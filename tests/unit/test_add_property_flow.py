@@ -207,3 +207,29 @@ class TestAddressPatchDerivesPostcode:
         assert a.succeeded and a.value_or_none() == "SL7 2AP", (
             "the postcode node must derive from the edited address"
         )
+
+    @staticmethod
+    def test_edit_overrides_the_scraped_postcode():
+        """The scrape lands 'Moores Place, Hungerford, RG17 0LA'; the
+        user edits the address to a different one — the postcode must
+        follow the EDITED address, not stay with Rightmove's."""
+        _add_url_only()
+        job = client.post("/api/scrapes/claim").json()["job"]
+        client.post(
+            "/api/scrapes/report",
+            json={
+                "job_id": job["id"],
+                "ok": True,
+                "data": {"address": "Moores Place, Hungerford, RG17 0LA"},
+            },
+        )
+        resp = client.patch(
+            f"/api/properties/{RID}/address",
+            json={"address": "Penwood Lane, Marlow, SL7 2AP"},
+        )
+        assert resp.status_code == 200, resp.text
+        prop = get_services().property_registry.get(RID)
+        a = prop.postcode.latest_attempt()
+        assert a.succeeded and a.value_or_none() == "SL7 2AP", (
+            "the user's edited address must override Rightmove's postcode"
+        )
