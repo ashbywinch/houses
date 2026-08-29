@@ -714,3 +714,44 @@ class TestNationalRailFallback:
         assert "National Rail fallback" not in (p2.description or ""), (
             "a plain TfL success must not narrate a fallback that did not run"
         )
+
+    @pytest.mark.asyncio
+    async def test_fallback_carries_the_poi_destination(self):
+        """The fallback commute must get the same _poi_info destination
+        as the normal path — the summary/provenance shows the POI label
+        + trips, not an empty address-only placeholder (PR #68 review)."""
+        from houses.nodes.transit import TransitNode, TransitOptions
+
+        poi_info = PlaceOfInterest(
+            label="Pimlico",
+            address="1 Drummond Gate, Pimlico, London SW1V 2QQ",
+            trips_per_week=5,
+        )
+
+        async def fake_route(loc, dest):
+            return self._commute()
+
+        loc = UserInputNode[GeoPoint]("nrfp3_loc", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("nrfp3_poi", PlaceOfInterest)
+        node = TransitNode(
+            "nrfp3",
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                no_bus_node=UserInputNode[Commute]("nrfp3_nb", Commute),
+                with_bus_node=UserInputNode[Commute]("nrfp3_wb", Commute),
+                poi_info=poi_info,
+                transit_route_fn=fake_route,
+            ),
+        )
+        a = await node.compute(
+            Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ")),
+            Attempt.succeeded(self._infeasible_commute()),
+            Attempt.succeeded(self._infeasible_commute()),
+        )
+        assert a.succeeded
+        v = a.value_or_none()
+        assert v is not None and not v.infeasible
+        assert v.destination.label == "Pimlico"
+        assert v.destination.trips_per_week == 5

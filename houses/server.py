@@ -21,7 +21,7 @@ import houses.town_desc as _town_desc
 import houses.web.broadcaster as _broadcaster_mod
 from dag.persistence import delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
-from dag.scheduler import flush_processor, set_after_refresh
+from dag.scheduler import flush_processor, get_scheduler, set_after_refresh
 from dag.scheduler import start_processor as _start_processor
 from houses.admin_router import admin_router
 from houses.context import get_scrape_fn
@@ -497,11 +497,29 @@ async def patch_property_details(rid: str, body: dict) -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
 
 
+def _disconnect_property_nodes(rid: str) -> None:
+    """Unregister every node the property registered in the scheduler.
+
+    Remove-then-re-add must not leave orphaned nodes registered under
+    the same node ids — their queued events would clobber the re-added
+    property's rows and starve its derived nodes (PR #68 review).  The
+    scheduler registry is the COMPLETE node set: builder-orphaned
+    sub-pipelines (school transit, walk/drive/bus variants that no
+    selector references) are not reachable from the property's
+    attributes, so a graph walk is not enough.
+    """
+
+    for nid, node in list(get_scheduler().registered_nodes().items()):
+        if nid.startswith(f"{rid}/"):
+            node.disconnect()
+
+
 @app.delete("/api/properties/{rid}", response_model=None)
 async def remove_property(rid: str) -> JSONResponse:
     """Remove a property (the wireframe's Remove): the scrape job, the
     DAG rows, and the registry entry all go away."""
     _scrape_queue.cancel_scrape_for_rid(rid)
+    _disconnect_property_nodes(rid)
     delete_node_results_for_rid(rid)
     _sp.get_services().property_registry.remove(rid)
     return JSONResponse(content={"status": "ok"})
