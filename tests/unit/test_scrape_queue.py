@@ -312,3 +312,23 @@ class TestAuth:
             _make_session_cookie(email="george@example.com", name="George", picture="", is_superuser=False),
         )
         assert non_super.post("/api/scrapes/claim").status_code == 403
+
+class TestMalformedReport:
+    @staticmethod
+    def test_malformed_report_values_requeue_without_500():
+        """A report whose bedrooms/price is unparseable must re-queue the
+        job with a clear error — not 500 and leave it in_progress (PR #68
+        review)."""
+        job = _add_url_only()
+        resp = client.post(
+            "/api/scrapes/report",
+            json={
+                "job_id": job["id"],
+                "ok": True,
+                "data": {"address": "Somewhere", "bedrooms": "4 bed"},
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        rows = _scrape_rows()
+        assert rows[0]["status"] == "pending", "unparseable fields must re-queue"
+        assert rows[0]["attempts"] == 1, "the failure must count as an attempt (backoff)"

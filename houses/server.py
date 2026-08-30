@@ -377,8 +377,6 @@ async def upsert_property(
     if scrape_pending:
         extra["scrape_pending"] = True
     return JSONResponse(content={"status": "ok", "rid": rid2, "data": dump, **extra}, status_code=200)
-
-
 def _require_superuser(request: Request) -> None:
     """403 unless the request carries a signed-in superuser session."""
     user = effective_session_user(request)
@@ -397,11 +395,19 @@ async def _apply_scraped_report(rid: str, data: dict) -> bool:
     """Push a worker's scraped listing into the property's DAG — the same
     seed the sync add path performs, sourced entirely from the report.
     Returns False when the DAG seed fails (the caller re-queues the job)."""
+    # Worker fields are scraped text — guard the coercion so a
+    # non-parseable value re-queues the job instead of 500ing and
+    # leaving it in_progress (PR #68 review).
+    try:
+        bedrooms = int(data["bedrooms"]) if data.get("bedrooms") is not None else 0
+        price = Money(str(data["price"]), "GBP") if data.get("price") is not None else Money(amount="0", currency="GBP")
+    except (ValueError, TypeError):
+        return False
     enriched = EnrichedProperty(
         url=data.get("url", ""),
         address=upgrade_address(data.get("address", ""), data.get("postcode", "")),
-        bedrooms=int(data["bedrooms"]) if data.get("bedrooms") is not None else 0,
-        price=Money(str(data["price"]), "GBP") if data.get("price") is not None else Money(amount="0", currency="GBP"),
+        bedrooms=bedrooms,
+        price=price,
         approx_latitude=data.get("latitude"),
         approx_longitude=data.get("longitude"),
     )
