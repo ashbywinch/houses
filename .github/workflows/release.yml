@@ -94,7 +94,7 @@ jobs:
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh '$REF'"
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh $REF"
         timeout-minutes: 40
 
   switch:
