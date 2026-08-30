@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -717,9 +719,9 @@ class TestNationalRailFallback:
 
     @pytest.mark.asyncio
     async def test_fallback_carries_the_poi_destination(self):
-        """The fallback commute must get the same _poi_info destination
-        as the normal path — the summary/provenance shows the POI label
-        + trips, not an empty address-only placeholder (PR #68 review)."""
+        """The fallback commute must get the same label/destination
+        fixups as the normal path — the summary/provenance shows the
+        POI label + trips, not a raw postcode (PR #68 review)."""
         from houses.nodes.transit import TransitNode, TransitOptions
 
         poi_info = PlaceOfInterest(
@@ -729,12 +731,14 @@ class TestNationalRailFallback:
         )
 
         async def fake_route(loc, dest):
-            return self._commute()
+            # The real router labels str POIs with "" — the node must
+            # derive the label from its own id, like the TfL path.
+            return replace(self._commute(), label="")
 
         loc = UserInputNode[GeoPoint]("nrfp3_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("nrfp3_poi", PlaceOfInterest)
         node = TransitNode(
-            "nrfp3",
+            "90691101/Simon/Pimlico/computed_transit",
             options=TransitOptions(
                 best_location=loc,
                 poi=poi,
@@ -753,5 +757,6 @@ class TestNationalRailFallback:
         assert a.succeeded
         v = a.value_or_none()
         assert v is not None and not v.infeasible
+        assert v.label == "Pimlico", "the fallback label must come from the node id"
         assert v.destination.label == "Pimlico"
         assert v.destination.trips_per_week == 5

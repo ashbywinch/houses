@@ -280,31 +280,42 @@ async def _scrape_for_address(payload):
     return None, None, address, True
 
 
-def _enriched_bedrooms(payload, scraped) -> int:
-    """Bedrooms for the seed: payload value, else the scraped one, else 0."""
+def _enriched_bedrooms(payload, scraped) -> int | None:
+    """Bedrooms for the seed: payload value, else the scraped one.
+    None when nothing is known — the cutover guard skips the push, so a
+    URL-only add never displays a made-up 0 (PR #68 review)."""
     if payload.bedrooms is not None:
         return payload.bedrooms
     if scraped and scraped.bedrooms is not None:
         return scraped.bedrooms
-    return 0
+    return None
 
 
-def _enriched_price(payload, scraped) -> Money:
-    """Price for the seed: payload value, else the scraped one, else £0."""
+def _enriched_price(payload, scraped) -> Money | None:
+    """Price for the seed: payload value, else the scraped one.
+    None when nothing is known — the cutover guard skips the push, so a
+    URL-only add never displays a made-up £0 (PR #68 review)."""
     if payload.price is not None:
         return payload.price
     if scraped and scraped.price is not None:
         return Money(str(scraped.price), "GBP")
-    return Money(amount="0", currency="GBP")
+    return None
 
 
 def _build_enriched(payload, scraped, address: str, postcode: str) -> EnrichedProperty:
     """Seed the DAG — a fresh enrichment."""
     address = address or (scraped.address if scraped else "")
+    postcode = postcode or (scraped.postcode if scraped else "")
+    if not address and postcode:
+        # A known postcode with no address yet (a URL-only add carrying
+        # one) must not be lost — seed it as the provisional address so
+        # the derivation sees it; the scrape report replaces it with the
+        # real address (PR #68 review, data loss).
+        address = postcode
     # The postcode node derives from the address — fold a separately-
     # known postcode INTO the address so the derivation sees it (the
     # address stays the single fact).
-    address = upgrade_address(address, postcode or (scraped.postcode if scraped else ""))
+    address = upgrade_address(address, postcode)
     return EnrichedProperty(
         url=payload.url or (scraped.url if scraped else ""),
         address=address,
@@ -481,18 +492,23 @@ async def patch_property_details(rid: str, body: dict) -> JSONResponse:
     address = body.get("address") or ""
     if not address:
         raise HTTPException(status_code=422, detail="address required")
+    # Omitted fields stay None — the cutover guards skip them, so the
+    # property never displays made-up £0/0 figures (PR #68 review).
     enriched = EnrichedProperty(
         address=address,
         url=(prop.rightmove_url.latest_attempt().value_or_none() or "")
         if prop.rightmove_url.latest_attempt().succeeded
         else "",
-        bedrooms=int(body["bedrooms"]) if body.get("bedrooms") is not None else 0,
-        price=Money(str(body["price"]), "GBP") if body.get("price") is not None else Money(amount="0", currency="GBP"),
+        bedrooms=int(body["bedrooms"]) if body.get("bedrooms") is not None else None,
+        price=Money(str(body["price"]), "GBP") if body.get("price") is not None else None,
     )
     seeded = _seed_dag(rid, enriched)
     if not seeded:
         raise HTTPException(status_code=500, detail="failed to apply details")
-    _scrape_queue.cancel_scrape_for_rid(rid)
+    # Cancel the scrape only when the user's facts are complete — an
+    # address-only form must leave the job to fill price/bedrooms.
+    if body.get("price") is not None and body.get("bedrooms") is not None:
+        _scrape_queue.cancel_scrape_for_rid(rid)
     await flush_processor()
     return JSONResponse(content={"status": "ok"})
 

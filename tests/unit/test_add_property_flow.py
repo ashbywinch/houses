@@ -6,11 +6,10 @@ completes the property and cancels the queue job), and Remove (deletes the
 job + the property's DAG rows + registry entry).
 """
 
-from __future__ import annotations
-
 import json
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dag.persistence import decompress_result
@@ -118,6 +117,28 @@ class TestManualDetails:
         a = prop.postcode.latest_attempt()
         assert a.succeeded and a.value_or_none() == "SL7 2AP", (
             "the postcode embedded in the typed address must be seeded into the DAG"
+        )
+
+    @staticmethod
+    def test_address_only_details_do_not_seed_fake_zeros():
+        """The user fills only the address — the property must not
+        display made-up £0/0 figures as real data, and the scrape job
+        must survive to fill the missing facts (PR #68 review)."""
+        _add_url_only()
+        resp = client.patch(
+            f"/api/properties/{RID}/details",
+            json={"address": "Penwood Lane, Marlow, SL7 2AP"},
+        )
+        assert resp.status_code == 200, resp.text
+        prop = get_services().property_registry.get(RID)
+        assert prop.rightmove_price.latest_attempt().pending, (
+            "an omitted price must not be seeded as £0"
+        )
+        assert prop.rightmove_bedrooms.latest_attempt().pending, (
+            "omitted bedrooms must not be seeded as 0"
+        )
+        assert _scrape_rows() != [], (
+            "the scrape job must survive while facts are still missing"
         )
 
 
@@ -274,3 +295,22 @@ class TestAddressPatchDerivesPostcode:
             "the user's edited address must override Rightmove's postcode"
         )
 
+
+class TestPostcodeOnlyPayload:
+    @pytest.mark.asyncio
+    async def test_postcode_without_address_is_not_lost(self):
+        """An API client sending a postcode with no address must not
+        lose it — the postcode seeds the provisional address until the
+        scrape lands (PR #68 review, data loss)."""
+        from dag.scheduler import flush_processor
+
+        with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
+            resp = client.post("/api/properties", json={"url": URL, "postcode": "SL7 2AP"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["postcode"] == "SL7 2AP"
+        await flush_processor()
+        prop = get_services().property_registry.get(RID)
+        a = prop.postcode.latest_attempt()
+        assert a.succeeded and a.value_or_none() == "SL7 2AP", (
+            "a postcode sent without an address must still reach the DAG"
+        )
