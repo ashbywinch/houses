@@ -38,7 +38,7 @@ fi
 
 # uv is installed per-user for ubuntu, and the venv must be ubuntu-owned
 # (the app unit runs as ubuntu) — sync as ubuntu, not as the invoking root.
-sudo -u ubuntu -H /home/ubuntu/.local/bin/uv sync --all-extras
+sudo -u ubuntu -H /home/ubuntu/.local/bin/uv sync
 
 # Snapshot the live DB into the standby's smoke copy — sqlite .backup is
 # consistent even with a live WAL writer. The standby then reads/writes its
