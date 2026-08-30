@@ -23,7 +23,7 @@ PORT=8766  # the standby (this release target) always binds 8766 (role-based por
 echo "== release '$REF' -> $SIDE (standby; active=$ACTIVE)"
 
 cd "$ROOT/$SIDE"
-git fetch origin --tags
+git fetch --tags --force origin
 git checkout --force "$REF"
 git rev-parse --short HEAD > "$ROOT/${SIDE}-revision"
 
