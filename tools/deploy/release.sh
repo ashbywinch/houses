@@ -82,7 +82,7 @@ print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", 
 ' 2>/dev/null)
 
 echo "== smoke: /health"
-curl -fsS --max-time 180 "localhost:$PORT/health" | grep -q '"status": "ok"'
+curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"'
 
 echo "== smoke: /api/properties/all"
 ALL=$(curl -fsS --max-time 300 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all")
