@@ -67,12 +67,14 @@ chown ubuntu:ubuntu "$ROOT/$SIDE-smoke.db"
 
 systemctl restart "houses-$SIDE"
 
-# Wait for health on the standby port.
-for i in $(seq 1 60); do
-  curl -fsS --max-time 3 "localhost:$PORT/health" >/dev/null 2>&1 && break
-  sleep 2
+# Wait for health on the standby port.  A first boot recomputes every
+# code-stale node (minutes of cascade) and builds the frontend — the
+# wait must cover the slow cold start (PR #68 release bring-up).
+for i in $(seq 1 200); do
+  curl -fsS --max-time 5 "localhost:$PORT/health" >/dev/null 2>&1 && break
+  sleep 3
 done
-curl -fsS --max-time 3 "localhost:$PORT/health" >/dev/null 2>&1 || {
+curl -fsS --max-time 30 "localhost:$PORT/health" >/dev/null 2>&1 || {
   echo "release: standby $SIDE not healthy on :$PORT" >&2
   systemctl status "houses-$SIDE" --no-pager | tail -20 || true
   exit 1
