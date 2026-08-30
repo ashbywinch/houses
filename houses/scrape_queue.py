@@ -124,21 +124,23 @@ def claim_due_scrape() -> ScrapeJob | None:
                 " claimed_at=NULL, last_error='worker died before reporting' WHERE id=?",
                 (attempts, (datetime.now(UTC) + backoff_delay(attempts)).isoformat(), stale["id"]),
             )
+    # Atomic claim: a single UPDATE ... RETURNING — two concurrent
+    # claimers (the --loop service plus a cron --once, both documented)
+    # must not both select the same pending row and double-scrape
+    # (PR #68 review).
     row = conn.execute(
-        "SELECT id, rid, url FROM pending_scrapes"
-        " WHERE next_retry_at <= ? AND status = 'pending'"
-        " ORDER BY created_at ASC LIMIT 1",
-        (now,),
+        "UPDATE pending_scrapes SET status='in_progress', claimed_at=?"
+        " WHERE id = (SELECT id FROM pending_scrapes"
+        "             WHERE next_retry_at <= ? AND status = 'pending'"
+        "             ORDER BY created_at ASC LIMIT 1)"
+        " RETURNING id, rid, url",
+        (now, now),
     ).fetchone()
     # lucidlint: ignore special-case sqlite row absence — a missing job row IS the
     # absent case; a null-object dataclass would add ceremony for zero benefit
     if row is None:
         conn.commit()  # persist the stale-claim requeue even when nothing is due
         return None
-    conn.execute(
-        "UPDATE pending_scrapes SET status='in_progress', claimed_at=? WHERE id=?",
-        (now, row["id"]),
-    )
     conn.commit()
     return ScrapeJob(id=row["id"], rid=row["rid"], url=row["url"])
 

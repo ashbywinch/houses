@@ -452,9 +452,12 @@ class TransitNode(DerivedNode[Commute]):
             # (the accessor raises).
             fallback = await self._nr_fallback(location, poi)
             if fallback is not None:
-                # Same destination patching as the normal path — the
+                # Same label/destination fixups as the normal path — the
                 # router only knows the address; the summary/provenance
                 # must show the POI label + trips (PR #68 review).
+                parts = self._id.split("/")
+                label = parts[2] if len(parts) >= 3 else (fallback.destination.label or "")
+                fallback = replace(fallback, label=label)
                 if self._poi_info is not None:
                     fallback = replace(fallback, destination=self._poi_info)
                 return Attempt.succeeded(fallback)

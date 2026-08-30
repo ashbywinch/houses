@@ -63,8 +63,8 @@ class EnrichedProperty:
     url: str
     rid: str = ""
     address: str = ""
-    bedrooms: int = 0
-    price: Money = Money(amount="0", currency="GBP")
+    bedrooms: int | None = 0
+    price: Money | None = Money(amount="0", currency="GBP")
 
     # Commute enrichment
     simon_commute: Commute | None = None
