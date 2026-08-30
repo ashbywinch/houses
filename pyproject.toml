@@ -36,7 +36,7 @@ dev = [
     "pyrefly>=1.2.0",
     "coverage>=7.0.0",
     "httpx>=0.28.0",
-    "lucidlint @ git+https://github.com/ashbywinch/lucidlint.git@98cf4661b43037f7365eaa4b32e563d6a0e75569",
+    "lucidlint @ git+https://github.com/ashbywinch/lucidlint.git@f8cbbc804aa1cd4e4efe8f87b527315c77dfa288",
     "libcst>=1.9.0",
 ]  # Architecture testing (ArchUnit-style rules for Python imports)
 
