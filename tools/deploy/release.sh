@@ -27,6 +27,15 @@ git fetch origin --tags
 git checkout --force "$REF"
 git rev-parse --short HEAD > "$ROOT/${SIDE}-revision"
 
+# A release must run the ref's OWN tooling: the /opt/houses copy of this
+# script is provision-time-frozen.  Re-exec the checked-out release.sh
+# (checkout --force guarantees it is the authentic ref content, so a
+# compromise of the ubuntu account cannot inject into it).
+if [ "$0" != "$ROOT/$SIDE/tools/deploy/release.sh" ] && [ -f "$ROOT/$SIDE/tools/deploy/release.sh" ]; then
+  echo "== re-exec the ref's own release.sh"
+  exec sh "$ROOT/$SIDE/tools/deploy/release.sh" "$REF"
+fi
+
 # uv is installed per-user for ubuntu, and the venv must be ubuntu-owned
 # (the app unit runs as ubuntu) — sync as ubuntu, not as the invoking root.
 sudo -u ubuntu -H /home/ubuntu/.local/bin/uv sync --all-extras
