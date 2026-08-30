@@ -76,11 +76,14 @@ echo "$OLD" > "$ROOT/PREVIOUS"
 echo "== starting $NEW (live DB)"
 sudo systemctl start "houses-$NEW"
 PORT=8765  # the new ACTIVE side binds 8765 (role-based ports)
-for i in $(seq 1 60); do
-  curl -fsS --max-time 3 "localhost:$PORT/health" >/dev/null 2>&1 && break
-  sleep 2
+# A first boot recomputes every code-stale node on the live DB (a deploy
+# invalidates persisted fingerprints) — the wait must cover the cascade,
+# which can run tens of minutes (PR #68 release bring-up).
+for i in $(seq 1 400); do
+  curl -fsS --max-time 5 "localhost:$PORT/health" >/dev/null 2>&1 && break
+  sleep 3
 done
-curl -fsS --max-time 3 "localhost:$PORT/health" >/dev/null 2>&1 || {
+curl -fsS --max-time 30 "localhost:$PORT/health" >/dev/null 2>&1 || {
   echo "switch: $NEW not healthy on :$PORT — rolling back" >&2
   sudo systemctl stop "houses-$NEW" || true
   echo "$OLD" > "$ROOT/ACTIVE"
