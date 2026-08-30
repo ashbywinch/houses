@@ -121,6 +121,7 @@ Every financial setting has its own `UserInputNode`, created by `Services.__post
 | **No side effects in compute** | Never push into other nodes — use a dependency chain |
 | **Typed values, not dicts** | Frozen dataclasses / Pydantic models so the value type is self-documenting and the TypeAdapter round-trips safely |
 | **Service results wrapped in Attempt** | `School | None` → `Attempt.succeeded(school)` or `Attempt.impossible("not found")` |
+| **Reads and writes are non-blocking** | A read (serialization/API) serves persisted state as-is and NEVER walks the graph or recomputes. Every recompute is scheduled by whatever makes it necessary — a dependency write, or a deploy invalidating persisted fingerprints (`PropertyNodes.schedule_code_stale_nodes()` at startup). The queue dedupes by node id and drains in the background; a first boot may take tens of minutes to settle, and that is expected. |
 
 ### Bumping node_id
 

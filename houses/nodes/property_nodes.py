@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 from money import Money
@@ -10,7 +9,7 @@ import dag.persistence as _dag_per
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from dag.persistence import property_created_at
-from dag.scheduler import flush_processor
+from dag.scheduler import get_scheduler
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
@@ -283,21 +282,20 @@ class PropertyNodes:
             "postcode": await self.postcode.to_json(),
         }
 
-    async def refresh_code_stale_nodes(self) -> None:
-        """Recompute any derived node whose persisted result was produced
-        by different code (the code-version stamp), then drain the cascade.
+    def schedule_code_stale_nodes(self) -> None:
+        """Schedule (never await) recompute for derived nodes whose
+        persisted result was produced by different code.
 
-        Called before serialization so a read never serves a result that
-        old code computed — the 'regenerate after deploy' step happens
-        lazily, per property, on first view.  After the first scan the
-        walk is O(1): the per-class fingerprint cache only grows when
-        CODE changes, so the module epoch tells us nothing could have
-        become stale.
+        PRD contract: reads and writes are non-blocking — a read must
+        never walk the graph, and every recompute is scheduled by
+        whatever makes it necessary (a dependency write, or a deploy
+        invalidating persisted fingerprints).  The queue dedupes by node
+        id and drains in the background.
+
+        The walk is O(1) between code changes: the per-class fingerprint
+        cache only grows when CODE changes, so the module epoch tells us
+        nothing could have become stale.
         """
-
-        # Skip the walk when no code could have changed since the last
-        # scan (the epoch only moves when a new class fingerprint is
-        # computed, i.e. on a code change).
         last = getattr(self, "_code_refresh_epoch", None)
         if last == _dag_derived._CODE_VERSION_EPOCH:
             return
@@ -305,31 +303,8 @@ class PropertyNodes:
         # Walk the whole node graph via deps — vars(self) alone misses
         # nodes stored in containers (the commute selectors dict and
         # their sub-pipeline are only reachable through deps).
-        # Concurrent serializations (summary racing detail, two tabs)
-        # must not both pass the staleness check — but the second caller
-        # must AWAIT the in-flight pass, not return stale.  One task per
-        # property; late callers join it.
-        task = getattr(self, "_code_refresh_task", None)
-        if task is not None:
-            await task
-            return
-        self._code_refresh_task = asyncio.create_task(self._run_code_refresh())
-        try:
-            await self._code_refresh_task
-        finally:
-            self._code_refresh_task = None
-        self._code_refresh_epoch = _dag_derived._CODE_VERSION_EPOCH
-
-    async def _run_code_refresh(self) -> None:
-        """Walk the node graph via deps and refresh code-stale nodes.
-
-        vars(self) alone misses nodes stored in containers (the commute
-        selectors dict and their sub-pipeline are only reachable through
-        deps)."""
-
         seen: set[int] = set()
         queue = [n for n in vars(self).values() if isinstance(n, Node)]
-        dirty = []
         while queue:
             node = queue.pop()
             if id(node) in seen:
@@ -337,12 +312,10 @@ class PropertyNodes:
             seen.add(id(node))
             if isinstance(node, DerivedNode):
                 if node.code_is_stale():
-                    dirty.append(node)
+                    get_scheduler().schedule(node)
                 queue.extend(node._get_active_deps())
-        for n in dirty:
-            await n.refresh()
-        if dirty:
-            await flush_processor()
+        self._code_refresh_epoch = _dag_derived._CODE_VERSION_EPOCH
+
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _commute_breakdown_json(self) -> dict:
@@ -353,8 +326,6 @@ class PropertyNodes:
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_summary(self) -> dict[str, Any]:
-
-        await self.refresh_code_stale_nodes()
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         result = {
@@ -393,7 +364,6 @@ class PropertyNodes:
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_detail(self) -> dict[str, Any]:
-        await self.refresh_code_stale_nodes()
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {
             "rid": self.rid,
