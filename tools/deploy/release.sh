@@ -48,7 +48,18 @@ sudo -u ubuntu -H /home/ubuntu/.local/bin/uv sync
 # consistent even with a live WAL writer. The standby then reads/writes its
 # OWN copy; the live DB is never touched by the standby.
 echo "== snapshot live DB -> $SIDE smoke copy"
-sqlite3 "$ROOT/data/houses.db" ".backup '$ROOT/$SIDE-smoke.db'"
+# A live writer (the eager evaluator persisting a cascade) can hold the
+# lock — wait through contention instead of failing the release.
+snapshot_ok=0
+for i in 1 2 3 4 5; do
+  if sqlite3 -cmd '.timeout 30000' "$ROOT/data/houses.db" ".backup '$ROOT/$SIDE-smoke.db'"; then
+    snapshot_ok=1
+    break
+  fi
+  echo "release: snapshot attempt $i failed (locked?) — retrying" >&2
+  sleep 10
+done
+[ "$snapshot_ok" = 1 ] || { echo "release: could not snapshot the live DB" >&2; exit 1; }
 chmod 600 "$ROOT/$SIDE-smoke.db"
 # release.sh runs as root (sudo), but the app unit runs as ubuntu — a
 # root-owned 600 file is unopenable by the standby (PR #68 review).
