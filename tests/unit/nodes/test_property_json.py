@@ -378,3 +378,114 @@ class TestSchoolAcceptableFromPersons:
 
         assert p.primary_school._acceptable == ("mixed",)
         assert p.secondary_school._acceptable == ("mixed",)
+
+
+class TestReadsAreNonBlocking:
+    """PRD contract: reads and writes are non-blocking.  A read must
+    serve the persisted state as-is and never walk the graph; a recompute
+    is scheduled by whatever makes it necessary (a dependency write, or a
+    deploy invalidating persisted fingerprints) and drains in the
+    background queue."""
+
+    @pytest.mark.asyncio
+    async def test_summary_read_serves_persisted_value_and_schedules_nothing(self):
+        from dag.scheduler import flush_processor, get_scheduler
+        from houses.nodes.property_nodes import PropertyNodes
+
+        p = PropertyNodes("test_nonblocking")
+        p.rightmove_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        await flush_processor()
+
+        ba = p.best_address
+        old_value = (await ba.attempt()).value_or_none()
+        # Simulate a deploy: the persisted row was computed by older code.
+        ba._persisted_code_version = "old-code-hash"
+
+        sched = get_scheduler()
+        calls: list[str] = []
+        sched.schedule = lambda node: calls.append(node._id)
+        try:
+            summary = await p.to_json_summary()
+        finally:
+            del sched.schedule
+        served = summary["best_address"]
+        assert served["value"] == old_value, "the read serves the persisted value as-is"
+        assert calls == [], (
+            "a read must schedule nothing — recomputes belong to the writer/startup"
+        )
+
+    @pytest.mark.asyncio
+    async def test_scheduled_stale_recompute_drains_in_the_background(self):
+        from dag.scheduler import flush_processor
+        from houses.nodes.property_nodes import PropertyNodes
+
+        p = PropertyNodes("test_nonblocking2")
+        p.rightmove_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        await flush_processor()
+
+        ba = p.best_address
+        ba._persisted_code_version = "old-code-hash"
+        p.schedule_code_stale_nodes()  # what the startup scan does
+
+        await flush_processor()
+        a = await ba.attempt()
+        assert a.succeeded
+        assert ba._persisted_code_version != "old-code-hash", (
+            "the background queue must have recomputed the code-stale node"
+        )
+
+
+class TestStartupSchedulesStaleNodes:
+    @pytest.mark.asyncio
+    async def test_loader_schedules_code_stale_nodes(self):
+        """PRD contract: the deploy/startup invalidates persisted
+        fingerprints and SCHEDULES the recompute — the loader is the
+        first thing that makes it necessary; reads never do."""
+        import json
+
+        from dag.scheduler import flush_processor, get_scheduler
+        from houses.database import get_connection
+        from houses.nodes.bootstrap import load_property_nodes_from_db
+        from houses.services_provider import get_services
+
+        rid = "98765432"
+        # A persisted best_address stamped with an OLD code fingerprint:
+        # computed by the previous deployment, stale under the new one.
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at, code_version)"
+            " VALUES (?, ?, NULL, ?, ?)",
+            (
+                f"{rid}/best_address",
+                json.dumps({"status": "succeeded", "value": "10 High St, SW1V 2QQ"}),
+                "2026-01-01T00:00:00+00:00",
+                "old-code-hash",
+            ),
+        )
+        conn.commit()
+
+        sched = get_scheduler()
+        calls: list[str] = []
+        real_schedule = sched.schedule
+
+        def _spy(node):
+            calls.append(node._id)
+            real_schedule(node)
+
+        sched.schedule = _spy
+        try:
+            load_property_nodes_from_db()
+        finally:
+            sched.schedule = real_schedule
+
+        prop = get_services().property_registry.get(rid)
+        assert prop is not None
+        ba = prop.best_address
+        assert ba.code_is_stale(), "the persisted row predates the current code"
+        assert f"{rid}/best_address" in calls, (
+            "the loader must schedule the code-stale node's recompute"
+        )
+        await flush_processor()
+        assert not ba.code_is_stale(), "the scheduled recompute ran in the background"

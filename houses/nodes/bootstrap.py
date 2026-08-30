@@ -189,6 +189,11 @@ def load_property_nodes_from_db() -> int:
         prop = PropertyNodes(rid)
         _seed_input_defaults(prop)
         register_property(rid, prop)
+        # PRD contract: reads and writes are non-blocking; recomputes are
+        # scheduled by whatever makes them necessary.  A deploy makes
+        # every persisted fingerprint stale — schedule the background
+        # recompute here, once, instead of on the read path.
+        prop.schedule_code_stale_nodes()
         count += 1
     logger.info("Loaded %d properties from DB", count)
     return count

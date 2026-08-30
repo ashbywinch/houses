@@ -164,11 +164,13 @@ class TestPropertyApi:
         assert prop2.annexe_ignored.latest_attempt().value_or_none() is True
 
     @pytest.mark.asyncio
-    async def test_refresh_code_stale_nodes_walks_the_commute_pipeline(self):
-        """The lazy code-version refresh must reach nodes stored inside
+    async def test_schedule_code_stale_nodes_walks_the_commute_pipeline(self):
+        """The code-staleness scan must reach nodes stored inside
         containers — the commute selectors and their sub-pipeline are in
-        dicts/attrs, not direct attributes of the property."""
-        from dag.scheduler import flush_processor
+        dicts/attrs, not direct attributes of the property — and SCHEDULE
+        (never await) their recompute: the background queue owns the
+        drain (PRD non-blocking contract)."""
+        from dag.scheduler import flush_processor, get_scheduler
         from houses.model.domain import HomeCoOwner, Person, PlaceOfInterest
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import _request_services as _sp
@@ -199,10 +201,26 @@ class TestPropertyApi:
             selector._persisted_code_version = "stale-code"
             assert selector.code_is_stale() is True
 
-            await prop.refresh_code_stale_nodes()
+            sched = get_scheduler()
+            calls: list[str] = []
+            real_schedule = sched.schedule
 
+            def _spy(node):
+                calls.append(node._id)
+                real_schedule(node)
+
+            sched.schedule = _spy
+            try:
+                prop.schedule_code_stale_nodes()
+            finally:
+                sched.schedule = real_schedule
+
+            assert any(cid.startswith("prop126/") for cid in calls), (
+                "the stale scan must schedule the code-stale commute pipeline"
+            )
+            await flush_processor()
             assert selector.code_is_stale() is False, (
-                "the commute selector must be recomputed by the stale scan"
+                "the commute selector must be recomputed by the scheduled drain"
             )
         finally:
             _sp.reset(token)
