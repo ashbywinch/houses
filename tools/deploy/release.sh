@@ -25,6 +25,10 @@ echo "== release '$REF' -> $SIDE (standby; active=$ACTIVE)"
 cd "$ROOT/$SIDE"
 git fetch --tags --force origin
 git checkout --force "$REF"
+# The checkout runs as root — changed files become root-owned, and the
+# app unit (ubuntu) would crash-loop on npm install EACCES.  Give the
+# checkout back to ubuntu before anything runs against it.
+chown -R ubuntu:ubuntu "$ROOT/$SIDE"
 git rev-parse --short HEAD > "$ROOT/${SIDE}-revision"
 
 # A release must run the ref's OWN tooling: the /opt/houses copy of this
