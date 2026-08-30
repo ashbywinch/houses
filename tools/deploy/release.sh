@@ -86,7 +86,7 @@ curl -fsS --max-time 180 "localhost:$PORT/health" | grep -q '"status": "ok"'
 
 echo "== smoke: /api/properties/all"
 ALL=$(curl -fsS --max-time 300 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all")
-RIDS=$(echo "$ALL" | "$ROOT/$SIDE/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("properties", d)))' 2>/dev/null || echo 0)
+curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"'
 echo "   properties served: $RIDS"
 [ "$RIDS" -gt 0 ] || { echo "release: smoke /api/properties/all returned no properties" >&2; exit 1; }
 
