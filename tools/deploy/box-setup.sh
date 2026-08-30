@@ -19,7 +19,12 @@ echo blue > "$ROOT/ACTIVE"          # blue is live from day one
 cp "$ROOT/blue/tools/deploy/run-instance.sh" "$ROOT/blue/tools/deploy/release.sh" "$ROOT/blue/tools/deploy/switch.sh" "$ROOT/"
 chmod +x "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
 chown -R ubuntu:ubuntu "$ROOT"
-
+# The deploy scripts execute as root via the sudoers rule — they must NOT
+# be writable by the sudo-able user, or any ubuntu compromise could edit
+# a script and escalate to root, defeating the guard (PR #68 security
+# review).
+chown root:root "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
+chmod 755 "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
 cp "$ROOT/blue/tools/deploy/units/"*.service /etc/systemd/system/
 systemctl daemon-reload
 mkdir -p /var/lib/houses-chrome && chown ubuntu:ubuntu /var/lib/houses-chrome
