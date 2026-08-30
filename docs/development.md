@@ -81,11 +81,11 @@ The session cookie lasts 30 days. On expiry the tool fails with a "Session expir
 
 ## Code Knowledge Graph
 
-`code-review-graph` (MCP tool) builds a knowledge graph of the codebase; enables structural analysis, impact radius, review support, refactoring guidance.
+`code-review-graph` (MCP tool) builds a knowledge graph of the codebase; enables structural analysis, impact radius, review support, refactoring guidance. The `crg-watch` hub service watches the repo and keeps the graph converged automatically — including across branch switches: a checkout is just file events, and the watcher re-parses additions and deletions and updates the recorded branch/commit within seconds.
 
 **Never full rebuild** — incremental updates re-parse only changed files. When using the MCP `build_or_update_graph_tool`: leave `full_rebuild` unset/false; `postprocess: "minimal"` for quick builds.
 
-**When to build:** first graph use in a session; after code changes; or when `uvx code-review-graph status` shows "Built at commit" ≠ HEAD.
+**Branch switches are free while the watcher runs.** If it was down during a switch (boot, crash), the graph is silently stale, and restarting the watcher does NOT recover it — the watcher is purely event-driven, with no startup sweep. Detect: `uvx code-review-graph status` shows "Built at commit" ≠ HEAD or a branch WARNING. Recover: `uvx code-review-graph build` — incremental; re-parses only the files the switch changed.
 
 ## Bus Fare Data Pipeline
 
