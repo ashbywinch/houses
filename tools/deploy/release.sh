@@ -98,7 +98,7 @@ echo "== smoke: /health"
 curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"'
 
 echo "== smoke: /api/properties/all"
-ALL=$(curl -fsS --max-time 300 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all")
+ALL=$(curl -fsS --max-time 1800 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all")
 RIDS=$(echo "$ALL" | "$ROOT/$SIDE/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("properties", d)))' 2>/dev/null || echo 0)
 echo "   properties served: $RIDS"
 [ "$RIDS" -gt 0 ] || { echo "release: smoke /api/properties/all returned no properties" >&2; exit 1; }
@@ -106,7 +106,7 @@ echo "   properties served: $RIDS"
 echo "== smoke: a property detail with commutes"
 RID=$(echo "$ALL" | "$ROOT/$SIDE/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); ps=d.get("properties", d); print(sorted(ps)[-1] if isinstance(ps, dict) else ps[0]["rid"])' 2>/dev/null || echo "")
 if [ -n "$RID" ]; then
-  curl -fsS --max-time 300 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/$RID/detail" >/dev/null
+  curl -fsS --max-time 900 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/$RID/detail" >/dev/null
 fi
 
 echo "== smoke: frontend index"

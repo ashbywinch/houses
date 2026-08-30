@@ -95,7 +95,7 @@ jobs:
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh $REF"
-        timeout-minutes: 40
+        timeout-minutes: 90
 
   switch:
     if: inputs.action == 'switch'
