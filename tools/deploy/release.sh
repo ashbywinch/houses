@@ -27,7 +27,9 @@ git fetch origin --tags
 git checkout --force "$REF"
 git rev-parse --short HEAD > "$ROOT/${SIDE}-revision"
 
-uv sync --all-extras
+# uv is installed per-user for ubuntu, and the venv must be ubuntu-owned
+# (the app unit runs as ubuntu) — sync as ubuntu, not as the invoking root.
+sudo -u ubuntu -H /home/ubuntu/.local/bin/uv sync --all-extras
 
 # Snapshot the live DB into the standby's smoke copy — sqlite .backup is
 # consistent even with a live WAL writer. The standby then reads/writes its
