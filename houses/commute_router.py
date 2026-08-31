@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """Commute routing — unified interface for walking, transit, and driving.
 
 The caller describes the traveler; ``CommuteRouter.get_commute`` handles the rest.

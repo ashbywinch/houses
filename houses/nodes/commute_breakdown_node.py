@@ -7,6 +7,7 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from dag.node import Node
 
 
 class CommuteBreakdownNode(DerivedNode[dict]):
@@ -14,10 +15,10 @@ class CommuteBreakdownNode(DerivedNode[dict]):
 
     # lucidlint: ignore record-shape keyed selector→node map (variable keys), not a fixed record shape
     def __init__(self, node_id: str, *, commute_selectors: dict[str, Any], persons_source):
-        self._commute_selectors = commute_selectors
+        self._commute_selectors: dict[str, Any] = commute_selectors
         # persons_source is always the last dep
         super().__init__(node_id, dict, tuple(commute_selectors.values()) + (persons_source,))
-        self._persons_source = persons_source
+        self._persons_source: Node = persons_source
 
     @override
     @property
@@ -92,6 +93,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                     person_yearly += yearly_person_poi
                     yearly_total += yearly_person_poi
                     commutes.append(
+                        # lucidlint: ignore record-shape commute entry — node_results wire shape (coding-standards.md)
                         {
                             "label": poi.label,
                             "trips_per_week": poi.trips_per_week,
@@ -106,6 +108,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 "commutes": commutes,
             }
         return Attempt.succeeded(
+            # lucidlint: ignore record-shape the node VALUE dict — serialized to node_results (coding-standards.md)
             {
                 "persons": per_person,
                 "yearly_total_gbp": str(yearly_total.amount),

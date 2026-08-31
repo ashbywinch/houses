@@ -42,6 +42,7 @@ class EpcNode(DerivedNode[dict]):
     provenance_source_type = SourceType.API
 
     @override
+    # lucidlint: ignore duplicate the difference IS the node identity (band vs description extraction) (review-log)
     async def build_provenance(self) -> Provenance:
         prov = await super().build_provenance()
         val = self._attempt.value_or_none()

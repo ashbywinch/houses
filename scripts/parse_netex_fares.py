@@ -1,3 +1,6 @@
+# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
+# lucidlint: ignore-file record-shape every dict is a NeTEx parse product for the CSV/JSON export (coding-standards.md)
+# lucidlint: ignore-file latent-class one-shot NeTEx ETL pipeline — root and fare dicts are threaded inputs (review-log)
 """NeTEx XML parsing and bus fare zone extraction."""
 
 from __future__ import annotations
@@ -96,7 +99,6 @@ def _naptan_from_rows(rows):
     return naptan
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def load_naptan_stops() -> dict[str, tuple[float, float]] | None:
     naptan: dict[str, tuple[float, float]] = {}
 
@@ -134,7 +136,6 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-# lucidlint: ignore record-shape spatial grid index (rows×cols → station lists), not a fixed record shape
 def _build_station_grid(stations: list[Station]) -> list[list[list[Station]]]:
     grid: list[list[list[Station]]] = [[[] for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
     for s in stations:
@@ -167,7 +168,6 @@ def is_near_station(lat: float, lon: float, stations: list[Station], max_dist_km
     return False
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def parse_netex_fares(
     xml_str: str,
     stations: list[Station],
@@ -204,7 +204,6 @@ def parse_netex_fares(
 
     stop_coords = _collect_stop_coords(zones, stops, stop_zones)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "stop_zones": stop_zones,
         "stop_coords": stop_coords,
@@ -213,7 +212,6 @@ def parse_netex_fares(
     }
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_stops(
     root: ET.Element,
     stations: list[Station],
@@ -239,7 +237,6 @@ def _parse_stops(
     return stops
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_stop_point(
     ssp: ET.Element,
     naptan: dict[str, tuple[float, float]] | None,
@@ -273,7 +270,6 @@ def _parse_stop_point(
     return atco, NetexStop(name=name, lat=lat, lon=lon, near_station=False)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _stop_coordinates(ssp: ET.Element) -> tuple[float | None, float | None]:
     lat_el = _first_found(
         ssp.find(".//netex:Latitude", NS),
@@ -303,7 +299,6 @@ def _stops_have_near_station(stops: dict[str, NetexStop]) -> bool:
     return True
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_fare_zones(
     root: ET.Element,
     stops: dict[str, NetexStop],
@@ -350,7 +345,6 @@ def _collect_zone_members(zone_el: ET.Element, stops: dict[str, NetexStop]) -> l
     return members
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_distance_matrix_elements(
     root: ET.Element,
 ) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
@@ -394,7 +388,6 @@ def _parse_distance_matrix_elements(
     return zone_fares, dme_zone_pairs
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _apply_price_group_fare(
     root: ET.Element,
     dme: ET.Element,
@@ -412,7 +405,6 @@ def _apply_price_group_fare(
             zone_fares[normalized_key] = {"adult_single": price}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_distance_matrix_prices(
     root: ET.Element,
     dme_zone_pairs: dict[str, str],
@@ -452,7 +444,6 @@ def _parse_distance_matrix_prices(
             zone_fares[nk]["adult_single"] = price
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _collect_stop_coords(
     zones: dict[str, list[str]],
     stops: dict[str, NetexStop],
@@ -506,7 +497,6 @@ def _find_price_for_group(root: ET.Element, group_ref: str) -> float | None:
     return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_fare_products(root: ET.Element, zone_fares: dict[str, dict[str, float]]) -> None:
     for product in root.iter():
         tag = _unprefixed(product.tag)
@@ -568,13 +558,13 @@ def _find_product_price(product: ET.Element) -> float | None:
                 if price is not None:
                     return price
                 continue
+# lucidlint: ignore duplicate-block deliberate two-stage fallback — Amount element, then element text (review-log)
             price = _as_float(child.text)
             if price is not None:
                 return price
     return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _apply_product_to_distance_matrix(
     root: ET.Element,
     product: ET.Element,
@@ -613,7 +603,6 @@ def _zone_price_key(start_ref: ET.Element | None, end_ref: ET.Element | None) ->
     return f"{sz}:{ez}".replace("@alighting", "@boarding")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _record_zone_fare(
     zone_fares: dict[str, dict[str, float]],
     key: str,
@@ -625,7 +614,6 @@ def _record_zone_fare(
     zone_fares[key][product_type] = price
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _associate_product_with_zones(
     root: ET.Element,
     product: ET.Element,
@@ -658,7 +646,6 @@ def _find_sales_offer_for_product(root: ET.Element, product_id: str) -> ET.Eleme
     return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _apply_sales_offer_fares(
     root: ET.Element,
     sop: ET.Element,
@@ -683,7 +670,6 @@ def _apply_sales_offer_fares(
                         _record_zone_fare(zone_fares, key, product_type, price)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_fare_tables(
     root: ET.Element,
     dme_zone_pairs: dict[str, str],
@@ -740,7 +726,6 @@ def _fare_table_product_type(ft: ET.Element, products: dict[str, str]) -> str | 
     return products[product_id]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _apply_fare_table_price(
     ft_child: ET.Element,
     root: ET.Element,
@@ -773,7 +758,6 @@ def _apply_fare_table_price(
     elif ptype in ("adult_day", "adult_return"):
         covered_stops = _collect_network_covered_stops(root)
         if covered_stops:
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             return {
                 "price": price,
                 "product_type": ptype,

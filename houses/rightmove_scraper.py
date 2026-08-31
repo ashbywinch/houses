@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """Scrape property details from Rightmove pages.
 
 Two modes:

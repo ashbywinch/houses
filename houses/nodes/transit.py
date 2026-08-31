@@ -93,56 +93,6 @@ class CommuteResult:
     destination_url: str = ""
 
 
-_LEG_MODE_LABEL = {
-    "walk": "Walk",
-    "bus": "Bus",
-    "tube": "Tube",
-    "train": "Train",
-    "dlr": "DLR",
-    "overground": "Overground",
-    "tram": "Tram",
-    "drive": "Drive",
-    "cycle": "Cycle",
-    "park": "Park",
-}
-
-
-def _build_details(commute: Commute) -> tuple[CommuteLeg, ...]:
-    """Convert a Commute's cost groups into CommuteLeg tuples.
-
-    Each CostGroup may carry a cost (parking fees, etc.) and an operator
-    name; these are attached to the first leg in the group.
-    """
-    legs: list[CommuteLeg] = []
-    for cg in commute.details:
-        cg_cost: Money | None = cg.cost
-        for i, leg in enumerate(cg.legs):
-            mode_name = leg.mode.name.lower() if hasattr(leg.mode, "name") else str(leg.mode)
-            legs.append(
-                CommuteLeg(
-                    mode=mode_name,
-                    duration=leg.duration,
-                    line_name=leg.line_name,
-                    destination=leg.end_station,
-                    cost=cg_cost if i == 0 else None,
-                    operator=cg.operator if i == 0 else "",
-                )
-            )
-    return tuple(legs)
-
-
-def _route_description(legs: tuple[CommuteLeg, ...]) -> str:
-    parts = []
-    for leg in legs:
-        label = _LEG_MODE_LABEL.get(leg.mode, leg.mode)
-        dur = f"{int(leg.duration.magnitude)}m"
-        part = f"{label} {dur}"
-        if leg.line_name:
-            part += f" ({leg.line_name})"
-        if leg.destination:
-            part += f" to {leg.destination}"
-        parts.append(part)
-    return " → ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -286,6 +236,7 @@ class DriveNode(DerivedNode[Commute]):
         self._poi_info: PlaceOfInterest | None = options.poi_info
 
     @override
+    # lucidlint: ignore duplicate the difference is the route source (fn vs TfL client) (review-log)
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
             return _infeasible_commute(label="no car available", reason="no car available")

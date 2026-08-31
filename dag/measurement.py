@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5) — dunder protocol methods
 """Measurement — a value with an uncertainty, propagated through arithmetic.
 
 Part A: uncertainty ("≈") as a first-class DAG citizen.

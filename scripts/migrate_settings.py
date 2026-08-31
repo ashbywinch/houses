@@ -18,19 +18,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 
 import houses.services as services
 from houses.nodes.settings_node import API_KEY_TO_NODE, SETTING_DEFAULTS
-
-
-def _conn() -> sqlite3.Connection:
-    db = Path("data/houses.db")
-    if not db.exists():
-        raise SystemExit("data/houses.db not found")
-    conn = sqlite3.connect(str(db))
-    conn.row_factory = sqlite3.Row
-    return conn
+from scripts.db import conn as _conn
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
