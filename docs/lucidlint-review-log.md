@@ -252,10 +252,6 @@ suppressed = wire formats, keyed collections, deliberate parallel structure.
 - **wire-format descent is too eager** — OSRM/ORS request bodies, Leaflet
   layer configs, CSV row shapes and API envelopes re-fired despite the house
   wire-format standard; suppressed with the coding-standards citation.
-- **`(rating, highlights)`-style local parse pairs** — 0.2.0's "NamedTuple is
-  ceremony for a local step" verdict holds; where return-type markers
-  wouldn't bind, converted to NamedTuples instead (enrich_with_ofsted
-  `_EffectiveRating`/`_OEIFRating` — callers unpack unchanged).
 - **large-class/latent-class on cohesive DI surfaces** — CommuteRouter (17
   methods, one wiring contract), BusJourneyRegistry (12 methods, one
   `_data` store), DerivedNode lifecycle: no field-disjoint partition exists;
@@ -267,10 +263,25 @@ suppressed = wire formats, keyed collections, deliberate parallel structure.
 
 ### Engine quirks (cost real time; verified empirically or in scanner internals)
 
-1. **`fix` prints prescriptions, not diffs** for most kinds
-   (undeclared-attribute, stale-suppression, duplicate-block) — "preview the
-   seam, judge, apply" has nothing to preview; every application needs a
-   hand-verification loop.
+1. **`fix` behavior is per-kind, and SILENT when it applies.** Verified on a
+   seeded probe post-sweep:
+   - **APPLIES immediately** (one-line confirmation, no diff, no preview):
+     `stale-suppression`, `magic-number --name <CONST>` (inserts the constant
+     at module level + rewrites the usage — verified correct),
+     `duplicate-block` (deletes the second copy).
+   - **PRESCRIBES only** (prints instruction text, edits nothing):
+    `undeclared-attribute`, `positional-literals` (no-op unless `--params`
+    resolves, and it mis-binds nested callees — see the 0.2.0 quirk list
+    above, items 3 and 9).
+   You cannot tell apply-from-prescribe by the output text — always
+   `git diff` (or hash-check) after running `fix`.
+   **Sweep cost of getting this wrong:** the agent policy asserted
+   "prescription-only" for all kinds after a two-kind probe without hash
+   checks, so ~90 stale-suppression / magic-number / duplicate-block sites
+   were hand-edited that one engine command would have fixed. For
+   duplicate-block the hand judgment (intentional parallel structure vs
+   edit mistake) was still required before applying; for the other two
+   kinds it was pure bypassed automation.
 2. **Signature findings anchor at the def line with a 3-line marker window,
    ending at that line; one marker consumes one finding.** Stacked params +
    return findings need stacked markers INSIDE the window; wrapped/continuation
