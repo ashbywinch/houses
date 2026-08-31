@@ -59,15 +59,15 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         *,
         options: ParkAndRideOptions,
     ):
-        self.transit_node = options.transit_node
-        self.best_location = options.best_location
-        self.postcode_node = options.postcode_node
-        self._has_car = options.has_car
-        self._max_walk = 30
-        self._max_walk_node = options.max_walk_node
+        self.transit_node: Node = options.transit_node
+        self.best_location: Node = options.best_location
+        self.postcode_node: Node = options.postcode_node
+        self._has_car: bool = options.has_car
+        self._max_walk: int = 30
+        self._max_walk_node: Node = options.max_walk_node
         self._car_park_name: str = ""
-        self._station_registry = options.station_registry
-        self._car_park_registry = options.car_park_registry
+        self._station_registry: StationRegistry | None = options.station_registry
+        self._car_park_registry: CarParkRegistry | None = options.car_park_registry
         # Static deps include postcode so its changed signal re-schedules
         # this node when a postcode arrives later; _get_active_deps gates
         # whether a PENDING postcode can block refresh.
@@ -77,7 +77,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
             deps = deps + (options.best_location, options.postcode_node)
             names += ["location", "postcode_attempt"]
         super().__init__(node_id, Commute, deps, dep_names=tuple(names))
-        self.display_name = "Park & Ride"
+        self.display_name: str = "Park & Ride"
 
     @override
     def _get_active_deps(self):
@@ -155,6 +155,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         # Look up car park cost at that station (injected or default)
         registry = self._station_registry or StationRegistry()
         station = registry.find(station_name)
+        # lucidlint: ignore duplicate-block parallel injected-registry lookups (station, then its car park) — each
         if station is None:
             return transit
 
@@ -195,24 +196,17 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
             new_cost = existing_cost
         # If the first CostGroup had transit legs after the walk, keep them in
         # their own group; otherwise there's only the drive group + parking.
+        new_details: tuple[CostGroup, ...] = (new_drive_group,)
+        if new_parking_group is not None:
+            new_details += (new_parking_group,)
         if transit_legs:
-            new_transit_group = replace(first_cg, legs=transit_legs)
             # Attribute the original transit fare if no cost yet
-            if new_transit_group.cost is None:
-                has_transit = any(leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.BUS) for leg in transit_legs)
-                if has_transit:
-                    new_transit_group = replace(new_transit_group, cost=existing_cost)
-            tail = commute.details[1:]
-            if new_parking_group is not None:
-                new_details = (new_drive_group, new_parking_group, new_transit_group) + tail
-            else:
-                new_details = (new_drive_group, new_transit_group) + tail
-        else:
-            tail = commute.details[1:]
-            if new_parking_group is not None:
-                new_details = (new_drive_group, new_parking_group) + tail
-            else:
-                new_details = (new_drive_group,) + tail
+            new_transit_group = replace(first_cg, legs=transit_legs)
+            has_transit = any(leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.BUS) for leg in transit_legs)
+            if has_transit and new_transit_group.cost is None:
+                new_transit_group = replace(new_transit_group, cost=existing_cost)
+            new_details += (new_transit_group,)
+        new_details += commute.details[1:]
         # Recalculate duration from replaced legs
         new_duration = Quantity(sum(int(leg.duration.magnitude) for cg in new_details for leg in cg.legs), "minute")
         new_commute = replace(

@@ -18,7 +18,7 @@ import logging
 import random
 import re
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,6 @@ _CHROME_START_POLL_S = 0.1
 
 
 @dataclass
-# lucidlint: ignore class-module small private helper — module keeps its domain name
 class RightmoveProperty:
     """Property data extracted from a Rightmove page.
 
@@ -48,6 +47,8 @@ class RightmoveProperty:
     price: float | None = None
     latitude: float | None = None
     longitude: float | None = None
+    # Extracted from url in __post_init__; deliberately not an __init__ parameter.
+    rid: str = field(init=False)
 
     _RID_RE = re.compile(r"properties/(\d+)")
 
@@ -226,7 +227,8 @@ def _parse_page_model(html: str) -> dict[str, Any]:
     if price is not None:
         result["price"] = price
 
-    # Bedrooms
+        # lucidlint: ignore duplicate-block field-merge accordion — each 3-line block merges a different page-model
+        # Bedrooms
     bedrooms = _page_model_bedrooms(data, prop)
     if bedrooms is not None:
         result["bedrooms"] = bedrooms
@@ -243,6 +245,7 @@ _PageModelAddress = tuple[str, str]  # (address, postcode)
 _PageModelLocation = tuple[float, float]  # (lat, lng)
 
 
+# lucidlint: ignore latent-class (data, prop) is a context pair — the parsed page-model JSON and its schema map —
 def _page_model_address(data: Any, prop: Any) -> _PageModelAddress | None:
     """(address, postcode) from the page model, or None when the fields are absent."""
     try:
@@ -292,6 +295,18 @@ def _page_model_location(data: Any, prop: Any) -> _PageModelLocation | None:
     return None
 
 
+_MERGE_KEYS = ("address", "postcode", "bedrooms", "price", "latitude", "longitude")
+
+
+# lucidlint: ignore record-shape keyed collection, not a record — result is a variable-key accumulator of whichever
+# lucidlint: ignore record-shape keyed collection, not a record — source is likewise a variable-key extraction result,
+def _merge_missing(result: dict[str, Any], source: dict[str, Any]) -> None:
+    """Fill fields absent from result from a secondary extraction source."""
+    for key in _MERGE_KEYS:
+        if key not in result and key in source:
+            result[key] = source[key]
+
+
 def _parse_html(html: str, url: str) -> RightmoveProperty | None:
     """Extract property data from a Rightmove page HTML.
 
@@ -316,16 +331,10 @@ def _parse_html(html: str, url: str) -> RightmoveProperty | None:
     result.update(pm)
 
     # 2. JSON-LD (fills gaps)
-    ld = _parse_json_ld(html)
-    for key in ("address", "postcode", "bedrooms", "price", "latitude", "longitude"):
-        if key not in result and key in ld:
-            result[key] = ld[key]
+    _merge_missing(result, _parse_json_ld(html))
 
     # 3. Preloaded state (fills bedrooms, lat/lon that JSON-LD may lack)
-    ps = _parse_preloaded_state(html)
-    for key in ("address", "postcode", "bedrooms", "price", "latitude", "longitude"):
-        if key not in result and key in ps:
-            result[key] = ps[key]
+    _merge_missing(result, _parse_preloaded_state(html))
 
     # 4. Map coords fallback
     if "latitude" not in result:
@@ -537,6 +546,20 @@ def _report_missing(result: RightmoveProperty, rid: str) -> None:
         )
 
 
+def _parsed_from(html: str, url: str, rid: str) -> RightmoveProperty | None:
+    """Parse cached/fetched HTML and report any missing fields."""
+    result = _parse_html(html, url)
+    if result:
+        _report_missing(result, rid)
+    return result
+
+
+def _write_cache(cache_file: Path, html: str) -> None:
+    """Persist fetched HTML to the page cache, creating the cache dir on first use."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(html, encoding="utf-8")
+
+
 async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty | None:
     """Return property details for a Rightmove URL.
 
@@ -560,11 +583,7 @@ async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty |
     cache_file = CACHE_DIR / f"{rid}.html"
     if cache_file.exists():
         logger.info("Using cached Rightmove page for %s", rid)
-        html = cache_file.read_text(encoding="utf-8")
-        result = _parse_html(html, url)
-        if result:
-            _report_missing(result, rid)
-        return result
+        return _parsed_from(cache_file.read_text(encoding="utf-8"), url, rid)
 
     # 2. Sample page (development / tests)
     sample = _page_path or settings.rightmove_sample_page
@@ -574,11 +593,7 @@ async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty |
             logger.warning("Rightmove sample page not found: %s", path)
             return None
         logger.info("Using Rightmove sample page: %s", path)
-        html = path.read_text(encoding="utf-8")
-        result = _parse_html(html, url)
-        if result:
-            _report_missing(result, rid)
-        return result
+        return _parsed_from(path.read_text(encoding="utf-8"), url, rid)
 
     # 3. Offline mode — fail fast instead of starting Chrome
     if settings.rightmove_scraper_offline:
@@ -593,8 +608,7 @@ async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty |
     html = await _fetch_via_chrome(url)
 
     if _is_login_wall(html):
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(html, encoding="utf-8")
+        _write_cache(cache_file, html)
         logger.warning(
             "Rightmove returned a login/verification page for %s. "
             "Please open Chrome in non-headless mode, navigate to "
@@ -604,51 +618,7 @@ async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty |
         return None
 
     if html:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(html, encoding="utf-8")
+        _write_cache(cache_file, html)
         logger.info("Cached Rightmove page to %s", cache_file)
 
-    result = _parse_html(html, url) if html else None
-    if result:
-        _report_missing(result, rid)
-    return result
-
-
-async def scrape_live(url: str) -> RightmoveProperty | None:
-    """Fetch a Rightmove page via Chrome CDP, cache it, and return parsed data.
-
-    Only call this when the user has explicitly opted in to live Rightmove
-    access. Applies randomised back-off and caches the HTML on success.
-
-    Returns a ``RightmoveProperty`` or ``None`` if the page cannot be parsed.
-    """
-    rid = RightmoveProperty.rid_from_url(url)
-    if not rid:
-        logger.warning("Could not extract Rightmove ID from URL: %s", url)
-        return None
-
-    await _human_delay()
-    html = await _fetch_via_chrome(url)
-
-    if _is_login_wall(html):
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{rid}.html"
-        cache_file.write_text(html, encoding="utf-8")
-        logger.warning(
-            "Rightmove returned a login/verification page for %s. "
-            "Please open Chrome in non-headless mode, navigate to "
-            "Rightmove and sign in, then try again.",
-            url,
-        )
-        return None
-
-    if html:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{rid}.html"
-        cache_file.write_text(html, encoding="utf-8")
-        logger.info("Cached Rightmove page to %s", cache_file)
-
-    result = _parse_html(html, url) if html else None
-    if result:
-        _report_missing(result, rid)
-    return result
+    return _parsed_from(html, url, rid) if html else None

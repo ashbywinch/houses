@@ -168,7 +168,6 @@ async def _auth_state(page) -> bool | None:
         return None
 
 
-# lucidlint: ignore class-module small private helper — module keeps its function name (capture_dom)
 @dataclass(frozen=True)
 class DeviceFlowAuthorization:
     """The device-flow grant: codes to show the human + the poll cadence."""
@@ -393,6 +392,7 @@ async def login(state_file: Path) -> None:
     print(f"Session saved → {state_file} (localhost session cookie only)")
 
 
+# lucidlint: ignore latent-class two event handlers append to one local errors list — a collector class for 3 lines of
 async def capture_page(url: str, output_dir: str | Path, label: str, state_file: Path):
     browser = await get_browser()
     context = await browser.new_context(

@@ -11,7 +11,6 @@ from houses.walkability import extract_town
 
 
 class WalkabilityNode(DerivedNode[dict]):
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_location, best_address):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
@@ -49,7 +48,6 @@ class WalkabilityNode(DerivedNode[dict]):
 class NearestTownNode(DerivedNode[str]):
     """Reverse-geocode the property's location to find the nearest town name."""
 
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_location):
         deps: tuple[Node, ...] = (best_location,)
         super().__init__(node_id, str, deps)
@@ -75,10 +73,10 @@ class NearestTownNode(DerivedNode[str]):
 
 class TownDescNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, nearest_town, town_name, postcode_node):
-        self._postcode_node = postcode_node
-        self.best_location = best_location
-        self._nearest_town = nearest_town
-        self._town_name = town_name
+        self._postcode_node: Node = postcode_node
+        self.best_location: Node = best_location
+        self._nearest_town: Node = nearest_town
+        self._town_name: Node = town_name
         deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
         super().__init__(node_id, dict, deps, dep_names=("location", "nearest_town", "town_name", "postcode"))
 
@@ -129,7 +127,6 @@ class TownDescNode(DerivedNode[dict]):
 
 
 class TownNode(DerivedNode[str]):
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_address):
         deps: tuple[Node, ...] = (best_address,)
         super().__init__(node_id, str, deps)

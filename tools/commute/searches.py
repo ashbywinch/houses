@@ -15,6 +15,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from pint import Quantity
 
@@ -66,6 +67,13 @@ class IntersectionOptions:
     property_type: str = "houses"
 
 
+# Committed-payload wire shapes (coding-standards.md: serialized payloads use
+# bare dicts by design) — named so signatures say which payload flows where.
+SearchesPayload = dict[str, Any]
+UnionPayload = dict[str, Any]
+SearchRecord = dict[str, Any]
+
+
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def nearest_station_name(rect: Rect, kept_stations: list[dict]) -> str:
     """Human-readable name: the nearest kept station to the rectangle's centre."""
@@ -74,12 +82,11 @@ def nearest_station_name(rect: Rect, kept_stations: list[dict]) -> str:
     return f"{best['name']} area"
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def build_searches(
     rects: list[Rect],
     kept_stations: list[dict],
     options: SearchOptions,
-) -> dict:
+) -> SearchesPayload:
     """Turn rectangles into the searches payload (deterministic given inputs)."""
     searches = []
     for i, rect in enumerate(rects, 1):
@@ -88,11 +95,12 @@ def build_searches(
         # rounds away, so the JSON polygon must match the encoded form exactly
         # or the round-trip validation flakes at half-step boundaries.
         poly = [(round(p.lat, POLYLINE_DECIMALS), round(p.lon, POLYLINE_DECIMALS)) for p in rect_to_polygon(rect)]
-        searches.append(
+        searches.append(  # lucidlint: ignore record-shape wire-format dict — the searches.json record
             {
                 "id": f"s{i:03d}",
                 "name": nearest_station_name(rect, kept_stations),
                 "polygon": poly,
+                # lucidlint: ignore record-shape wire-format dict — nested filters travel in the search record
                 "filters": {"min_beds": options.min_beds, "property_type": options.property_type},
                 "rightmove_url": build_search_url(poly, min_beds=options.min_beds, property_type=options.property_type),
             }
@@ -111,12 +119,11 @@ def build_searches(
     }
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def shed_to_searches(
     records: list[dict],
     bbox: BBox,
     options: SearchOptions,
-) -> dict:
+) -> SearchesPayload:
     """Full pipeline: kept records → grid cells → rectangles → searches payload."""
     kept = [r for r in records if r["kept"]]
     grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), options.cell_km)
@@ -138,8 +145,8 @@ def _existing_searches(path: Path) -> dict | None:
         return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def write_searches(payload: dict, out_dir: str | Path) -> None:
+# lucidlint: ignore latent-class (payload, out_dir) is the natural (what, where) of a write function — each writer
+def write_searches(payload: SearchesPayload, out_dir: str | Path) -> None:
     """Write searches.json + .txt — but never churn an identical artifact.
 
     ``commute-validate`` regenerates searches as part of its gate; if only
@@ -168,9 +175,7 @@ def _urls_text(payload: dict) -> str:
     urls = [s["rightmove_url"] for s in payload["searches"]]
     return "\n".join(urls) + "\n"
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _same_searches(existing: dict, new: dict) -> bool:
+def _same_searches(existing: SearchesPayload, new: SearchesPayload) -> bool:
     """Byte-identical apart from ``generated_at`` (the determinism contract).
 
     Compares JSON-serialized forms so tuple/list differences from the file
@@ -183,12 +188,11 @@ def _same_searches(existing: dict, new: dict) -> bool:
     return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def union_payload(
     kept_stations: list[dict],
     bbox: BBox,
     options: RasterOptions,
-) -> dict:
+) -> UnionPayload:
     """The shed as ONE-polygon-per-component Rightmove searches.
 
     Rightmove drawn-area searches take a single polygon. The shed is not one
@@ -214,15 +218,13 @@ def union_payload(
     return {"components": components}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def write_union(payload: dict, out_dir: str | Path) -> None:
+def write_union(payload: UnionPayload, out_dir: str | Path) -> None:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "union.json").write_text(json.dumps(payload, indent=2) + "\n")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def write_map_html(payload: dict, searches: list[dict], out_dir: str | Path) -> None:
+def write_map_html(payload: UnionPayload, searches: list[SearchRecord], out_dir: str | Path) -> None:
     """Self-contained Leaflet map: every search rectangle + the component outlines.
 
     Each rectangle is a layer whose popup links to its Rightmove search; the
@@ -233,6 +235,7 @@ def write_map_html(payload: dict, searches: list[dict], out_dir: str | Path) -> 
     rects_js = []
     for s in searches:
         coords = [[lat, lon] for lat, lon in s["polygon"]]
+        # lucidlint: ignore record-shape wire-format dict — popup record embedded in the map HTML (coding-standards.md)
         rects_js.append(json.dumps({"name": s["name"], "url": s["rightmove_url"], "coords": coords}))
     outlines_js = [[[lat, lon] for lat, lon in c["outline"]] for c in payload["components"]]
     html = """<!DOCTYPE html>

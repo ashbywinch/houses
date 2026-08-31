@@ -104,6 +104,7 @@ def extract_rates(ods_path: Path) -> list[dict[str, str]]:
 
         rate = _fmt_rate(rate_raw)
 
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         rates.append({"code": code, "authority": auth, "class": cls, "band_d_rate": rate})
 
     return rates

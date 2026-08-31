@@ -34,6 +34,7 @@ from houses.services_provider import get_services
 if TYPE_CHECKING:
     from houses.nodes.commute import CommuteSelectorNode
     from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
+    from houses.services import Services
 
 
 class PropertyNodes:
@@ -42,6 +43,8 @@ class PropertyNodes:
     Creates UserInputNodes for user-owned and enrichment data, DerivedNodes
     for derived values, and wires signal propagation.
     """
+
+    _code_refresh_epoch: int
 
     def __init__(self, rid: str) -> None:
         # Validate RID — must be numeric and at least 6 digits
@@ -54,45 +57,52 @@ class PropertyNodes:
                 f"least 6 characters long (Rightmove IDs are 6-10 digits). "
                 f"This appears to be test data."
             )
-        self.rid = rid
-        self.changed = Signal()
-        self._svc = get_services()
+        self.rid: str = rid
+        self.changed: Signal = Signal()
+        self._svc: Services = get_services()
 
         # ── Source Nodes (user-entered / scraped) ──────────────────────
-        self.rightmove_url = UserInputNode[str](f"{rid}/rightmove_url", str)
-        self.rightmove_address = UserInputNode[str](f"{rid}/rightmove_address", str)
-        self.rightmove_bedrooms = UserInputNode[str](f"{rid}/rightmove_bedrooms", str)
-        self.rightmove_price = UserInputNode[Money](f"{rid}/rightmove_price", Money)
-        self.rightmove_location = UserInputNode[GeoPoint](f"{rid}/rightmove_location", GeoPoint)
-        self.precise_location = UserInputNode[GeoPoint](f"{rid}/precise_location", GeoPoint)
-        self.corrected_address = UserInputNode[str](f"{rid}/corrected_address", str)
-        self.user_entered_address = UserInputNode[str](f"{rid}/user_entered_address", str)
+        self.rightmove_url: UserInputNode[str] = UserInputNode[str](f"{rid}/rightmove_url", str)
+        self.rightmove_address: UserInputNode[str] = UserInputNode[str](f"{rid}/rightmove_address", str)
+        # lucidlint: ignore duplicate-block structurally identical UserInputNode constructor calls are this file's
+        self.rightmove_bedrooms: UserInputNode[str] = UserInputNode[str](f"{rid}/rightmove_bedrooms", str)
+        self.rightmove_price: UserInputNode[Money] = UserInputNode[Money](f"{rid}/rightmove_price", Money)
+        self.rightmove_location: UserInputNode[GeoPoint] = UserInputNode[GeoPoint](
+            f"{rid}/rightmove_location", GeoPoint
+        )
+        self.precise_location: UserInputNode[GeoPoint] = UserInputNode[GeoPoint](f"{rid}/precise_location", GeoPoint)
+        self.corrected_address: UserInputNode[str] = UserInputNode[str](f"{rid}/corrected_address", str)
+        self.user_entered_address: UserInputNode[str] = UserInputNode[str](f"{rid}/user_entered_address", str)
 
         # Comments from View tab
-        self.comment_status = UserInputNode[str](f"{rid}/status", str)
-        self.comment_status_reason = UserInputNode[str](f"{rid}/status_reason", str)
-        self.comment_group_notes = UserInputNode[str](f"{rid}/group_notes", str)
-        self.comment_ashby_comments = UserInputNode[str](f"{rid}/ashby_comments", str)
-        self.works_estimates = UserInputNode[dict[str, Money]](f"{rid}/works_estimates", dict[str, Money])
-        self.rental_income = UserInputNode[Money](f"{rid}/rental_income", Money)
-        self.comment_design_needed = UserInputNode[str](f"{rid}/design_needed", str)
-        self.comment_planning_needed = UserInputNode[str](f"{rid}/planning_needed", str)
+        self.comment_status: UserInputNode[str] = UserInputNode[str](f"{rid}/status", str)
+        self.comment_status_reason: UserInputNode[str] = UserInputNode[str](f"{rid}/status_reason", str)
+        self.comment_group_notes: UserInputNode[str] = UserInputNode[str](f"{rid}/group_notes", str)
+        self.comment_ashby_comments: UserInputNode[str] = UserInputNode[str](f"{rid}/ashby_comments", str)
+        self.works_estimates: UserInputNode[dict[str, Money]] = UserInputNode[dict[str, Money]](
+            f"{rid}/works_estimates", dict[str, Money]
+        )
+        self.rental_income: UserInputNode[Money] = UserInputNode[Money](f"{rid}/rental_income", Money)
+        self.comment_design_needed: UserInputNode[str] = UserInputNode[str](f"{rid}/design_needed", str)
+        self.comment_planning_needed: UserInputNode[str] = UserInputNode[str](f"{rid}/planning_needed", str)
 
         # Triage state (app-only, not synced to sheet)
-        self.favourite = UserInputNode[bool](f"{rid}/favourite", bool)
-        self.dismissed = UserInputNode[bool](f"{rid}/dismissed", bool)
-        self.is_viewed = UserInputNode[bool](f"{rid}/is_viewed", bool)
-        self.user_notes = UserInputNode[str](f"{rid}/user_notes", str)
-        self.triage_status = UserInputNode[str](f"{rid}/triage_status", str)
+        self.favourite: UserInputNode[bool] = UserInputNode[bool](f"{rid}/favourite", bool)
+        self.dismissed: UserInputNode[bool] = UserInputNode[bool](f"{rid}/dismissed", bool)
+        self.is_viewed: UserInputNode[bool] = UserInputNode[bool](f"{rid}/is_viewed", bool)
+        self.user_notes: UserInputNode[str] = UserInputNode[str](f"{rid}/user_notes", str)
+        self.triage_status: UserInputNode[str] = UserInputNode[str](f"{rid}/triage_status", str)
 
         # Council-tax apportionment (app-only): which people pay a share
         # of the MAIN house's council tax (empty = all adults, the
         # default headcount split) and of the ANNEXE's (if detected);
         # annexe_ignored says the second dwelling is unrelated.
         # Defaults are seeded at bootstrap so they never block refresh.
-        self.council_tax_payers = UserInputNode[list[str]](f"{rid}/council_tax_payers", list[str])
-        self.annexe_payers = UserInputNode[list[str]](f"{rid}/annexe_payers", list[str])
-        self.annexe_ignored = UserInputNode[bool](f"{rid}/annexe_ignored", bool)
+        self.council_tax_payers: UserInputNode[list[str]] = UserInputNode[list[str]](
+            f"{rid}/council_tax_payers", list[str]
+        )
+        self.annexe_payers: UserInputNode[list[str]] = UserInputNode[list[str]](f"{rid}/annexe_payers", list[str])
+        self.annexe_ignored: UserInputNode[bool] = UserInputNode[bool](f"{rid}/annexe_ignored", bool)
         # Materialise defaults NOW so the nodes are never pending: the
         # group node passes its deps to compute POSITIONALLY, so a dropped
         # pending dep would shift every later argument into the wrong
@@ -104,21 +114,21 @@ class PropertyNodes:
             self.annexe_payers.push([], "default")
         if self.annexe_ignored.latest_attempt().pending:
             self.annexe_ignored.push(value=False, source_label="default")
-        self.best_address = BestAddressNode(
+        self.best_address: BestAddressNode = BestAddressNode(
             f"{rid}/best_address",
             user_entered_address=self.user_entered_address,
             corrected_address=self.corrected_address,
             rightmove_address=self.rightmove_address,
         )
-        self.postcode = PostcodeNode(
+        self.postcode: PostcodeNode = PostcodeNode(
             f"{rid}/postcode",
             best_address=self.best_address,
         )
-        self.geocode = GeocodeNode(
+        self.geocode: GeocodeNode = GeocodeNode(
             f"{rid}/geocode",
             best_address=self.best_address,
         )
-        self.best_location = BestLocationNode(
+        self.best_location: BestLocationNode = BestLocationNode(
             f"{rid}/best_location",
             precise_location=self.precise_location,
             rightmove_location=self.rightmove_location,
@@ -127,30 +137,30 @@ class PropertyNodes:
         )
 
         # ── Enrichment Nodes ────────────────────────────────────────────
-        self.epc = EpcNode(
+        self.epc: EpcNode = EpcNode(
             f"{rid}/epc",
             best_address=self.best_address,
             postcode_node=self.postcode,
         )
-        self.council_tax = CouncilTaxNode(
+        self.council_tax: CouncilTaxNode = CouncilTaxNode(
             f"{rid}/council_tax",
             best_address=self.best_address,
             postcode_node=self.postcode,
         )
-        self.walkability = WalkabilityNode(
+        self.walkability: WalkabilityNode = WalkabilityNode(
             f"{rid}/walkability",
             best_location=self.best_location,
             best_address=self.best_address,
         )
-        self.nearest_town = NearestTownNode(
+        self.nearest_town: NearestTownNode = NearestTownNode(
             f"{rid}/nearest_town",
             best_location=self.best_location,
         )
-        self.town_name = TownNode(
+        self.town_name: TownNode = TownNode(
             f"{rid}/town_name",
             best_address=self.best_address,
         )
-        self.town_desc = TownDescNode(
+        self.town_desc: TownDescNode = TownDescNode(
             f"{rid}/town_desc_v3",
             best_location=self.best_location,
             nearest_town=self.nearest_town,
@@ -165,13 +175,13 @@ class PropertyNodes:
             if p.is_child:
                 _school_acceptable = p.acceptable_schools
                 break
-        self.primary_school = PrimarySchoolNode(
+        self.primary_school: PrimarySchoolNode = PrimarySchoolNode(
             f"{rid}/primary_school",
             best_location=self.best_location,
             best_address=self.best_address,
             acceptable=_school_acceptable,
         )
-        self.secondary_school = SecondarySchoolNode(
+        self.secondary_school: SecondarySchoolNode = SecondarySchoolNode(
             f"{rid}/secondary_school",
             best_location=self.best_location,
             best_address=self.best_address,
@@ -188,52 +198,52 @@ class PropertyNodes:
         assert self.commute_breakdown is not None, "commute pipeline not built"
 
         # ── Monthly Cost Calculation Nodes ──────────────────────────────
-        self.stamp_duty = StampDutyNode(
+        self.stamp_duty: StampDutyNode = StampDutyNode(
             f"{rid}/stamp_duty",
             rightmove_price=self.rightmove_price,
             status_node=self.comment_status,
         )
         # ── Works Estimates ───────────────────────────────────────────
-        self.total_works = TotalWorksNode(
+        self.total_works: TotalWorksNode = TotalWorksNode(
             f"{rid}/total_works",
             persons_source=self._svc.persons_source,
             works_estimates_node=self.works_estimates,
         )
-        self.total_equity = EquityTotalNode(
+        self.total_equity: EquityTotalNode = EquityTotalNode(
             f"{rid}/total_equity",
             persons_source=self._svc.persons_source,
             status_node=self.comment_status,
         )
-        self.life_insurance_total = LifeInsuranceTotalNode(
+        self.life_insurance_total: LifeInsuranceTotalNode = LifeInsuranceTotalNode(
             f"{rid}/life_insurance_total",
             persons_source=self._svc.persons_source,
         )
-        self.mortgage_required = MortgageRequiredNode(
+        self.mortgage_required: MortgageRequiredNode = MortgageRequiredNode(
             f"{rid}/mortgage_required",
             rightmove_price=self.rightmove_price,
             stamp_duty=self.stamp_duty,
             total_works_node=self.total_works,
             total_equity_node=self.total_equity,
         )
-        self.monthly_mortgage = MonthlyMortgagePaymentNode(
+        self.monthly_mortgage: MonthlyMortgagePaymentNode = MonthlyMortgagePaymentNode(
             f"{rid}/monthly_mortgage",
             mortgage_required_node=self.mortgage_required,
             mortgage_rate_node=self._svc.setting_nodes.get("settings/mortgage_rate"),
             mortgage_term_node=self._svc.setting_nodes.get("settings/mortgage_term"),
         )
-        self.yearly_sinking_fund = YearlySinkingFundNode(
+        self.yearly_sinking_fund: YearlySinkingFundNode = YearlySinkingFundNode(
             f"{rid}/yearly_sinking_fund",
             rightmove_price=self.rightmove_price,
             sinking_fund_rate_node=self._svc.setting_nodes.get("settings/sinking_fund_rate"),
         )
-        self.monthly_sinking_fund = MonthlySinkingFundNode(
+        self.monthly_sinking_fund: MonthlySinkingFundNode = MonthlySinkingFundNode(
             f"{rid}/monthly_sinking_fund",
             yearly_sinking_fund_node=self.yearly_sinking_fund,
         )
 
         # The headline has NO family total — only the joint owners'
         # (couple) figure and the other adults' figure, labelled by name.
-        self.group_monthly_cost = GroupMonthlyCostNode(
+        self.group_monthly_cost: GroupMonthlyCostNode = GroupMonthlyCostNode(
             f"{rid}/group_monthly_cost",
             config=HousingCostConfig(
                 monthly_mortgage_node=self.monthly_mortgage,

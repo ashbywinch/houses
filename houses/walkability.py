@@ -99,6 +99,7 @@ def extract_town(address: str) -> str:
     return candidate
 
 
+# lucidlint: ignore data-clump (lat, lng) is enrich_walkability's public signature — houses/services.py and the
 async def _extract_town_centre(lat: float, lng: float, town: str) -> GeoPoint | None:
     """Resolve a town name to coordinates, used for walkability enrichment."""
     loc = await PropertyLocation.from_town(town)
@@ -201,6 +202,7 @@ async def _google_places_text(lat: float, lng: float) -> str:
     try:
         async with cached_async_client(timeout=15.0) as client:
 
+            # lucidlint: ignore duplicate twin POST wrapper of _fetch above — the shared cache logic already lives in
             async def _fetch_places():
                 resp = await client.post(
                     GOOGLE_MAPS_PLACES_URL,
@@ -221,6 +223,7 @@ async def _google_places_text(lat: float, lng: float) -> str:
             raise  # transient — let DAG retry handle it
         logger.warning("Google Places API failed (%s), falling back to Overpass", status)
         return ""
+    # lucidlint: ignore duplicate-block the RequestError and KeyError/IndexError handlers intentionally share the same
     except httpx.RequestError:
         raise  # transient — let DAG retry handle it
     except (KeyError, IndexError) as e:

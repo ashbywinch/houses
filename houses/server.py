@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -24,7 +25,6 @@ from dag.persistence import init_db as init_dag_db
 from dag.scheduler import flush_processor, get_scheduler, set_after_refresh
 from dag.scheduler import start_processor as _start_processor
 from houses.admin_router import admin_router
-from houses.context import get_scrape_fn
 from houses.database import close_db as close_app_db
 from houses.database import init_db as init_app_db
 from houses.location import extract_postcode, upgrade_address
@@ -59,16 +59,6 @@ def _deploy_hash() -> str:
     return ""
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-async def _scrape_url(url: str) -> tuple[RightmoveProperty | None, str | None]:
-    """Scrape a Rightmove listing; returns ``(result, error)``."""
-    try:
-        scraped = await get_scrape_fn()(url)
-        return scraped, None
-    # lucidlint: ignore broad-except boundary — scrape failures return (None, error) instead of raising
-    except Exception as e:
-        logger.warning("Scrape failed for %s: %s", url, e)
-        return None, str(e)
 
 def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
     """Seed the DAG for *rid2*; returns True on success.
@@ -84,6 +74,7 @@ def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
         push_enriched_property(
             rid2,
             enriched,
+            # lucidlint: ignore record-shape keyed collection, not a record — source-key → node lookup map
             {
                 "rightmove_address": prop.rightmove_address,
                 "rightmove_url": prop.rightmove_url,
@@ -129,6 +120,7 @@ async def lifespan(_app: FastAPI):
     if not settings.web_client_id:
         logger.error("HOUSES_GOOGLE_WEB_CLIENT_ID is not set. Configure Google OAuth in .env.")
         raise RuntimeError("Authentication not configured")
+    # lucidlint: ignore duplicate-block parallel settings-validation guards — each missing setting names its own env
     if not settings.web_client_secret:
         logger.error("HOUSES_GOOGLE_WEB_CLIENT_SECRET is missing. Set it in .env.")
         raise RuntimeError("Google Client Secret not configured")
@@ -250,6 +242,7 @@ def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
         return None
     if rid in property_rids():
         return JSONResponse(
+            # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the
             content={
                 "status": "error",
                 "error": f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
@@ -280,30 +273,35 @@ async def _scrape_for_address(payload):
     return None, None, address, True
 
 
-def _enriched_bedrooms(payload, scraped) -> int | None:
-    """Bedrooms for the seed: payload value, else the scraped one.
-    None when nothing is known — the cutover guard skips the push, so a
-    URL-only add never displays a made-up 0 (PR #68 review)."""
-    if payload.bedrooms is not None:
-        return payload.bedrooms
-    if scraped and scraped.bedrooms is not None:
-        return scraped.bedrooms
-    return None
+@dataclass(frozen=True)
+class SeedFacts:
+    """The requester's own facts plus, when one already landed, the
+    scraped listing — the two sources the DAG seed reconciles."""
+
+    payload: Property
+    scraped: RightmoveProperty | None = None
+
+    def bedrooms(self) -> int | None:
+        """Payload bedrooms, else the scraped one.  None when nothing is
+        known — the cutover guard skips the push, so a URL-only add never
+        displays a made-up 0 (PR #68 review)."""
+        if self.payload.bedrooms is not None:
+            return self.payload.bedrooms
+        return self.scraped.bedrooms if self.scraped else None
+
+    def price(self) -> Money | None:
+        """Payload price, else the scraped price as Money.  None when
+        nothing is known (cutover guard, PR #68 review)."""
+        if self.payload.price is not None:
+            return self.payload.price
+        if self.scraped and self.scraped.price is not None:
+            return Money(str(self.scraped.price), "GBP")
+        return None
 
 
-def _enriched_price(payload, scraped) -> Money | None:
-    """Price for the seed: payload value, else the scraped one.
-    None when nothing is known — the cutover guard skips the push, so a
-    URL-only add never displays a made-up £0 (PR #68 review)."""
-    if payload.price is not None:
-        return payload.price
-    if scraped and scraped.price is not None:
-        return Money(str(scraped.price), "GBP")
-    return None
-
-
-def _build_enriched(payload, scraped, address: str, postcode: str) -> EnrichedProperty:
+def _build_enriched(facts: SeedFacts, address: str, postcode: str) -> EnrichedProperty:
     """Seed the DAG — a fresh enrichment."""
+    scraped = facts.scraped
     address = address or (scraped.address if scraped else "")
     postcode = postcode or (scraped.postcode if scraped else "")
     if not address and postcode:
@@ -317,10 +315,10 @@ def _build_enriched(payload, scraped, address: str, postcode: str) -> EnrichedPr
     # address stays the single fact).
     address = upgrade_address(address, postcode)
     return EnrichedProperty(
-        url=payload.url or (scraped.url if scraped else ""),
+        url=facts.payload.url or (scraped.url if scraped else ""),
         address=address,
-        bedrooms=_enriched_bedrooms(payload, scraped),
-        price=_enriched_price(payload, scraped),
+        bedrooms=facts.bedrooms(),
+        price=facts.price(),
         approx_latitude=scraped.latitude if scraped else None,
         approx_longitude=scraped.longitude if scraped else None,
     )
@@ -360,7 +358,7 @@ async def upsert_property(
     postcode = payload.postcode or extract_postcode(address)
 
     # ── Seed the DAG ─────────────────────────────────────────────
-    enriched = _build_enriched(payload, scraped, address, postcode)
+    enriched = _build_enriched(SeedFacts(payload=payload, scraped=scraped), address, postcode)
     rid2 = rid or enriched.rid
     if rid2:
         _seed_dag(rid2, enriched)
@@ -467,6 +465,7 @@ async def scrape_status(request: Request) -> JSONResponse:
     _require_superuser(request)
     st = _scrape_queue.scrape_queue_status()
     return JSONResponse(
+        # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the shape
         content={"scrapes": {"pending": st.pending, "in_progress": st.in_progress, "failed": st.failed}}
     )
 

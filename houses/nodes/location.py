@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from typing import override
+from typing import TYPE_CHECKING, override
+
+if TYPE_CHECKING:
+    from dag.user_input_node import UserInputNode
+    from houses.nodes.geocode_node import GeocodeNode
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -91,19 +95,17 @@ class BestLocationNode(DerivedNode[GeoPoint]):
     """
 
     def __init__(self, node_id: str, *, precise_location, rightmove_location, best_address, geocode=None):
-        self._precise_location = precise_location
-        self._rightmove_location = rightmove_location
-        self._geocode = geocode
+        self._precise_location: UserInputNode[GeoPoint] = precise_location
+        self._rightmove_location: UserInputNode[GeoPoint] = rightmove_location
+        self._geocode: GeocodeNode | None = geocode
         super().__init__(node_id, GeoPoint, (best_address,))
 
-        for src in (precise_location, rightmove_location):
+        for src in (precise_location, rightmove_location, geocode):
+            if src is None:
+                continue
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
             src.changed.connect(slot)
-        if geocode is not None:
-            slot = Slot(self._on_dep_changed)
-            self._slots.append(slot)
-            geocode.changed.connect(slot)
 
     @override
     def _is_stale(self) -> bool:
@@ -128,22 +130,13 @@ class BestLocationNode(DerivedNode[GeoPoint]):
 
     @override
     async def compute(self, address: Attempt[str]) -> Attempt[GeoPoint]:
-
-        # Check precise_location first (optional — may be pending)
-        precise_attempt = await self._precise_location.attempt()
-        if precise_attempt.succeeded:
-            return precise_attempt
-
-        # Check geocode (optional — may be pending)
-        if self._geocode is not None:
-            geocode_attempt = await self._geocode.attempt()
-            if geocode_attempt.succeeded:
-                return geocode_attempt
-
-        # Check rightmove_location (optional — may be pending)
-        rightmove_attempt = await self._rightmove_location.attempt()
-        if rightmove_attempt.succeeded:
-            return rightmove_attempt
+        # Priority order: precise > geocode > rightmove. A missing geocode
+        # node is skipped; a source with no value falls through.
+        sources = (self._precise_location, self._geocode, self._rightmove_location)
+        for src in (s for s in sources if s is not None):
+            attempt = await src.attempt()
+            if attempt.succeeded:
+                return attempt
 
         if address.succeeded and is_single_property_address(address.value_or_none()):
             return self._impossible(

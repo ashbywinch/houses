@@ -28,16 +28,17 @@ class PMT(Expression):
         term_years: Expression,
         description: str = "Monthly mortgage payment calculated from the loan amount, interest rate, and term",
     ):
-        self.principal = principal
-        self.annual_rate = annual_rate
-        self.term_years = term_years
-        self.description = description
+        self.principal: Expression = principal
+        self.annual_rate: Expression = annual_rate
+        self.term_years: Expression = term_years
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt:
         p_result = self.principal.evaluate()
         if not p_result.succeeded:
             return Attempt.impossible(p_result.error or "principal missing")
+        # lucidlint: ignore duplicate-block parallel validation of three sub-expressions — each input guards its own
         r_result = self.annual_rate.evaluate()
         if not r_result.succeeded:
             return Attempt.impossible(r_result.error or "rate missing")
@@ -81,9 +82,9 @@ class StampDutyFn(Expression):
         price: Expression,
         description: str = "UK Stamp Duty Land Tax — a one-off tax paid when buying a property",
     ):
-        self.price = price
-        self.description = description
-
+        self.price: Expression = price
+        self.description: str = description
+    # lucidlint: ignore duplicate same evaluate/operand-guard skeleton as the dag.expression operands — the body is UK
     @override
     def evaluate(self) -> Attempt:
         price_result = self.price.evaluate()
@@ -143,15 +144,14 @@ class TieredRate(Expression):
         tiers: list[TaxTier],
         description: str = "",
     ):
-        if isinstance(value, Expression):
-            self.value = value
-        elif hasattr(value, "latest_attempt"):
-
-            self.value = Ref(value)
-        else:
-            self.value = Literal(value)
-        self.tiers = tiers
-        self.description = description
+        self.value: Expression = (
+            value
+            if isinstance(value, Expression)
+            else Ref(value) if hasattr(value, "latest_attempt")
+            else Literal(value)
+        )
+        self.tiers: list[TaxTier] = tiers
+        self.description: str = description
 
     # lucidlint: ignore record-shape (tier, cumulative) tax pair — a NamedTuple is ceremony for a local step
     def _tax_at(self, price: Decimal, tier_idx: int) -> tuple[Decimal, Decimal]:

@@ -50,9 +50,11 @@ async def force_regenerate(nodes: Iterable[Node]) -> tuple[list[dict[str, Any]],
     skipped: list[dict[str, Any]] = []
     for node in nodes:
         if not isinstance(node, DerivedNode):
+            # lucidlint: ignore record-shape wire-format dict — admin API response payload, serialization boundary owns
             skipped.append({"node": node._id, "reason": "input node — no computation"})
             continue
         await node.refresh(force=True)
+        # lucidlint: ignore record-shape wire-format dict — admin API response payload, serialization boundary owns the
         regenerated.append({"node": node._id, "status": node.latest_attempt().status})
     # Dependents of the regenerated nodes are now stale — drain the
     # scheduler so the response reflects the completed cascade.

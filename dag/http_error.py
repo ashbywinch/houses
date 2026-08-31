@@ -29,10 +29,10 @@ class HttpError(Exception):
         body: str = "",
         user_message: str = "",
     ) -> None:
-        self.status = status
-        self.headers = headers or {}
-        self.body = body
-        self.user_message = user_message or f"HTTP {status}: {message or _status_phrase(status)}"
+        self.status: int = status
+        self.headers: dict[str, str] = headers or {}
+        self.body: str = body
+        self.user_message: str = user_message or f"HTTP {status}: {message or _status_phrase(status)}"
         reason = message or _status_phrase(status)
         super().__init__(f"HTTP {status}: {reason}")
 
@@ -72,8 +72,3 @@ def _status_phrase(code: int) -> str:
         502: "Bad Gateway",
         503: "Service Unavailable",
     }.get(code, "")
-
-
-def is_transient_http_error(http_code: int) -> bool:
-    """Return True if the HTTP code indicates a transient failure worth retrying."""
-    return http_code in (429, 502, 503, 504)

@@ -231,6 +231,7 @@ def keep_station(inner: bool, dur_p: int | None, dur_a: int | None, threshold: i
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format list — shed records are the serialized station_shed.json payload end to
 def _resume_records(existing_records: list[dict] | None, stations: list[Station]) -> tuple[set[str], list[dict]]:
     """Records a resume carries forward, and the CRSes marked done.
 
@@ -267,6 +268,7 @@ class RoutingContext:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format list — shed records are the serialized station_shed.json payload end to
 async def build_shed(
     stations: list[Station],
     ctx: RoutingContext,
@@ -364,6 +366,7 @@ def build_metadata(offices: list[Office], expected: int, generated_at: str) -> d
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format list — shed records are the serialized station_shed.json payload end to
 def is_complete(existing: list[dict] | None, records: list[dict], expected: int) -> bool:
     """True when a resume found every expected station already done.
 
@@ -399,6 +402,7 @@ def config_signature(offices: list[Office]) -> dict:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — shed metadata/payload dicts are the serialized station_shed.json
 def resume_allowed(prev_metadata: dict, current: dict) -> bool:
     """A resume is only safe when the shed was built under the CURRENT config.
 
@@ -411,6 +415,7 @@ def resume_allowed(prev_metadata: dict, current: dict) -> bool:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format list — _write_payload serializes these records to station_shed.json
 def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
     """Write the shed payload atomically — a kill mid-write never corrupts the file."""
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -507,6 +512,7 @@ def _limit_stations(stations: list[Station], limit: int, out_path: Path) -> Limi
     return LimitedStations(stations, None)
 
 
+# lucidlint: ignore latent-class linear one-off batch main — offices is a stage input, not accumulated state; stages
 async def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the commutable-station shed (one-off TfL batch).")
     parser.add_argument("--csv", default=str(DEFAULT_CSV))

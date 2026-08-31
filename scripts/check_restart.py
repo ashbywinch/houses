@@ -9,12 +9,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from houses.settings import settings
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
 from houses.services import SETTINGS_SOURCE_CACHE
+
 # lucidlint: ignore private-import intra-package helper import
 from houses.services_provider import _request_services
+from houses.settings import settings
 from tests.helpers import make_services
 
 SETTINGS_SOURCE_CACHE.clear()

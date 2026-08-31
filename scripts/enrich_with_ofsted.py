@@ -14,6 +14,22 @@ import csv
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
+
+
+class _EffectiveRating(NamedTuple):
+    """Best-estimate school quality plus notable context for the summary."""
+
+    rating: str
+    highlights: str
+
+
+class _OEIFRating(NamedTuple):
+    """Overall OEIF rating together with its dimension grade pairs."""
+
+    rating: str
+    grades: list[tuple[str, str]]
+
 
 ENRICHED_CSV = Path("data/edubaseall_enriched.csv")
 OFSTED_CSV = Path("data/ofsted_inspections.csv")
@@ -98,8 +114,7 @@ def _s5_score(grade: str) -> int:
     return {"Strong standard": 4, "Expected standard": 3, "Needs attention": 2, "Cause for concern": 1}.get(grade, 0)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _determine_effective_rating(row: dict) -> tuple[str, str]:
+def _determine_effective_rating(row: dict) -> _EffectiveRating:
     """Determine the most accurate rating and a highlights string.
 
     Returns (rating, highlights) where rating is the best estimate of the
@@ -113,7 +128,7 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
     """
     oeif_rating, oeif_grades = _collect_oeif_rating(row)
     if oeif_rating:
-        return oeif_rating, _oeif_highlights(oeif_grades, oeif_rating, _collect_s5_data(row))
+        return _EffectiveRating(oeif_rating, _oeif_highlights(oeif_grades, oeif_rating, _collect_s5_data(row)))
 
     s5_data = _collect_s5_data(row)
     if s5_data:
@@ -124,13 +139,11 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
     if ungraded and ungraded != "NULL":
         for phrase, grade in _UNGRADED_GRADE_MAP.items():
             if phrase in ungraded.lower():
-                return grade, ""
+                return _EffectiveRating(rating=grade, highlights="")
+    return _EffectiveRating(rating="", highlights="")
 
-    return "", ""
 
-
-# lucidlint: ignore record-shape (rating, grades) parse pair — a NamedTuple is ceremony for a local step
-def _collect_oeif_rating(row: dict) -> tuple[str, list[tuple[str, str]]]:
+def _collect_oeif_rating(row: dict) -> _OEIFRating:
     oeif_raw = (row.get("Latest OEIF overall effectiveness") or "").strip()
     oeif_rating = OEIF_RATING_MAP.get(oeif_raw, "") if oeif_raw and oeif_raw != "NULL" else ""
 
@@ -146,7 +159,7 @@ def _collect_oeif_rating(row: dict) -> tuple[str, list[tuple[str, str]]]:
         scores = [_grade_score(g) for _, g in oeif_grades]
         avg = sum(scores) / len(scores) if scores else 0
         oeif_rating = {4: "Outstanding", 3: "Good", 2: "Requires Improvement", 1: "Inadequate"}.get(round(avg), "")
-    return oeif_rating, oeif_grades
+    return _OEIFRating(oeif_rating, oeif_grades)
 
 
 # lucidlint: ignore record-shape row dict — CSV boundary owns the shape
@@ -166,13 +179,12 @@ def _oeif_highlights(oeif_grades, oeif_rating: str, s5_data: dict[str, str]) -> 
     return ", ".join(highlights) if highlights else ""
 
 
-# lucidlint: ignore record-shape (rating, worst-area) pair — a NamedTuple is ceremony for a local step
-def _s5_rating_and_worst(s5_data: dict[str, str]) -> tuple[str, str]:
+def _s5_rating_and_worst(s5_data: dict[str, str]) -> _EffectiveRating:
     scores = [_s5_score(v) for v in s5_data.values()]
     avg = sum(scores) / len(scores) if scores else 0
     rating = {4: "Outstanding", 3: "Good", 2: "Requires Improvement", 1: "Inadequate"}.get(round(avg), "")
     worst = min(s5_data, key=lambda k: _s5_score(s5_data[k]))
-    return rating, f"{worst} {s5_data[worst]}"
+    return _EffectiveRating(rating, f"{worst} {s5_data[worst]}")
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -220,12 +232,10 @@ def _generate_ofsted_cell(row: dict) -> str:
 
 
 def main():
-    if not ENRICHED_CSV.is_file():
-        print(f"ERROR: {ENRICHED_CSV} not found", file=sys.stderr)
-        sys.exit(1)
-    if not OFSTED_CSV.is_file():
-        print(f"ERROR: {OFSTED_CSV} not found", file=sys.stderr)
-        sys.exit(1)
+    for path in (ENRICHED_CSV, OFSTED_CSV):
+        if not path.is_file():
+            print(f"ERROR: {path} not found", file=sys.stderr)
+            sys.exit(1)
 
     # Load all Ofsted rows into a dict by URN
     ofsted_by_urn: dict[str, dict] = {}

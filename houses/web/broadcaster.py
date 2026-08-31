@@ -1,8 +1,8 @@
 """Broadcaster — pushes fresh property summaries to WebSocket clients.
 
-When a DAG node finishes recomputing (via _processor), its RID is pushed
-to _broadcast_queue.  The _broadcaster picks it up, recomputes the full
-summary for that property, and sends it to all connected WebSocket clients.
+When a DAG node finishes recomputing (via _processor), _push_node_update
+sends its value to all WebSocket clients. The _broadcaster coroutine pops
+RID-level events from _broadcast_queue and pushes full-property summaries.
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ async def _push_node_update(node) -> None:
     # lucidlint: ignore broad-except serialisation failure silently drops this push; clients refresh on next change
     except Exception:
         return
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     msg = json.dumps({"type": "node_updated", "rid": rid, "node_id": node._id, "data": data})
     dead: list[WebSocket] = []
     for ws in list(_websocket_clients):
@@ -67,11 +68,6 @@ async def _push_node_update(node) -> None:
         _websocket_clients.discard(ws)
 
 
-def push_rid(rid: str) -> None:
-    """Push a property RID to the broadcast queue (add/delete events only)."""
-    _broadcast_queue.put_nowait(rid)
-
-
 async def _broadcaster() -> None:
     """Pop completed RIDs from the queue and push full-property summaries."""
 
@@ -84,6 +80,7 @@ async def _broadcaster() -> None:
             continue
         try:
             summary = await prop.to_json_summary()
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
             msg = json.dumps({"type": "property_updated", "rid": rid, "data": summary})
             dead: list[WebSocket] = []
             for ws in list(_websocket_clients):

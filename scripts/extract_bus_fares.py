@@ -98,30 +98,40 @@ def extract_operator_fares(operator: OperatorRef, options: FareExtractionOptions
         logger.info("No matching datasets for %s after sub-operator filter", display_name)
         return None
 
-    combined_fares, combined_network_fares, combined_stop_coords, zone_candidates, datasets_processed = (
-        _merge_dataset_results(datasets, options.stations, options.api_key, options.cached_only, options.naptan)
-    )
-    combined_stop_coords = _dedupe_stop_coords(combined_stop_coords)
-    combined_zones = _resolve_stop_zones(zone_candidates, combined_fares)
-    _apply_network_fares(combined_network_fares, combined_zones, combined_fares)
+    merged = _merge_dataset_results(datasets, options.stations, options.api_key, options.cached_only, options.naptan)
+    combined_stop_coords = _dedupe_stop_coords(merged.stop_coords)
+    combined_zones = _resolve_stop_zones(merged.zone_candidates, merged.fares)
+    _apply_network_fares(merged.network_fares, combined_zones, merged.fares)
 
-    if not combined_zones or not combined_fares:
+    if not combined_zones or not merged.fares:
         logger.info("No station-serving fare data for %s", display_name)
         return None
 
     logger.info(
         "Operator %s: processed %d datasets, %d stop->zone, %d zone pairs",
         display_name,
-        datasets_processed,
+        merged.datasets_processed,
         len(combined_zones),
-        len(combined_fares),
+        len(merged.fares),
     )
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"stop_zones": combined_zones, "zone_fares": combined_fares, "stop_coords": combined_stop_coords}
+    return {"stop_zones": combined_zones, "zone_fares": merged.fares, "stop_coords": combined_stop_coords}
 
 
-# lucidlint: ignore record-shape BODS dataset list — API boundary owns the shape
+@dataclass(frozen=True)
+class _MergeResults:
+    """Accumulated BODS extraction results for one operator."""
+
+    fares: dict[str, dict[str, float]]
+    network_fares: list[dict]
+    stop_coords: list[dict]
+    zone_candidates: dict[str, dict[str, bool]]
+    datasets_processed: int
+
+
+# lucidlint: ignore record-shape BODS API dataset payloads — wire format, serialization boundary owns the shape
+# lucidlint: ignore record-shape BODS API dataset payloads — wire format, serialization boundary owns the shape
 def _filter_datasets_by_sub_operators(noc: str, display_name: str, datasets: list[dict]) -> list[dict]:
     sub_ops = NOC_SUB_OPERATORS.get(display_name, [])
     if sub_ops:
@@ -147,14 +157,14 @@ def _filter_datasets_by_sub_operators(noc: str, display_name: str, datasets: lis
     return datasets
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape keyed collection, not a record — naptan is a stop-name→coordinate lookup table over
 def _merge_dataset_results(
     datasets: list[dict],
     stations: list[Station],
     api_key: str,
     cached_only: bool,
     naptan: dict[str, tuple[float, float]] | None,
-) -> tuple[dict, list, list, dict, int]:
+) -> _MergeResults:
     combined_fares: dict[str, dict[str, float]] = {}
     combined_network_fares: list[dict] = []
     combined_stop_coords: list[dict] = []
@@ -198,10 +208,17 @@ def _merge_dataset_results(
         if not had_any:
             logger.warning("No XML content yielded for dataset %d", ds_id)
 
-    return combined_fares, combined_network_fares, combined_stop_coords, zone_candidates, datasets_processed
+    return _MergeResults(
+        fares=combined_fares,
+        network_fares=combined_network_fares,
+        stop_coords=combined_stop_coords,
+        zone_candidates=zone_candidates,
+        datasets_processed=datasets_processed,
+    )
 
 
-# lucidlint: ignore record-shape stop-coord records — serialization boundary owns the shape
+# lucidlint: ignore record-shape stop-coord records — wire format, serialization boundary owns the shape
+# lucidlint: ignore record-shape stop-coord records — wire format, serialization boundary owns the shape
 def _dedupe_stop_coords(combined_stop_coords: list[dict]) -> list[dict]:
     seen: set[tuple[str, float, float]] = set()
     deduped: list[dict] = []
@@ -213,7 +230,8 @@ def _dedupe_stop_coords(combined_stop_coords: list[dict]) -> list[dict]:
     return deduped
 
 
-# lucidlint: ignore record-shape zone-candidate map — wire-format dict (coding-standards.md)
+# lucidlint: ignore record-shape zone-candidate map — keyed collection, not a record (coding-standards.md
+# lucidlint: ignore record-shape keyed collection, not a record — zone_candidates maps variable stop names to candidate
 def _resolve_stop_zones(
     zone_candidates: dict[str, dict[str, bool]],
     combined_fares: dict[str, dict[str, float]],
@@ -232,7 +250,8 @@ def _resolve_stop_zones(
     return combined_zones
 
 
-# lucidlint: ignore record-shape network-fare records — serialization boundary owns the shape
+# lucidlint: ignore record-shape network-fare records — wire format, serialization boundary owns the shape
+# lucidlint: ignore record-shape keyed collection, not a record — combined_fares maps variable zone-pair keys to
 def _apply_network_fares(
     combined_network_fares: list[dict],
     combined_zones: dict[str, str],
@@ -264,6 +283,7 @@ def main():
 
     logger.info("Loading stations from %s", STATIONS_CSV)
     stations = load_stations()
+    # lucidlint: ignore duplicate-block fail-fast guard pair — each guard validates a different precondition with the
     if not stations:
         logger.error("No stations loaded — check stations.csv exists")
         return

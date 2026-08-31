@@ -31,6 +31,7 @@ from houses.model.domain import (
     effective_selling_home,
     home_equity_contributions,
 )
+from houses.nodes.commute import commute_band
 from houses.nodes.settings_node import API_KEY_TO_NODE, aggregate_dict
 from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
@@ -47,10 +48,6 @@ def _registry_rids() -> list[str]:
     """All registered property IDs."""
     return get_services().property_registry.list_properties()
 
-GOOD_COMMUTE_MIN = 30
-BRACKNELL_WARN_COMMUTE_MIN = 60
-STANDARD_GOOD_COMMUTE_MIN = 45
-STANDARD_WARN_COMMUTE_MIN = 75
 GOOD_WALK_MIN = 15
 WARN_WALK_MIN = 30
 TOTAL_SHARE_PERCENT = 100
@@ -225,12 +222,7 @@ async def staleness_check(rid: str, nodes: str = ""):
 
 def _commute_score(minutes: int | None, bracknell: bool = False) -> int:
     """2 for a good commute, 1 for acceptable, -1 for poor, 0 unknown."""
-    if minutes is None:
-        return 0
-    if bracknell:
-        return 2 if minutes < GOOD_COMMUTE_MIN else (1 if minutes <= BRACKNELL_WARN_COMMUTE_MIN else -1)
-    return 2 if minutes < STANDARD_GOOD_COMMUTE_MIN else (1 if minutes <= STANDARD_WARN_COMMUTE_MIN else -1)
-
+    return {"good": 2, "warn": 1, "bad": -1, "unknown": 0}[commute_band(minutes, bracknell)]
 
 def _ofsted_score(rating: str | None) -> int:
     """Outstanding=2, Good=1, Requires Improvement/Inadequate=-1, else 0."""
@@ -274,6 +266,7 @@ def _walkability_score(walk_val: object) -> int:
     if not isinstance(walk_val, dict):
         return 0
     wv = walk_val.get("value")
+    # lucidlint: ignore duplicate-block parallel isinstance-guards walking a nested wire dict — each level guards its
     if not isinstance(wv, dict):
         return 0
     wt = wv.get("walk_to_town")
@@ -346,6 +339,7 @@ async def list_current_homes():
             continue
         att = prop.best_address.latest_attempt()
         address = str(att.value_or_none()) if att.succeeded and att.value_or_none() else ""
+        # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the shape
         result.append({"rid": str(rid), "address": address})
     return {"homes": result}
 
@@ -370,6 +364,7 @@ async def get_property_detail(rid: str):
 
 @api_router.patch("/properties/{rid}/address")
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore latent-class FastAPI handler signatures — rid is a decorated path param and body the request body;
 async def patch_address(rid: str, body: dict):
     prop = _registry_property(rid)
     if prop is None:
@@ -453,6 +448,7 @@ async def patch_triage(rid: str, body: dict):
         prop.favourite.push(bool(body["favourite"]), "user")
     if "dismissed" in body:
         prop.dismissed.push(bool(body["dismissed"]), "user")
+    # lucidlint: ignore duplicate-block parallel per-field application — each triage field guards and pushes
     if "is_viewed" in body:
         prop.is_viewed.push(bool(body["is_viewed"]), "user")
     if "user_notes" in body:
@@ -554,8 +550,37 @@ def _home_property_address(person) -> str:
     return str(att.value_or_none()).split("\n")[0].split(",")[0]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _enrich_persons(dumped: object, persons: list, session_user: dict | None, session_name: str) -> None:
+@dataclass(frozen=True)
+class SessionPersons:
+    """The person list plus the requesting session's user — the pair the
+    settings endpoints share for session-aware ownership decisions."""
+
+    persons: list
+    session_user: dict | None
+
+    def session_name(self) -> str:
+        """The session user's Person name (email match), or "" when unlinked."""
+        if not self.session_user:
+            return ""
+        folded = self.session_user.get("email", "").casefold()
+        for p in self.persons:
+            email = getattr(p, "email", "")
+            if email and email.casefold() == folded:
+                return getattr(p, "name", "")
+        return ""
+
+    def can_edit(self, session_name: str, person) -> bool:
+        """Server-side ownership check — the UI never decides this."""
+        if not self.session_user:
+            return False
+        if self.session_user.get("is_superuser"):
+            return True
+        if not session_name:
+            return False
+        return session_name == person.name or session_name in effective_editable_by(person, self.persons)
+
+
+def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> None:
     """Enrich serialized persons with the EFFECTIVE per-POI modes, the
     effective guardian list, the session-aware editable_by_me flag, and
     the linked-house address.  The server decides ownership; the UI only
@@ -563,16 +588,16 @@ def _enrich_persons(dumped: object, persons: list, session_user: dict | None, se
     non-Person entry in the source must not crash the enrichment."""
     if not isinstance(dumped, list):
         return
-    by_name = {p.name: p for p in persons}
+    by_name = {p.name: p for p in view.persons}
     for item in dumped:
         if not isinstance(item, dict):
             continue
         person = by_name.get(item.get("name") or "")
         if person is None:
             continue
-        editable_by = effective_editable_by(person, persons)
+        editable_by = effective_editable_by(person, view.persons)
         item["editable_by"] = list(editable_by)
-        item["editable_by_me"] = _can_edit_person(session_user, session_name, person, persons)
+        item["editable_by_me"] = view.can_edit(session_name, person)
         item["selling_home"] = effective_selling_home(person)
         for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=False):
             if isinstance(poi_item, dict):
@@ -588,9 +613,9 @@ async def get_settings(request: Request):
     persons_json = await svc.persons_source.to_json()
     attempt = svc.persons_source.latest_attempt()
     persons = [p for p in (attempt.value_or_none() or []) if isinstance(p, Person)]
-    session_user = effective_session_user(request)
-    session_name = _session_person_name(session_user, persons)
-    _enrich_persons(persons_json.get("value"), persons, session_user, session_name)
+    view = SessionPersons(persons=persons, session_user=effective_session_user(request))
+    session_name = view.session_name()
+    _enrich_persons(persons_json.get("value"), view, session_name)
 
     # The family deposit as ONE number (P4): per person, sale proceeds −
     # remaining mortgage + extra money, plus the household total —
@@ -665,33 +690,9 @@ def _deposit_breakdown(persons: list) -> DepositBreakdown:
             line = f"{source}+ £{cash:,.2f} cash = £{value:,.2f}"
         else:
             line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
+        # lucidlint: ignore record-shape wire-format dict — provenance line in the API response, serialization boundary
         deposit_lines.append({"label": name, "value": line})
     return DepositBreakdown(deposit_persons, deposit_total, deposit_lines)
-
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _session_person_name(session_user: dict | None, persons: list) -> str:
-    """The session user's Person name (email match), or "" when unlinked."""
-    if not session_user:
-        return ""
-    folded = session_user.get("email", "").casefold()
-    for p in persons:
-        email = getattr(p, "email", "")
-        if email and email.casefold() == folded:
-            return getattr(p, "name", "")
-    return ""
-
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _can_edit_person(session_user: dict | None, session_name: str, person, persons: list) -> bool:
-    """Server-side ownership check — the UI never decides this."""
-    if not session_user:
-        return False
-    if session_user.get("is_superuser"):
-        return True
-    if not session_name:
-        return False
-    return session_name == person.name or session_name in effective_editable_by(person, persons)
 
 
 _PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
@@ -799,6 +800,7 @@ def _person_from_dict(d: dict, target: Person) -> Person:
         updates["bus_walk_penalty"] = _parse_penalty(updates["bus_walk_penalty"])
     if "petrol_mpg" in updates:
         updates["petrol_mpg"] = _parse_petrol_mpg(updates["petrol_mpg"])
+    # lucidlint: ignore duplicate-block parallel per-field parse guards — each field has its own parser and type rule;
     if "home_co_owners" in updates:
         updates["home_co_owners"] = _parse_co_owners(updates["home_co_owners"])
     if "home_property_rid" in updates:
@@ -855,8 +857,9 @@ async def patch_person(name: str, body: dict, request: Request):
     if target is None:
         raise HTTPException(status_code=404, detail=f"No person named {name!r}")
 
-    session_name = _session_person_name(session_user, persons)
-    if not _can_edit_person(session_user, session_name, target, persons):
+    view = SessionPersons(persons=persons, session_user=session_user)
+    session_name = view.session_name()
+    if not view.can_edit(session_name, target):
         raise HTTPException(
             status_code=403,
             detail="You can only edit your own settings (or a child's, if you are their guardian)",
@@ -1006,7 +1009,6 @@ async def list_persons():
             else {
                 "name": getattr(p, "name", ""),
                 "email": getattr(p, "email", ""),
-                # lucidlint: ignore boolean-arg False is getattr's default, not a named flag
                 "is_child": bool(getattr(p, "is_child", False)),
             }
             for p in persons_attempt.value_or_none() or []

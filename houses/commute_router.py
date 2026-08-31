@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -49,8 +49,7 @@ class RoutesPostClient(Protocol):
     """Structural type for the transport seam tests stub out."""
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    # lucidlint: ignore detached-method protocol declaration — structural stub, no implementation
-    async def post(
+    async def post(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
         self, body: dict, field_mask: str, *, options: GoogleRoutesOptions | None = None
     ) -> dict | None: ...
 
@@ -71,9 +70,9 @@ class GoogleRoutesClient:
         client_factory: Callable[..., Any] | None = None,
         set_cached_fn: Callable[..., Any] | None = None,
     ):
-        self.api_key = api_key
-        self.client_factory = client_factory
-        self.set_cached_fn = set_cached_fn
+        self.api_key: str | None = api_key
+        self.client_factory: Callable[..., Any] | None = client_factory
+        self.set_cached_fn: Callable[..., Any] | None = set_cached_fn
 
     def _merge_defaults(self, options: GoogleRoutesOptions | None) -> GoogleRoutesOptions:
         """Constructor seams apply unless a caller overrides per call."""
@@ -95,7 +94,7 @@ class GoogleRoutesClient:
             raise httpx.HTTPStatusError(f"{e} — {body}", request=e.request, response=e.response) from e
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    async def post(
+    async def post(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
         self,
         body: dict,
         field_mask: str,
@@ -134,6 +133,7 @@ class GoogleRoutesClient:
 
 
 
+# lucidlint: ignore latent-class DI surface — every method hangs off the injected route/client fns, so no
 class CommuteRouter:
     """Aggregates all commute-routing logic: walk, transit, drive, and bus fallback."""
 
@@ -150,10 +150,12 @@ class CommuteRouter:
         Each function defaults to the real implementation; tests inject
         fakes through these keyword-only parameters.
         """
-        self._google_routes_client = routes_client or GoogleRoutesClient()
-        self._google_route_fn = google_route_fn or self._google_route_commute
-        self._tfl_transit_fn = tfl_transit_fn or self._tfl_transit_commute
-        self._congestion_fn = congestion_fn or self.in_congestion_zone
+        self._google_routes_client: RoutesPostClient = routes_client or GoogleRoutesClient()
+        self._google_route_fn: Callable[..., Awaitable[Attempt[Commute]]] = (
+            google_route_fn or self._google_route_commute
+        )
+        self._tfl_transit_fn: Callable[..., Awaitable[Attempt[Commute]]] = tfl_transit_fn or self._tfl_transit_commute
+        self._congestion_fn: Callable[[str | GeoPoint], bool] = congestion_fn or self.in_congestion_zone
 
     GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
     ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
@@ -422,7 +424,7 @@ class CommuteRouter:
                 label="",
                 destination=PlaceOfInterest(label="", address=dest_str),
                 duration=Quantity(duration_min, "minute"),
-                daily_cost=daily or Money("0", "GBP"),
+                daily_cost=daily or Money(amount="0", currency="GBP"),
                 mode="walk" if mode == "WALK" else "drive",
                 _details=(
                     CostGroup(
@@ -506,7 +508,7 @@ class CommuteRouter:
             label=dest.label,
             destination=dest,
             duration=Quantity(total_min, "minute"),
-            daily_cost=Money("0", "GBP"),
+            daily_cost=Money(amount="0", currency="GBP"),
             mode="transit",
             _details=(CostGroup(legs=tuple(legs), operator="TfL", cost=None),),
         )
@@ -702,7 +704,7 @@ class CommuteRouter:
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         def _tiebreak(c: Commute) -> tuple[int, float]:
-            no_cost = 1 if c.daily_cost == Money("0", "GBP") else 0
+            no_cost = 1 if c.daily_cost == Money(amount="0", currency="GBP") else 0
             return (no_cost, c.duration.magnitude or 0)
 
         best = min(valid_values, key=_tiebreak)

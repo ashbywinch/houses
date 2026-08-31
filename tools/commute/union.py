@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from houses.geopoint import GeoPoint
-from tools.commute.tile import Grid, GridCell, rasterize
+from tools.commute.tile import Grid, GridCell
 
 # unit directions: (dlat, dlon)
 N, S, E, W = (1, 0), (-1, 0), (0, 1), (0, -1)
@@ -25,12 +25,6 @@ _LEFT = {N: W, W: S, S: E, E: N}  # turn left from a direction
 COLLINEAR_EPSILON = 1e-9  # degree tolerance for treating outline points as collinear
 
 
-def union_cells(stations: list[GeoPoint], buffer_km: float, grid: Grid) -> set[GridCell]:
-    """The kept-cell set (same rasterize the tiling uses) for the union."""
-    return rasterize(stations, buffer_km, grid)
-
-
-# lucidlint: ignore class-module small private helper — Segment is internal to the union tracer
 @dataclass(frozen=True)
 class Segment:
     """One boundary edge of the union: from vertex ``start`` to ``end``."""
@@ -92,63 +86,84 @@ def _segment_index(segs: list[Segment]) -> dict[GeoPoint, list[tuple[GeoPoint, i
     return by_start
 
 
-# lucidlint: ignore record-shape (dlat, dlon) direction vector — a lookup-table key, not a data record
-def _pick_next(vertex: GeoPoint, incoming: tuple[int, int], by_start, used: set[int]) -> GeoPoint | None:
-    """Unused segment at vertex preferring left, straight, right, then any."""
-    candidates = [end for end, i in by_start.get(vertex, []) if i not in used]
-    if not candidates:
-        return None
-    if len(candidates) == 1:
-        return candidates[0]
-    order = [_LEFT[incoming], incoming, _LEFT[_LEFT[incoming]], _LEFT[_LEFT[_LEFT[incoming]]]]
-    for d in order:
-        for end in candidates:
-            if _direction(vertex, end) == d:
-                return end
-    return candidates[0]
+class _LoopTracer:
+    """Walks the segment graph, tracing boundary loops with the leftmost-turn rule.
 
-
-def _seg_index(vertex: GeoPoint, end: GeoPoint, by_start, used: set[int]) -> int | None:
-    for e, i in by_start.get(vertex, []):
-        if e == end and i not in used:
-            return i
-    return None
-
-
-def _trace_loop(start: GeoPoint, options, by_start, used: set[int]) -> list[GeoPoint] | None:
-    """Trace one boundary loop from an unused segment start.
-
-    Leftmost-turn rule: at each vertex pick the unused segment that turns left
-    first (then straight, then right) — keeps the interior on the left and
-    resolves pinch points without cutting through the union. Returns None when
-    every segment at this vertex is already used (no loop left to trace).
+    Owns the adjacency index and the used-segment set threaded through the
+    walk. Leftmost-turn: at each vertex pick the unused segment that turns
+    left first (then straight, then right) — keeps the interior on the left
+    and resolves pinch points without cutting through the union.
     """
-    first = next(((end, i) for end, i in options if i not in used), None)
-    if first is None:
+
+    def __init__(self, by_start: dict[GeoPoint, list[tuple[GeoPoint, int]]]) -> None:
+        self._by_start: dict[GeoPoint, list[tuple[GeoPoint, int]]] = by_start
+        self._used: set[int] = set()
+
+    # lucidlint: ignore record-shape outline loops — homogeneous point collections, not field-wise records
+    def trace_all(self) -> list[list[GeoPoint]]:
+        """Trace one loop per still-untraced boundary component."""
+        loops: list[list[GeoPoint]] = []
+        for start, options in list(self._by_start.items()):
+            loop = self._trace_loop(start, options)
+            if loop is not None:
+                loops.append(loop)
+        return loops
+
+    # lucidlint: ignore record-shape (dlat, dlon) direction vector — a lookup-table key, not a data record
+    def _pick_next(self, vertex: GeoPoint, incoming: tuple[int, int]) -> GeoPoint | None:
+        """Unused segment at vertex preferring left, straight, right, then any."""
+        candidates = [end for end, i in self._by_start.get(vertex, []) if i not in self._used]
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        order = [_LEFT[incoming], incoming, _LEFT[_LEFT[incoming]], _LEFT[_LEFT[_LEFT[incoming]]]]
+        for d in order:
+            for end in candidates:
+                if _direction(vertex, end) == d:
+                    return end
+        return candidates[0]
+
+    def _seg_index(self, vertex: GeoPoint, end: GeoPoint) -> int | None:
+        for e, i in self._by_start.get(vertex, []):
+            if e == end and i not in self._used:
+                return i
         return None
-    end, i = first
-    used.add(i)
-    loop = [start, end]
-    current = end
-    incoming = _direction(start, end)
-    while True:
-        nxt = _pick_next(current, incoming, by_start, used)
-        if nxt is None:
-            break
-        si = _seg_index(current, nxt, by_start, used)
-        if si is None:
-            break
-        used.add(si)
-        if nxt == start:
-            break
-        incoming = _direction(current, nxt)
-        loop.append(nxt)
-        current = nxt
-    if len(loop) > 2:
-        return loop
-    return None
+
+    def _trace_loop(self, start: GeoPoint, options) -> list[GeoPoint] | None:
+        """Trace one boundary loop from an unused segment start.
+
+        Returns None when every segment at this vertex is already used (no
+        loop left to trace).
+        """
+        first = next(((end, i) for end, i in options if i not in self._used), None)
+        if first is None:
+            return None
+        end, i = first
+        self._used.add(i)
+        loop = [start, end]
+        current = end
+        incoming = _direction(start, end)
+        while True:
+            nxt = self._pick_next(current, incoming)
+            if nxt is None:
+                break
+            # lucidlint: ignore duplicate-block this guard intentionally mirrors the one above — two different fallible
+            si = self._seg_index(current, nxt)
+            if si is None:
+                break
+            self._used.add(si)
+            if nxt == start:
+                break
+            incoming = _direction(current, nxt)
+            loop.append(nxt)
+            current = nxt
+        if len(loop) > 2:
+            return loop
+        return None
 
 
+# lucidlint: ignore record-shape outline loops — homogeneous point collections, not field-wise records
 # lucidlint: ignore record-shape outline loops — homogeneous point collections, not field-wise records
 def _remove_collinear(loops: list[list[GeoPoint]]) -> list[list[GeoPoint]]:
     """Drop outline points that lie on a straight run between neighbours."""
@@ -177,11 +192,5 @@ def union_outline(cells: set[GridCell], grid: Grid) -> list[list[GeoPoint]]:
     segs = _boundary_segments(cells, grid)
     if not segs:
         return []
-    by_start = _segment_index(segs)
-    used: set[int] = set()
-    loops: list[list[GeoPoint]] = []
-    for start, options in list(by_start.items()):
-        loop = _trace_loop(start, options, by_start, used)
-        if loop is not None:
-            loops.append(loop)
-    return _remove_collinear(loops)
+    tracer = _LoopTracer(_segment_index(segs))
+    return _remove_collinear(tracer.trace_all())

@@ -34,7 +34,8 @@ from houses.location import geocode_address, get_geo_state
 logger = logging.getLogger(__name__)
 
 CSV_PATH = Path("data/edubaseall_enriched.csv")
-# lucidlint: ignore magic-number 51.5074 — LONDON's latitude: coordinate data of the named LONDON constant
+# lucidlint: ignore magic-number the longitude datum of the LONDON constant — the literal IS the datum
+# lucidlint: ignore magic-number coordinate data of the named LONDON constant — the literal IS the datum, naming it
 LONDON = GeoPoint(51.5074, -0.1278)
 MAX_KM = 200
 MAX_CORRECTION_KM = 100

@@ -344,7 +344,7 @@ class _DefaultGeocoder:
     services container so geocode state/cache live on the injected instance."""
 
     def __init__(self, services: Services | None = None):
-        self._services = services
+        self._services: Services | None = services
 
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]:
         return await geocode(postcode, services=self._services)

@@ -19,7 +19,6 @@ class NearestStationNode(DerivedNode[Station | None]):
     and delegates to ``RailFareRegistry.nearest_station`` for the lookup.
     """
 
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_location: Node[GeoPoint]) -> None:
         super().__init__(node_id, Station | None, (best_location,))
 

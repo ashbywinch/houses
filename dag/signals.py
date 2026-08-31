@@ -11,8 +11,8 @@ class Connection:
     """Represents a connected handler. Call ``.disconnect()`` to remove it."""
 
     def __init__(self, signal: Signal, handler: Callable) -> None:
-        self._signal = signal
-        self._handler = handler
+        self._signal: Signal = signal
+        self._handler: Callable = handler
 
     def disconnect(self) -> None:
         self._signal._disconnect(self._handler)
@@ -46,6 +46,8 @@ class Signal:
 
 class Slot:
     """Wraps a bound method with a weak reference for auto-cleanup."""
+
+    _ref: weakref.WeakMethod | None = None
 
     def __init__(self, callback: Callable) -> None:
         self._callback: Callable | None = None

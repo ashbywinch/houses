@@ -17,11 +17,8 @@ from houses.database import get_connection
 
 logger = logging.getLogger(__name__)
 
-_MIGRATION_TIMESTAMP = "1980-01-01T00:00:00+00:00"
-
 
 @dataclass
-# lucidlint: ignore class-module small private helper — module keeps its domain name
 class CommentEntry:
     person: str  # "Ashby" | "Simon" | "Lorena"
     text: str
@@ -54,48 +51,3 @@ def add_comment(rid: str, person: str, text: str) -> dict[str, Any]:
     return {"person": person, "text": text, "timestamp": now}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def migrate_old_comments(rid: str, old_comments: dict[str, Any]) -> list[dict[str, Any]]:
-    """Migrate old flat comment fields to the new comments table on first request.
-
-    Reads the ``comments`` dict from the detail API, inserts any non-empty
-    values as comment rows, and returns the full comment list.
-
-    The migration uses ``_MIGRATION_TIMESTAMP`` so that old comments sort
-    before all real (user-created) comments.  The operation is idempotent
-    — inserted inside a transaction with a double-check to prevent
-    duplicate rows under concurrent access.
-    """
-    conn = get_connection()
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        # Check whether old comments have already been migrated for this RID
-        already = conn.execute(
-            "SELECT COUNT(*) FROM comments WHERE rid = ? AND created_at = ?",
-            (rid, _MIGRATION_TIMESTAMP),
-        ).fetchone()[0]
-        if already > 0:
-            conn.commit()
-            return get_comments(rid)
-
-        field_map: dict[str, str] = {
-            "group_notes": "Simon",
-            "ashby_comments": "Ashby",
-        }
-
-        for field_name, person in field_map.items():
-            val = old_comments.get(field_name, {})
-            if isinstance(val, dict) and val.get("succeeded") and val.get("value"):
-                text = str(val["value"]).strip()
-                if text:
-                    conn.execute(
-                        "INSERT INTO comments (rid, person, text, created_at) VALUES (?, ?, ?, ?)",
-                        (rid, person, text, _MIGRATION_TIMESTAMP),
-                    )
-
-        conn.commit()
-    # lucidlint: ignore broad-except transaction boundary — any failure rolls back the migration before re-raising
-    except Exception:
-        conn.rollback()
-        raise
-    return get_comments(rid)

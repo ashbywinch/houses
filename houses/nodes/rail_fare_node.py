@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import override
 
@@ -10,7 +11,9 @@ from dag.derived_node import DerivedNode
 from houses.commute import LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
-from houses.nodes.commute import transit_legs
+from houses.nodes.commute import CommuteSelectorNode, transit_legs
+from houses.nodes.location import BestLocationNode
+from houses.nodes.transit import TransitNode
 from houses.rail_fare_registry import get_rail_fare_registry
 from houses.stations import Station
 from houses.tfl_client import TflClient
@@ -39,10 +42,11 @@ class RailFareNode(DerivedNode[Commute]):
     provenance_source_type = SourceType.API
 
     def __init__(self, node_id: str, *, transit_result, best_location, selector=None, tube_fare_fn=None):
-        self.transit_result = transit_result
-        self.best_location = best_location
-        self.selector = selector
-        self._tube_fare_fn = tube_fare_fn  # DI seam (no monkeypatch): tests inject a canned tube fare
+        self.transit_result: TransitNode = transit_result
+        self.best_location: BestLocationNode = best_location
+        self.selector: CommuteSelectorNode | None = selector
+        self._tube_fare_fn: Callable[[Station, str], Awaitable[Money | None]] | None = tube_fare_fn
+        # DI seam (no monkeypatch): tests inject a canned tube fare
         deps: tuple = (transit_result, best_location)
         if selector is not None:
             deps = deps + (selector,)

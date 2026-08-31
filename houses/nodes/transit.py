@@ -36,6 +36,13 @@ def _with_destination(
     return Attempt.succeeded(replace(val, destination=poi))
 
 
+def _with_poi_destination(commute: Commute, poi: PlaceOfInterest | None) -> Commute:
+    """Patch the full destination POI onto a plain Commute."""
+    if poi is None:
+        return commute
+    return replace(commute, destination=poi)
+
+
 def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
     """Return a succeeded Commute that marks a route as not viable.
 
@@ -191,9 +198,9 @@ class PersonMaxWalkNode(DerivedNode[int]):
     """
 
     def __init__(self, node_id: str, *, persons_source, person_name: str):
-        self._person_name = person_name
+        self._person_name: str = person_name
         super().__init__(node_id, int, (persons_source,))
-        self.display_name = "Max walk"
+        self.display_name: str = "Max walk"
 
     @override
     def compute(self, persons: Attempt[list]) -> Attempt[int]:
@@ -211,7 +218,7 @@ class PersonMaxWalkNode(DerivedNode[int]):
 class WalkLegCheckNode(DerivedNode[bool]):
     def __init__(self, node_id: str, *, transit_node, max_walk: int = 30):
         super().__init__(node_id, bool, (transit_node,))
-        self._max_walk = max_walk
+        self._max_walk: int = max_walk
 
     @override
     def compute(self, transit: Attempt[Commute]) -> Attempt[bool]:
@@ -238,13 +245,13 @@ class WalkNode(DerivedNode[Commute]):
         options: RouteOptions,
     ):
         super().__init__(node_id, Commute, (options.best_location, options.poi))
-        self.display_name = "Walk"
-        self._max_walk = options.max_walk
-        self._route_fn = options.route_fn
+        self.display_name: str = "Walk"
+        self._max_walk: int = options.max_walk
+        self._route_fn: Callable | None = options.route_fn
         # The full destination POI (label + trips/weeks) — the route
         # planner only knows the address, so the provenance would lose
         # the destination without this patch.
-        self._poi_info = options.poi_info
+        self._poi_info: PlaceOfInterest | None = options.poi_info
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -273,10 +280,10 @@ class DriveNode(DerivedNode[Commute]):
         options: RouteOptions,
     ):
         super().__init__(node_id, Commute, (options.best_location, options.poi))
-        self.display_name = "Drive"
-        self._has_car = options.has_car
-        self._route_fn = options.route_fn
-        self._poi_info = options.poi_info
+        self.display_name: str = "Drive"
+        self._has_car: bool = options.has_car
+        self._route_fn: Callable | None = options.route_fn
+        self._poi_info: PlaceOfInterest | None = options.poi_info
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -311,12 +318,12 @@ class TflTransitNode(DerivedNode[Commute]):
         options: TransitOptions,
     ):
         super().__init__(node_id, Commute, (options.best_location, options.poi))
-        self._has_car = options.has_car
-        self._allow_bus = options.allow_bus
-        self._poi_info = options.poi_info
-        self._client_factory = options.client_factory
+        self._has_car: bool = options.has_car
+        self._allow_bus: bool = options.allow_bus
+        self._poi_info: PlaceOfInterest | None = options.poi_info
+        self._client_factory: Callable[..., Any] | None = options.client_factory
         self._last_no_route_detail: str = ""
-        self.display_name = "TfL"
+        self.display_name: str = "TfL"
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -390,11 +397,13 @@ class TransitNode(DerivedNode[Commute]):
         if options.best_address is not None:
             deps = deps + (options.best_address,)
         super().__init__(node_id, Commute, deps)
-        self.display_name = "TfL API"
-        self._has_car = options.has_car
-        self._best_address = options.best_address
-        self._poi_info = options.poi_info
-        self._transit_route_fn = options.transit_route_fn
+        self.display_name: str = "TfL API"
+        self._has_car: bool = options.has_car
+        self._best_address: Node | None = options.best_address
+        self._poi_info: PlaceOfInterest | None = options.poi_info
+        self._transit_route_fn: Callable[[GeoPoint, PlaceOfInterest], Awaitable[Commute | None]] | None = (
+            options.transit_route_fn
+        )
         self._last_fallback_detail: str | None = None
 
     @override
@@ -458,8 +467,7 @@ class TransitNode(DerivedNode[Commute]):
                 parts = self._id.split("/")
                 label = parts[2] if len(parts) >= 3 else (fallback.destination.label or "")
                 fallback = replace(fallback, label=label)
-                if self._poi_info is not None:
-                    fallback = replace(fallback, destination=self._poi_info)
+                fallback = _with_poi_destination(fallback, self._poi_info)
                 return Attempt.succeeded(fallback)
             return Attempt.succeeded(val)
 
@@ -469,7 +477,7 @@ class TransitNode(DerivedNode[Commute]):
         mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
         if val.details and all(leg.mode.name.lower() == "walk" for cg in val.details for leg in cg.legs):
             mode = "walk"
-        daily_cost = val.daily_cost or Money("0", "GBP")
+        daily_cost = val.daily_cost or Money(amount="0", currency="GBP")
 
         result = Commute(
             person=Person(name="", has_car=self._has_car),
@@ -480,8 +488,7 @@ class TransitNode(DerivedNode[Commute]):
             mode=mode,
             _details=val.details,
         )
-        if self._poi_info is not None:
-            result = replace(result, destination=self._poi_info)
+        result = _with_poi_destination(result, self._poi_info)
         return Attempt.succeeded(result)
     async def _nr_fallback(
         self,

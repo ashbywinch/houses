@@ -47,7 +47,6 @@ class CommuteRouterLike(Protocol):
     """Structural type for ``compute_school_commute``'s router seam —
     test fakes implement just ``get_commute``."""
 
-    # lucidlint: ignore detached-method protocol stub mirrors CommuteRouter's instance method — typing matches by kind
     async def get_commute(
         self,
         origin: str | GeoPoint,
@@ -102,6 +101,7 @@ async def _locate_property(postcode: str, address: str, geocode_fn, geocode_addr
             )
         property_coords = geocode_attempt.value_or_none()
     if property_coords is None and address:
+        # lucidlint: ignore duplicate-block two-stage fallback (geocode by postcode, then by address) — symmetric
         addr_attempt = await geocode_address_fn(address)
         if addr_attempt.impossible:
             return Attempt.impossible(

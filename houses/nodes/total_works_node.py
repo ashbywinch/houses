@@ -6,6 +6,7 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from dag.node import Node
 
 
 class TotalWorksNode(DerivedNode[Money]):
@@ -33,8 +34,8 @@ class TotalWorksNode(DerivedNode[Money]):
 
     def __init__(self, node_id: str, *, persons_source, works_estimates_node):
         super().__init__(node_id, Money, (persons_source, works_estimates_node))
-        self._persons_source = persons_source
-        self._works_estimates_node = works_estimates_node
+        self._persons_source: Node = persons_source
+        self._works_estimates_node: Node = works_estimates_node
 
     @override
     def compute(

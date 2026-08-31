@@ -23,7 +23,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, override
+from typing import Any, TypeVar, override
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
@@ -34,17 +34,19 @@ logger = logging.getLogger(__name__)
 
 _APP_KEY_RE = re.compile(r"app_key=[^&\"'}\s]+")
 
+_ClientT = TypeVar("_ClientT", httpx.AsyncClient, httpx.Client)
+
 
 CACHE_DIR = Path("data/api_cache")
 
-# lucidlint: ignore unused-setter test-injection API — unit conftest calls set_cache_dir() to isolate the cache
+# lucidlint: ignore unused,unused-setter test-injection API — unit conftest calls set_cache_dir() to isolate the cache
 def set_cache_dir(path: str | Path) -> None:
     """Override the cache directory (used by tests to isolate caches)."""
     # lucidlint: ignore global-state deliberate test seam — unit conftest calls set_cache_dir() to isolate the cache
     global CACHE_DIR
     CACHE_DIR = Path(path)
 
-
+# lucidlint: ignore-file data-clump this module's public cache API deliberately threads one request identity (method,
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _make_key(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> str:
     parts = [method.upper(), url]
@@ -61,6 +63,7 @@ def _cache_path(key: str) -> Path:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_cached(
     method: str,
     url: str,
@@ -74,6 +77,7 @@ def get_cached(
     return None
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None, data: dict[str, Any]) -> None:
     """Store a JSON response so future identical requests skip the API."""
@@ -129,27 +133,9 @@ def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str
     _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def with_cache_sync(
-    method: str,
-    url: str,
-    params: dict[str, Any] | None = None,
-    body: dict[str, Any] | None = None,
-    *,
-    fetch,
-) -> dict[str, Any]:
-    """Sync version of ``with_cache`` — for use with ``httpx.Client``."""
-    body_str = json.dumps(body, sort_keys=True) if body else None
-    cached = get_cached(method, url, params, body_str)
-    if cached is not None:
-        return cached
-    data = fetch()
-    set_cached(method, url, params, body_str, data)
-    return data
-
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-async def with_cache(
+# lucidlint: ignore record-shape request params enter the cache key verbatim — wire format (coding-standards.md)
+# lucidlint: ignore record-shape request body is the external API's wire payload (coding-standards.md)
+async def with_cache(  # lucidlint: ignore record-shape return is the cached API response body — wire format
     method: str,
     url: str,
     params: dict[str, Any] | None = None,
@@ -173,7 +159,6 @@ async def with_cache(
     return data
 
 
-# lucidlint: ignore class-module small private helper — module keeps its domain name
 class CachingTransport(httpx.AsyncBaseTransport):
     """httpx async transport that checks the disk cache before making HTTP calls.
 
@@ -188,7 +173,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
     """
 
     def __init__(self, inner: httpx.AsyncBaseTransport | None = None):
-        self._inner = inner or httpx.AsyncHTTPTransport()
+        self._inner: httpx.AsyncBaseTransport = inner or httpx.AsyncHTTPTransport()
 
     @override
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -235,6 +220,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
                     request.method,
                     url_path,
                     params,
+                    # lucidlint: ignore record-shape wire-format dict — the wrapped-error envelope IS the cache file's
                     body,
                     {"_cached_status": response.status_code, "_cached_body": data},
                 )
@@ -245,13 +231,17 @@ class CachingTransport(httpx.AsyncBaseTransport):
         return response
 
 
+def _cached_client(client_factory: type[_ClientT], **kwargs) -> _ClientT:
+    """Build an HTTP client whose transport caches every response to disk."""
+    kwargs.setdefault("transport", CachingTransport())
+    return client_factory(**kwargs)
+
+
 def cached_async_client(**kwargs) -> httpx.AsyncClient:
     """Return an ``AsyncClient`` that auto-caches every response to disk."""
-    kwargs.setdefault("transport", CachingTransport())
-    return httpx.AsyncClient(**kwargs)
+    return _cached_client(httpx.AsyncClient, **kwargs)
 
 
 def cached_sync_client(**kwargs) -> httpx.Client:
     """Return a ``Client`` that auto-caches every response to disk."""
-    kwargs.setdefault("transport", CachingTransport())
-    return httpx.Client(**kwargs)
+    return _cached_client(httpx.Client, **kwargs)

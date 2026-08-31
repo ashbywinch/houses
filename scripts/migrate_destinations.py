@@ -63,6 +63,7 @@ async def migrate() -> None:
                 new_pois.append(poi)
         object.__setattr__(person, "places_of_interest", tuple(new_pois))
 
+    # lucidlint: ignore duplicate-block fail-fast guard triple — each guard exits on a different empty precondition;
     if not updated:
         print("No POIs matched — nothing to migrate.")
         return

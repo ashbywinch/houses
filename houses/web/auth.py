@@ -104,7 +104,6 @@ def _person_superuser_flag(email: str, persons_attempt_value: Any) -> bool | Non
             if pe is not None and pe.casefold() == folded:
                 return bool(p.get("is_superuser"))
         elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded:
-            # lucidlint: ignore boolean-arg False is getattr's default, not a named flag
             return bool(getattr(p, "is_superuser", False))
     return None
 
@@ -127,7 +126,6 @@ def effective_session_user(request: Request) -> dict[str, Any] | None:
         persons_attempt = svc.persons_source.latest_attempt()
         if persons_attempt.succeeded:
             live = _person_superuser_flag(session.get("email", ""), persons_attempt.value_or_none())
-            # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
             if live is not None and live != session.get("is_superuser", False):
                 session = {**session, "is_superuser": live}
     # lucidlint: ignore broad-except live superuser re-derivation failure logs and returns the session unchanged
@@ -343,7 +341,6 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
     svc = get_services()
     try:
         id_info = svc.oauth_service.exchange_code(code, code_verifier, state)
-        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         if not id_info.get("email_verified", False):
             return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 
@@ -407,7 +404,6 @@ async def device(request: Request):
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)
         return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
-    # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
     if not id_info.get("email_verified", False):
         return JSONResponse(status_code=401, content={"detail": "email not verified"})
 
@@ -444,7 +440,6 @@ async def me(request: Request):
         "name": session["name"],
         "picture": session.get("picture", ""),
         "person": person_name,
-        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         "is_superuser": session.get("is_superuser", False),
         "impersonating": session.get("impersonating"),
     }
@@ -485,7 +480,6 @@ async def impersonate(request: Request, body: dict):
         for p in persons_attempt.value_or_none() or []:
             name = getattr(p, "name", None) if not isinstance(p, dict) else p.get("name")
             if name == person:
-                # lucidlint: ignore boolean-arg False is getattr's default, not a named flag
                 is_child = bool(p.get("is_child")) if isinstance(p, dict) else bool(getattr(p, "is_child", False))
                 if is_child:
                     raise HTTPException(status_code=400, detail="Cannot impersonate a child")
@@ -495,11 +489,11 @@ async def impersonate(request: Request, body: dict):
         email=session["email"],
         name=session["name"],
         picture=session.get("picture", ""),
-        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         is_superuser=session.get("is_superuser", False),
         impersonating=person,
     )
 
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     response = JSONResponse(content={"status": "ok", "impersonating": person})
     _set_session_cookie(response, new_cookie, _is_secure(request))
     return response

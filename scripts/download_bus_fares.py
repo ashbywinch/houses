@@ -68,6 +68,7 @@ def download_dataset(dataset_id: int, api_key: str, cached_only: bool = False) -
 
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             xml_names = sorted([n for n in zf.namelist() if n.endswith(".xml")])
+            # lucidlint: ignore duplicate-block this no-XML guard intentionally mirrors the no-cached-files guard above
             if not xml_names:
                 logger.warning("No XML files found in zip for dataset %d", dataset_id)
                 return

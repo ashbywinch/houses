@@ -26,7 +26,6 @@ SIMON_BUS_WALK_PENALTY = 20
 LORENA_BUS_WALK_PENALTY = 15
 ASHBY_BUS_WALK_PENALTY = 10
 
-# lucidlint: ignore unused-setter called from the FastAPI lifespan (houses/server.py:57)
 def set_app_mode() -> None:
     """Mark this process as the running app.
 
@@ -74,12 +73,10 @@ def guard_settings_write(
         "Set HOUSES_SCRIPTS_MAY_WRITE=1 to run a deliberate data-fix script."
     )
 
-# lucidlint: ignore class-module small private helper — module keeps its domain name
 class SettingsNode(UserInputNode):
     """A settings input node whose writes are guarded — only the app,
     pytest, or an explicitly opted-in script may change family data."""
 
-# lucidlint: ignore detached-method super().push() requires self — cannot be a staticmethod
     @override
     def push(
         self,

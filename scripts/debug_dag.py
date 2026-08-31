@@ -83,11 +83,8 @@ def inspect_rid(rid: str):
         data = nodes[nid]
         short = nid.replace(f"{rid}/", "", 1)
         status = data.get("status", "?")
-        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         s = data.get("succeeded", False)
-        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         p = data.get("pending", False)
-        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         i = data.get("impossible", False)
         val = data.get("value")
         error = data.get("error", "")

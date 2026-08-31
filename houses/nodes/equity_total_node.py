@@ -7,7 +7,8 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
-from houses.model.domain import home_equity_contributions
+from dag.user_input_node import UserInputNode
+from houses.model.domain import Person, home_equity_contributions
 
 _ZERO = Decimal("0")
 
@@ -33,8 +34,8 @@ class EquityTotalNode(DerivedNode[Money]):
         return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, persons_source, status_node=None):
-        self._persons_source = persons_source
-        self._status_node = status_node
+        self._persons_source: UserInputNode[list[Person]] = persons_source
+        self._status_node: UserInputNode[str] | None = status_node
         deps = [persons_source]
         names = ["persons"]
         if status_node is not None:

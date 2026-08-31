@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from money import Money
@@ -56,29 +57,83 @@ def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng:
         logger.warning("Invalid %s coords: lat=%s lng=%s (%s)", what, lat, lng, exc)
         return False
 
-def _push_cell(
-    sources: dict[str, UserInputNode],
-    row: dict[str, str],
-    col_name: str,
-    source_key: str,
-    *,
-    parse: Callable[[str], object] | None = None,
-) -> bool:
-    """Push one stripped sheet cell into a source node; False (no push)
-    when the node isn't wired, the cell is blank, or the parser rejects
-    it — callers count only real pushes.  The label comes from
-    SOURCE_LABELS (Sheet fallback), matching the per-key push chain."""
-    if source_key not in sources:
-        return False
-    val = (row.get(col_name) or "").strip()
-    if not val:
-        return False
-    if parse is not None:
-        val = parse(val)
-        if val is None:
+@dataclass(frozen=True)
+class SheetRow:
+    """One sheet row plus the input nodes it feeds; the push methods
+    materialise the row's cells onto those nodes."""
+
+    row: dict[str, Any]
+    sources: dict[str, UserInputNode]
+
+    def push_cell(
+        self,
+        col_name: str,
+        source_key: str,
+        *,
+        parse: Callable[[str], object] | None = None,
+    ) -> bool:
+        """Push one stripped sheet cell into a source node; False (no push)
+        when the node isn't wired, the cell is blank, or the parser rejects
+        it — callers count only real pushes.  The label comes from
+        SOURCE_LABELS (Sheet fallback), matching the per-key push chain."""
+        if source_key not in self.sources:
             return False
-    sources[source_key].push(val, SOURCE_LABELS.get(source_key, "Sheet"))
-    return True
+        val = (self.row.get(col_name) or "").strip()
+        if not val:
+            return False
+        if parse is not None:
+            val = parse(val)
+            if val is None:
+                return False
+        self.sources[source_key].push(val, SOURCE_LABELS.get(source_key, "Sheet"))
+        return True
+
+    def push_upgraded_address(self) -> int:
+        """Push the postcode-upgraded address onto both address nodes; 0–2 pushes."""
+        address = (self.row.get("Address") or "").strip()
+        postcode = (self.row.get("Postcode") or "").strip()
+        if not address or not postcode:
+            return 0
+        upgraded = upgrade_address(address, postcode)
+        pushed = 0
+        if upgraded != address and "user_entered_address" in self.sources:
+            self.sources["user_entered_address"].push(upgraded, SOURCE_LABELS["user_entered_address"])
+            pushed += 1
+        if "corrected_address" in self.sources:
+            self.sources["corrected_address"].push(upgraded, SOURCE_LABELS["corrected_address"])
+            pushed += 1
+        return pushed
+
+    def push_comment_cells(self) -> int:
+        """Push every non-blank comment column; floats coerced for float nodes."""
+        pushed = 0
+        for source_key, col_name in COMMENT_COLUMNS.items():
+            if source_key not in self.sources:
+                continue
+            val = (self.row.get(col_name) or "").strip()
+            if not val:
+                continue
+            src = self.sources[source_key]
+            label = COMMENT_LABELS.get(source_key, "Sheet")
+            if isinstance(src, UserInputNode) and src._value_type is float:
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    continue
+            src.push(val, label)
+            pushed += 1
+        return pushed
+
+    def push_coords(self, lat_col: str, lng_col: str, source_key: str, what: str) -> int:
+        """Push one lat/lng column pair; 1 push when both cells are numeric
+        and the location node is wired."""
+        lat = (self.row.get(lat_col) or "").strip()
+        lng = (self.row.get(lng_col) or "").strip()
+        if lat and lng and source_key in self.sources and _push_geo_coords(
+            self.sources, key=source_key, lat=lat, lng=lng, what=what
+        ):
+            return 1
+        return 0
 
 
 def _parse_price(value: str) -> Money | None:
@@ -88,70 +143,31 @@ def _parse_price(value: str) -> Money | None:
         return None
     return Money(cleaned, "GBP")
 
-def _push_upgraded_address(sources: dict[str, UserInputNode], row: dict[str, str]) -> int:
-    """Push the postcode-upgraded address onto both address nodes; 0–2 pushes."""
-    address = (row.get("Address") or "").strip()
-    postcode = (row.get("Postcode") or "").strip()
-    if not address or not postcode:
-        return 0
-    upgraded = upgrade_address(address, postcode)
-    pushed = 0
-    if upgraded != address and "user_entered_address" in sources:
-        sources["user_entered_address"].push(upgraded, SOURCE_LABELS["user_entered_address"])
-        pushed += 1
-    if "corrected_address" in sources:
-        sources["corrected_address"].push(upgraded, SOURCE_LABELS["corrected_address"])
-        pushed += 1
-    return pushed
-
-
-def _push_comment_cells(sources: dict[str, UserInputNode], row: dict[str, str]) -> int:
-    """Push every non-blank comment column; floats coerced for float nodes."""
-    pushed = 0
-    for source_key, col_name in COMMENT_COLUMNS.items():
-        if source_key not in sources:
-            continue
-        val = (row.get(col_name) or "").strip()
-        if not val:
-            continue
-        src = sources[source_key]
-        label = COMMENT_LABELS.get(source_key, "Sheet")
-        if isinstance(src, UserInputNode) and src._value_type is float:
-            try:
-                val = float(val)
-            except (ValueError, TypeError):
-                continue
-        src.push(val, label)
-        pushed += 1
-    return pushed
-
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore unused sheet-import entry point exercised by the source-values regression suite — startup uses the
 def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -> int:
+    sheet = SheetRow(row=row, sources=sources)
     pushed = 0
 
-    pushed += _push_cell(sources, row, col_name="Rightmove URL", source_key="rightmove_url")
-    pushed += _push_cell(sources, row, col_name="Address", source_key="rightmove_address")
-    pushed += _push_cell(sources, row, col_name="Bedrooms", source_key="rightmove_bedrooms")
-    pushed += _push_cell(sources, row, col_name="Price (£)", source_key="rightmove_price", parse=_parse_price)
+    pushed += sheet.push_cell(col_name="Rightmove URL", source_key="rightmove_url")
+    pushed += sheet.push_cell(col_name="Address", source_key="rightmove_address")
+    pushed += sheet.push_cell(col_name="Bedrooms", source_key="rightmove_bedrooms")
+    pushed += sheet.push_cell(col_name="Price (£)", source_key="rightmove_price", parse=_parse_price)
 
-    approx_lat = (row.get("Approx Latitude (est)") or "").strip()
-    approx_lng = (row.get("Approx Longitude (est)") or "").strip()
-    if approx_lat and approx_lng and "rightmove_location" in sources and _push_geo_coords(
-        sources, key="rightmove_location", lat=approx_lat, lng=approx_lng, what="approx"
-    ):
-        pushed += 1
+    pushed += sheet.push_coords(
+        lat_col="Approx Latitude (est)",
+        lng_col="Approx Longitude (est)",
+        source_key="rightmove_location",
+        what="approx",
+    )
+    pushed += sheet.push_coords(
+        lat_col="Actual Latitude", lng_col="Actual Longitude", source_key="precise_location", what="actual"
+    )
 
-    actual_lat = (row.get("Actual Latitude") or "").strip()
-    actual_lng = (row.get("Actual Longitude") or "").strip()
-    if actual_lat and actual_lng and "precise_location" in sources and _push_geo_coords(
-        sources, key="precise_location", lat=actual_lat, lng=actual_lng, what="actual"
-    ):
-        pushed += 1
-
-    pushed += _push_upgraded_address(sources, row)
-    pushed += _push_cell(sources, row, col_name="Postcode", source_key="postcode")
-    pushed += _push_comment_cells(sources, row)
+    pushed += sheet.push_upgraded_address()
+    pushed += sheet.push_cell(col_name="Postcode", source_key="postcode")
+    pushed += sheet.push_comment_cells()
     return pushed
 
 

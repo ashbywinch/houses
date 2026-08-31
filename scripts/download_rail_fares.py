@@ -38,6 +38,7 @@ MIN_FARE_LINE_LENGTH = 20
 def authenticate(password: str) -> str:
     resp = httpx.post(
         AUTH_URL,
+        # lucidlint: ignore record-shape wire-format dict — NRDP auth request body, external API contract
         data={"username": USERNAME, "password": password},
     )
     resp.raise_for_status()
@@ -90,6 +91,7 @@ def extract_relevant_fares(zip_data: bytes) -> list[dict]:
                         if key not in seen:
                             seen.add(key)
                             relevant.append(
+                                # lucidlint: ignore record-shape wire-format dict — CSV output row for
                                 {
                                     "origin_crs": origin,
                                     "dest_crs": dest,

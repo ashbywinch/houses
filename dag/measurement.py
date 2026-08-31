@@ -85,48 +85,44 @@ class Measurement(Generic[T]):
 
     # ── Binary arithmetic: value via T, error via uncertainties ──
 
+    def _binop(
+        self, other: Any, op: Callable[[Any, Any], Any], err: Callable[[Any, Any], Any]
+    ) -> Measurement:
+        """One binary step: the VALUE combines through ``T``'s own operator
+        (``op``) and the ERROR through Gaussian propagation (``err``) — the
+        same operator drives both, so expressions stay correct by construction."""
+        m = other if isinstance(other, Measurement) else Measurement(other)
+        return Measurement(
+            op(self.value, m.value),
+            _combine(err, self.value, m.value, self.stddev, m.stddev),
+        )
+
+# lucidlint: ignore middle-man __add__ implements the + protocol — _binop is its one implementation; the dunder cannot
     def __add__(self, other: Any) -> Measurement:
-        if isinstance(other, Measurement):
-            return Measurement(
-                self.value + other.value,
-                _combine(_add, self.value, other.value, self.stddev, other.stddev),
-            )
-        return self + Measurement(other)
+        return self._binop(other, _add, _add)
 
 # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __radd__(self, other: Any) -> Measurement:
         return self.__add__(other)  # addition is commutative
 
+# lucidlint: ignore middle-man __sub__ implements the - protocol — _binop is its one implementation; the dunder cannot
     def __sub__(self, other: Any) -> Measurement:
-        if isinstance(other, Measurement):
-            return Measurement(
-                self.value - other.value,
-                _combine(_sub, self.value, other.value, self.stddev, other.stddev),
-            )
-        return self - Measurement(other)
+        return self._binop(other, _sub, _sub)
 
     def __rsub__(self, other: Any) -> Measurement:
         return Measurement(other) - self
 
+# lucidlint: ignore middle-man __mul__ implements the * protocol — _binop is its one implementation; the dunder cannot
     def __mul__(self, other: Any) -> Measurement:
-        if isinstance(other, Measurement):
-            return Measurement(
-                self.value * other.value,
-                _combine(_mul, self.value, other.value, self.stddev, other.stddev),
-            )
-        return self * Measurement(other)
+        return self._binop(other, _mul, _mul)
 
 # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __rmul__(self, other: Any) -> Measurement:
         return self.__mul__(other)  # multiplication is commutative
 
+# lucidlint: ignore middle-man __truediv__ implements the / protocol — _binop is its one implementation; the dunder
     def __truediv__(self, other: Any) -> Measurement:
-        if isinstance(other, Measurement):
-            return Measurement(
-                self.value / other.value,
-                _combine(_truediv, self.value, other.value, self.stddev, other.stddev),
-            )
-        return self / Measurement(other)
+        return self._binop(other, _truediv, _truediv)
 
     def __rtruediv__(self, other: Any) -> Measurement:
         return Measurement(other) / self

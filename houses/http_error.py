@@ -22,12 +22,13 @@ class HttpError(Exception):
         headers: dict[str, str] | None = None,
         body: str = "",
     ) -> None:
-        self.status = status
-        self.headers = headers or {}
-        self.body = body
+        self.status: int = status
+        self.headers: dict[str, str] = headers or {}
+        self.body: str = body
         reason = message or _status_phrase(status)
         super().__init__(f"HTTP {status}: {reason}")
 
+    # lucidlint: ignore duplicate same retry_after parsing as dag.http_error.HttpError — merging across the dag/houses
     @property
     def retry_after(self) -> float | None:
         """Retry-After value in seconds, or ``None`` if not present.
@@ -66,6 +67,3 @@ def _status_phrase(code: int) -> str:
     }.get(code, "")
 
 
-def is_transient_http_error(http_code: int) -> bool:
-    """Return True if the HTTP code indicates a transient failure worth retrying."""
-    return http_code in (429, 502, 503, 504)

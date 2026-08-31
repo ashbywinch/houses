@@ -8,6 +8,7 @@ from money import Money
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.expression import Conditional, Literal
+from dag.node import Node
 from houses.nodes.expressions import TaxTier, TieredRate
 
 
@@ -18,8 +19,8 @@ class StampDutyNode(DerivedNode[Money]):
     """
 
     def __init__(self, node_id: str, *, rightmove_price, status_node=None):
-        self._price_node = rightmove_price
-        self._status_node = status_node
+        self._price_node: Node = rightmove_price
+        self._status_node: Node | None = status_node
         deps = [rightmove_price]
         names = ["price"]
         if status_node is not None:
@@ -41,10 +42,10 @@ class StampDutyNode(DerivedNode[Money]):
             if_false=TieredRate(
                 self._price_node,
                 tiers=[
-                    TaxTier(0, 250000, 0),
-                    TaxTier(250000, 925000, Decimal("0.05")),
-                    TaxTier(925000, 1500000, Decimal("0.10")),
-                    TaxTier(1500000, None, Decimal("0.12")),
+                    TaxTier(rate_from=0, rate_to=250000, rate=0),
+                    TaxTier(rate_from=250000, rate_to=925000, rate=Decimal("0.05")),
+                    TaxTier(rate_from=925000, rate_to=1500000, rate=Decimal("0.10")),
+                    TaxTier(rate_from=1500000, rate_to=None, rate=Decimal("0.12")),
                 ],
                 description="Stamp Duty Land Tax: 0% up to £250k, "
                 "5% on £250k–£925k, 10% on £925k–£1.5M, 12% above £1.5M",
@@ -54,9 +55,7 @@ class StampDutyNode(DerivedNode[Money]):
 
     @override
     def _get_active_deps(self):
-        if self._status_node is not None:
-            return (self._price_node, self._status_node)
-        return (self._price_node,)
+        return (self._price_node, self._status_node) if self._status_node is not None else (self._price_node,)
 
     @override
 # lucidlint: ignore middle-man protocol/reflected-operator requirement
