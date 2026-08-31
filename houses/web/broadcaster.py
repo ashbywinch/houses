@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """Broadcaster — pushes fresh property summaries to WebSocket clients.
 
 When a DAG node finishes recomputing (via _processor), _push_node_update

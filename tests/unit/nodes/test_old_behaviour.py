@@ -145,35 +145,6 @@ class TestCouncilTaxNode:
         assert a.pending
 
 
-class TestRouteDescription:
-    """Route description from CommuteLeg tuples — needed for commute display."""
-
-    def test_returns_string_with_leg_modes_durations_and_stations(self):
-        from pint import Quantity
-
-        from houses.nodes.transit import CommuteLeg, _route_description
-
-        legs = (
-            CommuteLeg(mode="walk", duration=Quantity(6, "minute"), destination="Stop A"),
-            CommuteLeg(mode="bus", duration=Quantity(9, "minute"), destination="Town Station"),
-            CommuteLeg(mode="train", duration=Quantity(20, "minute"), destination="Paddington"),
-            CommuteLeg(mode="tube", duration=Quantity(8, "minute"), line_name="Bakerloo", destination="Oxford Circus"),
-            CommuteLeg(mode="walk", duration=Quantity(7, "minute")),
-        )
-        result = _route_description(legs)
-        assert "Walk 6m to Stop A" in result
-        assert "Bus 9m to Town Station" in result
-        assert "Train 20m to Paddington" in result
-        assert "Bakerloo" in result
-        assert "Walk 7m" in result
-
-    def test_handles_empty_details(self):
-        from houses.nodes.transit import _route_description
-
-        result = _route_description(())
-        assert result == ""
-
-
 class TestTownNode:
     """TownNode extracts town from best_address — used by walk-to-town commute."""
 

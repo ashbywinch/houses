@@ -1,15 +1,16 @@
 # Lucidlint Review Log — Houses
 
-Records every lucidlint 0.2.0 finding we did **not** fix outright, and why —
-plus what lucidlint missed and where the tool cost us time. Final state
-(2026-08-23): **0 open actions, empty baseline** (`lucidlint.json` locks
-nothing). Every remaining diagnostic carries a per-site
+Records every lucidlint finding we did **not** fix outright, and why — plus
+what lucidlint missed and where the tool cost us time. Current state:
+**lucidlint 0.4.0 sweep** (2026-08-30 — see [§0.4.0 sweep](#04-0-sweep-2026-08-30)
+below). Previous state (0.2.0, 2026-08-23): **0 open actions, empty baseline**
+(`lucidlint.json` locked nothing). Every remaining diagnostic carries a per-site
 `# lucidlint: ignore <kind> <why>` comment; a suppression without a written
-why is itself a finding. Current suppression census (all carry whys):
-record-shape 408, fakefs 77, broad-except 72, magic-number 54,
-global-state 33, detached-method 16, boolean-arg 12, middle-man 8,
-class-module 7, unused-setter 5, special-case 4, loop-pipeline 4,
-private-import 2, swallow 1.
+why is itself a finding. The 0.2.0 suppression census (record-shape 408,
+fakefs 77, broad-except 72, magic-number 54, global-state 33, detached-method
+16, boolean-arg 12, middle-man 8, class-module 7, unused-setter 5,
+special-case 4, loop-pipeline 4, private-import 2, swallow 1) was re-audited
+during the 0.4.0 sweep — 80 markers had gone stale and were removed.
 
 The gate: `make lucidlint` (`.venv/bin/lucidlint --repo . --baseline
 lucidlint.json`). Warnings never fail.
@@ -222,3 +223,123 @@ conditional-polymorphism) are fixed or carry per-site whys — the gate
 reports 0 actions of any severity. The pytest suite runs with **zero
 warnings** after converting the starlette per-request `cookies=` deprecation
 sites to `client.cookies.set(...)`.
+
+## 0.4.0 sweep (2026-08-30)
+
+Repin `98cf466` (0.2.0) → `f8cbbc8` (**0.4.0**). The new detectors surfaced
+**587 actions (458 fail-severity)** on a repo the 0.2.0 sweep had driven to
+zero — all from deeper descent and new rules, not from code decay. Doctrine
+held: fix what we agree with, suppress the rest per-site with cited whys, no
+baseline. Disposition: fixed = annotations, extractions, dead-code deletion;
+suppressed = wire formats, keyed collections, deliberate parallel structure.
+
+### Rule improvements vindicated (0.4.0 fixed 0.2.0 false-positive classes)
+
+- **magic-number data-table exemption** (≥3 same-kind numeric siblings) —
+  obsoleted the 0.2.0 per-site data-table verdicts (council_tax BAND_RATIOS,
+  postcode bounds): the suppressions went stale because the rule now agrees
+  with us.
+- **detached-method trivial-stub exemption** (protocol/abstract bodies).
+- **boolean-arg `.get()`/`getattr()` default fix** — the 12 false positives
+  from the 0.2.0 log now pass without markers.
+
+### Per-site verdicts (disagreed with 0.4.0)
+
+- **bare-record-collection over-fires on keyed collections** — `dict[str, X]`
+  lookup tables (grid lattice coords, flow-id maps, `dict[str, Attempt]`
+  buckets) are keyed collections, not records. Suppressed with
+  "keyed collection, not a record" + flagged as an over-fire candidate.
+- **wire-format descent is too eager** — OSRM/ORS request bodies, Leaflet
+  layer configs, CSV row shapes and API envelopes re-fired despite the house
+  wire-format standard; suppressed with the coding-standards citation.
+- **`(rating, highlights)`-style local parse pairs** — 0.2.0's "NamedTuple is
+  ceremony for a local step" verdict holds; where return-type markers
+  wouldn't bind, converted to NamedTuples instead (enrich_with_ofsted
+  `_EffectiveRating`/`_OEIFRating` — callers unpack unchanged).
+- **large-class/latent-class on cohesive DI surfaces** — CommuteRouter (17
+  methods, one wiring contract), BusJourneyRegistry (12 methods, one
+  `_data` store), DerivedNode lifecycle: no field-disjoint partition exists;
+  suppressed, not split.
+- **operator triads** (Measurement `__add__`/`__sub__`/`__mul__`) —
+  extracted `_binop` (docstring already claimed shared algebra); 100%-identical
+  cross-file twins (`_fail`, `_same_payload`, `_existing_payload`) — extracted
+  to `tools/commute/payload_checks.py`.
+
+### Engine quirks (cost real time; verified empirically or in scanner internals)
+
+1. **`fix` prints prescriptions, not diffs** for most kinds
+   (undeclared-attribute, stale-suppression, duplicate-block) — "preview the
+   seam, judge, apply" has nothing to preview; every application needs a
+   hand-verification loop.
+2. **Signature findings anchor at the def line with a 3-line marker window,
+   ending at that line; one marker consumes one finding.** Stacked params +
+   return findings need stacked markers INSIDE the window; wrapped/continuation
+   lines push earlier markers out of the window and they self-report stale.
+3. **`stale-suppression` is the 0.4.0 migration tool**: 80 markers from the
+   0.2.0 sweep were stale (kinds renamed, exemptions added) — but re-audit
+   each before deleting; a marker can look stale under `--file` and bind
+   repo-wide.
+4. **Cross-file duplicate/similarity suppressions self-report stale under
+   `--file` mode** — `--repo` consumes them (false artifact).
+5. **Display kind ≠ suppression kind**: similarity/large-class findings
+   display as `standard`/`latent-class` but suppress with raw kinds
+   `duplicate`/`data-clump`; using the display kind always self-reports stale.
+6. **data-clump emits one finding per shared parameter pair** (deduped for
+   display) — suppressing the visible one reveals the next pair; >3 same-anchor
+   pairs can never fit per-site (only an ignore-file exemption covers it).
+7. **undeclared-attribute does not resolve inherited declarations** — `Node`
+   declares `display_name` (dag/node.py:178) yet subclasses get flagged;
+   forced redundant re-declaration (tool bug, flagged upstream).
+8. **`from __future__ import annotations` suspected of breaking return-type
+   marker binding** — identical patterns bind without it (two independent
+   observations, mechanism unconfirmed; workaround: NamedTuple conversion).
+9. **ruff E501 (120-col) vs the 3-marker window conflict**: long whys cannot
+   all fit — wrap continuation lines push markers out of the window. The
+   working idiom: keep each marker one line ≤120, why truncated, citation
+   token preserved; full verdicts live in this log.
+
+### Where the tool cost us extra tokens (wrong-or-unclear verdicts)
+
+- petrol.py `_attach_is_child`: marker "didn't bind" — cost a probe session
+  (future-import hypothesis) before the one-marker-one-finding rule explained
+  it; fix was a second stacked marker.
+- api_cache `with_cache` return site: five probe rounds with differentiated
+  comment texts before reading the scanner source for the window rule.
+- rightmove_url `v >>= 5`: the flagged "32" was the second `0x20` on a
+  different line; three marker placements before the report cleared.
+- 458 fail-severity findings where 0.2.0 showed 0 — re-triage of ~580 sites
+  is the inherent upgrade cost of a deeper scanner; the stale-suppression
+  census (which markers it obsoleted) was genuinely useful.
+
+### Dead code found during triage (deleted)
+
+- `houses/web/geo_utils.py` — entire module, zero consumers (incl. dynamic/
+  gitignored search) since before 0.2.0.
+- `dag/http_error.is_transient_http_error` — dead duplicate of the houses one.
+- `houses/web/broadcaster.push_rid` — only producer of a queue that never fires.
+- `houses/context.py get_scrape_fn` — zero callers; the `_request_scrape_fn`
+  seam is now write-only (tests set it, nothing reads it — their scrape fakes
+  are no-ops). Seam removal + test refactor flagged for follow-up.
+- `houses/nodes/transit._build_details` (zero callers) and
+  `_route_description` (prod-orphaned; only test_old_behaviour pinned it) +
+  its two test cases + the now-orphaned `_LEG_MODE_LABEL`.
+- `houses/nodes/commute_breakdown_node._persons_source` — assigned, never read.
+
+### Known accepted warning
+
+`scripts/parse_netex_fares.py:1 [warn][bulk-suppression]` — the census counts
+the file's latent-class suppressions, which are policy (one-shot ETL, see the
+ignore-file markers at the top of the file). Never fails; left visible
+
+### 0.4.0 suppression census
+
+Recorded per-site in the working tree (kinds: record-shape, latent-class,
+duplicate, bulk-suppression, middle-man, broad-except, global-state,
+magic-number, boolean-arg, private-import); every marker carries a cited why.
+The 0.2.0-era census above is historical.
+
+### Final state (2026-08-30)
+
+`make lucidlint`: **GATE PASS — 0 fail-severity actions, 1 accepted census
+warning.** `make test`: **1555 passed.** ruff + pyrefly: clean. lucidlint
+0.4.0 (`f8cbbc8`) pinned in pyproject.toml.

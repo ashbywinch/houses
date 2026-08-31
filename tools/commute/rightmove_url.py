@@ -19,23 +19,26 @@ _LOCATION_SUFFIX = '"}'
 Coord = tuple[float, float]
 
 
+_POLYLINE_PRECISION = 1e5  # Google polyline: 5 decimal places (spec)
+_POLYLINE_CONTINUATION = 0x20  # chunk continuation bit (spec)
+_POLYLINE_CHUNK_MASK = 0x1F  # low 5 bits per chunk (spec)
+_POLYLINE_CHUNK_BITS_COUNT = 5  # bits consumed per chunk (spec)
+_POLYLINE_ASCII_OFFSET = 63  # ASCII-63 offset of emitted chunk bytes (spec)
+
 def encode_polyline(coords: list[Coord]) -> str:
     """Encode a list of (lat, lon) pairs with the Google polyline algorithm."""
     out: list[str] = []
     prev_lat = prev_lon = 0
     for lat, lon in coords:
-        # lucidlint: ignore magic-number 1e5 — polyline precision factor of the Google polyline encode (spec constant)
-# lucidlint: ignore magic-number same polyline precision factor, second operand
-        lat5, lon5 = round(lat * 1e5), round(lon * 1e5)
+        lat5, lon5 = round(lat * _POLYLINE_PRECISION), round(lon * _POLYLINE_PRECISION)
         dlat, dlon = lat5 - prev_lat, lon5 - prev_lon
         prev_lat, prev_lon = lat5, lon5
         for v in (dlat, dlon):
             v = ~(v << 1) if v < 0 else v << 1
-            # lucidlint: ignore magic-number 0x20 — continuation bit of the Google polyline encode (spec constant)
-            while v >= 0x20:
-                v >>= 5
-            # lucidlint: ignore magic-number 63 — ASCII base-63 offset of the Google polyline encode (spec constant)
-            out.append(chr(v + 63))
+            while v >= _POLYLINE_CONTINUATION:
+                out.append(chr((_POLYLINE_CONTINUATION | (v & _POLYLINE_CHUNK_MASK)) + _POLYLINE_ASCII_OFFSET))
+                v >>= _POLYLINE_CHUNK_BITS_COUNT
+            out.append(chr(v + _POLYLINE_ASCII_OFFSET))
     return "".join(out)
 
 
