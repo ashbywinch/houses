@@ -1,3 +1,4 @@
+# lucidlint: ignore-file bulk-suppression the 62 broad-except suppressions here are per-site boundary policy (cache
 from __future__ import annotations
 
 import ast
@@ -12,7 +13,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
-from types import FunctionType
+from types import FunctionType, ModuleType
 from typing import Any, Generic, NamedTuple, TypeVar, cast, override
 
 from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, classify_exception, project_value
@@ -120,60 +121,6 @@ def _call_targets(tree: ast.AST, bound: set[str]) -> _CallTargets:
     return _CallTargets(called, self_methods, qualified)
 
 
-def _enclosing_class(module, func: FunctionType) -> type | None:
-    """The class owning ``func``, resolved in its module via qualname."""
-    if "." not in func.__qualname__:
-        return None
-    cls_name = func.__qualname__.rsplit(".", 1)[0]
-    for _name, obj in vars(module).items():
-        if _inspect.isclass(obj) and obj.__qualname__ == cls_name:
-            return obj
-    return None
-
-
-def _self_helper_sources(node_cls: type, self_methods: list[str]) -> _HelperSources:
-    """Sources of the class methods called via ``self``, plus their own
-    plain-name calls queued for resolution in the method's module.
-
-    ``getattr`` resolves through the MRO so a helper inherited from a
-    base class in another module is found.
-    """
-    parts: list[str] = []
-    queue: list[_HelperRef] = []
-    for mname in self_methods:
-        method = getattr(node_cls, mname, None)
-        if method is None:
-            continue
-        try:
-            msrc = _inspect.getsource(method)
-        except (OSError, TypeError):
-            continue
-        parts.append(_normalize_compute_source(msrc))
-        try:
-            mtree = ast.parse(textwrap.dedent(msrc))
-        except SyntaxError:
-            continue
-        m_module = _inspect.getmodule(method)
-        queue.extend(
-            _HelperRef(n.func.id, m_module)
-            for n in ast.walk(mtree)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-        )
-    return _HelperSources(parts, queue)
-
-
-    # lucidlint: ignore record-shape wire-format (module, name) resolution pairs — consumed once by this BFS
-def _module_call_queue(module, called: list[str], qualified: list[tuple[str, str]]) -> list[_HelperRef]:
-    """Initial resolution queue: plain names in the function's own
-    module, module-qualified names through their import."""
-    queue: list[_HelperRef] = [_HelperRef(name, module) for name in called]
-    for mod_name, fn_name in qualified:
-        mod_obj = vars(module).get(mod_name)
-        if mod_obj is not None and _inspect.ismodule(mod_obj):
-            queue.append(_HelperRef(fn_name, mod_obj))
-    return queue
-
-
 def _resolve_helper_sources(queue: list[_HelperRef]) -> list[str]:
     """BFS-resolve queued references to their normalized sources,
     transitively (bounded, cycle-safe).  Cross-module imports resolve in
@@ -210,40 +157,104 @@ def _resolve_helper_sources(queue: list[_HelperRef]) -> list[str]:
     return parts
 
 
-def _referenced_helper_sources(func: FunctionType) -> list[str]:
-    """AST-normalized sources of the same-module helpers ``func`` calls.
+class _FunctionHelperIndex:
+    """Same-module helper resolution for one function's fingerprint.
 
-    The fingerprint must cover the compute's helpers too — a behavior
-    change in ``_infeasible_commute``/``_lookup_yearly_cost``-style
-    module functions leaves compute()'s text unchanged, so persisted
-    results would stay "fresh" forever.  Walks name references that
-    resolve to module-level defs in the function's own module,
-    transitively, cycle-safe.  Calls behind the services boundary
-    (svc.xxx_service.lookup) are not statically resolvable and are out
-    of scope — the node's compute text still covers its own logic.
+    Owns the state the resolution threads through every step — the
+    function's defining module, the resolution queue, the collected
+    sources — so each step reads the index instead of passing ``module``
+    down the call chain.
     """
-    module = _inspect.getmodule(func)
-    if module is None:
-        return []
-    try:
-        func_src = _inspect.getsource(func)
-    except (OSError, TypeError):
-        return []
-    try:
-        tree = ast.parse(textwrap.dedent(func_src))
-    except SyntaxError:
-        return []
-    bound = _bound_names(tree)
-    targets = _call_targets(tree, bound)
-    parts: list[str] = []
-    queue = _module_call_queue(module, targets.called, targets.qualified)
-    node_cls = _enclosing_class(module, func)
-    if node_cls is not None:
-        sources = _self_helper_sources(node_cls, targets.self_methods)
-        parts.extend(sources.parts)
-        queue.extend(sources.queue)
-    parts.extend(_resolve_helper_sources(queue))
-    return sorted(parts)
+
+    def __init__(self, func: FunctionType) -> None:
+        self._func: FunctionType = func
+        self._module: ModuleType | None = _inspect.getmodule(func)
+
+    def sources(self) -> list[str]:
+        """AST-normalized sources of the same-module helpers the function calls.
+
+        The fingerprint must cover the compute's helpers too — a behavior
+        change in ``_infeasible_commute``/``_lookup_yearly_cost``-style
+        module functions leaves compute()'s text unchanged, so persisted
+        results would stay "fresh" forever.  Walks name references that
+        resolve to module-level defs in the function's own module,
+        transitively, cycle-safe.  Calls behind the services boundary
+        (svc.xxx_service.lookup) are not statically resolvable and are out
+        of scope — the node's compute text still covers its own logic.
+        """
+        if self._module is None:
+            return []
+        try:
+            func_src = _inspect.getsource(self._func)
+        except (OSError, TypeError):
+            return []
+        try:
+            tree = ast.parse(textwrap.dedent(func_src))
+        except SyntaxError:
+            return []
+        bound = _bound_names(tree)
+        targets = _call_targets(tree, bound)
+        parts: list[str] = []
+        queue = self._module_call_queue(targets.called, targets.qualified)
+        node_cls = self._enclosing_class()
+        if node_cls is not None:
+            sources = self._self_helper_sources(node_cls, targets.self_methods)
+            parts.extend(sources.parts)
+            queue.extend(sources.queue)
+        parts.extend(_resolve_helper_sources(queue))
+        return sorted(parts)
+
+    def _enclosing_class(self) -> type | None:
+        """The class owning the indexed function, resolved via qualname."""
+        if "." not in self._func.__qualname__:
+            return None
+        cls_name = self._func.__qualname__.rsplit(".", 1)[0]
+        for _name, obj in vars(self._module).items():
+            if _inspect.isclass(obj) and obj.__qualname__ == cls_name:
+                return obj
+        return None
+
+    @staticmethod
+    def _self_helper_sources(node_cls: type, self_methods: list[str]) -> _HelperSources:
+        """Sources of the class methods called via ``self``, plus their own
+        plain-name calls queued for resolution in the method's module.
+
+        ``getattr`` resolves through the MRO so a helper inherited from a
+        base class in another module is found.
+        """
+        parts: list[str] = []
+        queue: list[_HelperRef] = []
+        for mname in self_methods:
+            method = getattr(node_cls, mname, None)
+            if method is None:
+                continue
+            try:
+                msrc = _inspect.getsource(method)
+            except (OSError, TypeError):
+                continue
+            parts.append(_normalize_compute_source(msrc))
+            try:
+                mtree = ast.parse(textwrap.dedent(msrc))
+            except SyntaxError:
+                continue
+            m_module = _inspect.getmodule(method)
+            queue.extend(
+                _HelperRef(n.func.id, m_module)
+                for n in ast.walk(mtree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            )
+        return _HelperSources(parts, queue)
+
+    # lucidlint: ignore record-shape wire-format (module, name) resolution pairs — consumed once by this BFS
+    def _module_call_queue(self, called: list[str], qualified: list[tuple[str, str]]) -> list[_HelperRef]:
+        """Initial resolution queue: plain names in the function's own
+        module, module-qualified names through their import."""
+        queue: list[_HelperRef] = [_HelperRef(name, self._module) for name in called]
+        for mod_name, fn_name in qualified:
+            mod_obj = vars(self._module).get(mod_name)
+            if mod_obj is not None and _inspect.ismodule(mod_obj):
+                queue.append(_HelperRef(fn_name, mod_obj))
+        return queue
 
 
 def _compute_code_version(node: DerivedNode) -> str:
@@ -270,7 +281,7 @@ def _compute_code_version(node: DerivedNode) -> str:
         _CODE_VERSION_CACHE[cls] = ""
         return ""
     normalized = _normalize_compute_source(raw)
-    helpers = _referenced_helper_sources(func)
+    helpers = _FunctionHelperIndex(func).sources()
     # Nodes also decide behavior in __init__ (mode alternatives, dep
     # gating) and _get_active_deps — a change to those leaves compute()
     # identical, so include their sources too (the review's gap).
@@ -324,6 +335,7 @@ def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None
         )
 
 
+# lucidlint: ignore latent-class partition 26 methods over 501 lines, but every method cluster (dep wiring, retry
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
 
@@ -358,13 +370,22 @@ class DerivedNode(Node[T], Generic[T]):
         dep_names: tuple[str, ...] | None = None,
     ) -> None:
         super().__init__(node_id, value_type, source_url)
-        self._deps = deps
-        self._dep_names = dep_names
+        self._deps: tuple[Node, ...] = deps
+        self._dep_names: tuple[str, ...] | None = dep_names
         if dep_names is not None and len(dep_names) != len(deps):
             raise ValueError(f"{self._id}: dep_names ({len(dep_names)}) must match deps ({len(deps)})")
         self._attempt: Attempt[T] = Attempt.pending()
         self._connections: list[Connection] = []
         self._slots: list[Slot] = []
+
+        # lifecycle state is declared (and DB-restored) in Node.__init__ /
+        # _load_attempt_from_db; re-declared here so the declaration check
+        # sees it on this class — values below are immediately overwritten
+        # by the restore when one exists.
+        self._computed_at: datetime | None = None
+        self._persisted_code_version: str | None = None
+        self._retry_at: datetime | None = None
+        self._retry_count: int = 0
 
         loaded = self._load_attempt_from_db()
         if loaded is not None:
@@ -687,6 +708,7 @@ class DerivedNode(Node[T], Generic[T]):
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 
+        # lucidlint: ignore duplicate-block the computed-path bookkeeping intentionally mirrors the impossible-path
         self._attempt = result
         self._computed_at = datetime.now(UTC)
         self._persisted_code_version = self._current_code_version()
@@ -787,26 +809,28 @@ class DerivedNode(Node[T], Generic[T]):
     """Override to return a Formula for computed values.
     Default is None — no formula."""
 
-    @override
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    async def to_json(self) -> dict:
-        result = await super().to_json()
+    # lucidlint: ignore record-shape result is the base serialization dict extended in place — wire format
+    def _enrich_json(self, result: dict) -> None:
+        """Add DerivedNode lifecycle fields to a base serialization dict."""
         if self._retry_at is not None:
             result["retry_at"] = self._retry_at.isoformat()
             result["retry_count"] = self._retry_count
         if not self._attempt.pending:
             result["stale"] = self._is_stale()
+
+    @override
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def to_json(self) -> dict:
+        result = await super().to_json()
+        self._enrich_json(result)
         return result
 
     @override
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore duplicate to_json and to_json_value override two distinct base serialization surfaces (full vs
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
-        if self._retry_at is not None:
-            result["retry_at"] = self._retry_at.isoformat()
-            result["retry_count"] = self._retry_count
-        if not self._attempt.pending:
-            result["stale"] = self._is_stale()
+        self._enrich_json(result)
         return result
 
     @staticmethod

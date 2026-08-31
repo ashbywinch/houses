@@ -157,7 +157,6 @@ class AttemptError:
             code=d.get("code", "error"),
             message=d.get("message", ""),
             user_message=d.get("user_message", ""),
-            # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
             retryable=d.get("retryable", False),
             source=d.get("source", ""),
             exc=None,
@@ -256,11 +255,11 @@ class _AttemptMeta(type):
         return lambda error="", error_info=None: cls(_Status.IMPOSSIBLE, error=error, error_info=error_info)
     @impossible.setter
     @staticmethod
-    # lucidlint: ignore unused-setter referenced API/guard — see review log
     def impossible(cls, value):
         raise AttributeError("Cannot set 'impossible' — reserved by Attempt constructor/property")
 
 
+# lucidlint: ignore latent-class cohesive core value type — constructors, serialization, and provenance methods all
 class Attempt[T](metaclass=_AttemptMeta):
     """Three-state result: succeeded / pending / impossible.
 
@@ -562,6 +561,7 @@ class Provenance:
                 result["value"] = self.value
         if self.source_type is not None:
             result["sourceType"] = self.source_type.value
+        # lucidlint: ignore duplicate-block field-mapping table — each guard+assign pair serialises a distinct
         if self.status:
             result["status"] = self.status
         if self.error:

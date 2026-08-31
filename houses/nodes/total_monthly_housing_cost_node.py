@@ -81,9 +81,9 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         *,
         config: HousingCostConfig,
     ):
-        self._status_node = config.status_node
-        self._sinking_node = config.yearly_sinking_fund_node
-        self._life_insurance_node = config.life_insurance_node
+        self._status_node: Node = config.status_node
+        self._sinking_node: Node = config.yearly_sinking_fund_node
+        self._life_insurance_node: Node = config.life_insurance_node
         super().__init__(
             node_id,
             Measurement[Money],
@@ -117,7 +117,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                     (self._status_node.latest_attempt().value_or_none() or "").strip().lower() != "current"
                 ),
                 if_true=(Div(Ref(self._sinking_node), Literal(12)) + Ref(self._life_insurance_node)),
-                if_false=Literal(Money("0", "GBP")),
+                if_false=Literal(Money(amount="0", currency="GBP")),
             )
             + Conditional(
                 predicate=lambda: bool(
@@ -126,7 +126,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                     and "yearly_total_gbp" in v3
                 ),
                 if_true=Div(Field(Ref(self._deps[3]), "yearly_total_gbp"), Literal(12)),
-                if_false=Literal(Money("0", "GBP")),
+                if_false=Literal(Money(amount="0", currency="GBP")),
             )
             + Conditional(
                 predicate=lambda: bool(
@@ -137,7 +137,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                     and v4.yearly_cost is not None
                 ),
                 if_true=Div(Attr(Ref(self._deps[4]), "yearly_cost"), Literal(12)),
-                if_false=Literal(Money("0", "GBP")),
+                if_false=Literal(Money(amount="0", currency="GBP")),
             )
             - Ref(self._deps[1])  # rental_income
         )
@@ -174,9 +174,9 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         *,
         config: HousingCostConfig,
     ):
-        self._annexe_payers_node = config.annexe_payers_node
-        self._annexe_ignored_node = config.annexe_ignored_node
-        self._council_tax_payers_node = config.council_tax_payers_node
+        self._annexe_payers_node: Node | None = config.annexe_payers_node
+        self._annexe_ignored_node: Node | None = config.annexe_ignored_node
+        self._council_tax_payers_node: Node | None = config.council_tax_payers_node
         persons_source = config.persons_source
         if persons_source is None:
             # compute() binds the "persons" attempt by name — without the
@@ -202,15 +202,16 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             "council_tax",
             "persons",
         ]
-        if config.annexe_payers_node is not None:
-            deps = deps + (config.annexe_payers_node,)
-            names.append("annexe_payers")
-        if config.annexe_ignored_node is not None:
-            deps = deps + (config.annexe_ignored_node,)
-            names.append("annexe_ignored")
-        if config.council_tax_payers_node is not None:
-            deps = deps + (config.council_tax_payers_node,)
-            names.append("council_tax_payers")
+        dep_list = list(deps)
+        for optional_node, name in (
+            (config.annexe_payers_node, "annexe_payers"),
+            (config.annexe_ignored_node, "annexe_ignored"),
+            (config.council_tax_payers_node, "council_tax_payers"),
+        ):
+            if optional_node is not None:
+                dep_list.append(optional_node)
+                names.append(name)
+        deps = tuple(dep_list)
         super().__init__(
             node_id,
             dict,
@@ -278,7 +279,7 @@ class _GroupCostCalculator:
     """
 
     def __init__(self, inputs: GroupCostInputs):
-        self.inputs = inputs
+        self.inputs: GroupCostInputs = inputs
 
     def adults_and_owners(self) -> _AdultsSplit:
         """The adult/owner/other split of the persons attempt."""
@@ -508,8 +509,11 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
     others_fig = _group_figure_result(calc, ctx, others, others_share, others_rent_paid)
     others_val, others_std, others_breakdown = others_fig.value, others_fig.stddev, others_fig.breakdown
     return Attempt.succeeded(
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         {
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
             "couple": {"value": f"{couple_val:.2f}", "stddev": couple_std},
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
             "others": {"value": f"{others_val:.2f}", "stddev": others_std},
             "couple_label": "+".join(p.name[0].upper() for p in adults if p.name in owners),
             # Full names, not initials — the detail page says "Ashby",

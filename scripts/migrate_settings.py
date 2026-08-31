@@ -49,6 +49,7 @@ def _read_persons(conn: sqlite3.Connection) -> list[dict]:
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _write_persons(conn: sqlite3.Connection, persons: list[dict]) -> int:
     """Write persons data, return new row id."""
+    # lucidlint: ignore record-shape wire-format dict — node_results DB row payload, serialization boundary owns the
     result = json.dumps({"status": "succeeded", "value": persons})
     cur = conn.execute(
         "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
@@ -138,6 +139,7 @@ def _migrate_financial(conn: sqlite3.Connection) -> bool:
         node_id = API_KEY_TO_NODE.get(api_key)
         if node_id is None:
             continue
+        # lucidlint: ignore duplicate-block sequential skip guards — each guard skips a different unmapped key;
         type_info = SETTING_DEFAULTS.get(node_id)
         if type_info is None:
             continue

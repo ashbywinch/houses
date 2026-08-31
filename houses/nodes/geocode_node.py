@@ -9,7 +9,6 @@ from houses.services_provider import get_services
 
 
 class GeocodeNode(DerivedNode[GeoPoint]):
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_address):
         super().__init__(node_id, GeoPoint, (best_address,))
 

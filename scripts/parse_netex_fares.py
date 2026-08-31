@@ -81,6 +81,21 @@ def load_stations() -> list[Station]:
     return stations
 
 
+def _naptan_from_rows(rows):
+    """Parse NaPTAN CSV rows (file or text lines) into {atco: (lat, lon)}."""
+    naptan: dict[str, tuple[float, float]] = {}
+    for row in csv.DictReader(rows):
+        atco = row.get("ATCOCode", "").strip()
+        lat_raw = row.get("Latitude", "").strip()
+        lon_raw = row.get("Longitude", "").strip()
+        if atco and lat_raw and lon_raw:
+            try:
+                naptan[atco] = (float(lat_raw), float(lon_raw))
+            except ValueError:
+                continue
+    return naptan
+
+
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def load_naptan_stops() -> dict[str, tuple[float, float]] | None:
     naptan: dict[str, tuple[float, float]] = {}
@@ -88,15 +103,7 @@ def load_naptan_stops() -> dict[str, tuple[float, float]] | None:
     if NAPTAN_CACHE.is_file():
         logger.info("Loading NaPTAN stops from %s", NAPTAN_CACHE)
         with NAPTAN_CACHE.open(newline="") as f:
-            for row in csv.DictReader(f):
-                atco = row.get("ATCOCode", "").strip()
-                lat_raw = row.get("Latitude", "").strip()
-                lon_raw = row.get("Longitude", "").strip()
-                if atco and lat_raw and lon_raw:
-                    try:
-                        naptan[atco] = (float(lat_raw), float(lon_raw))
-                    except ValueError:
-                        continue
+            naptan = _naptan_from_rows(f)
         logger.info("Loaded %d NaPTAN stop coordinates", len(naptan))
         return naptan
 
@@ -112,15 +119,7 @@ def load_naptan_stops() -> dict[str, tuple[float, float]] | None:
     with NAPTAN_CACHE.open("wb") as f:
         f.write(resp.content)
 
-    for row in csv.DictReader(resp.text.splitlines()):
-        atco = row.get("ATCOCode", "").strip()
-        lat_raw = row.get("Latitude", "").strip()
-        lon_raw = row.get("Longitude", "").strip()
-        if atco and lat_raw and lon_raw:
-            try:
-                naptan[atco] = (float(lat_raw), float(lon_raw))
-            except ValueError:
-                continue
+    naptan = _naptan_from_rows(resp.text.splitlines())
     logger.info("Downloaded and loaded %d NaPTAN stop coordinates", len(naptan))
     return naptan
 
@@ -549,6 +548,13 @@ def _product_id_of(product: ET.Element) -> str | None:
     return None
 
 
+def _as_float(text: str | None) -> float | None:
+    try:
+        return float(text or "")
+    except (ValueError, TypeError):
+        return None
+
+
 def _find_product_price(product: ET.Element) -> float | None:
     for child in product.iter():
         tag = _unprefixed(child.tag)
@@ -558,14 +564,13 @@ def _find_product_price(product: ET.Element) -> float | None:
                 child.find("netex:Amount", NS),
             )
             if amt_el is not None:
-                try:
-                    return float(amt_el.text or "")
-                except (ValueError, TypeError):
-                    continue
-            try:
-                return float(child.text or "")
-            except (ValueError, TypeError):
+                price = _as_float(amt_el.text)
+                if price is not None:
+                    return price
                 continue
+            price = _as_float(child.text)
+            if price is not None:
+                return price
     return None
 
 

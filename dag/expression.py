@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from copy import deepcopy
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, override
@@ -132,8 +133,8 @@ class Literal(Expression[T]):
     """A constant value. No dependencies."""
 
     def __init__(self, value: T, description: str = ""):
-        self._value = value
-        self.description = description
+        self._value: T = value
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt[T]:
@@ -149,7 +150,7 @@ class Ref(Expression[T]):
 
     def __init__(self, node, description: str = ""):
         self.node: _Node = node
-        self.description = description
+        self.description: str = description
 
     @property
     def _label(self) -> str:
@@ -185,8 +186,8 @@ class Add(Expression):
     """Sum of one or more terms."""
 
     def __init__(self, *terms: Expression, description: str = ""):
-        self.terms = terms
-        self.description = description
+        self.terms: tuple[Expression, ...] = terms
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt:
@@ -217,30 +218,54 @@ class Add(Expression):
     def to_formula_lines(self) -> list[FormulaLine]:
         return [line for term in self.terms for line in term.to_formula_lines()]
 
+def _divide_operands(left_value: Any, right_value: Any) -> Any:
+    """Divide, coercing money-looking strings ("124.80") to Money first."""
+    if isinstance(left_value, str):
+        left_value = Money(left_value, "GBP")
+    if isinstance(right_value, str):
+        right_value = Money(right_value, "GBP")
+    return left_value / right_value
+
+
+def _binary_attempt(
+    left: Expression,
+    right: Expression,
+    verb: str,
+    combine: Callable[[Any, Any], Any],
+    errors: tuple[type[BaseException], ...] = (TypeError,),
+) -> Attempt:
+    """Evaluate two operands and combine their values.
+
+    Operand failure (evaluate failed, value missing, combine raised)
+    becomes an impossible attempt; ``verb`` names the operation in the
+    error message.
+    """
+    values: list[Any] = []
+    for side, expr in (("left", left), ("right", right)):
+        result = expr.evaluate()
+        if not result.succeeded:
+            return Attempt.impossible(result.error or f"{side} operand failed")
+        values.append(result.value_or_none())
+    if any(v is None for v in values):
+        return Attempt.impossible("operand missing")
+    left_value, right_value = values
+    try:
+        return Attempt.succeeded(combine(left_value, right_value))
+    except errors as e:
+        return Attempt.impossible(f"Cannot {verb}: {e}")
+
+
 class Sub(Expression):
     """Subtract right from left."""
 
     def __init__(self, left: Expression, right: Expression, description: str = ""):
-        self.left = left
-        self.right = right
-        self.description = description
+        self.left: Expression = left
+        self.right: Expression = right
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt:
-        left_result = self.left.evaluate()
-        if not left_result.succeeded:
-            return Attempt.impossible(left_result.error or "left operand failed")
-        right_result = self.right.evaluate()
-        if not right_result.succeeded:
-            return Attempt.impossible(right_result.error or "right operand failed")
-        left_value = left_result.value_or_none()
-        right_value = right_result.value_or_none()
-        if left_value is None or right_value is None:
-            return Attempt.impossible("operand missing")
-        try:
-            return Attempt.succeeded(left_value - right_value)
-        except TypeError as e:
-            return Attempt.impossible(f"Cannot subtract: {e}")
+        return _binary_attempt(self.left, self.right, "subtract", lambda a, b: a - b)
 
     @override
     def to_formula_lines(self) -> list[FormulaLine]:
@@ -251,8 +276,8 @@ class Negate(Expression):
     """Negate a value."""
 
     def __init__(self, inner: Expression, description: str = ""):
-        self.inner = inner
-        self.description = description
+        self.inner: Expression = inner
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt:
@@ -277,26 +302,13 @@ class Mul(Expression):
     """Multiply left by right."""
 
     def __init__(self, left: Expression, right: Expression, description: str = ""):
-        self.left = left
-        self.right = right
-        self.description = description
+        self.left: Expression = left
+        self.right: Expression = right
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt:
-        left_result = self.left.evaluate()
-        if not left_result.succeeded:
-            return Attempt.impossible(left_result.error or "left operand failed")
-        right_result = self.right.evaluate()
-        if not right_result.succeeded:
-            return Attempt.impossible(right_result.error or "right operand failed")
-        left_value = left_result.value_or_none()
-        right_value = right_result.value_or_none()
-        if left_value is None or right_value is None:
-            return Attempt.impossible("operand missing")
-        try:
-            return Attempt.succeeded(left_value * right_value)
-        except TypeError as e:
-            return Attempt.impossible(f"Cannot multiply: {e}")
+        return _binary_attempt(self.left, self.right, "multiply", lambda a, b: a * b)
 
     @override
     def to_formula_lines(self) -> list[FormulaLine]:
@@ -307,31 +319,19 @@ class Div(Expression):
     """Divide left by right."""
 
     def __init__(self, left: Expression, right: Expression, description: str = ""):
-        self.left = left
-        self.right = right
-        self.description = description
+        self.left: Expression = left
+        self.right: Expression = right
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt:
-        left_result = self.left.evaluate()
-        if not left_result.succeeded:
-            return Attempt.impossible(left_result.error or "left operand failed")
-        right_result = self.right.evaluate()
-        if not right_result.succeeded:
-            return Attempt.impossible(right_result.error or "right operand failed")
-        left_val = left_result.value_or_none()
-        right_val = right_result.value_or_none()
-        if left_val is None or right_val is None:
-            return Attempt.impossible("operand missing")
-        try:
-            # Handle string values that look like money ("124.80") by converting to Money
-            if isinstance(left_val, str):
-                left_val = Money(left_val, "GBP")
-            if isinstance(right_val, str):
-                right_val = Money(right_val, "GBP")
-            return Attempt.succeeded(left_val / right_val)
-        except (ZeroDivisionError, TypeError) as e:
-            return Attempt.impossible(f"Cannot divide: {e}")
+        return _binary_attempt(
+            self.left,
+            self.right,
+            "divide",
+            _divide_operands,
+            errors=(ZeroDivisionError, TypeError),
+        )
 
     @override
     def to_formula_lines(self) -> list[FormulaLine]:
@@ -366,10 +366,10 @@ class Conditional(Expression):
         if_false: Expression | None = None,
         description: str = "",
     ):
-        self.predicate = predicate
-        self.if_true = if_true
-        self.if_false = if_false
-        self.description = description
+        self.predicate: Callable[[], bool] = predicate
+        self.if_true: Expression = if_true
+        self.if_false: Expression | None = if_false
+        self.description: str = description
 
     @override
     def evaluate(self) -> Attempt:
@@ -418,8 +418,8 @@ class Field(Expression):
     """Extract a dict key from a node's evaluated value."""
 
     def __init__(self, source: Expression, key: str):
-        self.source = source
-        self.key = key
+        self.source: Expression = source
+        self.key: str = key
 
     @override
     def evaluate(self):
@@ -442,8 +442,8 @@ class Attr(Expression):
     """Extract an attribute from a node's evaluated value."""
 
     def __init__(self, source: Expression, attr: str):
-        self.source = source
-        self.attr = attr
+        self.source: Expression = source
+        self.attr: str = attr
 
     @override
     def evaluate(self):
@@ -506,9 +506,9 @@ class Choose(Expression):
         selector,
         description: str = "",
     ):
-        self.alternatives = alternatives
-        self.selector = selector
-        self.description = description
+        self.alternatives: dict[str, Expression] = alternatives
+        self.selector: Callable[[dict[str, Attempt]], str | None] = selector
+        self.description: str = description
         self.last_results: dict[str, Attempt] | None = None
         """Results dict from the most recent evaluate() call, exposed for provenance."""
 
@@ -561,8 +561,11 @@ class Choose(Expression):
         return results[winner]
 
     def _formula_winner(self) -> str | None:
-        """Re-run the selector for formula display; None when it fails
-        (no alternative is then marked as the winner)."""
+        """Re-run the selector for formula display; None when there are no
+        results or the selector fails (no alternative is then marked as
+        the winner)."""
+        if self.last_results is None:
+            return None
         try:
             return self.selector(self.last_results)
         # lucidlint: ignore broad-except deliberate degrade — selector failure during formula rendering yields None

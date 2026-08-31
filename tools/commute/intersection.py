@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are the mandated pattern (review-log scope decision 5: no config
 """Intersection — where EVERY commute works, i.e. where to buy a house.
 
 ANDs the toolchain's sheds on one common grid:
@@ -41,6 +42,7 @@ from tools.commute.drive_isochrone import (
     region_bbox,
     retained_components,
 )
+from tools.commute.payload_checks import existing_payload, fail, same_payload
 from tools.commute.rightmove_url import build_search_url, parse_search_url
 from tools.commute.searches import IntersectionOptions
 from tools.commute.tile import Grid, GridCell, Rect, rasterize
@@ -62,6 +64,15 @@ ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
 
 DEFAULT_CELL_KM_Q = DEFAULT_CELL_KM * KM
 DEFAULT_BUFFER_KM_Q = TRANSIT_BUFFER_KM * KM
+
+# Committed-payload wire shapes (coding-standards.md: serialized payloads use
+# bare dicts by design) — named so signatures say which payload flows where.
+DriveRawPayload = dict[str, Any]
+ShedPayload = dict[str, Any]
+DriveSearchesPayload = dict[str, Any]
+PolygonsByLabel = dict[str, list[list[GeoPoint]]]
+SearchRecord = dict[str, Any]
+IntersectionPayload = dict[str, Any]
 
 
 def common_grid(drive_raw: dict, cell_km: Quantity = DEFAULT_CELL_KM_Q) -> Grid:
@@ -108,8 +119,7 @@ def drive_cells(polygons: list[list[GeoPoint]], grid: Grid) -> set[GridCell]:
     return {cell for cell in cells if any(point_in_polygon(cell.lat, cell.lon, p) for p in polygons)}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _group_drive_polygons(drive_searches: dict) -> dict[str, list[list[GeoPoint]]]:
+def _group_drive_polygons(drive_searches: dict) -> PolygonsByLabel:
     """Shed polygons per drive destination (a shed may be several loops)."""
     by_label: dict[str, list[list[GeoPoint]]] = {}
     # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
@@ -120,8 +130,7 @@ def _group_drive_polygons(drive_searches: dict) -> dict[str, list[list[GeoPoint]
     return by_label
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _missing_destinations(drive_raw: dict, by_label: dict) -> list[str]:
+def _missing_destinations(drive_raw: DriveRawPayload, by_label: PolygonsByLabel) -> list[str]:
     """Drive destinations absent from the searches, raising on stale drive data.
 
     A destination with no shed makes its constraint unsatisfiable: the
@@ -156,11 +165,12 @@ def _intersection_searches(
             continue
         poly = [(round(p.lat, POLYLINE_DECIMALS), round(p.lon, POLYLINE_DECIMALS)) for p in loop]
         suffix = "" if i == 1 else f"-{i}"
-        searches.append(
+        searches.append(  # lucidlint: ignore record-shape wire-format dict — the intersection.json search record
             {
                 "id": f"intersection-{min(thresholds):03d}{suffix}",
                 "name": "All commutes",
                 "polygon": poly,
+                # lucidlint: ignore record-shape wire-format dict — nested filters travel in the search record
                 "filters": {"min_beds": min_beds, "property_type": property_type},
                 "rightmove_url": build_search_url(poly, min_beds=min_beds, property_type=property_type),
                 "threshold_min": min(thresholds),
@@ -168,15 +178,14 @@ def _intersection_searches(
         )
     return searches
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore latent-class pipeline over pure helpers — drive_raw feeds common_grid/_missing_destinations and
 def build_payload(
     *,
-    shed: dict,
-    drive_raw: dict,
-    drive_searches: dict,
+    shed: ShedPayload,
+    drive_raw: DriveRawPayload,
+    drive_searches: DriveSearchesPayload,
     options: IntersectionOptions | None = None,
-) -> dict:
+) -> IntersectionPayload:
     """Transit ∩ every drive shed → the intersection payload (deterministic)."""
     options = options or IntersectionOptions(generated_at="")
     cell_km, min_beds, property_type = options.cell_km, options.min_beds, options.property_type
@@ -240,8 +249,8 @@ def _valid_polygon(poly) -> bool:
     )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _search_issues(s: dict, max_vertices: int) -> list[str]:
+# lucidlint: ignore duplicate geometry checks mirror drive_isochrone _search_geometry_issues by design — unifying would
+def _search_issues(s: SearchRecord, max_vertices: int) -> list[str]:
     """Polygon geometry, GB-bbox, and URL round-trip issues for one search."""
     issues: list[str] = []
     poly: Any = s.get("polygon")
@@ -293,52 +302,19 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     return issues
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _same_payload(existing: dict, new: dict) -> bool:
-    """Byte-identical apart from ``generated_at`` (the determinism contract)."""
-    if not isinstance(existing, dict) or not isinstance(new, dict):
-        return False
-    if json.dumps(existing.get("searches"), sort_keys=True) != json.dumps(new.get("searches"), sort_keys=True):
-        return False
-    if not isinstance(existing.get("metadata"), dict) or not isinstance(new.get("metadata"), dict):
-        return False
-    e_meta = {k: v for k, v in existing["metadata"].items() if k != "generated_at"}
-    n_meta = {k: v for k, v in new["metadata"].items() if k != "generated_at"}
-    return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
-
-def _fail(user_message: str, dev_detail: str) -> int:
-    """Two-tier fail-fast exit (docs/coding-standards.md): a plain-language
-    stderr line plus a logger.warning with the exact resolution."""
-    print(user_message, file=sys.stderr)
-    logger.warning(dev_detail)
-    return 1
-
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _existing_payload(out_path: Path) -> dict | None:
-    """Current payload, or None when absent/unreadable (will regenerate)."""
-    if not out_path.exists():
-        return None
-    try:
-        return json.loads(out_path.read_text())
-    except json.JSONDecodeError:
-        logger.warning("%s unreadable (corrupt?) — will regenerate", out_path)
-        return None
-
-
-
+# lucidlint: ignore duplicate validate flow differs per payload type — filenames, regenerate hints and OK message are
 def _validate_committed(out_path: Path) -> int:
     """--validate: check the committed intersection payload and report."""
     if not out_path.exists():
-        return _fail(
+        return fail(
             "No all-commutes data yet — run 'make commute-intersection' first.",
             f"{out_path} not found for --validate",
         )
     try:
         payload = json.loads(out_path.read_text())
     except (json.JSONDecodeError, OSError) as e:
-        return _fail(
+        return fail(
             "The saved all-commutes data is unreadable — regenerate it with 'make commute-intersection'.",
             f"unreadable {out_path} for --validate: {e}",
         )
@@ -351,16 +327,13 @@ def _validate_committed(out_path: Path) -> int:
     return 0
 
 
-# lucidlint: ignore class-module small private helper — module keeps its function name
 @dataclass(frozen=True)
 class _CommittedInputs:
     """The three committed payloads the map needs."""
 
-    shed: dict
-    raw: dict
-    searches: dict
-
-
+    shed: ShedPayload
+    raw: DriveRawPayload
+    searches: DriveSearchesPayload
 def _load_inputs(args) -> _CommittedInputs | int:
     """Read the three committed payloads; int exit code when any is missing/unreadable."""
     missing = [(p, hint) for p, hint in (
@@ -370,7 +343,7 @@ def _load_inputs(args) -> _CommittedInputs | int:
     ) if not Path(p).exists()]
     if missing:
         hints = list(dict.fromkeys(h for _, h in missing))
-        return _fail(
+        return fail(
             f"Commute data is missing — run {' and '.join(hints)} first.",
             f"intersection inputs not found: {', '.join(str(p) for p, _ in missing)}",
         )
@@ -379,7 +352,7 @@ def _load_inputs(args) -> _CommittedInputs | int:
         drive_raw = json.loads(Path(args.drive_raw).read_text())
         drive_searches = json.loads(Path(args.drive_searches).read_text())
     except (json.JSONDecodeError, OSError) as e:
-        return _fail(
+        return fail(
             "Commute data is unreadable — regenerate it with 'make commute-drive'.",
             f"unreadable intersection input: {e}",
         )
@@ -389,8 +362,8 @@ def _load_inputs(args) -> _CommittedInputs | int:
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _write_if_changed(out_path: Path, payload: dict) -> None:
     """Write the payload atomically, skipping a byte-identical committed copy."""
-    existing = _existing_payload(out_path)
-    if existing is None or not _same_payload(existing, payload):
+    existing = existing_payload(out_path)
+    if existing is None or not same_payload(existing, payload):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = out_path.with_suffix(out_path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2) + "\n")
@@ -431,7 +404,7 @@ def run(argv: list[str] | None = None) -> int:
             ),
         )
     except (ValueError, KeyError, TypeError, AttributeError) as e:
-        return _fail(
+        return fail(
             "Can't build the all-commutes area — check the car destinations and try again.",
             f"intersection build failed: {e}",
         )

@@ -42,10 +42,10 @@ class IfThenElseNode(DerivedNode[T], Generic[T]):
         *,
         options: IfThenElseOptions,
     ) -> None:
-        self._condition_sources = options.condition_sources
-        self._condition_fn = options.condition_fn
-        self._then_branch = options.then_branch
-        self._else_branch = options.else_branch
+        self._condition_sources: tuple[Node, ...] = options.condition_sources
+        self._condition_fn: Callable[..., bool] = options.condition_fn
+        self._then_branch: Node[Any] = options.then_branch
+        self._else_branch: Node[Any] | None = options.else_branch
 
         deps = options.condition_sources + (options.then_branch,)
         if options.else_branch is not None:

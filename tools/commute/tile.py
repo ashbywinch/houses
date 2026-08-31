@@ -42,12 +42,8 @@ class Grid:
         return cls(bbox, lat_deg, lon_deg)
 
     def cell_rect(self, r: int, c: int) -> Rect:
-        """The cell at (row, col), clamped to the bounding box."""
-        lat_min = max(self.bbox.lat_min, self.bbox.lat_min + r * self.lat_deg)
-        lat_max = min(self.bbox.lat_max, self.bbox.lat_min + (r + 1) * self.lat_deg)
-        lon_min = max(self.bbox.lon_min, self.bbox.lon_min + c * self.lon_deg)
-        lon_max = min(self.bbox.lon_max, self.bbox.lon_min + (c + 1) * self.lon_deg)
-        return Rect(lat_min, lat_max, lon_min, lon_max)
+        """The cell at (row, col): a single-column span, clamped to the bounding box."""
+        return _span(r, c, c, self)
 
 
 @dataclass(frozen=True, eq=False)

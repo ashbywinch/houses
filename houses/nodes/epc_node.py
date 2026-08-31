@@ -18,7 +18,6 @@ _FALLBACK_STDDEV = 50.0
 
 
 class EpcNode(DerivedNode[dict]):
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, dict, (best_address, postcode_node))
 
@@ -33,6 +32,7 @@ class EpcNode(DerivedNode[dict]):
         if result.succeeded:
             band = result.value_or_none()
             if band:
+                # lucidlint: ignore record-shape wire-format dict — node value serialized verbatim to the frontend
                 return Attempt.succeeded({"band": band, "potential": band})
             return Attempt.impossible("no EPC data")
         # Propagate the real reason (e.g. ambiguous address) so the frontend
@@ -51,7 +51,6 @@ class EpcNode(DerivedNode[dict]):
 
 
 class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, CouncilTaxInfo, (best_address, postcode_node))
 

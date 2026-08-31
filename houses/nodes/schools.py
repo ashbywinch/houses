@@ -10,13 +10,22 @@ from houses.school_gender import SchoolGender
 from houses.services_provider import get_services
 
 
-class PrimarySchoolNode(DerivedNode[dict]):
+class NearestSchoolNode(DerivedNode[dict]):
+    """Nearest-school lookup shared by the primary and secondary stages.
+
+    Subclasses supply the child age and the stage name used in failure
+    messages; the lookup itself is identical.
+    """
+
+    child_age: int
+    stage: str
+
     provenance_source_type = SourceType.API
 
     def __init__(self, node_id: str, *, best_location, best_address, acceptable: tuple[str, ...] = ("mixed",)):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
-        self._acceptable = acceptable
+        self._acceptable: tuple[str, ...] = acceptable
 
     @override
     async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
@@ -26,7 +35,7 @@ class PrimarySchoolNode(DerivedNode[dict]):
         svc = get_services()
         attempt = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}",
-            child_age=4,
+            child_age=self.child_age,
             acceptable=tuple(SchoolGender(v) for v in self._acceptable),
         )
         if attempt.pending:
@@ -34,10 +43,10 @@ class PrimarySchoolNode(DerivedNode[dict]):
         if attempt.impossible:
             # Propagate the real reason (e.g. geocoding failed) — don't
             # collapse it into a generic "no school found".
-            return Attempt.impossible(attempt.error or "no primary school found")
+            return Attempt.impossible(attempt.error or f"no {self.stage} school found")
         school = attempt.value_or_none()
         if school is None:
-            return Attempt.impossible("no primary school found within search radius")
+            return Attempt.impossible(f"no {self.stage} school found within search radius")
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         result: dict[str, Any] = {
             "name": school.name,
@@ -53,47 +62,18 @@ class PrimarySchoolNode(DerivedNode[dict]):
         return Attempt.succeeded(result)
 
 
-class SecondarySchoolNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, best_location, best_address, acceptable: tuple[str, ...] = ("mixed",)):
-        deps: tuple[Node, ...] = (best_location, best_address)
-        super().__init__(node_id, dict, deps)
-        self._acceptable = acceptable
+class PrimarySchoolNode(NearestSchoolNode):
+    """Nearest primary school (age-4 entry)."""
 
-    @override
-    async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
-        loc = location.value_or_none()
-        if loc is None:
-            return self._impossible({"location": location})
-        svc = get_services()
-        attempt = await svc.school_lookup.find_nearest(
-            f"{loc.lat},{loc.lon}",
-            child_age=12,
-            acceptable=tuple(SchoolGender(v) for v in self._acceptable),
-        )
-        if attempt.pending:
-            return Attempt.pending()
-        if attempt.impossible:
-            # Propagate the real reason (e.g. geocoding failed) — don't
-            # collapse it into a generic "no school found".
-            return Attempt.impossible(attempt.error or "no secondary school found")
-        school = attempt.value_or_none()
-        if school is None:
-            return Attempt.impossible("no secondary school found within search radius")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        result: dict[str, Any] = {
-            "name": school.name,
-            "ofsted": school.ofsted_rating,
-            "walk": None,
-            "url": school.url,
-            "postcode": school.postcode,
-            "full_address": school.full_address,
-        }
-        if school.coords:
-            result["lat"] = school.coords.lat
-            result["lon"] = school.coords.lon
-        return Attempt.succeeded(result)
+    child_age = 4
+    stage = "primary"
 
-    provenance_source_type = SourceType.API
+
+class SecondarySchoolNode(NearestSchoolNode):
+    """Nearest secondary school (age-12 entry)."""
+
+    child_age = 12
+    stage = "secondary"
 
 
 class SchoolLocationNode(DerivedNode[str]):
@@ -103,7 +83,6 @@ class SchoolLocationNode(DerivedNode[str]):
     the address is what the legs should display — never a bare lat/lon.
     """
 
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, school_node):
         super().__init__(node_id, str, (school_node,))
 

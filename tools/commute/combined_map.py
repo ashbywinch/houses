@@ -27,9 +27,11 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from tools.commute.drive_isochrone import MapAssets, js_safe_json, user_label
+from tools.commute.payload_checks import fail
 
 # one colour per layer — the transit layer always takes _COLORS[0], so the
 # drive layers cycle through the rest (index 0 is the transit colour).
@@ -57,7 +59,8 @@ def _data_uri(path: Path) -> str:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def build_html(
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def build_html(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
     union: dict,
     drive: dict,
     assets: MapAssets,
@@ -81,9 +84,11 @@ def build_html(
     if transit:
         layers_js.append(
             js_safe_json(
+            # lucidlint: ignore record-shape wire-format dict — a Leaflet layer object serialized into the page
                 {
                     "name": "Train: Pimlico & Aldgate",
                     "color": _COLORS[0],
+                    # lucidlint: ignore record-shape wire-format dict — a Leaflet polygon object serialized into the
                     "polygons": [{"coords": outline, "url": "", "name": ""} for outline in transit],
                 }
             )
@@ -100,11 +105,13 @@ def build_html(
         # polygon string (Python json.dumps(52.0) != JS JSON.stringify(52.0),
         # a whole class of silent popup-loss bugs)
         layers_js.append(
+        # lucidlint: ignore record-shape wire-format dict — a Leaflet layer object serialized into the page
             js_safe_json({"name": f"Drive to {user_label(label)}", "color": color, "polygons": polygons})
         )
         d = searches[0]["destination"]
         markers_js.append(
             js_safe_json(
+            # lucidlint: ignore record-shape wire-format dict — a Leaflet marker object serialized into the page
                 {
                     "label": user_label(label),
                     "lat": d["lat"],
@@ -121,6 +128,7 @@ def build_html(
         ]
         layers_js.append(
             js_safe_json(
+                # lucidlint: ignore record-shape wire-format dict — a Leaflet layer object serialized into the page
                 {
                     "name": "Where we could live",
                     "color": "#c90",
@@ -250,14 +258,6 @@ def write_map(html: str, out_path: str | Path) -> None:
     os.replace(tmp, out_path)
 
 
-def _fail(user_message: str, dev_detail: str) -> int:
-    """Two-tier fail-fast exit (docs/coding-standards.md): a plain-language
-    stderr line plus a logger.warning with the exact resolution."""
-    print(user_message, file=sys.stderr)
-    logger.warning(dev_detail)
-    return 1
-
-
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _load_intersection(path: Path) -> dict | None:
     """Saved intersection payload, or None when absent/unreadable (map renders without it)."""
@@ -294,6 +294,7 @@ def _load_intersection_layer(path: Path) -> dict | None:
     ):
         # records missing expected keys would crash build_html — degrade
         # to a map without the layer instead of aborting the whole build
+        # lucidlint: ignore duplicate-block the two malformed-payload warnings intentionally mirror each other —
         print(
             "warning: the saved all-commutes data is malformed — showing the map without it.",
             file=sys.stderr,
@@ -303,8 +304,16 @@ def _load_intersection_layer(path: Path) -> dict | None:
     return intersection
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _build_map(union_path: Path, drive_path: Path, vendor: Path, intersection: dict | None) -> tuple[dict, dict, str]:
+@dataclass(frozen=True)
+class _RenderedMap:
+    """The loaded payloads plus the rendered page — main's report bundle."""
+
+    union: dict
+    drive: dict
+    html: str
+
+
+def _build_map(union_path: Path, drive_path: Path, vendor: Path, intersection: dict | None) -> _RenderedMap:
     """Load the payloads + vendor assets and render the page.
 
     build_html indexes the payloads unconditionally — a structurally wrong
@@ -324,9 +333,10 @@ def _build_map(union_path: Path, drive_path: Path, vendor: Path, intersection: d
         assets,
         intersection=intersection,
     )
-    return union, drive, html
+    return _RenderedMap(union=union, drive=drive, html=html)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _warn_empty_layers(drive: dict, union: dict, drive_path: Path, union_path: Path) -> None:
     """A map missing the drive/union layers must not be mistaken for complete."""
@@ -337,6 +347,7 @@ def _warn_empty_layers(drive: dict, union: dict, drive_path: Path, union_path: P
             file=sys.stderr,
         )
         logger.warning("%s has no searches — drive layers omitted", drive_path)
+    # lucidlint: ignore duplicate-block the two empty-layer warnings intentionally mirror each other — one per missing
     if isinstance(union, dict) and not union.get("components"):
         print(
             "warning: no train area found — the map may be incomplete (run 'make commute-searches' if "
@@ -363,21 +374,21 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if missing:
         hints = list(dict.fromkeys(h for _, h in missing))
-        return _fail(
+        return fail(
             f"Commute data is missing — run {' and '.join(hints)} first.",
             f"combined map inputs not found: {', '.join(str(p) for p, _ in missing)}",
         )
     vendor = Path(args.vendor)
     intersection = _load_intersection_layer(Path(args.intersection))
     try:
-        union, drive, html = _build_map(union_path, drive_path, vendor, intersection)
+        rendered = _build_map(union_path, drive_path, vendor, intersection)
     except (json.JSONDecodeError, OSError, KeyError, TypeError, AttributeError) as e:
-        return _fail(
+        return fail(
             "The commute data or map assets are unreadable — regenerate them with 'make commute-drive'.",
             f"unreadable input for the combined map: {e}",
         )
-    _warn_empty_layers(drive, union, drive_path, union_path)
-    write_map(html, args.out)
+    _warn_empty_layers(rendered.drive, rendered.union, drive_path, union_path)
+    write_map(rendered.html, args.out)
     print(f"combined commute map → {args.out}")
     return 0
 

@@ -16,7 +16,6 @@ class YearlySinkingFundNode(DerivedNode[Money]):
 
     provenance_source_type = SourceType.CONFIG
 
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, rightmove_price, sinking_fund_rate_node):
         super().__init__(node_id, Money, (rightmove_price, sinking_fund_rate_node))
 

@@ -71,15 +71,15 @@ def extract_daily_rate_from_tariff(tariff_text: str) -> float | None:
     if re.search(r"Permit\s*Holders?\s*Only", mf, re.IGNORECASE):
         return None
 
-    # Strategy 1: explicit "Daily Rate: £X.XX" (handles "before 12pm" qualifiers)
-    m = re.search(r"Daily\s*Rate\s*\S*?\s*:?\s*£(\d+\.\d{2})", mf, re.IGNORECASE)
-    if m:
-        return float(m.group(1))
-
-    # Strategy 2: "Up to 24 hours £X.XX" or "Up to 24 hours: £X.XX"
-    m = re.search(r"(?:Up\s*to\s*)?24\s*hours?\s*:?\s*£(\d+\.\d{2})", mf, re.IGNORECASE)
-    if m:
-        return float(m.group(1))
+    # Strategy 1 then 2: explicit "Daily Rate: £X.XX" (handles "before 12pm"
+    # qualifiers), then "Up to 24 hours £X.XX" / "Up to 24 hours: £X.XX".
+    for pattern in (
+        r"Daily\s*Rate\s*\S*?\s*:?\s*£(\d+\.\d{2})",
+        r"(?:Up\s*to\s*)?24\s*hours?\s*:?\s*£(\d+\.\d{2})",
+    ):
+        m = re.search(pattern, mf, re.IGNORECASE)
+        if m:
+            return float(m.group(1))
 
     # Strategy 3: extract all £X.XX prices, take the highest (likely daily max)
     prices = [float(p) for p in re.findall(r"£(\d+\.\d{2})", mf)]
@@ -91,7 +91,7 @@ def extract_daily_rate_from_tariff(tariff_text: str) -> float | None:
     return None
 
 
-def _make_slug(name: str) -> str:
+def make_slug(name: str) -> str:
     """Convert a station name to an APCOA URL slug."""
     slug = name.lower()
     slug = slug.replace("'", "").replace("&", "and")
@@ -99,7 +99,7 @@ def _make_slug(name: str) -> str:
     return slug.strip("-")
 
 
-def _station_city_slugs(station_name: str) -> list[str]:
+def city_slugs(station_name: str) -> list[str]:
     """Generate candidate city slugs for APCOA URL construction.
 
     Tries the full station name first (e.g. 'Bourne End' →
@@ -107,8 +107,8 @@ def _station_city_slugs(station_name: str) -> list[str]:
     (e.g. 'Didcot Parkway' → 'didcot').
     """
     name = station_name.strip()
-    full = _make_slug(name)
-    first = _make_slug(name.split()[0])
+    full = make_slug(name)
+    first = make_slug(name.split()[0])
     candidates = [full]
     if first != full:
         candidates.append(first)
@@ -117,9 +117,9 @@ def _station_city_slugs(station_name: str) -> list[str]:
 
 def _apcoa_urls(station_name: str) -> list[str]:
     """Generate candidate APCOA location page URLs for a station."""
-    station_slug = _make_slug(station_name)
+    station_slug = make_slug(station_name)
     urls: list[str] = []
-    for city_slug in _station_city_slugs(station_name):
+    for city_slug in city_slugs(station_name):
         urls.append(f"{APCOA_BASE}/{city_slug}/{station_slug}-station-{city_slug}")
         urls.append(f"{APCOA_BASE}/{city_slug}/{city_slug}-station-{city_slug}")
     return urls
@@ -133,10 +133,10 @@ def load_stations() -> list[dict]:
             crs = (row.get("crsCode", "") or "").strip()
             name = (row.get("stationName", "") or "").strip()
             if crs and name:
+                # lucidlint: ignore record-shape wire-format dict — station CSV row shape, the CSV boundary owns the
                 stations.append({"stationName": name, "crs": crs.upper()})
     logger.info("Loaded %d stations from %s", len(stations), STATIONS_CSV)
     return stations
-
 
 def load_existing_rates() -> dict[str, float | None]:
     """Return {crs: cost} from existing CSV."""
@@ -179,7 +179,7 @@ async def find_station_urls(page, station_name: str) -> list[str]:
     Tries each candidate city slug. Navigates to the city page and
     extracts links containing '-station-'.
     """
-    for city_slug in _station_city_slugs(station_name):
+    for city_slug in city_slugs(station_name):
         listing_url = f"{APCOA_BASE}/{city_slug}/"
         try:
             await page.goto(listing_url, wait_until="domcontentloaded", timeout=15000)
@@ -390,6 +390,7 @@ def _filter_missing(args, stations, existing) -> list[dict]:
     return filtered
 
 
+# lucidlint: ignore latent-class args is the CLI namespace (DI of flags) — only _select_stations and _filter_missing
 async def main():
     parser = argparse.ArgumentParser(description="Sync parking rates from APCOA via Playwright")
     parser.add_argument("--crs", help="Comma-separated CRS codes to process")

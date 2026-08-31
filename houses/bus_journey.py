@@ -113,6 +113,7 @@ def _zone_pair_key(dep_zone: str, arr_zone: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+# lucidlint: ignore latent-class the 12 methods all operate on the shared _data/_meta fare-product store (not
 class BusJourneyRegistry:
     """Lazy-loaded registry of bus fare zone data.
 
@@ -124,7 +125,7 @@ class BusJourneyRegistry:
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
         self._meta: dict[str, Any] | None = None
-        self._loaded = False
+        self._loaded: bool = False
 
     # ------------------------------------------------------------------
     # Loading
@@ -284,40 +285,37 @@ class BusJourneyRegistry:
                 continue
             stop_zones: dict[str, str] = op_data.get("stop_zones", {})
             if dep_zone is None:
-                for bods_name, zone in stop_zones.items():
-                    bods_tokens = _norm_tokens(bods_name)
-                    inter = dep_tokens & bods_tokens
-                    union = dep_tokens | bods_tokens
-                    if union and len(inter) / len(union) >= 0.85:
-                        dep_zone = zone
-                        logger.warning(
-                            "Bus fare fuzzy match dep='%s' -> '%s' zone=%s",
-                            dep_norm,
-                            bods_name,
-                            dep_zone,
-                        )
-                        if arr_zone is not None:
-                            break
+                dep_zone = self._fuzzy_zone(dep_tokens, stop_zones, "dep", dep_norm)
             if arr_zone is None:
-                for bods_name, zone in stop_zones.items():
-                    bods_tokens = _norm_tokens(bods_name)
-                    inter = arr_tokens & bods_tokens
-                    union = arr_tokens | bods_tokens
-                    if union and len(inter) / len(union) >= 0.85:
-                        arr_zone = zone
-                        logger.warning(
-                            "Bus fare fuzzy match arr='%s' -> '%s' zone=%s",
-                            arr_norm,
-                            bods_name,
-                            arr_zone,
-                        )
-                        if dep_zone is not None:
-                            break
+                arr_zone = self._fuzzy_zone(arr_tokens, stop_zones, "arr", arr_norm)
             if dep_zone and arr_zone:
                 products = self._products_for_zone_pair(op_key, dep_zone, arr_zone)
                 if products:
                     return products
         return {}
+
+    @staticmethod
+    def _fuzzy_zone(
+        tokens: set[str],
+        stop_zones: dict[str, str],
+        label: str,
+        raw_name: str,
+    ) -> str | None:
+        """First stop whose BODS name hits the 85% Jaccard threshold, if any."""
+        for bods_name, zone in stop_zones.items():
+            bods_tokens = _norm_tokens(bods_name)
+            inter = tokens & bods_tokens
+            union = tokens | bods_tokens
+            if union and len(inter) / len(union) >= 0.85:
+                logger.warning(
+                    "Bus fare fuzzy match %s='%s' -> '%s' zone=%s",
+                    label,
+                    raw_name,
+                    bods_name,
+                    zone,
+                )
+                return zone
+        return None
 
     _COORD_RADIUS_KM: float = 0.1  # 100m — point of taking bus is to avoid long walks
 

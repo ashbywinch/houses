@@ -67,6 +67,20 @@ def _parse_cost(raw_cost: str) -> Money | None:
         return None
 
 
+# lucidlint: ignore record-shape returns the same scraper page record it was given — wire shape
+# lucidlint: ignore record-shape result is the APCOA scraper's parsed page record — its dict shape is fixed by the
+def _log_apcoa_find(result: dict, source: str, station: Station) -> dict:
+    """Log a successful APCOA lookup and pass the result through."""
+    logger.info(
+        "APCOA %s for '%s': %s = £%.2f",
+        source,
+        station.name,
+        result.get("name", "?"),
+        result["price"],
+    )
+    return result
+
+
 class ApcoaCarParkLookup:
     """Playwright-scraping half of the car-park database.
 
@@ -76,6 +90,8 @@ class ApcoaCarParkLookup:
     registry stays the single owner of car-park state.
     """
 
+    _apcoa_scraper_inst: ApcoaScraper
+
     def __init__(
         self,
         registry: CarParkRegistry,
@@ -84,8 +100,10 @@ class ApcoaCarParkLookup:
         """``apcoa_lookup_fn`` is a test seam — it defaults to the real
         APCOA scrape, so tests never monkeypatch module globals.
         """
-        self._registry = registry
-        self._apcoa_lookup_fn = apcoa_lookup_fn or self._apcoa_lookup
+        self._registry: CarParkRegistry = registry
+        self._apcoa_lookup_fn: Callable[[Station], Awaitable[dict | None]] = (
+            apcoa_lookup_fn or self._apcoa_lookup
+        )
 
     @property
     def _apcoa_scraper(self) -> ApcoaScraper:
@@ -188,13 +206,7 @@ class ApcoaCarParkLookup:
                     page_text = await page.evaluate("() => document.body.innerText")
                     result = self._apcoa_scraper._parse_apcoa_location_page(page_text, title)
                     if result is not None:
-                        logger.info(
-                            "APCOA location page for '%s': %s = £%.2f",
-                            station.name,
-                            result.get("name", "?"),
-                            result["price"],
-                        )
-                        return result
+                        return _log_apcoa_find(result, "location page", station)
                 # lucidlint: ignore broad-except one APCOA location page failure continues to the next station
                 except Exception as e:
                     logger.debug("APCOA location page failed for %s: %s", station.name, e)
@@ -206,7 +218,7 @@ class ApcoaCarParkLookup:
                 url = (
                     "https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
                     f"?latitude={lat}&longitude={lng}&placeName={station.name}&maximumDistance=3"
-                )
+                )  # lucidlint: ignore duplicate-block strategy 2 intentionally repeats strategy 1's
                 await page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 await asyncio.sleep(3.5)
 
@@ -230,13 +242,7 @@ class ApcoaCarParkLookup:
 
                 result = self._apcoa_scraper._parse_apcoa_prebook_listing(page_text)
                 if result is not None:
-                    logger.info(
-                        "APCOA prebook for '%s': %s = £%.2f",
-                        station.name,
-                        result.get("name", "?"),
-                        result["price"],
-                    )
-                    return result
+                    return _log_apcoa_find(result, "prebook", station)
             # lucidlint: ignore broad-except deliberate fallback — prebook-listing failure degrades to None
             except Exception as e:
                 logger.debug("APCOA prebook listing failed for %s: %s", station.name, e)
@@ -260,7 +266,7 @@ class CarParkRegistry:
         self._by_name: dict[str, CarPark] | None = None
         self._by_crs: dict[str, CarPark] | None = None
         self._station_map: dict[str, str] = {}
-        self._rates_path = rates_path or _PARKING_RATES_PATH
+        self._rates_path: Path = rates_path or _PARKING_RATES_PATH
 
     @classmethod
     def from_car_parks(cls, car_parks: list[CarPark], station_map: dict[str, str] | None = None) -> CarParkRegistry:

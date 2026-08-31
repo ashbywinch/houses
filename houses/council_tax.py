@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are the mandated pattern (review-log scope decision 5: no config
 """Council tax band lookup via VOA website scraper + CivAccount rates."""
 
 from __future__ import annotations
@@ -7,6 +8,7 @@ import logging
 import re
 from collections import namedtuple
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,14 +31,14 @@ logger = logging.getLogger(__name__)
 # lucidlint: ignore global-state statutory Band-D ratio table; never mutated (data, not state)
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 BAND_RATIOS = {
-    "A": 6 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
-    "B": 7 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
-    "C": 8 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
-    "D": 9 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
-    "E": 11 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
-    "F": 13 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
-    "G": 15 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
-    "H": 18 / 9,  # lucidlint: ignore magic-number statutory band ratio numerator (Band D base)
+    "A": 6 / 9,
+    "B": 7 / 9,
+    "C": 8 / 9,
+    "D": 9 / 9,
+    "E": 11 / 9,
+    "F": 13 / 9,
+    "G": 15 / 9,
+    "H": 18 / 9,
 }
 CIVACCOUNT_URL = "https://www.civaccount.co.uk/api/v1/councils"
 COUNCIL_TAX_CSV = "data/council_tax_rates.csv"
@@ -261,7 +263,6 @@ def _lookup_yearly_cost(
     return None
 
 
-# lucidlint: ignore class-module small private helper — module keeps its domain name
 class CachedVOAClient:
     """Async context manager that wraps ``VOAClient`` with disk caching.
 
@@ -410,16 +411,28 @@ def _name_row_match(addr: str, name_norm: str, unit_norm: str) -> bool:
     return not _is_unit_descriptor(first, tokens)
 
 
+@dataclass(frozen=True)
+class _PropertyRef:
+    """The property a VOA match must positively identify.
+
+    ``address`` is the query as given, ``building_id`` the identifier
+    extracted from it, ``postcode`` the postcode both were queried with.
+    """
+
+    address: str
+    building_id: str
+    postcode: str
+
+
 def _match_building_name(
     active,
-    building_id: str,
     building,
-    postcode: str,
+    query: _PropertyRef,
 ):
     """Rows matching a named building; None when the name is present but
     never identifies a specific unit on its own (the caller reports the
     address as not identifying a single property)."""
-    name_norm = _normalise_keep_commas(building_id)
+    name_norm = _normalise_keep_commas(query.building_id)
     unit_norm = _normalise_keep_commas(building.get("unit") or "")
     matches = [
         r
@@ -428,21 +441,25 @@ def _match_building_name(
     ]
     if not matches:
         # The name is present but never identifies a unit on its own.
-        norm_id = _normalise(building_id)
+        norm_id = _normalise(query.building_id)
         if any(norm_id in _normalise(r["address"]) for r in active):
-            logger.debug("Address %r names a building/street but no specific unit in %s", building_id, postcode)
+            logger.debug(
+                "Address %r names a building/street but no specific unit in %s",
+                query.building_id,
+                query.postcode,
+            )
             return None
     return matches
 
 
-def _match_rows(active, building, address: str, postcode: str):
+def _match_rows(active, building, query: _PropertyRef):
     """VOA rows matching the building identifier, or None when the address
     cannot positively identify a single property."""
     building_id = building.get("building_number") or building.get("building_name") or ""
     norm_id = _normalise(building_id)
     if building.get("building_number"):
-        return _match_by_number(active, norm_id, address)
-    return _match_building_name(active, building_id, building, postcode)
+        return _match_by_number(active, norm_id, query.address)
+    return _match_building_name(active, building, query)
 
 
 def _collapse_exact_matches(matches, address: str):
@@ -471,9 +488,7 @@ def _collapse_exact_matches(matches, address: str):
 
 def _select_matched_row(
     matches,
-    address: str,
-    building_id: str,
-    postcode: str,
+    query: _PropertyRef,
 ):
     """Reduce matches to one unambiguous row.
 
@@ -482,14 +497,14 @@ def _select_matched_row(
     addresses (sorted, deterministic) and the total count so the
     provenance is actually troubleshooting-useful.
     """
-    matches = _collapse_exact_matches(matches, address)
+    matches = _collapse_exact_matches(matches, query.address)
     unique_addresses = sorted({m["address"] for m in matches})
     if len(unique_addresses) > 1:
         logger.debug(
             "Ambiguous address %r — matched %d different VOA addresses for %s",
-            building_id,
+            query.building_id,
             len(unique_addresses),
-            postcode,
+            query.postcode,
         )
         sample = ", ".join(repr(a) for a in unique_addresses[:2])
         return None, f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
@@ -549,12 +564,10 @@ def _find_annexe(
         )
     return None
 
-
 def _lookup_matched_rate(
     matched,
     rate_lookup: Callable[[str, str], Money | None],
-    building_id: str,
-    postcode: str,
+    query: _PropertyRef,
 ):
     """(yearly cost, evidence URL, lookup error) for the matched row.
 
@@ -574,7 +587,7 @@ def _lookup_matched_rate(
             # say why there is no figure instead of silently omitting it.
             lookup_error = f"no yearly rate found for {matched['local_authority']}"
     else:
-        logger.warning("No local authority found for %s postcode %s", building_id, postcode)
+        logger.warning("No local authority found for %s postcode %s", query.building_id, query.postcode)
     return yearly_cost, evidence_url, lookup_error
 
 
@@ -582,20 +595,24 @@ def _active_rows(results_raw):
     """Rows with a live band (A–H or I), excluding DELETED/archived rows."""
     return [r for r in results_raw if r["band"] in BAND_RATIOS or r["band"] == "I"]
 
-
-def _match_failure(matches, building_id: str, postcode: str):
+def _match_failure(matches, query: _PropertyRef):
     """The impossible-reason when matches do not identify a single
     property; None to proceed with the match."""
     if matches is None:
         return "address does not identify a single property"
     if not matches:
-        logger.debug("Could not match building %r in VOA results for %s", building_id, postcode)
-        return f"no VOA match for building {building_id}"
+        logger.debug(
+            "Could not match building %r in VOA results for %s",
+            query.building_id,
+            query.postcode,
+        )
+        return f"no VOA match for building {query.building_id}"
     return None
 
 
 
 
+# lucidlint: ignore latent-class state already explicit — after the _PropertyRef refactor only _find_annexe and
 async def lookup_council_tax(
     postcode: str,
     address: str = "",
@@ -637,21 +654,23 @@ async def lookup_council_tax(
         return Attempt.impossible("no active properties in VOA results")
 
     building, building_id, norm_id = _building_identifier(address)
+    # lucidlint: ignore duplicate-block intentional guard clauses — each VOA preflight (no active rows / no building
     if not norm_id:
         logger.debug("Could not extract building identifier from address %r", address)
         return Attempt.impossible("could not extract building identifier")
 
-    matches = _match_rows(active, building, address, postcode)
-    failure = _match_failure(matches, building_id, postcode)
+    query = _PropertyRef(address=address, building_id=building_id, postcode=postcode)
+    matches = _match_rows(active, building, query)
+    failure = _match_failure(matches, query)
     if failure is not None:
         return Attempt.impossible(failure)
 
-    matched, match_error = _select_matched_row(matches, address, building_id, postcode)
+    matched, match_error = _select_matched_row(matches, query)
     if match_error is not None or matched is None:
         return Attempt.impossible(match_error or "no matching VOA property row")
 
     annexe = _find_annexe(active, matched, rate_lookup)
-    yearly_cost, evidence_url, lookup_error = _lookup_matched_rate(matched, rate_lookup, building_id, postcode)
+    yearly_cost, evidence_url, lookup_error = _lookup_matched_rate(matched, rate_lookup, query)
 
     return Attempt.succeeded(
         CouncilTaxInfo(

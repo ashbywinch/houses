@@ -8,6 +8,7 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from dag.node import Node
 
 
 class MonthlySinkingFundNode(DerivedNode[Money]):
@@ -18,7 +19,7 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
     """
 
     def __init__(self, node_id: str, *, yearly_sinking_fund_node):
-        self._yearly_node = yearly_sinking_fund_node
+        self._yearly_node: Node = yearly_sinking_fund_node
         super().__init__(node_id, Money, (yearly_sinking_fund_node,))
 
     @override

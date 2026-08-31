@@ -7,6 +7,7 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from dag.node import Node
 
 _ZERO = Decimal("0")
 
@@ -37,7 +38,7 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
 
     def __init__(self, node_id: str, *, persons_source):
         super().__init__(node_id, Money, (persons_source,))
-        self._persons_source = persons_source
+        self._persons_source: Node = persons_source
 
     @override
     def compute(self, persons: Attempt[list]) -> Attempt[Money]:

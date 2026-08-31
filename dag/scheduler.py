@@ -86,9 +86,9 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._queue: asyncio.PriorityQueue[QueueEvent] = asyncio.PriorityQueue()
         self._scheduled: dict[str, QueueEvent] = {}
         self._registered: dict[str, DerivedNode] = {}
-        self._wakeup = asyncio.Event()
+        self._wakeup: asyncio.Event = asyncio.Event()
         self._after_refresh_callback: Callable[[DerivedNode], object] | None = None
-        self._respect_time = respect_time
+        self._respect_time: bool = respect_time
 
     @override
     def register(self, node: DerivedNode) -> None:
@@ -113,25 +113,24 @@ class AsyncQueueScheduler(RefreshScheduler):
         return dict(self._registered)
 
     @override
-    def schedule(self, node: DerivedNode) -> None:
-        """Schedule for immediate processing. No-op if node already queued."""
+    def _enqueue(self, node: DerivedNode, scheduled_at: float) -> None:
+        """Queue the node unless already queued, then wake the processor."""
         if node._id in self._scheduled:
             return
-        now_ts = datetime.now(UTC).timestamp()
-        event = QueueEvent(scheduled_at=now_ts, node_id=node._id, node=node)
+        event = QueueEvent(scheduled_at=scheduled_at, node_id=node._id, node=node)
         self._scheduled[node._id] = event
         self._queue.put_nowait(event)
         self._wakeup.set()
 
     @override
+    def schedule(self, node: DerivedNode) -> None:
+        """Schedule for immediate processing. No-op if node already queued."""
+        self._enqueue(node, datetime.now(UTC).timestamp())
+
+    @override
     def schedule_at(self, node: DerivedNode, dt: datetime) -> None:
         """Schedule for processing at a specific wall-clock time. No-op if already queued."""
-        if node._id in self._scheduled:
-            return
-        event = QueueEvent(scheduled_at=dt.timestamp(), node_id=node._id, node=node)
-        self._scheduled[node._id] = event
-        self._queue.put_nowait(event)
-        self._wakeup.set()
+        self._enqueue(node, dt.timestamp())
 
     @override
     def after_refresh(self, node: DerivedNode) -> None:
@@ -196,6 +195,7 @@ def set_scheduler(scheduler: RefreshScheduler) -> None:
     _scheduler_var.set(scheduler)
 
 
+# lucidlint: ignore unused test seam — clears the ContextVar override in isolation fixtures across dag tests
 def reset_scheduler() -> None:
     """Reset to default (clears the ContextVar override)."""
     _scheduler_var.set(None)
@@ -216,7 +216,6 @@ def start_processor() -> asyncio.Task:
     raise TypeError(f"Cannot start background processor on {type(sched).__name__}")
 
 
-# lucidlint: ignore unused-setter wired from houses/server.py lifespan (_on_node_refreshed)
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
     sched = get_scheduler()
     sched._after_refresh_callback = callback

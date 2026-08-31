@@ -17,6 +17,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from dag.node import Node
 from houses.commute import JourneyLeg, LegMode
 from houses.model.domain import Commute
 
@@ -58,9 +59,9 @@ class PersonPetrolMpgNode(DerivedNode[int]):
     """
 
     def __init__(self, node_id: str, *, persons_source, person_name: str):
-        self._person_name = person_name
+        self._person_name: str = person_name
         super().__init__(node_id, int, (persons_source,))
-        self.display_name = "Petrol MPG"
+        self.display_name: str = "Petrol MPG"
 
     @override
     def compute(self, persons: Attempt[list]) -> Attempt[int]:
@@ -80,12 +81,12 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
     """
 
     def __init__(self, node_id: str, *, commute_node, petrol_mpg_node, petrol_cost_per_litre_node):
-        self.commute_node = commute_node
+        self.commute_node: Node = commute_node
         deps = (commute_node, petrol_mpg_node, petrol_cost_per_litre_node)
         super().__init__(node_id, Commute, deps)
-        self._mpg_node = petrol_mpg_node
-        self._cost_node = petrol_cost_per_litre_node
-        self.display_name = "Petrol Cost"
+        self._mpg_node: Node = petrol_mpg_node
+        self._cost_node: Node = petrol_cost_per_litre_node
+        self.display_name: str = "Petrol Cost"
 
     @override
     @property
@@ -158,24 +159,23 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         )
         return Attempt.succeeded(new_commute)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    @override
-    async def to_json(self) -> dict:
-        result = await super().to_json()
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def _attach_is_child(self, base: dict) -> dict:
+        """Annotate a serialized payload with the value's ``is_child`` flag."""
         attempt = await self.attempt()
         if attempt.succeeded:
             val = attempt.value_or_none()
             if val is not None:
-                result["is_child"] = val.is_child
-        return result
+                base["is_child"] = val.is_child
+        return base
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     @override
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def to_json(self) -> dict:
+        return await self._attach_is_child(await super().to_json())
+
+    @override
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_value(self) -> dict:
-        result = await super().to_json_value()
-        attempt = await self.attempt()
-        if attempt.succeeded:
-            val = attempt.value_or_none()
-            if val is not None:
-                result["is_child"] = val.is_child
-        return result
+        return await self._attach_is_child(await super().to_json_value())

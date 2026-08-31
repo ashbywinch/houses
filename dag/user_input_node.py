@@ -72,6 +72,7 @@ def _validate_money(v) -> Money:
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _serialize_money(m) -> dict:
+    # lucidlint: ignore record-shape wire-format dict — pydantic serializer payload, serialization boundary owns the
     return {
         "amount": str(m.amount.quantize(_GBP_SCALE)),
         "currency": m.currency,

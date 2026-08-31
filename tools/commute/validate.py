@@ -90,8 +90,9 @@ def _point_in_rect(point: GeoPoint, rect: Rect) -> bool:
     return rect.lat_min <= point.lat <= rect.lat_max and rect.lon_min <= point.lon <= rect.lon_max
 
 
+# lucidlint: ignore record-shape kept_stations ride in the committed searches payload's station shape
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def uncovered_cells(
+def uncovered_cells(  # lucidlint: ignore record-shape returns a list of (row, col) grid lattice coordinates — keyed
     searches: list[dict],
     kept_stations: list[dict],
     bbox: BBox,
@@ -181,6 +182,7 @@ def _coverage_issues(rects: list[Rect], kept_stations: list[dict], buffer_km: fl
     return issues
 
 
+# lucidlint: ignore record-shape kept_stations ride in the committed searches payload's station shape
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def validate(
     payload: dict,

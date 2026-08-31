@@ -30,10 +30,8 @@ testing: bool = False
 _connection_cache = threading.local()
 
 
-# lucidlint: ignore class-module small private helper — module keeps its domain name
 class DagJSONEncoder(json.JSONEncoder):
     """Handles enums, Decimal, Money, Quantity, and other non-serializable types in DAG node results."""
-    # lucidlint: ignore detached-method super().default(o) requires self — json.JSONEncoder dispatches via self.default
     @override
     def default(self, o):
         if isinstance(o, Enum):
@@ -102,6 +100,7 @@ def close_db() -> None:
         _connection_cache.conn = None
 
 
+# lucidlint: ignore unused deliberate test seam — round-trip primitives driven directly by test_persistence.py;
 def _serialize_value(val: Any) -> str | None:
     if val is None:
         return None
@@ -126,6 +125,7 @@ def _serialize_value(val: Any) -> str | None:
         raise
 
 
+# lucidlint: ignore unused deliberate test seam — round-trip primitives driven directly by test_persistence.py;
 def _deserialize_value(raw: str | None) -> Any:
     if raw is None:  # was: if not raw — empty string "" should not be treated as None
         return None

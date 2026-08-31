@@ -33,8 +33,7 @@ import httpx
 
 from houses.rightmove_scraper import scrape
 
-# lucidlint: ignore private-import shared-secret cookie mint — the only minting entry point;
-# same pattern as tools/deploy/release.sh
+# lucidlint: ignore private-import cookie mint — only minting entry point; mirrors tools/deploy/release.sh
 from houses.web.auth import _make_session_cookie
 
 
@@ -101,6 +100,7 @@ async def _run_job(client: httpx.AsyncClient, job: ScrapeJob) -> None:
         )
         resp.raise_for_status()
         print(f"scraped {job.rid} ok: {listing.address}")
+    # lucidlint: ignore broad-except boundary — blast radius is one claimed job: any scrape/convert failure is reported
     except Exception as exc:
         try:
             resp = await client.post(
@@ -111,6 +111,7 @@ async def _run_job(client: httpx.AsyncClient, job: ScrapeJob) -> None:
             resp.raise_for_status()
             print(f"scrape failed for {job.rid}: {exc}")
             return
+        # lucidlint: ignore broad-except boundary — blast radius is one failure-report POST: nothing left to do but log
         except Exception as report_exc:
             print(f"FAILED to report job {job.id}: {report_exc}")
             print(f"scrape failed for {job.rid}: {exc}")
@@ -134,6 +135,7 @@ async def run_loop(interval: float) -> None:
     while True:
         try:
             await run_once()
+        # lucidlint: ignore broad-except boundary — blast radius is one poll iteration: the worker must survive any
         except Exception as exc:
             print(f"worker error: {exc}")
             continue

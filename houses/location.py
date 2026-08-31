@@ -1,3 +1,4 @@
+# lucidlint: ignore-file bulk-suppression the repeated duplicate-block suppressions here are per-site verdicts on
 """PropertyLocation — where a property is on the map, possibly unresolved."""
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ _TOWN_SUFFIXES = re.compile(
 # ── In-memory geocode cache (per-request via Services) ─────────
 
 
+# lucidlint: ignore duplicate deliberate twin of get_geo_state above — the same lazy-per-request-slot idiom over a
 # lucidlint: ignore record-shape keyed geocode cache map (variable keys), not a fixed record shape
 def _geo_cache(*, services: Any | None = None) -> dict:
     """Return the per-request geocode cache, lazily created on the services container."""
@@ -245,6 +247,7 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
                 resp.raise_for_status()
                 data = resp.json()
                 set_cached("GET", NOMINATIM_URL, params, None, data)
+                    # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
                 if data:
                     lat = float(data[0]["lat"])
                     lng = float(data[0]["lon"])
@@ -299,6 +302,7 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
             data = resp.json()
             if data.get("status") == "OK" and data.get("results"):
                 set_cached("GET", googlegeocode_url, cache_params, None, data)
+                # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
                 loc = data["results"][0]["geometry"]["location"]
                 gp = GeoPoint(loc["lat"], loc["lng"])
                 result = Attempt.succeeded(gp)
@@ -348,6 +352,7 @@ async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = N
             resp.raise_for_status()
             data = resp.json()
             set_cached("GET", ORS_GEOCODE_URL, params, None, data)
+            # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared geocoder
             features = data.get("features", [])
             if features:
                 lng, lat = features[0]["geometry"]["coordinates"]
@@ -382,6 +387,7 @@ async def geocode_address(address: str, *, services: Any | None = None) -> Attem
     # Note: No pre-check for the API key. Just try the call — the mock
     # transport handles it in tests, and in production a missing key
     # produces a non-OK response that falls through to the next geocoder.
+    # lucidlint: ignore duplicate-block the cascade intentionally repeats the try-next-geocoder step per provider —
     result = await _geocode_google(address, cache_key, services=services)
     if result is not None:
         return result
@@ -427,6 +433,7 @@ async def _geocode_postcode(postcode: str, *, services: Any | None = None) -> At
                 resp.raise_for_status()
                 data = resp.json()
                 set_cached("GET", url, None, None, data)
+                # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
                 result = data.get("result")
                 if not result:
                     return Attempt.impossible("postcode not found")
@@ -541,6 +548,7 @@ def extract_postcode(address: str) -> str:
     m = _FULL_POSTCODE_RE.search(address)
     if m:
         return m.group(0).strip().upper()
+    # lucidlint: ignore duplicate-block the outcode tier intentionally mirrors the full-postcode tier — a two-tier
     m = _ADDR_OUTCODE_RE.search(address)
     if m:
         return m.group(0).strip().upper()

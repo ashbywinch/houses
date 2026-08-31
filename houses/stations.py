@@ -68,7 +68,7 @@ class StationRegistry:
     def __init__(self, _stations_csv: Path | None = None) -> None:
         self._stations: dict[str, Station] | None = None
         self._by_crs: dict[str, Station] | None = None
-        self._csv_path = _stations_csv or _STATIONS_CSV
+        self._csv_path: Path = _stations_csv or _STATIONS_CSV
 
     # ------------------------------------------------------------------
     # Internal helpers

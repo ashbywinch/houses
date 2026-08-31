@@ -57,8 +57,9 @@ def _friendly_tfl_message(status: int) -> str:
         return "TfL's route planner is unavailable right now"
     return "TfL couldn't plan this route"
 
-
-def _tube_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+# lucidlint: ignore data-clump the arrival text and leg minutes travel together through every formatter by
+# lucidlint: ignore data-clump (clean_arr, duration, instr) is the dispatch-table formatter signature shared by seven
+def _tube_leg_label(clean_arr: str, duration: int, instr: str) -> str:  # lucidlint: ignore data-clump (duration,
     """Label for a tube leg — the line name comes from the instruction summary."""
     line_from_instr = instr.split(" to ")[0] if " to " in instr else ""
     tube_line = line_from_instr.replace(" line", "").replace(" Line", "").strip()
@@ -141,6 +142,7 @@ class ParkingCostResult:
     cost_groups: list[CostGroup]
 
 
+# lucidlint: ignore latent-class partition 19 methods over 641 lines, but the clusters (journey planning, fare
 class TflClient:
     """TfL API client for public-transit route planning in London.
 
@@ -165,17 +167,17 @@ class TflClient:
         label: str,
         options: TflRouteOptions | None = None,
     ):
-        self._origin = origin_postcode
-        self._destination = destination_postcode
-        self._label = label
+        self._origin: str = origin_postcode
+        self._destination: str = destination_postcode
+        self._label: str = label
         opts = options or TflRouteOptions()
-        self._park_and_ride = opts.park_and_ride
-        self._allow_bus = opts.allow_bus
+        self._park_and_ride: bool = opts.park_and_ride
+        self._allow_bus: bool = opts.allow_bus
         self._no_route_reason: str = ""
         self._no_route_detail: str = ""
         # DI seams (docs/testing-standards: no monkeypatch in new tests).
-        self._cached_call = opts.cached_call or TflClient._cached_api_call
-        self._plan_override = opts.plan_override
+        self._cached_call: Callable = opts.cached_call or TflClient._cached_api_call
+        self._plan_override: Callable | None = opts.plan_override
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -395,6 +397,7 @@ class TflClient:
 
     @staticmethod
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape homogeneous (leg, mode-name) parse pairs — a keyed collection, not a field-wise record
     def _parse_tfl_legs(tfl_legs: list[dict]) -> list[tuple[JourneyLeg, str]]:
         """Parse TfL API legs into (JourneyLeg, mode_name) pairs.
 
@@ -432,6 +435,7 @@ class TflClient:
     # ── Internal fetch / process ─────────────────────────────────────
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _cached_with_retry(
         url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
@@ -487,6 +491,7 @@ class TflClient:
 
     @staticmethod
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _cached_api_call(
         url: str, params: dict, *, _client_factory: Callable | None = None
     ) -> dict | None:
@@ -529,6 +534,7 @@ class TflClient:
                 # Legacy poisoned entry (429/5xx cached before the rule): reject
                 # and evict so the route is re-fetched — transient errors are
                 # never served from cache.
+                # lucidlint: ignore duplicate-block the legacy-entry eviction intentionally mirrors the
                 logger.warning("evicting cached transient error response for %s", url)
                 evict_cached("GET", url, cache_params, None)
                 cached = None
@@ -546,12 +552,14 @@ class TflClient:
             if resp.status_code < 300:
                 set_cached("GET", url, cache_params, None, data)
             elif 300 <= resp.status_code < 400:
+                # lucidlint: ignore record-shape wire-format dict — the wrapped-error envelope IS the cache file's
                 set_cached("GET", url, cache_params, None, {"_cached_status": resp.status_code, "_cached_body": data})
             elif resp.status_code == 404:
                 # 404 "cannot route this station" is genuinely deterministic —
                 # re-hitting the endpoint for the same impossible request
                 # wastes calls. Every OTHER 4xx is transient-ish (401/403 key
                 # expiry, 409 planner outage) and must not poison the cache.
+                # lucidlint: ignore record-shape wire-format dict — the wrapped-error envelope IS the cache file's
                 set_cached("GET", url, cache_params, None, {"_cached_status": 404, "_cached_body": data})
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(
@@ -673,6 +681,7 @@ class TflClient:
         )
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _geocode_fallback(self, params: dict) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""
         pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", self._origin)
@@ -762,6 +771,7 @@ class TflClient:
         if not journeys:
             return []
         best = min(journeys, key=lambda j: j.get("duration", 9999))
+        # lucidlint: ignore duplicate-block the no-legs guard intentionally mirrors the no-journeys guard above —
         tfl_legs = best.get("legs", [])
         if not tfl_legs:
             return []
@@ -797,13 +807,13 @@ class _CostGroupBuilder:
     """
 
     def __init__(self, mode_single_pence: dict[str, int], total_single_pence: int | None) -> None:
-        self._mode_single_pence = mode_single_pence
-        self._total_single_pence = total_single_pence
+        self._mode_single_pence: dict[str, int] = mode_single_pence
+        self._total_single_pence: int | None = total_single_pence
         self._groups: list[CostGroup] = []
         self._current_legs: list[JourneyLeg] = []
         self._current_mode: str | None = None
-        self._in_transit = False
-        self._total_applied = False
+        self._in_transit: bool = False
+        self._total_applied: bool = False
 
     def add_walking(self, jl: JourneyLeg) -> None:
         if self._in_transit:

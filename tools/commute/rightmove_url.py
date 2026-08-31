@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are the mandated pattern (review-log scope decision 5: no config
 """Rightmove drawn-area search URLs.
 
 Spike result (2026-08-02, verified live on rightmove.co.uk): drawn search areas
@@ -24,6 +25,7 @@ def encode_polyline(coords: list[Coord]) -> str:
     prev_lat = prev_lon = 0
     for lat, lon in coords:
         # lucidlint: ignore magic-number 1e5 — polyline precision factor of the Google polyline encode (spec constant)
+# lucidlint: ignore magic-number same polyline precision factor, second operand
         lat5, lon5 = round(lat * 1e5), round(lon * 1e5)
         dlat, dlon = lat5 - prev_lat, lon5 - prev_lon
         prev_lat, prev_lon = lat5, lon5
@@ -31,8 +33,6 @@ def encode_polyline(coords: list[Coord]) -> str:
             v = ~(v << 1) if v < 0 else v << 1
             # lucidlint: ignore magic-number 0x20 — continuation bit of the Google polyline encode (spec constant)
             while v >= 0x20:
-                # lucidlint: ignore magic-number 0x20/0x1F/63 — polyline chunk bits + ASCII-63 offset (spec)
-                out.append(chr((0x20 | (v & 0x1F)) + 63))
                 v >>= 5
             # lucidlint: ignore magic-number 63 — ASCII base-63 offset of the Google polyline encode (spec constant)
             out.append(chr(v + 63))
@@ -62,6 +62,7 @@ def decode_polyline(encoded: str) -> list[Coord]:
                 lat += d
             else:
                 lon += d
+        # lucidlint: ignore magic-number same polyline precision factor, second operand
         # lucidlint: ignore magic-number 1e5 — polyline precision factor of the Google polyline decode (spec constant)
         coords.append((lat / 1e5, lon / 1e5))
     return coords

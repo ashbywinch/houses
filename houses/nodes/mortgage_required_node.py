@@ -15,7 +15,6 @@ _ZERO = Decimal("0")
 class MortgageRequiredNode(DerivedNode[Money]):
     """Mortgage principal = Price + StampDuty + TotalWorks - TotalEquity."""
 
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(
         self,
         node_id: str,

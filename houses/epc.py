@@ -179,8 +179,9 @@ def _street_after_token(tokens: list[str], token: str) -> str:
     return ""
 
 
-
-def _filter_candidates(certs, building_id: str, address: str):
+# lucidlint: ignore data-clump the lookup identity (address, building_id) travels with its certificates by design
+# lucidlint: ignore data-clump (certs, building_id, address) is _match_cert's public signature — ~20 test call sites in
+def _filter_candidates(certs, building_id: str, address: str):  # lucidlint: ignore data-clump (address, certs) travel
     """Certificates whose address matches the building identifier.
 
     A NUMBER identifier is matched as a whole token — "2" must not claim

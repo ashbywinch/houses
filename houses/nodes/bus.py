@@ -11,6 +11,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.node import Node
 from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
@@ -26,7 +27,7 @@ class BusRouteNode(DerivedNode[dict]):
     _default_google_routes_post: Callable | None = None
 
     def __init__(self, node_id: str, *, best_location, poi, _google_routes_post=None):
-        self._google_routes_post = _google_routes_post or self._default_google_routes_post
+        self._google_routes_post: Callable | None = _google_routes_post or self._default_google_routes_post
         super().__init__(node_id, dict, (best_location, poi))
 
     @override
@@ -34,6 +35,7 @@ class BusRouteNode(DerivedNode[dict]):
         loc = location.value_or_none()
         dest_val = dest.value_or_none()
         if not loc or not dest_val:
+            # lucidlint: ignore record-shape keyed collection — dep_attempts maps dep name → Attempt (dict[str,
             return self._impossible({"location": location, "dest": dest})
 
         grp = self._google_routes_post
@@ -77,6 +79,7 @@ class BusRouteNode(DerivedNode[dict]):
             dep = td.get("stopDetails", {}).get("departureStop", {})
             arr = td.get("stopDetails", {}).get("arrivalStop", {})
             bus_stops.append(
+                # lucidlint: ignore record-shape wire-format dict — bus-stop entries persist inside the serialized node
                 {
                     "departure_name": dep.get("name", ""),
                     "arrival_name": arr.get("name", ""),
@@ -92,6 +95,7 @@ class BusRouteNode(DerivedNode[dict]):
 
         duration_sec = int(routes[0].get("duration", "0s").removesuffix("s"))
         return Attempt.succeeded(
+            # lucidlint: ignore record-shape wire-format dict — BusRouteNode result persists to the DAG store as JSON
             {
                 "bus_stops": bus_stops,
                 "duration_minutes": round(duration_sec / 60),
@@ -102,7 +106,6 @@ class BusRouteNode(DerivedNode[dict]):
 class BodsFareNode(DerivedNode[dict]):
     """Look up BODS bus fares for the stops found by BusRouteNode."""
 
-# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, bus_route_node):
         super().__init__(node_id, dict, (bus_route_node,))
 
@@ -161,10 +164,10 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         bods_fare_node,
         max_walk_node=None,
     ):
-        self._transit_input = transit_input
-        self._bus_route_node = bus_route_node
-        self._bods_fare_node = bods_fare_node
-        self._max_walk_node = max_walk_node
+        self._transit_input: Node = transit_input
+        self._bus_route_node: Node = bus_route_node
+        self._bods_fare_node: Node = bods_fare_node
+        self._max_walk_node: Node | None = max_walk_node
         deps = [transit_input]
         if max_walk_node is not None:
             deps.append(max_walk_node)
@@ -305,7 +308,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         # Build the bus CostGroup
         bus_cg = CostGroup(
             legs=(JourneyLeg(mode=LegMode.BUS, duration=Quantity(bus_time, "minute")),),
-            cost=total_bus_cost if total_bus_cost > Money("0", "GBP") else None,
+            cost=total_bus_cost if total_bus_cost > Money(amount="0", currency="GBP") else None,
         )
 
         new_duration = int(commute.duration.magnitude - walk_minutes + bus_time)

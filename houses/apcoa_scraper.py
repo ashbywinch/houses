@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+from scripts.sync_parking_rates import city_slugs, extract_daily_rate_from_tariff, make_slug
 
 
 class ApcoaScraper:
@@ -23,20 +23,12 @@ class ApcoaScraper:
     @staticmethod
     def _make_slug(name: str) -> str:
         """Convert a station name to an APCOA URL slug."""
-        slug = name.lower()
-        slug = slug.replace("'", "").replace("&", "and")
-        slug = re.sub(r"[^a-z0-9]+", "-", slug)
-        return slug.strip("-")
+        return make_slug(name)
 
-    def _city_slugs(self, station_name: str) -> list[str]:
+    @staticmethod
+    def _city_slugs(station_name: str) -> list[str]:
         """Generate candidate city slugs for APCOA URL construction."""
-        name = station_name.strip()
-        full = self._make_slug(name)
-        first = self._make_slug(name.split()[0])
-        candidates = [full]
-        if first != full:
-            candidates.append(first)
-        return candidates
+        return city_slugs(station_name)
 
     def apcoa_location_urls(self, station_name: str) -> list[str]:
         """Generate candidate APCOA location page URLs for a station."""

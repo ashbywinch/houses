@@ -63,6 +63,7 @@ def needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
         # infeasible commute (the accessor raises).
         return False
     if selected is not None:
+        # lucidlint: ignore duplicate-block same success-guard as the transit attempt above — parallel guards on two
         if not selected.succeeded:
             return False
         sel = selected.value_or_none()
@@ -73,6 +74,7 @@ def needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
     return _has_unpriced_transit(val)
 
 
+# lucidlint: ignore unused card-format helper pinned by the card_data contract tests — the web layer no longer formats
 def format_duration(minutes: int | None) -> str:
     """Match the old ``houses.web.card_data._dur`` format.
 
@@ -87,14 +89,20 @@ def format_duration(minutes: int | None) -> str:
     r = minutes % MINUTES_PER_HOUR
     return f"{h}h{r}" if r else f"{h}h"
 
+def commute_band(minutes: int | None, bracknell: bool = False) -> str:
+    """'good'/'warn'/'bad' band of a commute ('unknown' for None) — the
+    single home of the threshold bands; colour and score both encode it."""
+    if minutes is None:
+        return "unknown"
+    good = GOOD_COMMUTE_MIN if bracknell else STANDARD_GOOD_COMMUTE_MIN
+    warn = BRACKNELL_WARN_COMMUTE_MIN if bracknell else STANDARD_WARN_COMMUTE_MIN
+    return "good" if minutes < good else "warn" if minutes <= warn else "bad"
+
 
 def commute_colour(minutes: int | None, bracknell: bool = False) -> str:
     """Match the old ``houses.web.card_data.commute_colour`` thresholds."""
-    if minutes is None:
-        return "muted"
-    if bracknell:
-        return "good" if minutes < GOOD_COMMUTE_MIN else "warn" if minutes <= BRACKNELL_WARN_COMMUTE_MIN else "bad"
-    return "good" if minutes < STANDARD_GOOD_COMMUTE_MIN else "warn" if minutes <= STANDARD_WARN_COMMUTE_MIN else "bad"
+    band = commute_band(minutes, bracknell)
+    return "muted" if band == "unknown" else band
 
 
 def _replace_transit_group(
@@ -195,18 +203,18 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         *,
         options: CommuteSelectorOptions,
     ):
-        self.origin = options.origin
-        self.poi = options.poi
-        self.walk_result = options.walk_result
-        self.transit_result = options.transit_result
-        self.drive_result = options.drive_result
-        self.is_child = options.is_child
-        self._max_walk = 30
-        self._max_walk_node = options.max_walk_node
+        self.origin: Node = options.origin
+        self.poi: Node = options.poi
+        self.walk_result: Node | None = options.walk_result
+        self.transit_result: Node = options.transit_result
+        self.drive_result: Node | None = options.drive_result
+        self.is_child: bool = options.is_child
+        self._max_walk: int = 30
+        self._max_walk_node: Node | None = options.max_walk_node
         # Empty (unset/legacy) means every mode is acceptable — the old
         # behaviour.  An explicit set EXCLUDES the modes the person won't
         # accept: a train-only POI is never scored by a car route.
-        self._acceptable_modes = tuple(options.acceptable_modes)
+        self._acceptable_modes: tuple[str, ...] = tuple(options.acceptable_modes)
         # deps mirror the alternatives: an excluded mode is not a
         # dependency — a permanently pending excluded node must not stall
         # the selector's refresh (same freeze the bootstrap fix addresses).
@@ -220,6 +228,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if self._mode_acceptable("transit"):
             deps.append(options.transit_result)
             names.append("transit")
+        # lucidlint: ignore duplicate-block parallel per-mode dep registration — each alternative (walk/drive) gates
         if options.walk_result is not None and self._mode_acceptable("walk"):
             deps.append(options.walk_result)
             names.append("walk")
@@ -367,8 +376,8 @@ class MergeRailFareNode(DerivedNode[Commute]):
     """
 
     def __init__(self, node_id: str, *, commute_result, rail_fare_result):
-        self._commute_result = commute_result
-        self._rail_fare_result = rail_fare_result
+        self._commute_result: Node = commute_result
+        self._rail_fare_result: Node = rail_fare_result
         super().__init__(
             node_id,
             Commute,

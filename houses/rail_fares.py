@@ -41,8 +41,8 @@ class RailFareRegistry:
         station_registry: StationRegistry | None = None,
         _fares_csv: Path | None = None,
     ):
-        self._station_registry = station_registry or StationRegistry()
-        self._fares_csv = _fares_csv or Path("data/rail_fares.csv")
+        self._station_registry: StationRegistry = station_registry or StationRegistry()
+        self._fares_csv: Path = _fares_csv or Path("data/rail_fares.csv")
         self._fares_by_pair: dict[frozenset[str], Money] | None = None
 
     def _load(self) -> None:

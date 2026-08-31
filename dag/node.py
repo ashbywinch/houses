@@ -55,6 +55,7 @@ class PersistedNodeMixin(Generic[T]):
         self._computed_at: datetime | None = None
         self._persisted_at: datetime | None = None
         self._db_created_at: str = ""
+        # lucidlint: ignore duplicate-block field-default initializer table — each line seeds a distinct piece of
         self._loaded_dep_timestamps: dict[str, str] = {}
         self._persisted_code_version: str | None = None
         self._retry_at: datetime | None = None
@@ -168,11 +169,11 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
     """Base class for all DAG nodes."""
 
     def __init__(self, node_id: str, value_type: type[T], source_url: str = "") -> None:
-        self._id = node_id
-        self._value_type = value_type
-        self._source_url = source_url
-        self._adapter = _get_adapter(value_type)
-        self.changed = Signal()
+        self._id: str = node_id
+        self._value_type: type[T] = value_type
+        self._source_url: str = source_url
+        self._adapter: TypeAdapter = _get_adapter(value_type)
+        self.changed: Signal = Signal()
         raw = node_id.rstrip("/").split("/")[-1]
         self.display_name: str = _humanify(raw)
         super().__init__()
@@ -291,36 +292,24 @@ def _with_ops(self, other):
     return _to_expr(self), _to_expr(other)
 
 
-def _node_add(self, other):
-    a, b = _with_ops(self, other)
-    return Add(a, b)
-
-
-def _node_sub(self, other):
-    a, b = _with_ops(self, other)
-    return Sub(a, b)
+def _node_binop(expr_cls):
+    """Build a binary Node operator that coerces both sides to Expressions."""
+    def op(self, other):
+        a, b = _with_ops(self, other)
+        return expr_cls(a, b)
+    return op
 
 
 def _node_neg(self):
     return Negate(Ref(self))
 
 
-def _node_mul(self, other):
-    a, b = _with_ops(self, other)
-    return Mul(a, b)
-
-
-def _node_div(self, other):
-    a, b = _with_ops(self, other)
-    return Div(a, b)
-
-
-Node.__add__ = _node_add
+Node.__add__ = _node_add = _node_binop(Add)
 Node.__radd__ = _node_add  # same — addition is commutative
-Node.__sub__ = _node_sub
+Node.__sub__ = _node_binop(Sub)
 Node.__rsub__ = lambda self, other: _to_expr(other) - _to_expr(self)
 Node.__neg__ = _node_neg
-Node.__mul__ = _node_mul
-Node.__rmul__ = _node_mul  # same — multiplication is commutative
-Node.__truediv__ = _node_div
+Node.__mul__ = _node_binop(Mul)
+Node.__rmul__ = _node_binop(Mul)  # same — multiplication is commutative
+Node.__truediv__ = _node_binop(Div)
 Node.__rtruediv__ = lambda self, other: _to_expr(other) / _to_expr(self)

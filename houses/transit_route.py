@@ -75,6 +75,7 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
         return None
 
 
+# lucidlint: ignore record-shape TfL journeys wire payload — serialization boundary owns the shape (coding-standards.md)
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 async def apply_park_and_ride_to_journeys(
     data: dict,

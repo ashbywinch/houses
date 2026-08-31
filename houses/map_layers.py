@@ -48,10 +48,12 @@ def _union_layer(union_path: Path):
     layers = []
     if union and union.get("components"):
         layers.append(
+                # lucidlint: ignore record-shape wire-format dict — Leaflet layer config serialized to the map page JS
             {
                 "name": "Train: Pimlico & Aldgate",
                 "color": _COLORS[0],
                 "polygons": [
+                # lucidlint: ignore record-shape wire-format dict — Leaflet polygon entry serialized to the map page JS
                     {"coords": c["outline"], "name": "", "url": ""}
                     for c in union["components"]
                     if c.get("outline")
@@ -73,10 +75,12 @@ def _drive_layers(drive_path: Path):
         if label:
             drive_by_label.setdefault(label, []).append(s)
     layers.extend(
+        # lucidlint: ignore record-shape wire-format dict — Leaflet layer config serialized to the map page JS
         {
             "name": f"Drive to {label}",
             "color": _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)],
             "polygons": [
+                # lucidlint: ignore record-shape wire-format dict — Leaflet polygon entry serialized to the map page JS
                 {"coords": s["polygon"], "name": s.get("name", ""), "url": s.get("rightmove_url", "")}
                 for s in searches
             ],
@@ -92,6 +96,7 @@ def _intersection_layer(intersection_path: Path):
     layers = []
     if intersection and intersection.get("searches"):
         layers.append(
+            # lucidlint: ignore record-shape wire-format dict — Leaflet layer config serialized to the map page JS
             {
                 "name": "Where we could live",
                 "color": "#c90",
@@ -101,6 +106,7 @@ def _intersection_layer(intersection_path: Path):
                 # isochrone layers start hidden behind the key.
                 "visibleByDefault": True,
                 "polygons": [
+                    # lucidlint: ignore record-shape wire-format dict — Leaflet polygon entry serialized to the map
                     {"coords": s["polygon"], "name": s.get("name", ""), "url": s.get("rightmove_url", "")}
                     for s in intersection["searches"]
                 ],

@@ -108,7 +108,7 @@ class SettingsNode(DerivedNode[dict]):
     """
 
     def __init__(self, node_id: str, *, setting_nodes: dict[str, UserInputNode]):
-        self._setting_nodes = setting_nodes
+        self._setting_nodes: dict[str, UserInputNode] = setting_nodes
         deps = tuple(setting_nodes.values())
         super().__init__(node_id, dict, deps)
 

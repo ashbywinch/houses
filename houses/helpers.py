@@ -11,6 +11,7 @@ HTTP_5XX_START = 500
 HTTP_5XX_END = 600
 
 
+# lucidlint: ignore unused referenced only by the transient-retry regression tests — prod retry policy lives in
 def is_transient_error(exc: Exception) -> bool:
     """True if the error is likely transient (rate limit, server error, network issue)."""
     if isinstance(exc, HttpError):
