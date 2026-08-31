@@ -112,7 +112,6 @@ make stop                       # Stop dev server + frontend
 |------|---------|
 | `houses/server.py` | FastAPI app, endpoints, `_run_enrichment()` orchestration |
 | `houses/services.py` | Service protocols + `Services` DI container (real/fake) |
-| `houses/context.py` | ContextVar per-request state (Rightmove scrape fn) |
 | `houses/settings.py` | Env-var configuration |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
 | `houses/nodes/` | New DAG node implementations (replaces old `houses/model/` DAG) |

@@ -11,7 +11,6 @@ recovery, success applies scraped data to the DAG, auth.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
@@ -19,7 +18,6 @@ from houses.database import get_connection
 from houses.scrape_queue import MAX_ATTEMPTS, STALE_CLAIM_SECONDS
 from houses.server import app
 from houses.web.auth import _make_session_cookie
-from tests.helpers import inject_server_deps
 
 client = TestClient(app)
 client.cookies.set(
@@ -46,8 +44,7 @@ def _scrape_rows() -> list[dict]:
 def _add_url_only() -> dict:
     """Add a URL-only property with a scrape that returns nothing; returns
     the claim response's job dict."""
-    with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
-        client.post("/api/properties", json={"url": URL})
+    client.post("/api/properties", json={"url": URL})
     return client.post("/api/scrapes/claim").json()["job"]
 
 
@@ -63,13 +60,10 @@ class TestEnqueueOnFailedScrape:
         returns immediately with scrape_pending and the queue owns the
         work (regression: the add hung for the scrape on environments
         with a local scraper)."""
-        scrape_fn = AsyncMock(return_value=None)
-        with inject_server_deps(scrape_fn=scrape_fn):
-            resp = client.post("/api/properties", json={"url": URL})
+        resp = client.post("/api/properties", json={"url": URL})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body.get("scrape_pending") is True, body
-        scrape_fn.assert_not_called()
         rows = _scrape_rows()
         assert len(rows) == 1
         assert rows[0]["rid"] == RID
@@ -80,31 +74,25 @@ class TestEnqueueOnFailedScrape:
     def test_address_payload_add_does_not_enqueue(self):
         """A payload WITH the user's own facts is seeded directly — no
         scrape, no enqueue (the scrape is for URL-only adds)."""
-        scrape_fn = AsyncMock(return_value=None)
-        with inject_server_deps(scrape_fn=scrape_fn):
-            resp = client.post(
-                "/api/properties",
-                json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000},
-            )
+        resp = client.post(
+            "/api/properties",
+            json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000},
+        )
         assert resp.status_code == 200, resp.text
         assert resp.json().get("scrape_pending") is None
-        scrape_fn.assert_not_called()
         assert _scrape_rows() == []
 
     def test_duplicate_enqueue_is_skipped(self):
         """Re-adding the same property while a job is active must not
         create a second job."""
-        scrape_fn = AsyncMock(return_value=None)
-        with inject_server_deps(scrape_fn=scrape_fn):
-            client.post("/api/properties", json={"url": URL})
-            client.post("/api/properties", json={"url": URL})
+        client.post("/api/properties", json={"url": URL})
+        client.post("/api/properties", json={"url": URL})
         assert len(_scrape_rows()) == 1
 
 
 class TestClaim:
     def test_claim_returns_due_job_and_marks_in_progress(self):
-        with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
-            client.post("/api/properties", json={"url": URL})
+        client.post("/api/properties", json={"url": URL})
         resp = client.post("/api/scrapes/claim")
         assert resp.status_code == 200, resp.text
         job = resp.json()["job"]

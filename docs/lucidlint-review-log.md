@@ -328,9 +328,11 @@ suppressed = wire formats, keyed collections, deliberate parallel structure.
   gitignored search) since before 0.2.0.
 - `dag/http_error.is_transient_http_error` — dead duplicate of the houses one.
 - `houses/web/broadcaster.push_rid` — only producer of a queue that never fires.
-- `houses/context.py get_scrape_fn` — zero callers; the `_request_scrape_fn`
-  seam is now write-only (tests set it, nothing reads it — their scrape fakes
-  are no-ops). Seam removal + test refactor flagged for follow-up.
+- `houses/context.py` — deleted whole: `get_scrape_fn` had zero callers and
+  the `_request_scrape_fn` seam was write-only (tests set it, nothing reads
+  it — their scrape fakes were no-ops). Removed the module, the
+  `inject_server_deps` helper, and the `scrape_fn=` machinery at all 12 call
+  sites in three test files (suite green after).
 - `houses/nodes/transit._build_details` (zero callers) and
   `_route_description` (prod-orphaned; only test_old_behaviour pinned it) +
   its two test cases + the now-orphaned `_LEG_MODE_LABEL`.
