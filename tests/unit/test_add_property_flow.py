@@ -7,7 +7,6 @@ job + the property's DAG rows + registry entry).
 """
 
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +21,6 @@ from houses.web.auth import (
     # minting entry point; same pattern as tools/deploy/release.sh
     _make_session_cookie,
 )
-from tests.helpers import inject_server_deps
 
 client = TestClient(app)
 client.cookies.set(
@@ -43,8 +41,7 @@ def _scrape_rows() -> list[dict]:
 
 def _add_url_only() -> None:
     """Add a URL-only property whose scrape yields nothing (job enqueued)."""
-    with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
-        client.post("/api/properties", json={"url": URL})
+    client.post("/api/properties", json={"url": URL})
 
 
 class TestSummaryCarriesScrapeState:
@@ -61,8 +58,7 @@ class TestSummaryCarriesScrapeState:
     def test_no_scrape_key_when_no_job():
         """A payload WITH the user's own facts never enqueues — no scrape
         state on the summary."""
-        with inject_server_deps(scrape_fn=AsyncMock()):
-            client.post("/api/properties", json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP"})
+        client.post("/api/properties", json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP"})
         all_props = client.get("/api/properties/all").json()
         assert "scrape" not in all_props[RID]
 
@@ -304,8 +300,7 @@ class TestPostcodeOnlyPayload:
         scrape lands (PR #68 review, data loss)."""
         from dag.scheduler import flush_processor
 
-        with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
-            resp = client.post("/api/properties", json={"url": URL, "postcode": "SL7 2AP"})
+        resp = client.post("/api/properties", json={"url": URL, "postcode": "SL7 2AP"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["data"]["postcode"] == "SL7 2AP"
         await flush_processor()

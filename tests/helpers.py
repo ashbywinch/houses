@@ -5,7 +5,6 @@ Every fake returns minimal data so tests don't hit real APIs.
 
 from __future__ import annotations
 
-import contextlib
 from typing import Any, override
 
 from money import Money
@@ -32,25 +31,6 @@ from houses.services import (
     TownDescService,
     WalkabilityService,
 )
-
-
-@contextlib.contextmanager
-def inject_server_deps(*, scrape_fn=None):
-    """Temporarily inject per-request server dependencies.
-
-    ``scrape_fn`` replaces the Rightmove scraper (the ``houses.context``
-    seam) — no monkeypatching of module globals.
-    """
-    from houses import context as _ctx
-
-    saved = []
-    if scrape_fn is not None:
-        saved.append((_ctx._request_scrape_fn, _ctx._request_scrape_fn.set(scrape_fn)))
-    try:
-        yield
-    finally:
-        for var, token in reversed(saved):
-            var.reset(token)
 
 # ── Individual Fake Services ──────────────────────────────────────────
 

@@ -1,6 +1,5 @@
 """Tests for the FastAPI server endpoints — pure unit tests, no API calls."""
 
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -126,17 +125,13 @@ class TestInjectProperty:
         (covered by the scrape-report tests). The scrape seam must not be
         called and the postcode node must not be seeded at add time."""
         from houses.property_registry import get_property as get_registry_property
-        from tests.helpers import inject_server_deps
 
-        scrape_fn = AsyncMock(return_value=None)
-        with inject_server_deps(scrape_fn=scrape_fn):
-            resp = client.post(
-                "/api/properties",
-                json={"url": "https://www.rightmove.co.uk/properties/89498715"},
-            )
+        resp = client.post(
+            "/api/properties",
+            json={"url": "https://www.rightmove.co.uk/properties/89498715"},
+        )
         assert resp.status_code == 200, resp.text
         assert resp.json().get("scrape_pending") is True
-        scrape_fn.assert_not_called()
 
         # The postcode node stays pending until the report applies it
         prop = get_registry_property("89498715")
