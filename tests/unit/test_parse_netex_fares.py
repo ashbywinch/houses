@@ -102,6 +102,7 @@ class TestGating:
         xml = f'<PublicationDelivery {NS}><FareZone id="Z1"/></PublicationDelivery>'
         assert parse_netex_fares(xml, []) is None
 
+    # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
     def test_no_stop_near_station_returns_none(self):
         xml = XML.replace("51.5", "55.0")  # Foo Lane moved far from any station
         assert parse_netex_fares(xml, [STATION_AT_FOO]) is None
@@ -126,6 +127,7 @@ class TestStops:
         zones = {c["zone"]: c for c in result["stop_coords"]}
         assert set(zones) == {"Z1", "Z2", "Z3"}
 
+    # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
     def test_duplicate_stop_ids_first_wins(self):
         xml = XML.replace(
             "</PublicationDelivery>",
@@ -142,6 +144,7 @@ class TestStops:
         coords = [c for c in result["stop_coords"] if c["name"] == "Foo Lane"]
         assert coords and coords[0]["lat"] == 51.5  # first definition kept
 
+    # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
     def test_naptan_fallback_fills_missing_coordinates(self):
         xml = XML.replace("<Latitude>51.5</Latitude>\n    <Longitude>-0.1</Longitude>\n    ", "")
         result = parse_netex_fares(xml, [STATION_AT_FOO], naptan={"010A": (51.5, -0.1)})

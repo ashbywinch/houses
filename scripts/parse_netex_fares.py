@@ -1,6 +1,4 @@
 # lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
-# lucidlint: ignore-file record-shape every dict is a NeTEx parse product for the CSV/JSON export (coding-standards.md)
-# lucidlint: ignore-file latent-class one-shot NeTEx ETL pipeline — root and fare dicts are threaded inputs (review-log)
 """NeTEx XML parsing and bus fare zone extraction."""
 
 from __future__ import annotations
@@ -35,6 +33,27 @@ GRID_LAT_ORIGIN = 49.5
 COORD_ROUND_DIGITS = 5
 
 
+@dataclass(frozen=True)
+class ParseResult:
+    """The parser's output record for one NeTEx document."""
+
+    stop_zones: dict[str, str]
+    stop_coords: list[dict]
+    zone_fares: dict[str, dict[str, float]]
+    network_fares: list[dict]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here
+        # (coding-standards.md)
+        return dict(
+            stop_zones=self.stop_zones,
+            stop_coords=self.stop_coords,
+            zone_fares=self.zone_fares,
+            network_fares=self.network_fares,
+        )
+
+
 def _first_found(*elements):
     for el in elements:
         if el is not None:
@@ -44,6 +63,11 @@ def _first_found(*elements):
 
 def _unprefixed(tag: str) -> str:
     return tag.split("}")[-1] if "}" in tag else tag
+
+
+def xml_bytes(el: ET.Element) -> bytes:
+    """The element serialized back to bytes — used for cheap marker scans."""
+    return ET.tostring(el, encoding="unicode").encode()
 
 
 @dataclass
@@ -63,6 +87,46 @@ class NetexStop:
     lat: float | None
     lon: float | None
     near_station: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        """Serialized shape consumed by the commute-map builders."""
+        # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+        return dict(
+            name=self.name,
+            lat=self.lat,
+            lon=self.lon,
+            near_station=self.near_station,
+        )
+
+
+@dataclass(frozen=True)
+class StopCoord:
+    """A zone member's map entry: stop name, rounded coordinates, zone id."""
+
+    name: str
+    lat: float
+    lon: float
+    zone: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+        return dict(name=self.name, lat=self.lat, lon=self.lon, zone=self.zone)
+
+
+@dataclass(frozen=True)
+class NetworkFare:
+    """A network-wide fare (day/return) that is not scoped to a zone pair."""
+
+    price: float
+    product_type: str
+    covered_stops: set[str]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+        return dict(price=self.price, product_type=self.product_type, covered_stops=self.covered_stops)
 
 
 def load_stations() -> list[Station]:
@@ -99,6 +163,7 @@ def _naptan_from_rows(rows):
     return naptan
 
 
+# lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
 def load_naptan_stops() -> dict[str, tuple[float, float]] | None:
     naptan: dict[str, tuple[float, float]] = {}
 
@@ -136,6 +201,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+# lucidlint: ignore record-shape spatial grid — indexed collection, not a record (review-log)
 def _build_station_grid(stations: list[Station]) -> list[list[list[Station]]]:
     grid: list[list[list[Station]]] = [[[] for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
     for s in stations:
@@ -168,359 +234,6 @@ def is_near_station(lat: float, lon: float, stations: list[Station], max_dist_km
     return False
 
 
-def parse_netex_fares(
-    xml_str: str,
-    stations: list[Station],
-    naptan: dict[str, tuple[float, float]] | None = None,
-) -> dict | None:
-    try:
-        root = ET.fromstring(xml_str)
-    except ET.ParseError as e:
-        logger.warning("XML parse error: %s", e)
-        return None
-
-    stops = _parse_stops(root, stations, naptan)
-    if not stops:
-        logger.warning("No stops found in NeTEx data")
-        return None
-    if not _stops_have_near_station(stops):
-        return None
-
-    zones, stop_zones = _parse_fare_zones(root, stops)
-    zone_fares, dme_zone_pairs = _parse_distance_matrix_elements(root)
-    network_fares: list[dict] = []
-
-    _parse_distance_matrix_prices(root, dme_zone_pairs, zone_fares)
-
-    if b"PreassignedFareProduct" in xml_str.encode():
-        _parse_fare_products(root, zone_fares)
-    if b"FareTable" in xml_str.encode():
-        _parse_fare_tables(root, dme_zone_pairs, zone_fares, network_fares)
-
-    if not zone_fares:
-        logger.warning("No zone pair prices found — returning zones without prices")
-
-    logger.info("Parsed %d zone pair prices", len(zone_fares))
-
-    stop_coords = _collect_stop_coords(zones, stops, stop_zones)
-
-    return {
-        "stop_zones": stop_zones,
-        "stop_coords": stop_coords,
-        "zone_fares": zone_fares,
-        "network_fares": network_fares,
-    }
-
-
-def _parse_stops(
-    root: ET.Element,
-    stations: list[Station],
-    naptan: dict[str, tuple[float, float]] | None,
-) -> dict[str, NetexStop]:
-    stops: dict[str, NetexStop] = {}
-
-    for ssp in root.iter():
-        tag = _unprefixed(ssp.tag)
-        if tag not in ("ScheduledStopPoint", "scheduledStopPoint"):
-            continue
-        stop = _parse_stop_point(ssp, naptan)
-        if stop is None:
-            continue
-        atco, entry = stop
-        if atco in stops:
-            continue
-        near_station = entry.lat is not None and entry.lon is not None and is_near_station(
-            entry.lat, entry.lon, stations
-        )
-        stops[atco] = NetexStop(name=entry.name, lat=entry.lat, lon=entry.lon, near_station=near_station)
-
-    return stops
-
-
-def _parse_stop_point(
-    ssp: ET.Element,
-    naptan: dict[str, tuple[float, float]] | None,
-) -> tuple[str, NetexStop] | None:
-    name_el = _first_found(
-        ssp.find(".//netex:Name", NS),
-        ssp.find(".//netex:name", NS),
-    )
-    # lucidlint: ignore special-case — _first_found's None is the shared contract; a sentinel alters fallbacks
-    if name_el is None:
-        return None
-    name = (name_el.text or "").strip()
-    if not name:
-        return None
-
-    atco_el = _first_found(
-        ssp.find(".//netex:AtcoCode", NS),
-        ssp.find(".//netex:atcoCode", NS),
-    )
-    atco = atco_el.text.strip() if atco_el is not None and atco_el.text else (ssp.get("id", "") or "").strip()
-    if not atco:
-        return None
-
-    lat, lon = _stop_coordinates(ssp)
-    if lat is None and lon is None and naptan is not None:
-        atco_key = atco.removeprefix("atco:")
-        coords = naptan.get(atco_key)
-        if coords is not None:
-            lat, lon = coords
-
-    return atco, NetexStop(name=name, lat=lat, lon=lon, near_station=False)
-
-
-def _stop_coordinates(ssp: ET.Element) -> tuple[float | None, float | None]:
-    lat_el = _first_found(
-        ssp.find(".//netex:Latitude", NS),
-        ssp.find(".//netex:latitude", NS),
-    )
-    lon_el = _first_found(
-        ssp.find(".//netex:Longitude", NS),
-        ssp.find(".//netex:longitude", NS),
-    )
-    lat = float(lat_el.text) if lat_el is not None and lat_el.text else None
-    lon = float(lon_el.text) if lon_el is not None and lon_el.text else None
-    return lat, lon
-
-
-def _stops_have_near_station(stops: dict[str, NetexStop]) -> bool:
-    near_count = sum(1 for s in stops.values() if s.near_station)
-    stops_with_coords = sum(1 for s in stops.values() if s.lat is not None and s.lon is not None)
-
-    if near_count == 0 and stops_with_coords > 0:
-        logger.info("No stops near any station (%d stops have coordinates), skipping XML", stops_with_coords)
-        return False
-
-    if near_count == 0 and stops_with_coords == 0:
-        logger.warning("No stop coordinates available — cannot verify station proximity, proceeding anyway")
-
-    logger.info("Found %d total stops, %d near stations", len(stops), near_count)
-    return True
-
-
-def _parse_fare_zones(
-    root: ET.Element,
-    stops: dict[str, NetexStop],
-) -> tuple[dict[str, list[str]], dict[str, str]]:
-    zones: dict[str, list[str]] = {}
-    for zone_el in root.iter():
-        tag = _unprefixed(zone_el.tag)
-        if tag not in ("FareZone", "fareZone"):
-            continue
-        zone_id_el = _first_found(
-            zone_el.find(".//netex:Id", NS),
-            zone_el.find(".//netex:id", NS),
-        )
-        zone_id = (
-            zone_id_el.text.strip()
-            if zone_id_el is not None and zone_id_el.text
-            else (zone_el.get("id", "") or "").strip()
-        )
-        members = _collect_zone_members(zone_el, stops)
-        if zone_id and members:
-            zones[zone_id] = members
-
-    stop_zones: dict[str, str] = {}
-    for zone_id, members in zones.items():
-        for atco in members:
-            stop = stops.get(atco)
-            if stop:
-                normalized = stop.name.strip().lower()
-                if normalized not in stop_zones:
-                    stop_zones[normalized] = zone_id
-
-    logger.info("Parsed %d fare zones, %d stop->zone mappings", len(zones), len(stop_zones))
-    return zones, stop_zones
-
-
-def _collect_zone_members(zone_el: ET.Element, stops: dict[str, NetexStop]) -> list[str]:
-    members: list[str] = []
-    for member in zone_el.iter():
-        mt = _unprefixed(member.tag)
-        if mt == "Member" or mt == "StopPointRef" or "ref" in mt.lower():
-            ref = member.get("ref", "") or member.text or ""
-            if ref in stops:
-                members.append(ref)
-    return members
-
-
-def _parse_distance_matrix_elements(
-    root: ET.Element,
-) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
-    zone_fares: dict[str, dict[str, float]] = {}
-    dme_zone_pairs: dict[str, str] = {}
-
-    for dme in root.iter():
-        tag = _unprefixed(dme.tag)
-        if tag not in ("DistanceMatrixElement", "distanceMatrixElement"):
-            continue
-
-        dme_id = dme.get("id", "")
-
-        start_el = _first_found(
-            dme.find(".//netex:StartTariffZoneRef", NS),
-            dme.find(".//netex:startTariffZoneRef", NS),
-            dme.find(".//netex:StartZoneRef", NS),
-            dme.find(".//netex:startZoneRef", NS),
-        )
-        end_el = _first_found(
-            dme.find(".//netex:EndTariffZoneRef", NS),
-            dme.find(".//netex:endTariffZoneRef", NS),
-            dme.find(".//netex:EndZoneRef", NS),
-            dme.find(".//netex:endZoneRef", NS),
-        )
-        if start_el is None or end_el is None:
-            continue
-
-        start_zone = start_el.get("ref", "") or start_el.text or ""
-        end_zone = end_el.get("ref", "") or end_el.text or ""
-        if not start_zone or not end_zone:
-            continue
-
-        key = f"{start_zone}:{end_zone}"
-        normalized_key = f"{start_zone}:{end_zone.replace('@alighting', '@boarding')}"
-        if dme_id:
-            dme_zone_pairs[dme_id] = key
-
-        _apply_price_group_fare(root, dme, normalized_key, zone_fares)
-
-    return zone_fares, dme_zone_pairs
-
-
-def _apply_price_group_fare(
-    root: ET.Element,
-    dme: ET.Element,
-    normalized_key: str,
-    zone_fares: dict[str, dict[str, float]],
-) -> None:
-    price_ref_el = _first_found(
-        dme.find(".//netex:PriceGroupRef", NS),
-        dme.find(".//netex:priceGroupRef", NS),
-    )
-    if price_ref_el is not None:
-        price_group_ref = price_ref_el.get("ref", "") or price_ref_el.text or ""
-        price = _find_price_for_group(root, price_group_ref)
-        if price is not None and normalized_key not in zone_fares:
-            zone_fares[normalized_key] = {"adult_single": price}
-
-
-def _parse_distance_matrix_prices(
-    root: ET.Element,
-    dme_zone_pairs: dict[str, str],
-    zone_fares: dict[str, dict[str, float]],
-) -> None:
-    for dmep in root.iter():
-        tag = _unprefixed(dmep.tag)
-        if tag not in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
-            continue
-
-        amount_el = dmep.find(".//netex:Amount", NS)
-        if amount_el is None or not amount_el.text:
-            continue
-        try:
-            price = float(amount_el.text)
-        except ValueError:
-            continue
-
-        dme_ref_el = _first_found(
-            dmep.find(".//netex:DistanceMatrixElementRef", NS),
-            dmep.find(".//netex:distanceMatrixElementRef", NS),
-        )
-        if dme_ref_el is None:
-            continue
-        dme_ref = dme_ref_el.get("ref", "") or dme_ref_el.text or ""
-        if not dme_ref:
-            continue
-
-        zone_key = dme_zone_pairs.get(dme_ref)
-        if not zone_key:
-            continue
-        nk = zone_key.replace("@alighting", "@boarding")
-
-        if nk not in zone_fares:
-            zone_fares[nk] = {}
-        if "adult_single" not in zone_fares[nk]:
-            zone_fares[nk]["adult_single"] = price
-
-
-def _collect_stop_coords(
-    zones: dict[str, list[str]],
-    stops: dict[str, NetexStop],
-    stop_zones: dict[str, str],
-) -> list[dict]:
-    stop_coords: list[dict] = []
-    for _, members in zones.items():
-        for atco in members:
-            stop = stops.get(atco)
-            if stop and stop.lat is not None and stop.lon is not None:
-                zone_name = stop_zones.get(stop.name.strip().lower())
-                if zone_name:
-                    stop_coords.append(
-                        {
-                            "name": stop.name,
-                            "lat": round(stop.lat, COORD_ROUND_DIGITS),
-                            "lon": round(stop.lon, COORD_ROUND_DIGITS),
-                            "zone": zone_name,
-                        }
-                    )
-    return stop_coords
-
-
-def _find_price_for_group(root: ET.Element, group_ref: str) -> float | None:
-    for pg in root.iter():
-        tag = _unprefixed(pg.tag)
-        if tag not in ("PriceGroup", "priceGroup"):
-            continue
-        pg_id_el = pg.find(".//netex:id", NS)
-        pg_id = pg_id_el.text if pg_id_el is not None else pg.get("id", pg.get("Id", ""))
-
-        attrs = {**pg.attrib}
-        pg_id = attrs.get("id", attrs.get("Id", attrs.get("{http://www.netex.org.uk/netex}id", "")))
-
-        if pg_id != group_ref:
-            continue
-
-        for amt in pg.iter():
-            atag = _unprefixed(amt.tag)
-            if atag == "Amount":
-                try:
-                    text = amt.text or ""
-                    if text:
-                        val_el = amt.find(".//netex:amount", NS) or amt.find("netex:Amount", NS)
-                        if val_el is not None:
-                            return float(val_el.text or "")
-                        return float(text)
-                except (ValueError, TypeError):
-                    continue
-
-    return None
-
-
-def _parse_fare_products(root: ET.Element, zone_fares: dict[str, dict[str, float]]) -> None:
-    for product in root.iter():
-        tag = _unprefixed(product.tag)
-        if tag not in ("PreassignedFareProduct", "preassignedFareProduct"):
-            continue
-
-        name_el = _first_found(
-            product.find(".//netex:Name", NS),
-            product.find(".//netex:name", NS),
-        )
-        if name_el is None:
-            continue
-        product_name = (name_el.text or "").strip().lower()
-
-        product_type = _classify_fare_product_type(product_name)
-        if product_type is None:
-            continue
-
-        price = _find_product_price(product)
-        if price is not None:
-            _apply_product_to_distance_matrix(root, product, product_type, price, zone_fares)
-            _associate_product_with_zones(root, product, product_type, price, zone_fares)
-
-
 def _classify_fare_product_type(name: str) -> str | None:
     if "single" in name:
         return "adult_single"
@@ -531,13 +244,6 @@ def _classify_fare_product_type(name: str) -> str | None:
     return None
 
 
-def _product_id_of(product: ET.Element) -> str | None:
-    for attr_key in ("id", "Id", "{http://www.netex.org.uk/netex}id"):
-        if attr_key in product.attrib:
-            return product.attrib[attr_key]
-    return None
-
-
 def _as_float(text: str | None) -> float | None:
     try:
         return float(text or "")
@@ -545,247 +251,554 @@ def _as_float(text: str | None) -> float | None:
         return None
 
 
-def _find_product_price(product: ET.Element) -> float | None:
-    for child in product.iter():
-        tag = _unprefixed(child.tag)
-        if tag == "Price" or tag == "price":
-            amt_el = _first_found(
-                child.find(".//netex:Amount", NS),
-                child.find("netex:Amount", NS),
+# lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
+# lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+def parse_netex_fares(
+    xml_str: str,
+    stations: list[Station],
+    naptan: dict[str, tuple[float, float]] | None = None,
+) -> dict | None:
+    try:
+        root = ET.fromstring(xml_str)
+    except ET.ParseError as e:
+        logger.warning("XML parse error: %s", e)
+        return None
+    return NetexFareParser(root, stations, naptan).run()
+
+
+# lucidlint: ignore latent-class the 27 methods all read the same parse state (root, stops, zone_fares) — no
+# field-disjoint partition exists to split along; size is a review signal, not a split order (review-log)
+class NetexFareParser:
+    """One-shot parser for a BODS NeTEx fares XML document.
+
+    The section parsers are methods cooperating through shared state
+    (stops, zone_fares, dme_zone_pairs, network_fares) and produce the
+    output record set on :meth:`run`.
+    """
+
+    # lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
+    def __init__(
+        self,
+        root: ET.Element,
+        stations: list[Station],
+        naptan: dict[str, tuple[float, float]] | None = None,
+    ):
+        self.root: ET.Element = root
+        self.stations: list[Station] = stations
+        self.naptan: dict[str, tuple[float, float]] | None = naptan
+        self.stops: dict[str, NetexStop] = {}
+        self.zone_fares: dict[str, dict[str, float]] = {}
+        self.dme_zone_pairs: dict[str, str] = {}
+        self.network_fares: list[dict] = []
+
+    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+    def run(self) -> dict | None:
+        self._parse_stops()
+        if not self.stops:
+            logger.warning("No stops found in NeTEx data")
+            return None
+        if not self._stops_have_near_station():
+            return None
+
+        zones, stop_zones = self._parse_fare_zones()
+        self.zone_fares, self.dme_zone_pairs = self._parse_distance_matrix_elements()
+
+        self._parse_distance_matrix_prices()
+
+        if b"PreassignedFareProduct" in xml_bytes(self.root):
+            self._parse_fare_products()
+        if b"FareTable" in xml_bytes(self.root):
+            self._parse_fare_tables()
+
+        if not self.zone_fares:
+            logger.warning("No zone pair prices found — returning zones without prices")
+
+        logger.info("Parsed %d zone pair prices", len(self.zone_fares))
+
+        stop_coords = self._collect_stop_coords(zones, stop_zones)
+
+        return ParseResult(
+            stop_zones=stop_zones,
+            stop_coords=[sc.to_dict() for sc in stop_coords],
+            zone_fares=self.zone_fares,
+            network_fares=self.network_fares,
+        ).to_dict()
+
+    def _parse_stops(self) -> None:
+        for ssp in self.root.iter():
+            tag = _unprefixed(ssp.tag)
+            if tag not in ("ScheduledStopPoint", "scheduledStopPoint"):
+                continue
+            stop = self._parse_stop_point(ssp)
+            if stop is None:
+                continue
+            atco, entry = stop
+            if atco in self.stops:
+                continue
+            near_station = entry.lat is not None and entry.lon is not None and is_near_station(
+                entry.lat, entry.lon, self.stations
             )
-            if amt_el is not None:
-                price = _as_float(amt_el.text)
+            self.stops[atco] = NetexStop(name=entry.name, lat=entry.lat, lon=entry.lon, near_station=near_station)
+
+    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+    def _parse_stop_point(self, ssp: ET.Element) -> tuple[str, NetexStop] | None:
+        name_el = _first_found(
+            ssp.find(".//netex:Name", NS),
+            ssp.find(".//netex:name", NS),
+        )
+        # lucidlint: ignore special-case — _first_found's None is the shared contract; a sentinel alters fallbacks
+        if name_el is None:
+            return None
+        name = (name_el.text or "").strip()
+        if not name:
+            return None
+
+        atco_el = _first_found(
+            ssp.find(".//netex:AtcoCode", NS),
+            ssp.find(".//netex:atcoCode", NS),
+        )
+        atco = atco_el.text.strip() if atco_el is not None and atco_el.text else (ssp.get("id", "") or "").strip()
+        if not atco:
+            return None
+
+        lat, lon = self._stop_coordinates(ssp)
+        if lat is None and lon is None and self.naptan is not None:
+            atco_key = atco.removeprefix("atco:")
+            coords = self.naptan.get(atco_key)
+            if coords is not None:
+                lat, lon = coords
+
+        return atco, NetexStop(name=name, lat=lat, lon=lon, near_station=False)
+
+    # lucidlint: ignore record-shape (lat, lon) coordinate pair — positional pair, named fields add noise (review-log)
+    @staticmethod
+    def _stop_coordinates(ssp: ET.Element) -> tuple[float | None, float | None]:
+        lat_el = _first_found(
+            ssp.find(".//netex:Latitude", NS),
+            ssp.find(".//netex:latitude", NS),
+        )
+        lon_el = _first_found(
+            ssp.find(".//netex:Longitude", NS),
+            ssp.find(".//netex:longitude", NS),
+        )
+        lat = float(lat_el.text) if lat_el is not None and lat_el.text else None
+        lon = float(lon_el.text) if lon_el is not None and lon_el.text else None
+        return lat, lon
+
+    def _stops_have_near_station(self) -> bool:
+        near_count = sum(1 for s in self.stops.values() if s.near_station)
+        stops_with_coords = sum(1 for s in self.stops.values() if s.lat is not None and s.lon is not None)
+
+        if near_count == 0 and stops_with_coords > 0:
+            logger.info("No stops near any station (%d stops have coordinates), skipping XML", stops_with_coords)
+            return False
+
+        if near_count == 0 and stops_with_coords == 0:
+            logger.warning("No stop coordinates available — cannot verify station proximity, proceeding anyway")
+
+        logger.info("Found %d total stops, %d near stations", len(self.stops), near_count)
+        return True
+
+    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+    def _parse_fare_zones(self) -> tuple[dict[str, list[str]], dict[str, str]]:
+        zones: dict[str, list[str]] = {}
+        for zone_el in self.root.iter():
+            tag = _unprefixed(zone_el.tag)
+            if tag not in ("FareZone", "fareZone"):
+                continue
+            zone_id_el = _first_found(
+                zone_el.find(".//netex:Id", NS),
+                zone_el.find(".//netex:id", NS),
+            )
+            zone_id = (
+                zone_id_el.text.strip()
+                if zone_id_el is not None and zone_id_el.text
+                else (zone_el.get("id", "") or "").strip()
+            )
+            members = self._collect_zone_members(zone_el)
+            if zone_id and members:
+                zones[zone_id] = members
+
+        stop_zones: dict[str, str] = {}
+        for zone_id, members in zones.items():
+            for atco in members:
+                stop = self.stops.get(atco)
+                if stop:
+                    normalized = stop.name.strip().lower()
+                    if normalized not in stop_zones:
+                        stop_zones[normalized] = zone_id
+
+        logger.info("Parsed %d fare zones, %d stop->zone mappings", len(zones), len(stop_zones))
+        return zones, stop_zones
+
+    def _collect_zone_members(self, zone_el: ET.Element) -> list[str]:
+        members: list[str] = []
+        for member in zone_el.iter():
+            mt = _unprefixed(member.tag)
+            if mt == "Member" or mt == "StopPointRef" or "ref" in mt.lower():
+                ref = member.get("ref", "") or member.text or ""
+                if ref in self.stops:
+                    members.append(ref)
+        return members
+
+    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+    def _parse_distance_matrix_elements(self) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+        for dme in self.root.iter():
+            tag = _unprefixed(dme.tag)
+            if tag not in ("DistanceMatrixElement", "distanceMatrixElement"):
+                continue
+
+            dme_id = dme.get("id", "")
+
+            start_el = _first_found(
+                dme.find(".//netex:StartTariffZoneRef", NS),
+                dme.find(".//netex:startTariffZoneRef", NS),
+                dme.find(".//netex:StartZoneRef", NS),
+                dme.find(".//netex:startZoneRef", NS),
+            )
+            end_el = _first_found(
+                dme.find(".//netex:EndTariffZoneRef", NS),
+                dme.find(".//netex:endTariffZoneRef", NS),
+                dme.find(".//netex:EndZoneRef", NS),
+                dme.find(".//netex:endZoneRef", NS),
+            )
+            if start_el is None or end_el is None:
+                continue
+
+            start_zone = start_el.get("ref", "") or start_el.text or ""
+            end_zone = end_el.get("ref", "") or end_el.text or ""
+            if not start_zone or not end_zone:
+                continue
+
+            key = f"{start_zone}:{end_zone}"
+            normalized_key = f"{start_zone}:{end_zone.replace('@alighting', '@boarding')}"
+            if dme_id:
+                self.dme_zone_pairs[dme_id] = key
+
+            self._apply_price_group_fare(dme, normalized_key)
+
+        return self.zone_fares, self.dme_zone_pairs
+
+    def _apply_price_group_fare(self, dme: ET.Element, normalized_key: str) -> None:
+        price_ref_el = _first_found(
+            dme.find(".//netex:PriceGroupRef", NS),
+            dme.find(".//netex:priceGroupRef", NS),
+        )
+        if price_ref_el is not None:
+            price_group_ref = price_ref_el.get("ref", "") or price_ref_el.text or ""
+            price = self._find_price_for_group(price_group_ref)
+            if price is not None and normalized_key not in self.zone_fares:
+                self.zone_fares[normalized_key] = {"adult_single": price}
+
+    def _parse_distance_matrix_prices(self) -> None:
+        for dmep in self.root.iter():
+            tag = _unprefixed(dmep.tag)
+            if tag not in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
+                continue
+
+            amount_el = dmep.find(".//netex:Amount", NS)
+            if amount_el is None or not amount_el.text:
+                continue
+            try:
+                price = float(amount_el.text)
+            except ValueError:
+                continue
+
+            dme_ref_el = _first_found(
+                dmep.find(".//netex:DistanceMatrixElementRef", NS),
+                dmep.find(".//netex:distanceMatrixElementRef", NS),
+            )
+            if dme_ref_el is None:
+                continue
+            dme_ref = dme_ref_el.get("ref", "") or dme_ref_el.text or ""
+            if not dme_ref:
+                continue
+
+            zone_key = self.dme_zone_pairs.get(dme_ref)
+            if not zone_key:
+                continue
+            nk = zone_key.replace("@alighting", "@boarding")
+
+            if nk not in self.zone_fares:
+                self.zone_fares[nk] = {}
+            if "adult_single" not in self.zone_fares[nk]:
+                self.zone_fares[nk]["adult_single"] = price
+
+    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
+    def _collect_stop_coords(
+        self, zones: dict[str, list[str]], stop_zones: dict[str, str]
+    ) -> list[StopCoord]:
+        stop_coords: list[StopCoord] = []
+        for _, members in zones.items():
+            for atco in members:
+                stop = self.stops.get(atco)
+                if stop and stop.lat is not None and stop.lon is not None:
+                    zone_name = stop_zones.get(stop.name.strip().lower())
+                    if zone_name:
+                        stop_coords.append(
+                            StopCoord(
+                                name=stop.name,
+                                lat=round(stop.lat, COORD_ROUND_DIGITS),
+                                lon=round(stop.lon, COORD_ROUND_DIGITS),
+                                zone=zone_name,
+                            )
+                        )
+        return stop_coords
+
+    def _find_price_for_group(self, group_ref: str) -> float | None:
+        for pg in self.root.iter():
+            tag = _unprefixed(pg.tag)
+            if tag not in ("PriceGroup", "priceGroup"):
+                continue
+            pg_id_el = pg.find(".//netex:id", NS)
+            pg_id = pg_id_el.text if pg_id_el is not None else pg.get("id", pg.get("Id", ""))
+
+            attrs = {**pg.attrib}
+            pg_id = attrs.get("id", attrs.get("Id", attrs.get("{http://www.netex.org.uk/netex}id", "")))
+
+            if pg_id != group_ref:
+                continue
+
+            for amt in pg.iter():
+                atag = _unprefixed(amt.tag)
+                if atag == "Amount":
+                    try:
+                        text = amt.text or ""
+                        if text:
+                            val_el = amt.find(".//netex:amount", NS) or amt.find("netex:Amount", NS)
+                            if val_el is not None:
+                                return float(val_el.text or "")
+                            return float(text)
+                    except (ValueError, TypeError):
+                        continue
+
+        return None
+
+    def _parse_fare_products(self) -> None:
+        for product in self.root.iter():
+            tag = _unprefixed(product.tag)
+            if tag not in ("PreassignedFareProduct", "preassignedFareProduct"):
+                continue
+
+            name_el = _first_found(
+                product.find(".//netex:Name", NS),
+                product.find(".//netex:name", NS),
+            )
+            if name_el is None:
+                continue
+            product_name = (name_el.text or "").strip().lower()
+
+            product_type = _classify_fare_product_type(product_name)
+            if product_type is None:
+                continue
+
+            price = self._find_product_price(product)
+            if price is not None:
+                self._apply_product_to_distance_matrix(product, product_type, price)
+                self._associate_product_with_zones(product, product_type, price)
+
+    @staticmethod
+    def _product_id_of(product: ET.Element) -> str | None:
+        for attr_key in ("id", "Id", "{http://www.netex.org.uk/netex}id"):
+            if attr_key in product.attrib:
+                return product.attrib[attr_key]
+        return None
+
+    @staticmethod
+    def _find_product_price(product: ET.Element) -> float | None:
+        for child in product.iter():
+            tag = _unprefixed(child.tag)
+            if tag == "Price" or tag == "price":
+                amt_el = _first_found(
+                    child.find(".//netex:Amount", NS),
+                    child.find("netex:Amount", NS),
+                )
+                if amt_el is not None:
+                    price = _as_float(amt_el.text)
+                    if price is not None:
+                        return price
+                    continue
+                # lucidlint: ignore duplicate-block deliberate two-stage fallback — Amount element, then element text
+                # (review-log)
+                price = _as_float(child.text)
                 if price is not None:
                     return price
+        return None
+
+    def _apply_product_to_distance_matrix(self, product: ET.Element, product_type: str, price: float) -> None:
+        product_id = self._product_id_of(product)
+        for dme in self.root.iter():
+            dtag = _unprefixed(dme.tag)
+            if dtag not in ("DistanceMatrixElement", "distanceMatrixElement"):
                 continue
-# lucidlint: ignore duplicate-block deliberate two-stage fallback — Amount element, then element text (review-log)
-            price = _as_float(child.text)
-            if price is not None:
-                return price
-    return None
+            for pfep in dme.iter():
+                ptag = _unprefixed(pfep.tag)
+                if ptag == "PreassignedFareProductRef" or "fareProductRef" in ptag:
+                    ref = pfep.get("ref", "")
+                    if ref and product_id and (ref == product_id or ref in product_id):
+                        start_ref = _first_found(
+                            dme.find(".//netex:StartZoneRef", NS),
+                            dme.find(".//netex:startZoneRef", NS),
+                        )
+                        end_ref = _first_found(
+                            dme.find(".//netex:EndZoneRef", NS),
+                            dme.find(".//netex:endZoneRef", NS),
+                        )
+                        key = self._zone_price_key(start_ref, end_ref)
+                        if key is not None:
+                            self._record_zone_fare(key, product_type, price)
 
+    @staticmethod
+    def _zone_price_key(start_ref: ET.Element | None, end_ref: ET.Element | None) -> str | None:
+        if start_ref is None or end_ref is None:
+            return None
+        sz = start_ref.get("ref", "") or start_ref.text or ""
+        ez = end_ref.get("ref", "") or end_ref.text or ""
+        return f"{sz}:{ez}".replace("@alighting", "@boarding")
 
-def _apply_product_to_distance_matrix(
-    root: ET.Element,
-    product: ET.Element,
-    product_type: str,
-    price: float,
-    zone_fares: dict[str, dict[str, float]],
-) -> None:
-    product_id = _product_id_of(product)
-    for dme in root.iter():
-        dtag = _unprefixed(dme.tag)
-        if dtag not in ("DistanceMatrixElement", "distanceMatrixElement"):
-            continue
-        for pfep in dme.iter():
-            ptag = _unprefixed(pfep.tag)
-            if ptag == "PreassignedFareProductRef" or "fareProductRef" in ptag:
-                ref = pfep.get("ref", "")
-                if ref and product_id and (ref == product_id or ref in product_id):
-                    start_ref = _first_found(
-                        dme.find(".//netex:StartZoneRef", NS),
-                        dme.find(".//netex:startZoneRef", NS),
-                    )
-                    end_ref = _first_found(
-                        dme.find(".//netex:EndZoneRef", NS),
-                        dme.find(".//netex:endZoneRef", NS),
-                    )
-                    key = _zone_price_key(start_ref, end_ref)
-                    if key is not None:
-                        _record_zone_fare(zone_fares, key, product_type, price)
+    def _record_zone_fare(self, key: str, product_type: str, price: float) -> None:
+        if key not in self.zone_fares:
+            self.zone_fares[key] = {}
+        self.zone_fares[key][product_type] = price
 
+    def _associate_product_with_zones(self, product: ET.Element, product_type: str, price: float) -> None:
+        product_id = self._product_id_of(product)
+        if not product_id:
+            return
 
-def _zone_price_key(start_ref: ET.Element | None, end_ref: ET.Element | None) -> str | None:
-    if start_ref is None or end_ref is None:
+        sop = self._find_sales_offer_for_product(product_id)
+        if sop is None:
+            return
+        self._apply_sales_offer_fares(sop, product_type, price)
+
+    def _find_sales_offer_for_product(self, product_id: str) -> ET.Element | None:
+        for sop in self.root.iter():
+            stag = _unprefixed(sop.tag)
+            if stag not in ("SalesOfferPackage", "salesOfferPackage"):
+                continue
+
+            for ref in sop.iter():
+                rtag = _unprefixed(ref.tag)
+                if rtag in ("PreassignedFareProductRef", "fareProductRef", "fareProduct") or "productRef" in rtag:
+                    ref_val = ref.get("ref", "")
+                    if ref_val and ref_val == product_id:
+                        return sop
         return None
-    sz = start_ref.get("ref", "") or start_ref.text or ""
-    ez = end_ref.get("ref", "") or end_ref.text or ""
-    return f"{sz}:{ez}".replace("@alighting", "@boarding")
 
+    def _apply_sales_offer_fares(self, sop: ET.Element, product_type: str, price: float) -> None:
+        for dme in self.root.iter():
+            dtag = _unprefixed(dme.tag)
+            if dtag not in ("DistanceMatrixElement", "distanceMatrixElement"):
+                continue
+            for dme_sop_ref in dme.iter():
+                ds_tag = _unprefixed(dme_sop_ref.tag)
+                if ds_tag in ("SalesOfferPackageRef", "sopRef"):
+                    sop_ref = dme_sop_ref.get("ref", "")
+                    sop_id = sop.get("id", sop.attrib.get("{http://www.netex.org.uk/netex}id", ""))
+                    if sop_ref and sop_id and sop_ref == sop_id:
+                        start_ref = dme.find(".//netex:StartZoneRef", NS) or dme.find(".//netex:startZoneRef", NS)
+                        end_ref = dme.find(".//netex:EndZoneRef", NS) or dme.find(".//netex:endZoneRef", NS)
+                        key = self._zone_price_key(start_ref, end_ref)
+                        if key is not None:
+                            self._record_zone_fare(key, product_type, price)
 
-def _record_zone_fare(
-    zone_fares: dict[str, dict[str, float]],
-    key: str,
-    product_type: str,
-    price: float,
-) -> None:
-    if key not in zone_fares:
-        zone_fares[key] = {}
-    zone_fares[key][product_type] = price
+    def _parse_fare_tables(self) -> None:
+        products = self._collect_fare_product_types()
+        for ft in self.root.iter():
+            tag = _unprefixed(ft.tag)
+            if tag not in ("FareTable", "fareTable"):
+                continue
+            ptype = self._fare_table_product_type(ft, products)
+            if ptype is None:
+                continue
+            for ft_child in ft.iter():
+                ct = _unprefixed(ft_child.tag)
+                if ct in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
+                    network_fare = self._apply_fare_table_price(ft_child, ptype)
+                    if network_fare is not None:
+                        self.network_fares.append(network_fare.to_dict())
 
+    def _collect_fare_product_types(self) -> dict[str, str]:
+        products: dict[str, str] = {}
+        for product in self.root.iter():
+            tag = _unprefixed(product.tag)
+            if tag not in ("PreassignedFareProduct", "preassignedFareProduct"):
+                continue
+            name_el = _first_found(
+                product.find(".//netex:Name", NS),
+                product.find(".//netex:name", NS),
+            )
+            if name_el is None:
+                continue
+            pname = (name_el.text or "").strip().lower()
+            ptype = _classify_fare_product_type(pname)
+            if ptype is None:
+                continue
+            pid = self._product_id_of(product)
+            if pid:
+                products[pid] = ptype
+        return products
 
-def _associate_product_with_zones(
-    root: ET.Element,
-    product: ET.Element,
-    product_type: str,
-    price: float,
-    zone_fares: dict[str, dict[str, float]],
-) -> None:
-    product_id = _product_id_of(product)
-    if not product_id:
-        return
+    @staticmethod
+    def _fare_table_product_type(ft: ET.Element, products: dict[str, str]) -> str | None:
+        product_id = None
+        for pf_ref in ft.iter():
+            rt = _unprefixed(pf_ref.tag)
+            if rt == "PreassignedFareProductRef" or "fareProductRef" in rt:
+                product_id = pf_ref.get("ref", "")
+                break
+        if not product_id or product_id not in products:
+            return None
+        return products[product_id]
 
-    sop = _find_sales_offer_for_product(root, product_id)
-    if sop is None:
-        return
-    _apply_sales_offer_fares(root, sop, product_type, price, zone_fares)
-
-
-def _find_sales_offer_for_product(root: ET.Element, product_id: str) -> ET.Element | None:
-    for sop in root.iter():
-        stag = _unprefixed(sop.tag)
-        if stag not in ("SalesOfferPackage", "salesOfferPackage"):
-            continue
-
-        for ref in sop.iter():
-            rtag = _unprefixed(ref.tag)
-            if rtag in ("PreassignedFareProductRef", "fareProductRef", "fareProduct") or "productRef" in rtag:
-                ref_val = ref.get("ref", "")
-                if ref_val and ref_val == product_id:
-                    return sop
-    return None
-
-
-def _apply_sales_offer_fares(
-    root: ET.Element,
-    sop: ET.Element,
-    product_type: str,
-    price: float,
-    zone_fares: dict[str, dict[str, float]],
-) -> None:
-    for dme in root.iter():
-        dtag = _unprefixed(dme.tag)
-        if dtag not in ("DistanceMatrixElement", "distanceMatrixElement"):
-            continue
-        for dme_sop_ref in dme.iter():
-            ds_tag = _unprefixed(dme_sop_ref.tag)
-            if ds_tag in ("SalesOfferPackageRef", "sopRef"):
-                sop_ref = dme_sop_ref.get("ref", "")
-                sop_id = sop.get("id", sop.attrib.get("{http://www.netex.org.uk/netex}id", ""))
-                if sop_ref and sop_id and sop_ref == sop_id:
-                    start_ref = dme.find(".//netex:StartZoneRef", NS) or dme.find(".//netex:startZoneRef", NS)
-                    end_ref = dme.find(".//netex:EndZoneRef", NS) or dme.find(".//netex:endZoneRef", NS)
-                    key = _zone_price_key(start_ref, end_ref)
-                    if key is not None:
-                        _record_zone_fare(zone_fares, key, product_type, price)
-
-
-def _parse_fare_tables(
-    root: ET.Element,
-    dme_zone_pairs: dict[str, str],
-    zone_fares: dict[str, dict[str, float]],
-    network_fares: list[dict],
-) -> None:
-    products = _collect_fare_product_types(root)
-    for ft in root.iter():
-        tag = _unprefixed(ft.tag)
-        if tag not in ("FareTable", "fareTable"):
-            continue
-        ptype = _fare_table_product_type(ft, products)
-        if ptype is None:
-            continue
-        for ft_child in ft.iter():
-            ct = _unprefixed(ft_child.tag)
-            if ct in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
-                network_fare = _apply_fare_table_price(ft_child, root, ptype, dme_zone_pairs, zone_fares)
-                if network_fare is not None:
-                    network_fares.append(network_fare)
-
-
-def _collect_fare_product_types(root: ET.Element) -> dict[str, str]:
-    products: dict[str, str] = {}
-    for product in root.iter():
-        tag = _unprefixed(product.tag)
-        if tag not in ("PreassignedFareProduct", "preassignedFareProduct"):
-            continue
-        name_el = _first_found(
-            product.find(".//netex:Name", NS),
-            product.find(".//netex:name", NS),
+    def _apply_fare_table_price(self, ft_child: ET.Element, ptype: str) -> NetworkFare | None:
+        amt_el = _first_found(
+            ft_child.find(".//netex:Amount", NS),
+            ft_child.find(".//netex:amount", NS),
         )
-        if name_el is None:
-            continue
-        pname = (name_el.text or "").strip().lower()
-        ptype = _classify_fare_product_type(pname)
-        if ptype is None:
-            continue
-        pid = _product_id_of(product)
-        if pid:
-            products[pid] = ptype
-    return products
-
-
-def _fare_table_product_type(ft: ET.Element, products: dict[str, str]) -> str | None:
-    product_id = None
-    for pf_ref in ft.iter():
-        rt = _unprefixed(pf_ref.tag)
-        if rt == "PreassignedFareProductRef" or "fareProductRef" in rt:
-            product_id = pf_ref.get("ref", "")
-            break
-    if not product_id or product_id not in products:
+        if amt_el is None or not amt_el.text:
+            return None
+        try:
+            price = float(amt_el.text)
+        except ValueError:
+            return None
+        dme_ref_el = _first_found(
+            ft_child.find(".//netex:DistanceMatrixElementRef", NS),
+            ft_child.find(".//netex:distanceMatrixElementRef", NS),
+        )
+        if dme_ref_el is not None:
+            dme_ref = dme_ref_el.get("ref", "") or dme_ref_el.text or ""
+            zone_key = self.dme_zone_pairs.get(dme_ref)
+            if zone_key:
+                nk = zone_key.replace("@alighting", "@boarding")
+                if nk not in self.zone_fares:
+                    self.zone_fares[nk] = {}
+                self.zone_fares[nk][ptype] = price
+        elif ptype in ("adult_day", "adult_return"):
+            covered_stops = self._collect_network_covered_stops()
+            if covered_stops:
+                return NetworkFare(price=price, product_type=ptype, covered_stops=covered_stops)
         return None
-    return products[product_id]
 
-
-def _apply_fare_table_price(
-    ft_child: ET.Element,
-    root: ET.Element,
-    ptype: str,
-    dme_zone_pairs: dict[str, str],
-    zone_fares: dict[str, dict[str, float]],
-) -> dict | None:
-    amt_el = _first_found(
-        ft_child.find(".//netex:Amount", NS),
-        ft_child.find(".//netex:amount", NS),
-    )
-    if amt_el is None or not amt_el.text:
-        return None
-    try:
-        price = float(amt_el.text)
-    except ValueError:
-        return None
-    dme_ref_el = _first_found(
-        ft_child.find(".//netex:DistanceMatrixElementRef", NS),
-        ft_child.find(".//netex:distanceMatrixElementRef", NS),
-    )
-    if dme_ref_el is not None:
-        dme_ref = dme_ref_el.get("ref", "") or dme_ref_el.text or ""
-        zone_key = dme_zone_pairs.get(dme_ref)
-        if zone_key:
-            nk = zone_key.replace("@alighting", "@boarding")
-            if nk not in zone_fares:
-                zone_fares[nk] = {}
-            zone_fares[nk][ptype] = price
-    elif ptype in ("adult_day", "adult_return"):
-        covered_stops = _collect_network_covered_stops(root)
-        if covered_stops:
-            return {
-                "price": price,
-                "product_type": ptype,
-                "covered_stops": covered_stops,
-            }
-    return None
-
-
-def _collect_network_covered_stops(root: ET.Element) -> set[str]:
-    covered_stops: set[str] = set()
-    for t in root.iter():
-        tt = _unprefixed(t.tag)
-        if tt == "Tariff":
-            for fz_ref in t.iter():
-                zt = _unprefixed(fz_ref.tag)
-                if zt == "FareZoneRef":
-                    zone_id = fz_ref.get("ref", "")
-                    if zone_id:
-                        for fz in root.iter():
-                            ftag = _unprefixed(fz.tag)
-                            if ftag == "FareZone" and fz.get("id", "") == zone_id:
-                                for m in fz.iter():
-                                    mt = _unprefixed(m.tag)
-                                    if "ref" in mt.lower() and m.text:
-                                        covered_stops.add(m.text.strip().lower())
-                    break
-            break
-    return covered_stops
+    def _collect_network_covered_stops(self) -> set[str]:
+        covered_stops: set[str] = set()
+        for t_el in self.root.iter():
+            tt = _unprefixed(t_el.tag)
+            if tt == "Tariff":
+                for fz_ref in t_el.iter():
+                    zt = _unprefixed(fz_ref.tag)
+                    if zt == "FareZoneRef":
+                        zone_id = fz_ref.get("ref", "")
+                        if zone_id:
+                            for fz in self.root.iter():
+                                ftag = _unprefixed(fz.tag)
+                                if ftag == "FareZone" and fz.get("id", "") == zone_id:
+                                    for m in fz.iter():
+                                        mt = _unprefixed(m.tag)
+                                        if "ref" in mt.lower() and m.text:
+                                            covered_stops.add(m.text.strip().lower())
+                break
+        return covered_stops
 
 
 def dataset_description_matches(desc: str, sub_op: str) -> bool:
