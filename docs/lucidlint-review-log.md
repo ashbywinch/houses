@@ -338,11 +338,23 @@ suppressed = wire formats, keyed collections, deliberate parallel structure.
   its two test cases + the now-orphaned `_LEG_MODE_LABEL`.
 - `houses/nodes/commute_breakdown_node._persons_source` — assigned, never read.
 
-### Known accepted warning
+### Scope decision (user, 2026-08-31): wire formats are not an exemption
 
-`scripts/parse_netex_fares.py:1 [warn][bulk-suppression]` — the census counts
-the file's latent-class suppressions, which are policy (one-shot ETL, see the
-ignore-file markers at the top of the file). Never fails; left visible
+The 0.2.0 ruling ("serialized payload dicts suppressed as wire format by
+design") is **overturned by the user**: "We can perfectly well have a class
+with a to_dict method." Wire-format payloads become typed records with
+`to_dict()` at the serialization boundary; raw dict literals are still
+findings. ~420 existing wire-format suppressions across the repo cite the
+old standard and are candidates for the same conversion — re-triage in a
+future sweep, newest files first.
+
+First application: `scripts/parse_netex_fares.py` — converted to
+`NetexFareParser` (one class, the section parsers as methods — kills the
+latent-class clumps), `StopCoord`/`NetworkFare`/`ParseResult` records with
+`to_dict()`. Characterization suite (16 tests) written FIRST and kept green
+throughout; all three `ignore-file` exemptions removed; gate clean with no
+exemptions in the file. Suppressions remain only for keyed collections and
+positional coordinate pairs (ceremony, not wire format).
 
 ### 0.4.0 suppression census
 
