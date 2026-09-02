@@ -81,6 +81,42 @@ class IsochronePaths:
 api_router = APIRouter(prefix="/api")
 
 
+@dataclass(frozen=True)
+class _WhatIfOutcome:
+    """One property's what-if evaluation as serialized to the response."""
+
+    succeeded: bool
+    group: object | None = None
+    error: str | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        d: dict = dict(succeeded=self.succeeded)
+        if self.succeeded:
+            d["group"] = self.group
+        else:
+            d["error"] = self.error
+        return d
+
+
+@dataclass(frozen=True)
+class _StalenessReport:
+    """Per-property node staleness as serialized to the response."""
+
+    rid: str
+    nodes: dict
+    fresh: bool
+    error: str | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape conditional error key — the wire shape owns the omission (coding-standards.md)
+        d = dict(rid=self.rid, nodes=self.nodes, fresh=self.fresh)
+        if self.error is not None:
+            d["error"] = self.error
+        return d
+
+
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     # Extract session cookie from WebSocket headers — Starlette's Request
@@ -149,18 +185,21 @@ async def _what_if_results(merged: list):
         attempts = await evaluate(group_node, overrides={"persons": merged})
         group_att = attempts[group_node._id]
         if group_att.succeeded and group_att.value is not None:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            results[rid] = {"succeeded": True, "group": group_att.value_or_none()}
+            results[rid] = _WhatIfOutcome(
+                succeeded=True, group=group_att.value_or_none()
+            ).to_dict()
         elif group_att.impossible:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            results[rid] = {"succeeded": False, "error": group_att.error}
+            results[rid] = _WhatIfOutcome(
+                succeeded=False, error=group_att.error
+            ).to_dict()
         else:
-            results[rid] = {"succeeded": False, "error": "pending"}
+            results[rid] = _WhatIfOutcome(succeeded=False, error="pending").to_dict()
     return results
 
 
 @api_router.post("/what-if")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape incoming request body is the caller's wire
+# payload — parsed defensively at the boundary (coding-standards.md)
 async def post_what_if(body: dict):
     """Pure what-if: evaluate every property's total monthly cost under
     candidate person settings (Part D).
@@ -193,8 +232,9 @@ async def staleness_check(rid: str, nodes: str = ""):
     """
     prop = _registry_property(rid)
     if prop is None:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {"rid": rid, "nodes": {}, "fresh": False, "error": "property not found"}
+        return _StalenessReport(
+            rid=rid, nodes={}, fresh=False, error="property not found"
+        ).to_dict()
 
     node_list = [n.strip() for n in nodes.split(",") if n.strip()]
     detail = await prop.to_json_detail()
@@ -217,8 +257,7 @@ async def staleness_check(rid: str, nodes: str = ""):
             stale_map[nid] = True
 
     fresh = not any(stale_map.values())
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"rid": rid, "nodes": stale_map, "fresh": fresh}
+    return _StalenessReport(rid=rid, nodes=stale_map, fresh=fresh).to_dict()
 
 
 def _commute_score(minutes: int | None, bracknell: bool = False) -> int:

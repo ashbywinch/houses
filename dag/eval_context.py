@@ -31,7 +31,7 @@ def staged_attempt(node_id: str) -> Attempt | None:
     return ctx.get(node_id) if ctx is not None else None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape keyed collection, not a record — overrides maps variable node ids to candidate values
 def build_staging(overrides: dict[str, Any]) -> dict[str, Attempt]:
     """Seed a staging map from ``node_id -> candidate value`` overrides.
 
