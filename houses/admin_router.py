@@ -6,6 +6,9 @@ stays focused on the property/user API surface.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Request
 
 import dag.scheduler
@@ -15,8 +18,22 @@ from houses.web.auth import effective_session_user
 admin_router = APIRouter(prefix="/api")
 
 
+@dataclass(frozen=True)
+class _RegenerateReport:
+    """Regenerate outcome as serialized into the HTTP response (wire shape)."""
+
+    matched: int
+    regenerated: list[dict[str, Any]]
+    skipped: list[dict[str, Any]]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict IS the boundary — wire shape owned here (coding-standards.md)
+        return dict(matched=self.matched, regenerated=self.regenerated, skipped=self.skipped)
+
 @admin_router.post("/admin/regenerate")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape incoming request body is the caller's
+# wire payload — parsed defensively at the boundary (coding-standards.md)
 async def regenerate_nodes(body: dict, request: Request):
     """Force-recompute DerivedNodes whose persisted results are stale in
     CODE, not by timestamp — e.g. after a computation change (the A3
@@ -45,5 +62,6 @@ async def regenerate_nodes(body: dict, request: Request):
     registry = dag.scheduler.get_scheduler().registered_nodes()
     matched = nodes_matching(patterns, registry.values())
     regenerated, skipped = await force_regenerate(matched)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"matched": len(matched), "regenerated": regenerated, "skipped": skipped}
+    return _RegenerateReport(
+        matched=len(matched), regenerated=regenerated, skipped=skipped
+    ).to_dict()

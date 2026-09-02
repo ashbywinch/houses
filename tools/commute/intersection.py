@@ -74,6 +74,83 @@ PolygonsByLabel = dict[str, list[list[GeoPoint]]]
 SearchRecord = dict[str, Any]
 IntersectionPayload = dict[str, Any]
 
+@dataclass(frozen=True)
+class _SearchFilters:
+    """Rightmove filter keys as serialized into a search record (wire shape)."""
+
+    min_beds: int
+    property_type: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
+        return dict(min_beds=self.min_beds, property_type=self.property_type)
+
+
+@dataclass(frozen=True)
+class _IntersectionSearch:
+    """One outlined polygon search as serialized into intersection.json (wire shape)."""
+
+    id: str
+    name: str
+    polygon: list[tuple[float, float]]
+    filters: _SearchFilters
+    rightmove_url: str
+    threshold_min: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
+        return dict(
+            id=self.id,
+            name=self.name,
+            polygon=self.polygon,
+            filters=self.filters.to_dict(),
+            rightmove_url=self.rightmove_url,
+            threshold_min=self.threshold_min,
+        )
+
+
+@dataclass(frozen=True)
+class _IntersectionMetadata:
+    """The metadata block as serialized into intersection.json (wire shape)."""
+
+    engine_version: str
+    profile: str
+    threshold_min: int
+    cell_km: float
+    transit_buffer_km: float
+    sources: list[str]
+    generated_at: str
+    count: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
+        return dict(
+            engine_version=self.engine_version,
+            profile=self.profile,
+            threshold_min=self.threshold_min,
+            cell_km=self.cell_km,
+            transit_buffer_km=self.transit_buffer_km,
+            sources=self.sources,
+            generated_at=self.generated_at,
+            count=self.count,
+        )
+
+
+@dataclass(frozen=True)
+class _IntersectionPayload:
+    """The intersection payload as serialized into intersection.json (wire shape)."""
+
+    metadata: _IntersectionMetadata
+    searches: list[_IntersectionSearch]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
+        return dict(metadata=self.metadata.to_dict(), searches=[s.to_dict() for s in self.searches])
+
 
 def common_grid(drive_raw: dict, cell_km: Quantity = DEFAULT_CELL_KM_Q) -> Grid:
     """One grid over the overlap of the driving regions.
@@ -98,7 +175,7 @@ def common_grid(drive_raw: dict, cell_km: Quantity = DEFAULT_CELL_KM_Q) -> Grid:
     return Grid.from_cell_km(bbox, cell_km.to("km").magnitude)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape incoming wire payload — station records parsed defensively (coding-standards.md)
 def transit_cells(
     kept_stations: list[dict], grid: Grid, buffer_km: Quantity = DEFAULT_BUFFER_KM_Q
 ) -> set[GridCell]:
@@ -149,32 +226,30 @@ def _missing_destinations(drive_raw: DriveRawPayload, by_label: PolygonsByLabel)
     return missing
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _intersection_searches(
     kept: set[GridCell], grid: Grid, thresholds: list[int], min_beds: int, property_type: str
-) -> list[dict]:
+) -> list[_IntersectionSearch]:
     """Kept cells → outlined polygon searches.
 
     The island filter (main shed always kept) is the drive toolchain's rule —
     one implementation, shared, so tuning it can't diverge.
     """
-    searches: list[dict] = []
+    searches: list[_IntersectionSearch] = []
     for i, comp in enumerate(retained_components(kept), 1):
         loop = outer_loop(comp, grid)
         if loop is None:
             continue
         poly = [(round(p.lat, POLYLINE_DECIMALS), round(p.lon, POLYLINE_DECIMALS)) for p in loop]
         suffix = "" if i == 1 else f"-{i}"
-        searches.append(  # lucidlint: ignore record-shape wire-format dict — the intersection.json search record
-            {
-                "id": f"intersection-{min(thresholds):03d}{suffix}",
-                "name": "All commutes",
-                "polygon": poly,
-                # lucidlint: ignore record-shape wire-format dict — nested filters travel in the search record
-                "filters": {"min_beds": min_beds, "property_type": property_type},
-                "rightmove_url": build_search_url(poly, min_beds=min_beds, property_type=property_type),
-                "threshold_min": min(thresholds),
-            }
+        searches.append(
+            _IntersectionSearch(
+                id=f"intersection-{min(thresholds):03d}{suffix}",
+                name="All commutes",
+                polygon=poly,
+                filters=_SearchFilters(min_beds=min_beds, property_type=property_type),
+                rightmove_url=build_search_url(poly, min_beds=min_beds, property_type=property_type),
+                threshold_min=min(thresholds),
+            )
         )
     return searches
 
@@ -199,21 +274,19 @@ def build_payload(
         logger.warning(
             "destination(s) have no shed — the all-commutes intersection is empty: %s", ", ".join(missing)
         )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "metadata": {
-                "engine_version": ENGINE_VERSION,
-                "profile": "tfl-transit + driving-car",
-                "threshold_min": min(d["threshold_min"] for d in drive_raw["destinations"]),
-                "cell_km": cell_km.to("km").magnitude,
-                "transit_buffer_km": TRANSIT_BUFFER_KM,
-                "sources": ["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
-                "generated_at": options.generated_at,
-                "count": 0,
-            },
-            "searches": [],
-        }
+        return _IntersectionPayload(
+            metadata=_IntersectionMetadata(
+                engine_version=ENGINE_VERSION,
+                profile="tfl-transit + driving-car",
+                threshold_min=min(d["threshold_min"] for d in drive_raw["destinations"]),
+                cell_km=cell_km.to("km").magnitude,
+                transit_buffer_km=TRANSIT_BUFFER_KM,
+                sources=["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
+                generated_at=options.generated_at,
+                count=0,
+            ),
+            searches=[],
+        ).to_dict()
     drive_sets = [drive_cells(polys, grid) for polys in by_label.values()]
     kept = transit
     for ds in drive_sets:
@@ -221,21 +294,19 @@ def build_payload(
 
     thresholds = [d["threshold_min"] for d in drive_raw["destinations"]]
     searches = _intersection_searches(kept, grid, thresholds, min_beds, property_type)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        "metadata": {
-            "engine_version": ENGINE_VERSION,
-            "profile": "tfl-transit + driving-car",
-            "threshold_min": min(thresholds),
-            "cell_km": cell_km.to("km").magnitude,
-            "transit_buffer_km": TRANSIT_BUFFER_KM,
-            "sources": ["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
-            "generated_at": options.generated_at,
-            "count": len(searches),
-        },
-        "searches": searches,
-    }
+    return _IntersectionPayload(
+        metadata=_IntersectionMetadata(
+            engine_version=ENGINE_VERSION,
+            profile="tfl-transit + driving-car",
+            threshold_min=min(thresholds),
+            cell_km=cell_km.to("km").magnitude,
+            transit_buffer_km=TRANSIT_BUFFER_KM,
+            sources=["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
+            generated_at=options.generated_at,
+            count=len(searches),
+        ),
+        searches=searches,
+    ).to_dict()
 
 
 def _valid_polygon(poly) -> bool:
@@ -282,7 +353,7 @@ def _search_issues(s: SearchRecord, max_vertices: int) -> list[str]:
     return issues
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape incoming committed payload — parsed defensively at the boundary (coding-standards.md)
 def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:
     """Issues with the intersection payload; empty means it passes."""
     if not isinstance(payload, dict):
@@ -359,7 +430,7 @@ def _load_inputs(args) -> _CommittedInputs | int:
     return _CommittedInputs(shed=shed, raw=drive_raw, searches=drive_searches)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape built wire payload post-to_dict — json.dumps serializes it here (coding-standards.md)
 def _write_if_changed(out_path: Path, payload: dict) -> None:
     """Write the payload atomically, skipping a byte-identical committed copy."""
     existing = existing_payload(out_path)
