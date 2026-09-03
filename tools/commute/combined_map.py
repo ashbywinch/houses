@@ -54,6 +54,41 @@ _CSS_IMAGES = ("layers-2x.png", "layers.png", "marker-icon.png")
 _JS_ICONS = ("marker-icon.png", "marker-icon-2x.png", "marker-shadow.png")
 
 
+@dataclass(frozen=True)
+class _LeafletPolygon:
+    """One polygon entry of a Leaflet layer, serialized into the page."""
+
+    coords: list[tuple[float, float]]
+    url: str
+    name: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(coords=self.coords, url=self.url, name=self.name)
+
+
+@dataclass(frozen=True)
+class _LeafletLayer:
+    """One Leaflet layer config serialized into the map page JS."""
+
+    name: str
+    color: str
+    polygons: list[_LeafletPolygon]
+    fill_opacity: float | None = None
+    weight: int | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        d: dict = dict(name=self.name, color=self.color, polygons=[p.to_dict() for p in self.polygons])
+        if self.fill_opacity is not None:
+            d["fillOpacity"] = self.fill_opacity
+        if self.weight is not None:
+            d["weight"] = self.weight
+        return d
+
+
 def _data_uri(path: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
 
@@ -82,62 +117,47 @@ def build_html(  # lucidlint: ignore record-shape wire-format dict — serializa
     layers_js = []
     markers_js = []
     if transit:
-        layers_js.append(
-            js_safe_json(
-            # lucidlint: ignore record-shape wire-format dict — a Leaflet layer object serialized into the page
-                {
-                    "name": "Train: Pimlico & Aldgate",
-                    "color": _COLORS[0],
-                    # lucidlint: ignore record-shape wire-format dict — a Leaflet polygon object serialized into the
-                    "polygons": [{"coords": outline, "url": "", "name": ""} for outline in transit],
-                }
-            )
+        transit_layer = _LeafletLayer(
+            name="Train: Pimlico & Aldgate",
+            color=_COLORS[0],
+            polygons=[_LeafletPolygon(coords=outline, url="", name="") for outline in transit],
         )
+        layers_js.append(js_safe_json(transit_layer.to_dict()))
     for i, (label, searches) in enumerate(drive_by_label.items(), 1):
         color = _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)]
         # the search NAME is user-controlled (built from the destination label)
         # — HTML-escape it for the popup innerHTML
         polygons = [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            {"coords": s["polygon"], "url": s["rightmove_url"], "name": user_label(s["name"])} for s in searches
+            _LeafletPolygon(coords=s["polygon"], url=s["rightmove_url"], name=user_label(s["name"]))
+            for s in searches
         ]
         # each polygon carries its own url — never keyed by a serialised
         # polygon string (Python json.dumps(52.0) != JS JSON.stringify(52.0),
         # a whole class of silent popup-loss bugs)
-        layers_js.append(
-        # lucidlint: ignore record-shape wire-format dict — a Leaflet layer object serialized into the page
-            js_safe_json({"name": f"Drive to {user_label(label)}", "color": color, "polygons": polygons})
+        drive_layer = _LeafletLayer(
+            name=f"Drive to {user_label(label)}", color=color, polygons=polygons
         )
+        layers_js.append(js_safe_json(drive_layer.to_dict()))
         d = searches[0]["destination"]
         markers_js.append(
             js_safe_json(
-            # lucidlint: ignore record-shape wire-format dict — a Leaflet marker object serialized into the page
-                {
-                    "label": user_label(label),
-                    "lat": d["lat"],
-                    "lon": d["lon"],
-                    "url": searches[0]["rightmove_url"],
-                }
+                # lucidlint: ignore record-shape Leaflet marker object serialized into the page (coding-standards.md)
+                dict(
+                    label=user_label(label), lat=d["lat"], lon=d["lon"],
+                    url=searches[0]["rightmove_url"],
+                )
             )
         )
     if intersection and intersection.get("searches"):
         polygons = [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            {"coords": s["polygon"], "url": s["rightmove_url"], "name": user_label(s["name"])}
+            _LeafletPolygon(coords=s["polygon"], url=s["rightmove_url"], name=user_label(s["name"]))
             for s in intersection["searches"]
         ]
-        layers_js.append(
-            js_safe_json(
-                # lucidlint: ignore record-shape wire-format dict — a Leaflet layer object serialized into the page
-                {
-                    "name": "Where we could live",
-                    "color": "#c90",
-                    "polygons": polygons,
-                    "fillOpacity": 0.25,
-                    "weight": 4,
-                }
-            )
+        intersection_layer = _LeafletLayer(
+            name="Where we could live", color="#c90", polygons=polygons,
+            fill_opacity=0.25, weight=4,
         )
+        layers_js.append(js_safe_json(intersection_layer.to_dict()))
 
     css = assets.leaflet_css
     for name in _CSS_IMAGES:
