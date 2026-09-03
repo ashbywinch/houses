@@ -183,24 +183,24 @@ def test_grid_cell_centers_row_major():
 
 
 def test_build_matrix_requests_single_chunk():
-    centers = [(-1.9, 51.1), (-1.8, 51.2), (-1.7, 51.3)]  # (lon, lat) — ORS location order
+    centers = [GridCell(0, 1, 51.1, -1.9), GridCell(0, 2, 51.2, -1.8), GridCell(0, 3, 51.3, -1.7)]
     bodies = build_matrix_requests(-1.55, 51.94, centers, max_locations=100)
     assert len(bodies) == 1
-    body = bodies[0]
+    body = bodies[0].to_dict()
     assert body["locations"][0] == [-1.55, 51.94]  # destination first, lon/lat
-    assert body["locations"][1:] == centers
+    assert body["locations"][1:] == [[c.lon, c.lat] for c in centers]
     assert body["sources"] == [1, 2, 3]
     assert body["destinations"] == [0]
     assert body["metrics"] == ["duration"]
 
 
 def test_build_matrix_requests_chunks_at_location_cap():
-    centers = [(51.1 + i * 0.1, -1.9) for i in range(5)]
+    centers = [GridCell(0, i, 51.1 + i * 0.1, -1.9) for i in range(5)]
     bodies = build_matrix_requests(-1.55, 51.94, centers, max_locations=3)  # dest + 2 centers each
-    assert [len(b["locations"]) for b in bodies] == [3, 3, 2]
-    assert len([s for b in bodies for s in b["sources"]]) == 5
-    assert [b["sources"] for b in bodies] == [[1, 2], [1, 2], [1]]
-    assert all(b["destinations"] == [0] for b in bodies)
+    assert [len(b.to_dict()["locations"]) for b in bodies] == [3, 3, 2]
+    assert len([s for b in bodies for s in b.to_dict()["sources"]]) == 5
+    assert [b.to_dict()["sources"] for b in bodies] == [[1, 2], [1, 2], [1]]
+    assert all(b.to_dict()["destinations"] == [0] for b in bodies)
 
 
 def test_parse_durations_seconds_to_minutes_preserves_nulls():

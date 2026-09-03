@@ -231,11 +231,27 @@ def grid_cell_centers(grid: Grid) -> list[GridCell]:
 # ── ORS matrix adapter ───────────────────────────────────────────────
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format list — ORS matrix request bodies, serialization boundary owns the shape
+@dataclass(frozen=True)
+class _ORSMatrixRequest:
+    """ORS matrix request body (wire shape): every source routes to the
+    single destination at index 0."""
+
+    locations: list[list[float]]
+    sources: list[int]
+    destinations: list[int]
+    metrics: list[str]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            locations=self.locations, sources=self.sources,
+            destinations=self.destinations, metrics=self.metrics,
+        )
+
+
 def build_matrix_requests(
-    dest_lon: float, dest_lat: float, centers: list[tuple[float, float]], max_locations: int = MAX_LOCATIONS_PER_REQUEST
-) -> list[dict]:
+    dest_lon: float, dest_lat: float, centers: list[GridCell], max_locations: int = MAX_LOCATIONS_PER_REQUEST
+) -> list[_ORSMatrixRequest]:
     """Chunk grid centres into matrix request bodies.
 
     Each body routes every grid point (source) to the destination (index 0),
@@ -246,22 +262,21 @@ def build_matrix_requests(
     ``max_locations - 1`` centres.
     """
     chunk_size = max_locations - 1
-    bodies: list[dict] = []
+    bodies: list[_ORSMatrixRequest] = []
     for start in range(0, len(centers), chunk_size):
         chunk = centers[start : start + chunk_size]
         bodies.append(
-            # lucidlint: ignore record-shape wire-format dict — ORS matrix request body, serialization boundary owns
-            {
-                "locations": [[dest_lon, dest_lat], *chunk],
-                "sources": list(range(1, len(chunk) + 1)),
-                "destinations": [0],
-                "metrics": ["duration"],
-            }
+            _ORSMatrixRequest(
+                locations=[[dest_lon, dest_lat], *[[c.lon, c.lat] for c in chunk]],
+                sources=list(range(1, len(chunk) + 1)),
+                destinations=[0],
+                metrics=["duration"],
+            )
         )
     return bodies
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses the ORS matrix response — provider wire payload (coding-standards.md)
 def parse_durations(data: dict, count: int) -> list[Quantity | None]:
     """Extract minutes from an ORS matrix response, aligned to the request order.
 
@@ -282,8 +297,8 @@ def parse_durations(data: dict, count: int) -> list[Quantity | None]:
     return out
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — ORS matrix response, serialization boundary owns the shape
+# lucidlint: ignore record-shape posts and returns the ORS matrix response — provider wire payload (coding-standards.md)
+# lucidlint: ignore record-shape request/response bodies cross the provider boundary here (coding-standards.md)
 async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: Any = None) -> dict:
     """POST one matrix request through the disk cache; retry transient errors.
 
@@ -298,7 +313,7 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: 
     disk-cached httpx client.
     """
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape HTTP request headers — keyed collection, not a record (review-log)
     headers = {"Content-Type": "application/json", "Authorization": key}
     transient = (429, 500, 502, 503, 504)
     for attempt in (1, 2):
@@ -373,11 +388,11 @@ async def build_raw(
         bbox = region_bbox(point.lat, point.lon, config.region_km)
         grid = Grid.from_cell_km(bbox, config.cell_km.to("km").magnitude)
         cells = grid_cell_centers(grid)
-        centers = [(cell.lon, cell.lat) for cell in cells]  # ORS wants [lon, lat]
+        centers = cells  # GridCell records; ORS location order applied in build_matrix_requests
         durations: list[Quantity | None] = []
-        for body in build_matrix_requests(point.lon, point.lat, centers):
-            data = await fetch(body, key=config.key)
-            durations.extend(parse_durations(data, len(body["sources"])))
+        for req in build_matrix_requests(point.lon, point.lat, centers):
+            data = await fetch(req.to_dict(), key=config.key)
+            durations.extend(parse_durations(data, len(req.sources)))
             if _REQUEST_DELAY_S:
                 await asyncio.sleep(_REQUEST_DELAY_S)
         rec = _RawDestinationRecord(
