@@ -52,6 +52,10 @@ class _LatLng:
     latitude: float
     longitude: float
 
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(latitude=self.latitude, longitude=self.longitude)
+
 
 @dataclass(frozen=True)
 class _Waypoint:
@@ -62,10 +66,8 @@ class _Waypoint:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the Google wire shape (coding-standards.md)
-        ll = self.location
-        if ll is not None:
-            return {"location": {"latLng": dict(latitude=ll.latitude, longitude=ll.longitude)}}
+        if self.location is not None:
+            return {"location": {"latLng": self.location.to_dict()}}
         return {"address": self.address}
 
 
