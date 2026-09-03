@@ -380,58 +380,48 @@ async def build_raw(
             durations.extend(parse_durations(data, len(body["sources"])))
             if _REQUEST_DELAY_S:
                 await asyncio.sleep(_REQUEST_DELAY_S)
-        records.append(
-            # lucidlint: ignore record-shape wire-format dict — raw drive_isochrone.json destination record,
-            {
-                "label": dest.label,
-                "postcode": dest.postcode,
-                "lat": point.lat,
-                "lon": point.lon,
-                "threshold_min": int(dest.threshold_min.to("minute").magnitude),
-                "cell_km": config.cell_km.to("km").magnitude,
-                "slack_min": round(slack_minutes(config.cell_km).to("minute").magnitude, MINUTES_DECIMALS),
-                # lucidlint: ignore record-shape wire-format dict — serialized grid bounds in the raw payload
-                "grid": {
-                    "lat_min": bbox.lat_min,
-                    "lat_max": bbox.lat_max,
-                    "lon_min": bbox.lon_min,
-                    "lon_max": bbox.lon_max,
-                },
-                "cells": [
-                    # lucidlint: ignore record-shape wire-format dict — serialized grid-cell record in the raw payload
-                    {
-                        "r": cell.row,
-                        "c": cell.col,
-                        "lat": cell.lat,
-                        "lon": cell.lon,
-                        "duration_min": None if dur is None else round(dur.to("minute").magnitude, MINUTES_DECIMALS),
-                    }
-                    for cell, dur in zip(cells, durations, strict=True)
-                ],
-            }
-        )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {
-        # lucidlint: ignore record-shape wire-format dict — raw payload metadata, serialization boundary owns the shape
-        "metadata": {
-            "engine_version": ENGINE_VERSION,
-            "profile": "driving-car",
-            "speed_model": "free-flow",
-            "threshold_min": int(min(ld.destination.threshold_min for ld in located).to("minute").magnitude),
-            "cell_km": config.cell_km.to("km").magnitude,
-            "region_km": config.region_km.to("km").magnitude,
-            "destinations": [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-                {
-                    "label": ld.destination.label,
-                    "postcode": ld.destination.postcode,
-                    "threshold_min": int(ld.destination.threshold_min.to("minute").magnitude),
-                }
-                for ld in located
+        rec = _RawDestinationRecord(
+            label=dest.label,
+            postcode=dest.postcode,
+            lat=point.lat,
+            lon=point.lon,
+            threshold_min=int(dest.threshold_min.to("minute").magnitude),
+            cell_km=config.cell_km.to("km").magnitude,
+            slack_min=round(slack_minutes(config.cell_km).to("minute").magnitude, MINUTES_DECIMALS),
+            grid=_RawGridBounds(
+                lat_min=bbox.lat_min, lat_max=bbox.lat_max,
+                lon_min=bbox.lon_min, lon_max=bbox.lon_max,
+            ),
+            cells=[
+                _RawGridCell(
+                    r=cell.row, c=cell.col, lat=cell.lat, lon=cell.lon,
+                    duration_min=None if dur is None else round(dur.to("minute").magnitude, MINUTES_DECIMALS),
+                )
+                for cell, dur in zip(cells, durations, strict=True)
             ],
-            "generated_at": generated_at,
-            "count": len(records),
-        },
+        )
+        records.append(rec.to_dict())
+    meta = _RawMetadata(
+        threshold_min=int(min(ld.destination.threshold_min for ld in located).to("minute").magnitude),
+        cell_km=config.cell_km.to("km").magnitude,
+        region_km=config.region_km.to("km").magnitude,
+        destinations=[
+            _RawDestinationMeta(
+                label=ld.destination.label,
+                postcode=ld.destination.postcode,
+                threshold_min=int(ld.destination.threshold_min.to("minute").magnitude),
+            ).to_dict()
+            for ld in located
+        ],
+        count=len(records),
+    )
+    # lucidlint: ignore record-shape raw payload assembly — serialization boundary owns the shape (coding-standards.md)
+    return {
+        # lucidlint: ignore record-shape metadata header — serialization boundary owns the shape (coding-standards.md)
+        "metadata": dict(
+            engine_version=ENGINE_VERSION, profile="driving-car", speed_model="free-flow",
+            **meta.to_dict(), generated_at=generated_at,
+        ),
         "destinations": records,
     }
 
@@ -531,9 +521,149 @@ def outer_loop(cells: set[GridCell], grid: Grid) -> list[GeoPoint] | None:
         return None
     return max(loops, key=lambda loop: abs(_signed_area(loop)))
 
+@dataclass(frozen=True)
+class _RawGridBounds:
+    """Serialized grid bounds of a destination block in drive_isochrone.json."""
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — drive_searches.json payload, serialization boundary owns the shape
+    lat_min: float
+    lat_max: float
+    lon_min: float
+    lon_max: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(lat_min=self.lat_min, lat_max=self.lat_max, lon_min=self.lon_min, lon_max=self.lon_max)
+
+
+@dataclass(frozen=True)
+class _RawGridCell:
+    """One grid-cell center with its drive duration, serialized."""
+
+    r: int
+    c: int
+    lat: float
+    lon: float
+    duration_min: float | None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(r=self.r, c=self.c, lat=self.lat, lon=self.lon, duration_min=self.duration_min)
+
+
+@dataclass(frozen=True)
+class _RawDestinationRecord:
+    """One destination's full serialized block in drive_isochrone.json."""
+
+    label: str
+    postcode: str
+    lat: float
+    lon: float
+    threshold_min: int
+    cell_km: float
+    slack_min: float
+    grid: _RawGridBounds
+    cells: list[_RawGridCell]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(
+            label=self.label, postcode=self.postcode, lat=self.lat, lon=self.lon,
+            threshold_min=self.threshold_min, cell_km=self.cell_km,
+            slack_min=self.slack_min, grid=self.grid.to_dict(),
+            cells=[c.to_dict() for c in self.cells],
+        )
+
+
+@dataclass(frozen=True)
+class _RawDestinationMeta:
+    """The metadata-level destination summary in drive_isochrone.json."""
+
+    label: str
+    postcode: str
+    threshold_min: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(label=self.label, postcode=self.postcode, threshold_min=self.threshold_min)
+
+
+@dataclass(frozen=True)
+class _RawMetadata:
+    """Serialized metadata header of drive_isochrone.json (engine/profile
+    keys are added at assembly)."""
+
+    threshold_min: int
+    cell_km: float
+    region_km: float
+    destinations: list[dict]
+    count: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(
+            threshold_min=self.threshold_min, cell_km=self.cell_km,
+            region_km=self.region_km, destinations=self.destinations,
+            count=self.count,
+        )
+
+
+@dataclass(frozen=True)
+class _SearchFilters:
+    """Rightmove query filters carried on a drive search record."""
+
+    min_beds: int
+    property_type: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(min_beds=self.min_beds, property_type=self.property_type)
+
+
+@dataclass(frozen=True)
+class _SearchDestination:
+    """The destination block embedded in a drive search record."""
+
+    label: str
+    postcode: str
+    lat: float
+    lon: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(label=self.label, postcode=self.postcode, lat=self.lat, lon=self.lon)
+
+
+@dataclass(frozen=True)
+class DriveSearchRecord:
+    """A scraper-compatible Rightmove search record for one kept component."""
+
+    id: str
+    name: str
+    polygon: list[tuple[float, float]]
+    filters: _SearchFilters
+    rightmove_url: str
+    destination: _SearchDestination
+    threshold_min: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(
+            id=self.id, name=self.name, polygon=self.polygon,
+            filters=self.filters.to_dict(), rightmove_url=self.rightmove_url,
+            destination=self.destination.to_dict(), threshold_min=self.threshold_min,
+        )
+
+
+# lucidlint: ignore record-shape raw payload passed by key — keyed collection, not a record (review-log)
+# lucidlint: ignore record-shape returns the drive_searches.json payload — serialization boundary (coding-standards.md)
 def raw_to_searches(
     raw: dict, *, min_beds: int = 2, property_type: str = "houses", generated_at: str, min_island_cells: int = 4
 ) -> dict:
