@@ -228,8 +228,8 @@ async def list_properties(
         if prop is None:
             continue
         props.append(await prop.to_json())
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"tab": tab, "properties": props}
+    # lucidlint: ignore record-shape per-tab listing aggregator — serialization boundary (coding-standards.md)
+    return dict(tab=tab, properties=props)
 
 
 def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
@@ -384,10 +384,7 @@ def _require_superuser(request: Request) -> None:
 
 def _job_wire(job):
     """Serialization boundary: a claimed job as the worker sees it."""
-    if job is None:
-        return None
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"id": job.id, "rid": job.rid, "url": job.url}
+    return None if job is None else job.to_dict()
 # lucidlint: ignore record-shape wire-format dict — the worker's report body is a wire record (coding-standards.md)
 async def _apply_scraped_report(rid: str, data: dict) -> bool:
     """Push a worker's scraped listing into the property's DAG — the same

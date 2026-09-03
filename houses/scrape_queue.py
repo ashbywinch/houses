@@ -40,6 +40,11 @@ class ScrapeJob:
     rid: str
     url: str
 
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(id=self.id, rid=self.rid, url=self.url)
+
 
 @dataclass(frozen=True)
 class ScrapeJobStatus:
@@ -51,6 +56,15 @@ class ScrapeJobStatus:
     claimed_at: str | None
     next_retry_at: str
     last_error: str | None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(
+            status=self.status, attempts=self.attempts, created_at=self.created_at,
+            claimed_at=self.claimed_at, next_retry_at=self.next_retry_at,
+            last_error=self.last_error,
+        )
 
 
 @dataclass(frozen=True)
