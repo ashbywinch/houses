@@ -343,13 +343,7 @@ def _attach_scrape_state(summary: dict, rid: str) -> None:
     client-side timer. Wire-record at the serialization boundary."""
     status = scrape_status_for_rid(rid)
     if status is not None:
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        summary["scrape"] = {
-            "status": status.status,
-            "attempts": status.attempts,
-            "created_at": status.created_at,
-            "claimed_at": status.claimed_at,
-        }
+        summary["scrape"] = status.to_dict()
 
 @api_router.get("/properties/all")
 async def get_all_properties():
