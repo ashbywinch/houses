@@ -97,7 +97,6 @@ class _BuildingMatch:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the parsed keys (coding-standards.md)
         d = dict(postcode=self.postcode)
         if self.building_number is not None:
             d["building_number"] = self.building_number
