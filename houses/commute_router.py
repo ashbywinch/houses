@@ -45,12 +45,37 @@ class GoogleRoutesOptions:
     set_cached_fn: Callable[..., Any] | None = None
 
 
+@dataclass(frozen=True)
+class _LatLng:
+    """A Google Routes latitude/longitude pair (request wire shape)."""
+
+    latitude: float
+    longitude: float
+
+
+@dataclass(frozen=True)
+class _Waypoint:
+    """A Google Routes waypoint (request wire shape)."""
+
+    location: _LatLng | None = None
+    address: str = ""
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the Google wire shape (coding-standards.md)
+        ll = self.location
+        if ll is not None:
+            return {"location": {"latLng": dict(latitude=ll.latitude, longitude=ll.longitude)}}
+        return {"address": self.address}
+
+
 @runtime_checkable
 class RoutesPostClient(Protocol):
     """Structural type for the transport seam tests stub out."""
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    async def post(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
+    # lucidlint: ignore record-shape transport seam contract — the request body is the caller's
+    # payload and the response is Google's (coding-standards.md)
+    async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self, body: dict, field_mask: str, *, options: GoogleRoutesOptions | None = None
     ) -> dict | None: ...
 
@@ -94,8 +119,9 @@ class GoogleRoutesClient:
             body = resp.text[:1000]
             raise httpx.HTTPStatusError(f"{e} — {body}", request=e.request, response=e.response) from e
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    async def post(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
+    # lucidlint: ignore record-shape transport seam contract — the request body is the caller's
+    # payload and the response is Google's (coding-standards.md)
+    async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self,
         body: dict,
         field_mask: str,
@@ -111,7 +137,7 @@ class GoogleRoutesClient:
         if not google_key:
             raise ValueError("Google Maps API key not configured")
 
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape HTTP request headers — keyed collection, not a record (review-log)
         headers = {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": google_key,
@@ -298,30 +324,26 @@ class CommuteRouter:
         return False
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    def _parse_coord(loc: str) -> dict | None:
+    def _parse_coord(loc: str) -> _Waypoint | None:
         """Parse a ``"lat,lon"`` string into a location waypoint, else None."""
         try:
             lat, lon = loc.split(",", 1)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            return {"location": {"latLng": {"latitude": float(lat), "longitude": float(lon)}}}
+            return _Waypoint(location=_LatLng(latitude=float(lat), longitude=float(lon)))
         except (ValueError, TypeError):
             return None
 
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    def _address_waypoint(loc: str | GeoPoint) -> dict:
+    def _address_waypoint(loc: str | GeoPoint) -> _Waypoint:
         """Build a Google Routes waypoint from a postcode string or GeoPoint."""
         if isinstance(loc, GeoPoint):
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            return {"location": {"latLng": {"latitude": loc.lat, "longitude": loc.lon}}}
+            return _Waypoint(location=_LatLng(latitude=loc.lat, longitude=loc.lon))
         # If the string looks like "lat,lon", parse it as a location waypoint
         if "," in loc:
             waypoint = CommuteRouter._parse_coord(loc)
             if waypoint is not None:
                 return waypoint
-        return {"address": loc}
+        return _Waypoint(address=loc)
 
     # ------------------------------------------------------------------
     # Walking — Google Routes walking mode
