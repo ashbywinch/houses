@@ -149,25 +149,17 @@ class Station:
             dur_a = None
         return ImplausibleCheck(dur_p=dur_p, dur_a=dur_a)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def record(
         self, dur_p: int | None, dur_a: int | None, kept: bool, routing_error: str | None = None
-    ) -> dict:
+    ) -> ShedRecord:
         """The wire-format shed record for this station."""
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {
-            "name": self.name,
-            "crs": self.crs,
-            "lat": self.lat,
-            "lon": self.lon,
-            "duration_pimlico": dur_p,
-            "duration_aldgate": dur_a,
-            "kept": kept,
-            "routing_error": routing_error,
-        }
+        return ShedRecord(
+            name=self.name, crs=self.crs, lat=self.lat, lon=self.lon,
+            duration_pimlico=dur_p, duration_aldgate=dur_a, kept=kept,
+            routing_error=routing_error,
+        )
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    async def process(self, ctx: RoutingContext) -> dict | None:
+    async def process(self, ctx: RoutingContext) -> ShedRecord | None:
         """Route this station → its shed record, or None when it is outside the box.
 
         Inner-zone stations are kept without a single router call. Both
@@ -202,6 +194,74 @@ class Office:
     point: GeoPoint
 
 
+@dataclass(frozen=True)
+class ShedRecord:
+    """The wire-format shed record for one station in station_shed.json."""
+
+    name: str
+    crs: str
+    lat: float
+    lon: float
+    duration_pimlico: int | None
+    duration_aldgate: int | None
+    kept: bool
+    routing_error: str | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(
+            name=self.name, crs=self.crs, lat=self.lat, lon=self.lon,
+            duration_pimlico=self.duration_pimlico,
+            duration_aldgate=self.duration_aldgate, kept=self.kept,
+            routing_error=self.routing_error,
+        )
+
+
+@dataclass(frozen=True)
+class ShedMetadata:
+    """Current-constants metadata for the shed payload."""
+
+    threshold_min: int
+    destinations: list[str]
+    bbox: dict
+    inner_radius_km: float
+    engine_version: str
+    expected_stations: int
+    generated_at: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(
+            threshold_min=self.threshold_min, destinations=self.destinations,
+            bbox=self.bbox, inner_radius_km=self.inner_radius_km,
+            engine_version=self.engine_version,
+            expected_stations=self.expected_stations,
+            generated_at=self.generated_at,
+        )
+
+
+@dataclass(frozen=True)
+class ShedConfigSignature:
+    """The config identity a shed was built under."""
+
+    engine_version: str
+    destinations: list[str]
+    threshold_min: int
+    bbox: dict
+    inner_radius_km: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(
+            engine_version=self.engine_version, destinations=self.destinations,
+            threshold_min=self.threshold_min, bbox=self.bbox,
+            inner_radius_km=self.inner_radius_km,
+        )
+
+
 def load_stations(csv_path: str | Path) -> list[Station]:
     """Load stations from the repo's stations.csv (name, lat, long, crsCode)."""
     stations: list[Station] = []
@@ -230,8 +290,8 @@ def keep_station(inner: bool, dur_p: int | None, dur_a: int | None, threshold: i
     return bool(durations) and min(durations) <= threshold
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format list — shed records are the serialized station_shed.json payload end to
+# lucidlint: ignore record-shape resumes consume persisted JSON records (coding-standards.md)
+# lucidlint: ignore record-shape shed records are serialized station_shed.json payload (coding-standards.md)
 def _resume_records(existing_records: list[dict] | None, stations: list[Station]) -> tuple[set[str], list[dict]]:
     """Records a resume carries forward, and the CRSes marked done.
 
@@ -267,8 +327,8 @@ class RoutingContext:
     delay_s: float
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format list — shed records are the serialized station_shed.json payload end to
+# lucidlint: ignore record-shape returns the serialized shed records — serialization boundary (coding-standards.md)
+# lucidlint: ignore record-shape return type is the serialized station_shed.json records list (coding-standards.md)
 async def build_shed(
     stations: list[Station],
     ctx: RoutingContext,
@@ -307,7 +367,7 @@ async def build_shed(
         rec = await st.process(ctx)
         if rec is None:
             continue
-        records.append(rec)
+        records.append(rec.to_dict())
         processed += 1
         if checkpoint is not None:
             checkpoint(records, processed)
@@ -344,8 +404,7 @@ async def _geocode_offices() -> list[Office]:
     return offices
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def build_metadata(offices: list[Office], expected: int, generated_at: str) -> dict:
+def build_metadata(offices: list[Office], expected: int, generated_at: str) -> ShedMetadata:
     """Current-constants metadata for the shed payload.
 
     ``generated_at`` is the batch start time — preserved across resumes so a
@@ -353,20 +412,19 @@ def build_metadata(offices: list[Office], expected: int, generated_at: str) -> d
     rebuilt from current constants so a resume can never silently keep
     outdated destinations/bbox/threshold values.
     """
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {
-        "threshold_min": THRESHOLD_MIN,
-        "destinations": [o.postcode for o in offices],
-        "bbox": DEFAULT_BBOX,
-        "inner_radius_km": INNER_RADIUS_KM,
-        "engine_version": ENGINE_VERSION,
-        "expected_stations": expected,
-        "generated_at": generated_at,
-    }
+    return ShedMetadata(
+        threshold_min=THRESHOLD_MIN,
+        destinations=[o.postcode for o in offices],
+        bbox=DEFAULT_BBOX,
+        inner_radius_km=INNER_RADIUS_KM,
+        engine_version=ENGINE_VERSION,
+        expected_stations=expected,
+        generated_at=generated_at,
+    )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format list — shed records are the serialized station_shed.json payload end to
+# lucidlint: ignore record-shape compares persisted JSON records — serialization boundary (coding-standards.md)
+# lucidlint: ignore record-shape records param is the serialized station_shed.json payload (coding-standards.md)
 def is_complete(existing: list[dict] | None, records: list[dict], expected: int) -> bool:
     """True when a resume found every expected station already done.
 
@@ -384,25 +442,23 @@ def is_complete(existing: list[dict] | None, records: list[dict], expected: int)
     )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def config_signature(offices: list[Office]) -> dict:
+def config_signature(offices: list[Office]) -> ShedConfigSignature:
     """The config identity a shed was built under — engine, destinations,
     threshold, bbox, inner zone. If any of these change, previously-routed
     records (routed to the OLD destinations/params) must not be resumed: they
     would mix with new metadata claiming the new config.
     """
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {
-        "engine_version": ENGINE_VERSION,
-        "destinations": [o.postcode for o in offices],
-        "threshold_min": THRESHOLD_MIN,
-        "bbox": DEFAULT_BBOX,
-        "inner_radius_km": INNER_RADIUS_KM,
-    }
+    return ShedConfigSignature(
+        engine_version=ENGINE_VERSION,
+        destinations=[o.postcode for o in offices],
+        threshold_min=THRESHOLD_MIN,
+        bbox=DEFAULT_BBOX,
+        inner_radius_km=INNER_RADIUS_KM,
+    )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — shed metadata/payload dicts are the serialized station_shed.json
+# lucidlint: ignore record-shape resumes compare persisted JSON metadata — serialization boundary (coding-standards.md)
+# lucidlint: ignore record-shape the current config dict is the serialized signature (coding-standards.md)
 def resume_allowed(prev_metadata: dict, current: dict) -> bool:
     """A resume is only safe when the shed was built under the CURRENT config.
 
@@ -414,11 +470,11 @@ def resume_allowed(prev_metadata: dict, current: dict) -> bool:
     return all(prev_metadata.get(k) == v for k, v in current.items())
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format list — _write_payload serializes these records to station_shed.json
+# lucidlint: ignore record-shape _write_payload serializes these records to station_shed.json (coding-standards.md)
+# lucidlint: ignore record-shape the payload assembly is the serialization boundary (coding-standards.md)
 def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
     """Write the shed payload atomically — a kill mid-write never corrupts the file."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape the payload assembly is the serialization boundary (coding-standards.md)
     payload = {"metadata": metadata, "stations": records}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, indent=2))
@@ -442,11 +498,11 @@ def _resume_state(out_path: Path, offices: list[Office]) -> ResumeState:
     """
     try:
         prev = json.loads(out_path.read_text())
-        if not resume_allowed(prev["metadata"], config_signature(offices)):
+        if not resume_allowed(prev["metadata"], config_signature(offices).to_dict()):
             logger.warning(
                 "shed config mismatch: stored metadata %s != current %s — refusing to resume %s",
-                {k: prev["metadata"].get(k) for k in config_signature(offices)},
-                config_signature(offices),
+                {k: prev["metadata"].get(k) for k in config_signature(offices).to_dict()},
+                config_signature(offices).to_dict(),
                 out_path,
             )
             print(
@@ -540,9 +596,10 @@ async def run(argv: list[str] | None = None) -> int:
     # Always rebuild from current constants; preserve only the batch-start
     # timestamp across resumes (a resume must never keep outdated settings).
     generated_at = resume.metadata["generated_at"] if resume.metadata else datetime.now(UTC).isoformat()
-    metadata = build_metadata(offices, expected, generated_at)
+    metadata = build_metadata(offices, expected, generated_at).to_dict()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape checkpoint persists the serialized records — serialization boundary
+# (coding-standards.md)
     def _checkpoint(records: list[dict], processed: int) -> None:
         if processed % args.checkpoint_every == 0:
             _write_payload(out_path, metadata, records)
