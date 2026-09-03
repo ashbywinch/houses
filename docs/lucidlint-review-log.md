@@ -366,13 +366,22 @@ the standard citation.
 
 ### 0.4.0 suppression census
 
-Recorded per-site in the working tree (kinds: record-shape, latent-class,
-duplicate, bulk-suppression, middle-man, broad-except, global-state,
-magic-number, boolean-arg, private-import); every marker carries a cited why.
+Recorded per-site in the working tree. Dispositions after the wire-format
+conversion pass (2026-08-31):
+
+- **Converted to typed records** (`to_dict` at the serialization boundary):
+  parse_netex_fares, drive_isochrone payloads, tfl cache envelope,
+  api_router what-if/staleness, intersection, admin_router, auth session
+  claims, commute_router waypoints, station_shed, combined_map Leaflet
+  configs.
+- **Boundary/aggregator methods keep markers**: PropertyNodes.to_json*,
+  api_router response aggregators, payload_checks, DagJSONEncoder paths —
+  the wire shape is owned by the method, not by a data record.
+- **Keyed collections / external contracts keep markers**: cache-key
+  identity threading, ORS/Places/Overpass request params, Google OAuth
+  claims, BODS dataset payloads.
 The 0.2.0-era census above is historical.
 
-### Final state (2026-08-30)
-
 `make lucidlint`: **GATE PASS — 0 fail-severity actions, 1 accepted census
-warning.** `make test`: **1555 passed.** ruff + pyrefly: clean. lucidlint
+warning.** `make test`: **1571 passed.** ruff + pyrefly: clean. lucidlint
 0.4.0 (`f8cbbc8`) pinned in pyproject.toml.
