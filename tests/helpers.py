@@ -23,6 +23,7 @@ from houses.services import (
     DriveTimeService,
     EPCLookupService,
     GeocodingService,
+    GoogleUserInfo,
     OAuthService,
     RailFareService,
     RoutePlanner,
@@ -314,14 +315,14 @@ class FakeOAuthService(OAuthService):
         return self.auth_url, "fake_code_verifier"
 
     @override
-    def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
-        return self._id_info
+    def exchange_code(self, code: str, code_verifier: str, state: str) -> GoogleUserInfo:
+        return GoogleUserInfo(**self._id_info)
 
     @override
-    async def verify_id_token(self, token: str) -> dict:
+    async def verify_id_token(self, token: str) -> GoogleUserInfo:
         if self._verify_error is not None:
             raise self._verify_error
-        return self._id_info
+        return GoogleUserInfo(**self._id_info)
 
 
 # ── Composite helper ──────────────────────────────────────────────────

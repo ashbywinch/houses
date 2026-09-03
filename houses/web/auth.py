@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.exceptions import TransportError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from houses.services import GoogleUserInfo
 from houses.services_provider import get_services
 from houses.settings import settings
 
@@ -185,16 +186,16 @@ def _make_session_cookie(
     return get_serializer().dumps(payload)
 
 
-def _build_session(id_info: Mapping[str, Any]) -> SessionMint:
+def _build_session(user: GoogleUserInfo) -> SessionMint:
     """Return (user_payload, session_cookie_value) for verified Google id_info.
 
     Shared by the web callback and the device-flow endpoint so both mint
     identical sessions.
     """
-    email = id_info.get("email", "")
+    email = user.email
     folded_email = email.casefold()
-    name = id_info.get("name", email.split("@")[0] if email else "Unknown")
-    picture = id_info.get("picture", "")
+    name = user.name or (email.split("@")[0] if email else "Unknown")
+    picture = user.picture
 
     # Look up Person by email to determine superuser status
     is_superuser = False
@@ -353,11 +354,11 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 
     svc = get_services()
     try:
-        id_info = svc.oauth_service.exchange_code(code, code_verifier, state)
-        if not id_info.get("email_verified", False):
+        user = svc.oauth_service.exchange_code(code, code_verifier, state)
+        if not user.email_verified:
             return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 
-        cookie_value = _build_session(id_info).cookie_value
+        cookie_value = _build_session(user).cookie_value
 
         response = RedirectResponse(url=f"{settings.frontend_url}/")
         _set_session_cookie(response, cookie_value, _is_secure(request))
@@ -407,7 +408,7 @@ async def device(request: Request):
 
     svc = get_services()
     try:
-        id_info = await svc.oauth_service.verify_id_token(token)
+        user = await svc.oauth_service.verify_id_token(token)
     except TransportError as e:
         logger.warning("Device-flow id_token verification failed (transport): %s", e)
         return JSONResponse(
@@ -417,10 +418,10 @@ async def device(request: Request):
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)
         return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
-    if not id_info.get("email_verified", False):
+    if not user.email_verified:
         return JSONResponse(status_code=401, content={"detail": "email not verified"})
 
-    mint = _build_session(id_info)
+    mint = _build_session(user)
     payload, cookie_value = mint.payload, mint.cookie_value
     response = JSONResponse(
         content={"authenticated": True, **payload},

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from google.auth.exceptions import TransportError
@@ -85,6 +86,49 @@ class SchoolLookupService(Protocol):
     async def school_commute(postcode: str, school: School) -> Commute | None: ...
 
 
+@dataclass(frozen=True)
+class _GoogleClientConfig:
+    """Google OAuth web-client config for google_auth_oauthlib (its library
+    expects exactly this nesting)."""
+
+    client_id: str
+    client_secret: str
+    auth_uri: str
+    token_uri: str
+    redirect_uris: list[str]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the client-config nesting (coding-standards.md)
+        return dict(
+            web=dict(
+                client_id=self.client_id, client_secret=self.client_secret,
+                auth_uri=self.auth_uri, token_uri=self.token_uri,
+                redirect_uris=self.redirect_uris,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class GoogleUserInfo:
+    """The verified Google identity claims the auth flow consumes."""
+
+    email: str
+    name: str
+    picture: str
+    email_verified: bool = False
+
+
+def _google_client_config() -> _GoogleClientConfig:
+    return _GoogleClientConfig(
+        client_id=settings.web_client_id,
+        client_secret=settings.web_client_secret,
+        auth_uri="https://accounts.google.com/o/oauth2/auth",
+        token_uri="https://oauth2.googleapis.com/token",
+        redirect_uris=[settings.public_url.rstrip("/") + "/api/auth/callback"],
+    )
+
+
 class OAuthService(Protocol):
     """Generate an OAuth authorization URL and exchange an authorization code
     for user identity information."""
@@ -96,15 +140,12 @@ class OAuthService(Protocol):
         ...
 
     @staticmethod
-    def exchange_code(code: str, code_verifier: str, state: str) -> Mapping[str, Any]:
-        """Exchange an authorization code for user info.
-        Returns a dict with keys: email, name, picture, etc.
-        """
+    def exchange_code(code: str, code_verifier: str, state: str) -> GoogleUserInfo:
+        """Exchange an authorization code for user info."""
         ...
 
     @staticmethod
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-    async def verify_id_token(token: str) -> dict:
+    async def verify_id_token(token: str) -> GoogleUserInfo:
         """Verify a Google id_token (device flow) and return its claims."""
         ...
 
@@ -184,16 +225,7 @@ class _DefaultOAuthService:
     @staticmethod
 # lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     def create_authorization_url(state: str) -> tuple[str, str]:
-        client_config = {
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-            "web": {
-                "client_id": settings.web_client_id,
-                "client_secret": settings.web_client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
-            }
-        }
+        client_config = _google_client_config().to_dict()
         flow = Flow.from_client_config(
             client_config,
             scopes=[
@@ -212,18 +244,8 @@ class _DefaultOAuthService:
         return authorization_url, code_verifier
 
     @staticmethod
-    def exchange_code(code: str, code_verifier: str, state: str) -> Mapping[str, Any]:
-
-        client_config = {
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-            "web": {
-                "client_id": settings.web_client_id,
-                "client_secret": settings.web_client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
-            }
-        }
+    def exchange_code(code: str, code_verifier: str, state: str) -> GoogleUserInfo:
+        client_config = _google_client_config().to_dict()
         flow = Flow.from_client_config(
             client_config,
             scopes=[
@@ -240,16 +262,21 @@ class _DefaultOAuthService:
         id_token_str = getattr(flow.credentials, "id_token", None)
         if not id_token_str:
             raise ValueError("OAuth exchange returned no id_token")
-        id_info = id_token.verify_oauth2_token(
+        claims = id_token.verify_oauth2_token(
             id_token_str,
             google_requests.Request(),
             settings.web_client_id,
         )
-        return id_info
+        return GoogleUserInfo(
+            email=claims.get("email", ""),
+            name=claims.get("name", ""),
+            picture=claims.get("picture", ""),
+            email_verified=bool(claims.get("email_verified", False)),
+        )
 
     @staticmethod
 # lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-    async def verify_id_token(token: str) -> dict:
+    async def verify_id_token(token: str) -> GoogleUserInfo:
         """Verify a Google id_token (device flow) and return its claims.
 
         Bound strictly to the device-flow client: a web-flow id_token (easy
@@ -266,16 +293,20 @@ class _DefaultOAuthService:
             raise ValueError("device_client_id not configured for device-flow login")
 
 # lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-        def _verify_in_thread() -> dict:
+        def _verify_in_thread() -> GoogleUserInfo:
             # Build the cert-fetch session inside the worker thread so it is
             # created and used in one thread — requests.Session isn't
             # guaranteed thread-safe across thread boundaries.
-            return dict(
-                google_id_token.verify_oauth2_token(
-                    token,
-                    google_requests.Request(),
-                    settings.device_client_id,
-                )
+            claims = google_id_token.verify_oauth2_token(
+                token,
+                google_requests.Request(),
+                settings.device_client_id,
+            )
+            return GoogleUserInfo(
+                email=claims.get("email", ""),
+                name=claims.get("name", ""),
+                picture=claims.get("picture", ""),
+                email_verified=bool(claims.get("email_verified", False)),
             )
 
         try:
