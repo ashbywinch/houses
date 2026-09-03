@@ -85,7 +85,6 @@ def _load_rates() -> dict[str, float]:
     return _cached_rates
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 @dataclass(frozen=True)
 class _BuildingMatch:
     """The building descriptor parsed from an address (keys present only
