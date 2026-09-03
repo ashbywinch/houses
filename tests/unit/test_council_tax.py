@@ -8,27 +8,27 @@ from houses.council_tax import _extract_building, _normalise
 class TestExtractBuilding:
     def test_street_number(self):
         result = _extract_building("94A Northbrook Street, Newbury, RG14 1AA")
-        assert result == {"postcode": "RG14 1AA", "building_number": "94A"}
+        assert result.to_dict() == {"postcode": "RG14 1AA", "building_number": "94A"}
 
     def test_simple_number(self):
         result = _extract_building("10 Downing Street, London, SW1A 2AA")
-        assert result == {"postcode": "SW1A 2AA", "building_number": "10"}
+        assert result.to_dict() == {"postcode": "SW1A 2AA", "building_number": "10"}
 
     def test_named_building(self):
         result = _extract_building("Buckingham Palace, London, SW1A 1AA")
-        assert result == {"postcode": "SW1A 1AA", "building_name": "Buckingham Palace"}
+        assert result.to_dict() == {"postcode": "SW1A 1AA", "building_name": "Buckingham Palace"}
 
     def test_flat_format(self):
         result = _extract_building("Flat 3, 123 High Street, Maidenhead, SL6 1AA")
-        assert result == {"postcode": "SL6 1AA", "unit": "Flat 3", "building_name": "123 High Street"}
+        assert result.to_dict() == {"postcode": "SL6 1AA", "unit": "Flat 3", "building_name": "123 High Street"}
 
     def test_no_postcode_in_address(self):
         result = _extract_building("10 Downing Street, London")
-        assert result == {"postcode": "", "building_number": "10"}
+        assert result.to_dict() == {"postcode": "", "building_number": "10"}
 
     def test_empty_address(self):
         result = _extract_building("")
-        assert result == {"postcode": "", "building_name": ""}
+        assert result.to_dict() == {"postcode": "", "building_name": ""}
 
 
 class TestNormalise:

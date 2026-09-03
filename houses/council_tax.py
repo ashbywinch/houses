@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are the mandated pattern (review-log scope decision 5: no config
 """Council tax band lookup via VOA website scraper + CivAccount rates."""
 
 from __future__ import annotations
@@ -87,7 +86,30 @@ def _load_rates() -> dict[str, float]:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def _extract_building(address: str) -> dict:
+@dataclass(frozen=True)
+class _BuildingMatch:
+    """The building descriptor parsed from an address (keys present only
+    when identified)."""
+
+    postcode: str
+    building_number: str | None = None
+    unit: str | None = None
+    building_name: str | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the parsed keys (coding-standards.md)
+        d = dict(postcode=self.postcode)
+        if self.building_number is not None:
+            d["building_number"] = self.building_number
+        if self.unit is not None:
+            d["unit"] = self.unit
+        if self.building_name is not None:
+            d["building_name"] = self.building_name
+        return d
+
+
+def _extract_building(address: str) -> _BuildingMatch:
     """Extract building name/number and postcode from an address."""
     parts = [p.strip() for p in address.split(",")]
     first = parts[0] if parts else ""
@@ -102,16 +124,13 @@ def _extract_building(address: str) -> dict:
     building = first
     num_match = re.match(r"^(\d+[A-Z]?)\s", building)
     if num_match:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {"postcode": postcode, "building_number": num_match.group(1)}
+        return _BuildingMatch(postcode=postcode, building_number=num_match.group(1))
     # A unit descriptor ("Flat 3") names a unit INSIDE a building — the
     # building descriptor is the next part of the address.
     unit_match = re.match(r"^(flat|unit|apartment|maisonette)\s+\d+[A-Z]?$", building, re.IGNORECASE)
     if unit_match and len(parts) > 1:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {"postcode": postcode, "unit": building, "building_name": parts[1]}
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"postcode": postcode, "building_name": building}
+        return _BuildingMatch(postcode=postcode, unit=building, building_name=parts[1])
+    return _BuildingMatch(postcode=postcode, building_name=building)
 
 
 def _normalise_keep_commas(text: str) -> str:
@@ -345,7 +364,7 @@ async def _fetch_voa_results(
 def _building_identifier(address: str):
     """The building descriptor dict, its id, and its normalized id."""
     building = _extract_building(address)
-    building_id = building.get("building_number") or building.get("building_name") or ""
+    building_id = building.building_number or building.building_name or ""
     return building, building_id, _normalise(building_id)
 
 
@@ -433,7 +452,7 @@ def _match_building_name(
     never identifies a specific unit on its own (the caller reports the
     address as not identifying a single property)."""
     name_norm = _normalise_keep_commas(query.building_id)
-    unit_norm = _normalise_keep_commas(building.get("unit") or "")
+    unit_norm = _normalise_keep_commas(building.unit or "")
     matches = [
         r
         for r in active
@@ -455,9 +474,9 @@ def _match_building_name(
 def _match_rows(active, building, query: _PropertyRef):
     """VOA rows matching the building identifier, or None when the address
     cannot positively identify a single property."""
-    building_id = building.get("building_number") or building.get("building_name") or ""
+    building_id = building.building_number or building.building_name or ""
     norm_id = _normalise(building_id)
-    if building.get("building_number"):
+    if building.building_number:
         return _match_by_number(active, norm_id, query.address)
     return _match_building_name(active, building, query)
 
