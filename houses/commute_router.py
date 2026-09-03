@@ -65,9 +65,7 @@ class _Waypoint:
         # lucidlint: ignore record-shape to_dict construction mirrors the Google wire shape (coding-standards.md)
         ll = self.location
         if ll is not None:
-            # lucidlint: ignore record-shape lat/lng location branch — Google wire shape (coding-standards.md)
             return {"location": {"latLng": dict(latitude=ll.latitude, longitude=ll.longitude)}}
-        # lucidlint: ignore record-shape address branch — Google wire shape (coding-standards.md)
         return {"address": self.address}
 
 
