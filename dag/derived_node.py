@@ -19,7 +19,7 @@ from typing import Any, Generic, NamedTuple, TypeVar, cast, override
 from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, classify_exception, project_value
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
-from dag.node import Node
+from dag.node import Node, NodeJson
 from dag.scheduler import get_scheduler
 from dag.signals import Connection, Slot
 
@@ -570,16 +570,14 @@ class DerivedNode(Node[T], Generic[T]):
             self._retry_count += 1
         return timedelta(seconds=min(delay_sec, 300))
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    async def _error_result_dict(self, status: str, exc: Exception) -> dict:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {
-            "status": status,
-            "value": None,
-            "error": f"{self._id}: {exc}",
-            "error_detail": AttemptError.from_exception(str(exc), exc, source=self._id).to_dict(),
-            "provenance": await self._build_provenance_dict(),
-        }
+    async def _error_result_dict(self, status: str, exc: Exception) -> NodeJson:
+        return NodeJson(
+            status=status,
+            value=None,
+            error=f"{self._id}: {exc}",
+            error_detail=AttemptError.from_exception(str(exc), exc, source=self._id).to_dict(),
+            provenance=await self._build_provenance_dict(),
+        )
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _safe_result_dict(self, status: str) -> dict:
@@ -599,7 +597,8 @@ class DerivedNode(Node[T], Generic[T]):
                 status,
                 e,
             )
-            return await self._error_result_dict(status, e)
+            error_rec = await self._error_result_dict(status, e)
+            return error_rec.to_dict()
 
     async def _compute_attempt(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Attempt:
         """Run compute, converting failures into pending/impossible Attempts.
