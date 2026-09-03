@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
@@ -11,6 +12,34 @@ from dag.attempt import Attempt, AttemptError, Provenance
 from dag.expression import Add, Div, Expression, Literal, Mul, Negate, Ref, Sub
 from dag.persistence import latest_node_result, save_node_result
 from dag.signals import Signal
+
+
+@dataclass
+class NodeJson:
+    """The serialized node record served by to_json/to_json_value and
+    persisted into node_results. Fields left as None are omitted from the
+    serialized dict, so the emitted key set matches the emitting path
+    (full to_json vs to_json_value vs error-result)."""
+
+    status: str
+    value: Any = None
+    succeeded: bool | None = None
+    pending: bool | None = None
+    impossible: bool | None = None
+    error: str | None = None
+    error_detail: dict | None = None
+    source_url: str | None = None
+    provenance: dict | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the node_results wire shape (coding-standards.md)
+        d = dict(status=self.status, value=self.value)
+        for k in ("succeeded", "pending", "impossible", "error", "error_detail", "source_url", "provenance"):
+            v = getattr(self, k)
+            if v is not None:
+                d[k] = v
+        return d
 
 T = TypeVar("T")
 
@@ -196,29 +225,28 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         Subclasses override this to return a Provenance describing
         how this node's value was derived."""
         ...
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape to_json returns the serialized node record (coding-standards.md)
     async def to_json(self) -> dict:
         attempt = await self.attempt()
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        result: dict = {
-            "status": attempt.status,
-            "value": self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
-        }
-        result["succeeded"] = attempt.succeeded
-        result["pending"] = attempt.pending
-        result["impossible"] = attempt.impossible
+        rec = NodeJson(
+            status=attempt.status,
+            value=self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
+            succeeded=attempt.succeeded,
+            pending=attempt.pending,
+            impossible=attempt.impossible,
+        )
         if attempt.impossible:
             info = attempt.error_info
-            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
+            rec.error = (info.display_message if info is not None else attempt.error) or attempt.error
             if info is not None:
-                result["error_detail"] = info.to_dict()
+                rec.error_detail = info.to_dict()
         if self._source_url:
-            result["source_url"] = self._source_url
+            rec.source_url = self._source_url
         if not attempt.pending:
-            result["provenance"] = (await self.build_provenance()).to_dict()
-        return result
+            rec.provenance = (await self.build_provenance()).to_dict()
+        return rec.to_dict()
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape returns the serialized node record (coding-standards.md)
     async def to_json_value(self) -> dict:
         """Like to_json() but skips the expensive provenance tree build.
 
@@ -226,20 +254,19 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         Use this for bulk-list endpoints where provenance is not needed.
         """
         attempt = await self.attempt()
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        result: dict = {
-            "status": attempt.status,
-            "value": self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
-        }
-        result["succeeded"] = attempt.succeeded
-        result["pending"] = attempt.pending
-        result["impossible"] = attempt.impossible
+        rec = NodeJson(
+            status=attempt.status,
+            value=self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
+            succeeded=attempt.succeeded,
+            pending=attempt.pending,
+            impossible=attempt.impossible,
+        )
         if attempt.impossible:
             info = attempt.error_info
-            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
+            rec.error = (info.display_message if info is not None else attempt.error) or attempt.error
         if self._source_url:
-            result["source_url"] = self._source_url
-        return result
+            rec.source_url = self._source_url
+        return rec.to_dict()
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _impossible(self, dep_attempts: dict[str, Attempt[Any]], extra: str = "") -> Attempt[T]:
