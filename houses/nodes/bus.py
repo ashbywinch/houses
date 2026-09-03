@@ -47,8 +47,8 @@ class BusRouteNode(DerivedNode[dict]):
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         body = {
-            "origin": CommuteRouter._address_waypoint(origin_str),
-            "destination": CommuteRouter._address_waypoint(dest_str),
+            "origin": CommuteRouter._address_waypoint(origin_str).to_dict(),
+            "destination": CommuteRouter._address_waypoint(dest_str).to_dict(),
             "travelMode": "TRANSIT",
             "transitPreferences": {"routingPreference": "less_walking"},
             "computeAlternativeRoutes": False,

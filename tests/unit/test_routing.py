@@ -599,7 +599,7 @@ class TestAddressWaypoint:
         from houses.commute_router import CommuteRouter
 
         result = CommuteRouter._address_waypoint("SW1V 2QQ")
-        assert result == {"address": "SW1V 2QQ"}
+        assert result.to_dict() == {"address": "SW1V 2QQ"}
 
     def test_geopoint_returns_location_waypoint(self):
         from houses.commute_router import CommuteRouter
@@ -607,20 +607,20 @@ class TestAddressWaypoint:
 
         gp = GeoPoint(lat=51.5, lon=-0.13)
         result = CommuteRouter._address_waypoint(gp)
-        assert result == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
+        assert result.to_dict() == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
 
     def test_coordinate_string_returns_location_waypoint(self):
         """'lat,lon' strings must use location format, not address."""
         from houses.commute_router import CommuteRouter
 
         result = CommuteRouter._address_waypoint("51.5,-0.13")
-        assert result == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
+        assert result.to_dict() == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
 
     def test_invalid_coordinate_string_falls_back_to_address(self):
         from houses.commute_router import CommuteRouter
 
         result = CommuteRouter._address_waypoint("not-a-coordinate")
-        assert result == {"address": "not-a-coordinate"}
+        assert result.to_dict() == {"address": "not-a-coordinate"}
 
 
 class TestGoogleRoutesPostReturn:

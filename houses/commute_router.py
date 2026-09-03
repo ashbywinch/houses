@@ -401,8 +401,8 @@ class CommuteRouter:
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         body = {
-            "origin": self._address_waypoint(origin),
-            "destination": self._address_waypoint(dest),
+            "origin": self._address_waypoint(origin).to_dict(),
+            "destination": self._address_waypoint(dest).to_dict(),
             "travelMode": mode,
         }
         mask = "routes.duration,routes.distanceMeters,routes.legs"
@@ -502,8 +502,8 @@ class CommuteRouter:
             dest = PlaceOfInterest(label="", address=dest)
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         body = {
-            "origin": self._address_waypoint(origin),
-            "destination": self._address_waypoint(dest.address),
+            "origin": self._address_waypoint(origin).to_dict(),
+            "destination": self._address_waypoint(dest.address).to_dict(),
             "travelMode": "TRANSIT",
         }
         mask = (
