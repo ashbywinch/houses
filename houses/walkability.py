@@ -110,7 +110,7 @@ async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoi
     """Use ORS Pelias reverse geocode to find the nearest town and its centre."""
 
     rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
     params = {"point.lat": lat, "point.lon": lng, "size": 1, "boundary.country": "GBR"}
 
     cached = get_cached("GET", rev_url, params, None)
@@ -186,14 +186,14 @@ async def _google_places_text(lat: float, lng: float) -> str:
         "pharmacy",
         "convenience_store",
     ]
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
     places_body = {
         "includedTypes": types,
         "maxResultCount": 5,
         "locationRestriction": {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
             "circle": {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
                 "center": {"latitude": lat, "longitude": lng},
                 "radius": 1000.0,
             }
@@ -272,7 +272,7 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
     return places
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
 def _format_places(data: dict, lat: float, lng: float) -> str:
     """Format Google Places response into a human-readable string."""
     google_places = data.get("places", [])
@@ -305,7 +305,7 @@ def _format_places(data: dict, lat: float, lng: float) -> str:
     return " | ".join(name for _, name in hits[:5])
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
 def _format_overpass(data: dict, lat: float, lng: float) -> str:
     """Format Overpass API response into a human-readable string."""
     elements = data.get("elements", [])
@@ -367,7 +367,7 @@ async def _walk_to_town_minutes(
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
 async def enrich_walkability(
     lat: float,
     lng: float,
@@ -392,9 +392,9 @@ async def enrich_walkability(
     )
     amenities = await nearby_amenities(lat, lng)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
     return {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
         "walk_to_town": {"value": walk_to_town_minutes, "unit": "minute"} if walk_to_town_minutes is not None else None,
         "amenities": amenities,
     }

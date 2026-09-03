@@ -28,6 +28,25 @@ from houses.settings import settings
 
 SESSION_MAX_AGE = timedelta(days=30)
 
+
+@dataclass(frozen=True)
+class _SessionClaims:
+    """The signed session-cookie claims (its serialized wire shape)."""
+
+    email: str
+    name: str
+    picture: str
+    is_superuser: bool
+    impersonating: str | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the cookie claims (coding-standards.md)
+        return dict(
+            email=self.email, name=self.name, picture=self.picture,
+            is_superuser=self.is_superuser, impersonating=self.impersonating,
+        )
+
 logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
@@ -75,7 +94,8 @@ def get_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_secret, salt="auth-session")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape returns the signed session claims parsed from the cookie — serialization boundary
+# (coding-standards.md)
 def get_session_user(request: Request) -> dict[str, Any] | None:
     """Extract session user info from the signed ``session`` cookie.
 
@@ -108,7 +128,8 @@ def _person_superuser_flag(email: str, persons_attempt_value: Any) -> bool | Non
     return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape returns the signed session claims with live superuser state — serialization boundary
+# (coding-standards.md)
 def effective_session_user(request: Request) -> dict[str, Any] | None:
     """The session user with is_superuser re-derived from LIVE settings.
 
@@ -157,14 +178,10 @@ def _make_session_cookie(
     impersonating: str | None = None,
 ) -> str:
     """Create a signed session cookie value."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    payload: dict[str, Any] = {
-        "email": email,
-        "name": name,
-        "picture": picture,
-        "is_superuser": is_superuser,
-        "impersonating": impersonating,
-    }
+    payload = _SessionClaims(
+        email=email, name=name, picture=picture,
+        is_superuser=is_superuser, impersonating=impersonating,
+    ).to_dict()
     return get_serializer().dumps(payload)
 
 
@@ -201,14 +218,10 @@ def _build_session(id_info: Mapping[str, Any]) -> SessionMint:
                 break
 
     cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    payload = {
-        "email": folded_email,
-        "name": name,
-        "picture": picture,
-        "is_superuser": is_superuser,
-        "impersonating": None,
-    }
+    payload = _SessionClaims(
+        email=folded_email, name=name, picture=picture,
+        is_superuser=is_superuser, impersonating=None,
+    ).to_dict()
     return SessionMint(payload, cookie_value)
 
 
@@ -433,7 +446,7 @@ async def me(request: Request):
     # Look up associated Person by email
     person_name = _current_person_name(session)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape session-status response — serialization boundary owns the shape (coding-standards.md)
     return {
         "authenticated": True,
         "email": session["email"],
@@ -454,7 +467,8 @@ async def logout(request: Request):
 
 
 @auth_router.post("/impersonate")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape incoming request body is the caller's wire payload — parsed defensively at the
+# boundary (coding-standards.md)
 async def impersonate(request: Request, body: dict):
     """Set or clear impersonation for a superuser.
 
@@ -493,7 +507,8 @@ async def impersonate(request: Request, body: dict):
         impersonating=person,
     )
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape impersonation response — serialization boundary owns the shape
+    # (coding-standards.md)
     response = JSONResponse(content={"status": "ok", "impersonating": person})
     _set_session_cookie(response, new_cookie, _is_secure(request))
     return response
