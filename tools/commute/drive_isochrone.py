@@ -243,6 +243,7 @@ class _ORSMatrixRequest:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the ORS wire shape (coding-standards.md)
         return dict(
             locations=self.locations, sources=self.sources,
             destinations=self.destinations, metrics=self.metrics,
