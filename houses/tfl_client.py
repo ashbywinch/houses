@@ -1,3 +1,4 @@
+# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """TfL API client for public-transit route planning in London."""
 
 from __future__ import annotations
@@ -156,6 +157,7 @@ class _CacheEnvelope:
         return dict(_cached_status=self.status, _cached_body=self.body)
 
 
+# lucidlint: ignore latent-class all 19 methods share the TfL API surface; no field-disjoint split (review-log)
 class TflClient:
     """TfL API client for public-transit route planning in London.
 
