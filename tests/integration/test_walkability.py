@@ -28,7 +28,7 @@ async def test_amenities_include_walk_times():
         lng=-0.720,
         address="Maidenhead Station Area, Maidenhead, SL6",
     )
-    amenities = result.get("amenities", "")
+    amenities = result.amenities
     assert amenities, f"Amenities should not be empty, got: {amenities!r}"
 
     parts = amenities.split(" | ")
@@ -42,5 +42,5 @@ async def test_amenities_include_walk_times():
         minutes = int(time_str.rstrip("m"))
         assert 1 <= minutes <= 60, f"Walk time should be 1-60 min, got: {minutes}"
 
-    assert result.get("walk_to_town") is not None, "Walk to town time not found"
-    assert 1 <= result["walk_to_town"]["value"] <= 60
+    assert result.walk_to_town is not None, "Walk to town time not found"
+    assert 1 <= result.walk_to_town.value <= 60

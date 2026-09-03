@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
 
 import httpx
 
@@ -445,27 +444,24 @@ class _WalkToTown:
 class WalkabilityPayload:
     """The walkability node value: walk-to-town summary plus amenities text."""
 
-    walk_to_town_minutes: int | None
+    walk_to_town: _WalkToTown | None
     amenities: str
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        walk = (
-            _WalkToTown(value=self.walk_to_town_minutes, unit="minute").to_dict()
-            if self.walk_to_town_minutes is not None
-            else None
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(
+            walk_to_town=self.walk_to_town.to_dict() if self.walk_to_town is not None else None,
+            amenities=self.amenities,
         )
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(walk_to_town=walk, amenities=self.amenities)
 
 
-# lucidlint: ignore record-shape returns the walkability payload dict — serialization boundary (coding-standards.md)
 async def enrich_walkability(
     lat: float,
     lng: float,
     address: str,
     fns: WalkabilityFns | None = None,
-) -> dict[str, Any]:
+) -> WalkabilityPayload:
     """Walk time to town centre + nearby amenities for a property.
 
     ``fns`` carries the function-param injection seams for tests
@@ -484,6 +480,5 @@ async def enrich_walkability(
     )
     amenities = await nearby_amenities(lat, lng)
 
-    return WalkabilityPayload(
-        walk_to_town_minutes=walk_to_town_minutes, amenities=amenities
-    ).to_dict()
+    walk_to_town = _WalkToTown(value=walk_to_town_minutes, unit="minute") if walk_to_town_minutes is not None else None
+    return WalkabilityPayload(walk_to_town=walk_to_town, amenities=amenities)

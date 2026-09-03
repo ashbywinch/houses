@@ -31,7 +31,9 @@ from houses.services import (
     Services,
     TownDescService,
     WalkabilityService,
+    _AuthorizationUrl,
 )
+from houses.walkability import WalkabilityPayload, _WalkToTown
 
 # ── Individual Fake Services ──────────────────────────────────────────
 
@@ -219,9 +221,11 @@ class FakeWalkability(WalkabilityService):
         self.amenities = amenities
 
     @override
-    async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
-        val = {"value": self.walk_to_town_minutes, "unit": "minute"} if self.walk_to_town_minutes is not None else None
-        return {"walk_to_town": val, "amenities": self.amenities}
+    async def enrich(self, lat: float, lng: float, address: str) -> WalkabilityPayload:
+        walk = None
+        if self.walk_to_town_minutes is not None:
+            walk = _WalkToTown(value=self.walk_to_town_minutes, unit="minute")
+        return WalkabilityPayload(walk_to_town=walk, amenities=self.amenities)
 
 
 class FakeTownDesc(TownDescService):
@@ -311,8 +315,8 @@ class FakeOAuthService(OAuthService):
         self._verify_error = verify_error
 
     @override
-    def create_authorization_url(self, state: str) -> tuple[str, str]:
-        return self.auth_url, "fake_code_verifier"
+    def create_authorization_url(self, state: str) -> _AuthorizationUrl:
+        return _AuthorizationUrl(url=self.auth_url, code_verifier="fake_code_verifier")
 
     @override
     def exchange_code(self, code: str, code_verifier: str, state: str) -> GoogleUserInfo:

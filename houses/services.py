@@ -42,7 +42,7 @@ from houses.schools import SchoolLookupOptions, compute_school_commute, find_nea
 from houses.settings import settings
 from houses.tfl_client import TflClient
 from houses.town_desc import generate_town_description
-from houses.walkability import enrich_walkability
+from houses.walkability import WalkabilityPayload, enrich_walkability
 
 # ── Protocols ──────────────────────────────────────────────────────────
 
@@ -119,6 +119,22 @@ class GoogleUserInfo:
     email_verified: bool = False
 
 
+@dataclass(frozen=True)
+class _AuthorizationUrl:
+    """The OAuth authorization URL plus the PKCE code verifier."""
+
+    url: str
+    code_verifier: str
+
+
+@dataclass(frozen=True)
+class _RailFarePair:
+    """The rail-fare-enriched commute pair (Simon, Lorena)."""
+
+    simon: Commute | None
+    lorena: Commute | None
+
+
 def _google_client_config() -> _GoogleClientConfig:
     return _GoogleClientConfig(
         client_id=settings.web_client_id,
@@ -134,9 +150,8 @@ class OAuthService(Protocol):
     for user identity information."""
 
     @staticmethod
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-    def create_authorization_url(state: str) -> tuple[str, str]:
-        """Return (authorization_url, code_verifier)."""
+    def create_authorization_url(state: str) -> _AuthorizationUrl:
+        """Return the authorization URL and its PKCE code verifier."""
         ...
 
     @staticmethod
@@ -150,12 +165,13 @@ class OAuthService(Protocol):
         ...
 
 
+
+
 class WalkabilityService(Protocol):
     """Walk time to town centre and nearby amenities."""
 
     @staticmethod
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-    async def enrich(lat: float, lng: float, address: str) -> dict[str, Any]: ...
+    async def enrich(lat: float, lng: float, address: str) -> WalkabilityPayload: ...
 
 
 class TownDescService(Protocol):
@@ -183,14 +199,13 @@ class RailFareService(Protocol):
     """National Rail fare fallback for commute costs."""
 
     @staticmethod
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     async def enrich(
         enabled: set[str] | None,
         postcode: str,
         address: str,
         simon: Commute | None,
         lorena: Commute | None,
-    ) -> tuple[Commute | None, Commute | None]: ...
+    ) -> _RailFarePair: ...
 
 
 class DriveTimeService(Protocol):
@@ -223,8 +238,7 @@ class _DefaultOAuthService:
     """Real Google OAuth implementation."""
 
     @staticmethod
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
-    def create_authorization_url(state: str) -> tuple[str, str]:
+    def create_authorization_url(state: str) -> _AuthorizationUrl:
         client_config = _google_client_config().to_dict()
         flow = Flow.from_client_config(
             client_config,
@@ -241,7 +255,7 @@ class _DefaultOAuthService:
             state=state,
         )
         code_verifier: str = getattr(flow, "code_verifier", None) or ""  # type: ignore[arg-type]  # google-auth sets code_verifier inside authorization_url() (PKCE); the library types don't declare the attribute, so getattr's None default is flagged — at this point in the flow it is always populated
-        return authorization_url, code_verifier
+        return _AuthorizationUrl(url=authorization_url, code_verifier=code_verifier)
 
     @staticmethod
     def exchange_code(code: str, code_verifier: str, state: str) -> GoogleUserInfo:
@@ -275,7 +289,6 @@ class _DefaultOAuthService:
         )
 
     @staticmethod
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     async def verify_id_token(token: str) -> GoogleUserInfo:
         """Verify a Google id_token (device flow) and return its claims.
 
@@ -292,7 +305,6 @@ class _DefaultOAuthService:
         if not settings.device_client_id:
             raise ValueError("device_client_id not configured for device-flow login")
 
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
         def _verify_in_thread() -> GoogleUserInfo:
             # Build the cert-fetch session inside the worker thread so it is
             # created and used in one thread — requests.Session isn't
@@ -431,9 +443,8 @@ class _DefaultSchoolLookup:
 
 
 class _DefaultWalkability:
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     @staticmethod
-    async def enrich(lat: float, lng: float, address: str) -> dict[str, Any]:
+    async def enrich(lat: float, lng: float, address: str) -> WalkabilityPayload:
         return await enrich_walkability(lat, lng, address)
 
 
@@ -456,7 +467,6 @@ class _DefaultCouncilTax:
 
 
 class _DefaultRailFare:
-# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     @staticmethod
     async def enrich(
         enabled: set[str] | None,
@@ -464,9 +474,9 @@ class _DefaultRailFare:
         address: str,
         simon: Commute | None,
         lorena: Commute | None,
-    ) -> tuple[Commute | None, Commute | None]:
+    ) -> _RailFarePair:
         # NR fare enrichment is now handled by RailFareNode in the DAG pipeline
-        return simon, lorena
+        return _RailFarePair(simon=simon, lorena=lorena)
 
 
 # ── DI Container ──────────────────────────────────────────────────────

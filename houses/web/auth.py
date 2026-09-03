@@ -197,26 +197,7 @@ def _build_session(user: GoogleUserInfo) -> SessionMint:
     name = user.name or (email.split("@")[0] if email else "Unknown")
     picture = user.picture
 
-    # Look up Person by email to determine superuser status
-    is_superuser = False
-    svc = get_services()
-    persons_attempt = svc.persons_source.latest_attempt()
-    if persons_attempt.succeeded:
-        for p in persons_attempt.value_or_none() or []:
-            if isinstance(p, dict):
-                pe = p.get("email")
-                if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
-                    is_superuser = True
-                    break
-            elif (
-                hasattr(p, "email")
-                and p.email is not None
-                and p.email.casefold() == folded_email
-                and hasattr(p, "is_superuser")
-                and p.is_superuser
-            ):
-                is_superuser = True
-                break
+    is_superuser = _is_superuser_for_email(folded_email)
 
     cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
     payload = _SessionClaims(
@@ -224,6 +205,29 @@ def _build_session(user: GoogleUserInfo) -> SessionMint:
         is_superuser=is_superuser, impersonating=None,
     ).to_dict()
     return SessionMint(payload, cookie_value)
+
+
+def _is_superuser_for_email(folded_email: str) -> bool:
+    """Look up Person by email to determine superuser status."""
+    svc = get_services()
+    persons_attempt = svc.persons_source.latest_attempt()
+    if not persons_attempt.succeeded:
+        return False
+    for p in persons_attempt.value_or_none() or []:
+        if isinstance(p, dict):
+            pe = p.get("email")
+            if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
+                return True
+        elif (
+            hasattr(p, "email")
+            and p.email is not None
+            and p.email.casefold() == folded_email
+            and hasattr(p, "is_superuser")
+            and p.is_superuser
+        ):
+            return True
+    return False
+
 
 
 def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | None:
@@ -310,7 +314,8 @@ async def login():
 
     svc = get_services()
     try:
-        authorization_url, code_verifier = svc.oauth_service.create_authorization_url(state)
+        oauth_url = svc.oauth_service.create_authorization_url(state)
+        authorization_url, code_verifier = oauth_url.url, oauth_url.code_verifier
     except ImportError:
         return {"status": "error", "detail": "google-auth libraries not installed"}
 
