@@ -28,8 +28,21 @@ from houses.transit_route import apply_park_and_ride_to_journeys
 
 logger = logging.getLogger(__name__)
 
-# lucidlint: ignore global-state static TfL mode-name → LegMode mapping table; never mutated
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+@dataclass(frozen=True)
+class _TravelDate:
+    """The TfL journey-date query parameter (YYYYMMDD + fixed 09:00)."""
+
+    date: str
+    time: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the TfL query param shape (coding-standards.md)
+        return dict(date=self.date, time=self.time)
+
+
+# lucidlint: ignore record-shape static dispatch table mode-to-LegMode — keyed dispatch, not a record (review-log)
+# lucidlint: ignore global-state static TfL mode-name-to-LegMode mapping table; never mutated
 _MODE_MAP: dict[str, LegMode] = {
     "walking": LegMode.WALK,
     "tube": LegMode.TUBE,
@@ -259,7 +272,7 @@ class TflClient:
         return duration
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     def _disambiguate_national_rail(data: dict) -> str | None:
         """Extract the national-rail StopPoint id from a 300 disambiguation body.
 
@@ -333,13 +346,11 @@ class TflClient:
         # Work in local time since TfL API expects local dates
         now_local = datetime.now(UTC).astimezone()
         if now_local.weekday() < 5 and now_local.hour < 9:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            return {"date": now_local.strftime("%Y%m%d"), "time": "0900"}
+            return _TravelDate(date=now_local.strftime("%Y%m%d"), time="0900").to_dict()
         target = now_local + timedelta(days=1)
         while target.weekday() >= 5:
             target += timedelta(days=1)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {"date": target.strftime("%Y%m%d"), "time": "0900"}
+        return _TravelDate(date=target.strftime("%Y%m%d"), time="0900").to_dict()
 
     @staticmethod
     def _tfl_auth_params() -> dict[str, str]:
@@ -349,7 +360,7 @@ class TflClient:
         return params
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     def _format_route_summary(journey: dict) -> str:
         legs = journey.get("legs", [])
         parts: list[str] = []
@@ -451,7 +462,7 @@ class TflClient:
 
     @staticmethod
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_with_retry(
         url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
     ) -> dict | None:
@@ -482,7 +493,7 @@ class TflClient:
         return None
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     def _is_transient_error_body(data: dict) -> bool:
         """True for cached entries that are TRANSIENT error responses.
 
@@ -506,7 +517,7 @@ class TflClient:
 
     @staticmethod
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_api_call(
         url: str, params: dict, *, _client_factory: Callable | None = None
     ) -> dict | None:
@@ -600,7 +611,7 @@ class TflClient:
                     user_message=_friendly_tfl_message(resp.status_code),
                 )
             return data
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _fetch_data(self) -> dict | None:
         """Call TfL API and return the raw JSON response, or None on failure.
 
@@ -642,7 +653,7 @@ class TflClient:
             return None
         return data
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _process_data(self, data: dict | None) -> Attempt[Commute]:
         """Turn raw TfL API data into a Commute.  Pure logic — no HTTP.
 
