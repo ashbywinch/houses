@@ -142,7 +142,20 @@ class ParkingCostResult:
     cost_groups: list[CostGroup]
 
 
-# lucidlint: ignore latent-class partition 19 methods over 641 lines, but the clusters (journey planning, fare
+@dataclass(frozen=True)
+class _CacheEnvelope:
+    """The wrapped-error envelope stored in the fare cache file: a
+    deterministic non-2xx TfL response with its status preserved."""
+
+    status: int
+    body: object
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the cache-file shape (coding-standards)
+        return dict(_cached_status=self.status, _cached_body=self.body)
+
+
 class TflClient:
     """TfL API client for public-transit route planning in London.
 
@@ -552,15 +565,19 @@ class TflClient:
             if resp.status_code < 300:
                 set_cached("GET", url, cache_params, None, data)
             elif 300 <= resp.status_code < 400:
-                # lucidlint: ignore record-shape wire-format dict — the wrapped-error envelope IS the cache file's
-                set_cached("GET", url, cache_params, None, {"_cached_status": resp.status_code, "_cached_body": data})
+                set_cached(
+                    "GET", url, cache_params, None,
+                    _CacheEnvelope(status=resp.status_code, body=data).to_dict(),
+                )
             elif resp.status_code == 404:
                 # 404 "cannot route this station" is genuinely deterministic —
                 # re-hitting the endpoint for the same impossible request
                 # wastes calls. Every OTHER 4xx is transient-ish (401/403 key
                 # expiry, 409 planner outage) and must not poison the cache.
-                # lucidlint: ignore record-shape wire-format dict — the wrapped-error envelope IS the cache file's
-                set_cached("GET", url, cache_params, None, {"_cached_status": 404, "_cached_body": data})
+                set_cached(
+                    "GET", url, cache_params, None,
+                    _CacheEnvelope(status=404, body=data).to_dict(),
+                )
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(
                     resp.status_code,
