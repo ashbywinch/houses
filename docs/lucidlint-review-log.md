@@ -356,6 +356,14 @@ throughout; all three `ignore-file` exemptions removed; gate clean with no
 exemptions in the file. Suppressions remain only for keyed collections and
 positional coordinate pairs (ceremony, not wire format).
 
+**Boundary methods are not convertible records.** The ruling applies to
+*data* records (fixed-field payloads built and passed around). It does not
+apply to serialization-aggregator methods — e.g.
+`PropertyNodes.to_json/to_json_summary/to_json_detail` (18 markers), which
+`await` ~40 DAG nodes into frontend-pinned payloads: a record with 40
+awaited async fields is ceremony. Those keep their boundary markers with
+the standard citation.
+
 ### 0.4.0 suppression census
 
 Recorded per-site in the working tree (kinds: record-shape, latent-class,
