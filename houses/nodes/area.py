@@ -22,8 +22,8 @@ class WalkabilityNode(DerivedNode[dict]):
         if loc is None:
             return Attempt.impossible("location missing")
         svc = get_services()
-        result = await svc.walkability_service.enrich(loc.lat, loc.lon, address.value_or_none() or "")
-        return Attempt.succeeded(result)
+        payload = await svc.walkability_service.enrich(loc.lat, loc.lon, address.value_or_none() or "")
+        return Attempt.succeeded(payload.to_dict())
 
     @override
     async def build_provenance(self) -> Provenance:
