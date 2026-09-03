@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -148,7 +149,7 @@ async def _walk_duration(
 ) -> int | None:
     origin = [lng, lat]
     dest = [town_centre.lon, town_centre.lat]
-    body = {"coordinates": [origin, dest]}
+    body = _ORSWalkBody(coordinates=[origin, dest]).to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
@@ -186,19 +187,13 @@ async def _google_places_text(lat: float, lng: float) -> str:
         "pharmacy",
         "convenience_store",
     ]
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-    places_body = {
-        "includedTypes": types,
-        "maxResultCount": 5,
-        "locationRestriction": {
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-            "circle": {
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-                "center": {"latitude": lat, "longitude": lng},
-                "radius": 1000.0,
-            }
-        },
-    }
+    places_body = _PlacesBody(
+        included_types=types,
+        max_result_count=5,
+        location_restriction=_PlacesLocationRestriction(
+            circle=_PlacesCircle(center=_PlacesCircleCenter(latitude=lat, longitude=lng), radius=1000.0)
+        ),
+    ).to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
@@ -367,7 +362,104 @@ async def _walk_to_town_minutes(
 
 
 
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
+@dataclass(frozen=True)
+class _ORSWalkBody:
+    """ORS walking-directions request body (wire shape)."""
+
+    coordinates: list[list[float]]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(coordinates=self.coordinates)
+
+
+@dataclass(frozen=True)
+class _PlacesCircleCenter:
+    """Google Places circle-center wire shape."""
+
+    latitude: float
+    longitude: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(latitude=self.latitude, longitude=self.longitude)
+
+
+@dataclass(frozen=True)
+class _PlacesCircle:
+    """Google Places circular location restriction (wire shape)."""
+
+    center: _PlacesCircleCenter
+    radius: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(center=self.center.to_dict(), radius=self.radius)
+
+
+@dataclass(frozen=True)
+class _PlacesLocationRestriction:
+    """Google Places location restriction (wire shape)."""
+
+    circle: _PlacesCircle
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(circle=self.circle.to_dict())
+
+
+@dataclass(frozen=True)
+class _PlacesBody:
+    """Google Places nearby-search request body (wire shape)."""
+
+    included_types: list[str]
+    max_result_count: int
+    location_restriction: _PlacesLocationRestriction
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(
+            includedTypes=self.included_types,
+            maxResultCount=self.max_result_count,
+            locationRestriction=self.location_restriction.to_dict(),
+        )
+
+
+@dataclass(frozen=True)
+class _WalkToTown:
+    """The walk-to-town summary entry of the walkability payload."""
+
+    value: int
+    unit: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(value=self.value, unit=self.unit)
+
+
+@dataclass(frozen=True)
+class WalkabilityPayload:
+    """The walkability node value: walk-to-town summary plus amenities text."""
+
+    walk_to_town_minutes: int | None
+    amenities: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        walk = (
+            _WalkToTown(value=self.walk_to_town_minutes, unit="minute").to_dict()
+            if self.walk_to_town_minutes is not None
+            else None
+        )
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(walk_to_town=walk, amenities=self.amenities)
+
+
+# lucidlint: ignore record-shape returns the walkability payload dict — serialization boundary (coding-standards.md)
 async def enrich_walkability(
     lat: float,
     lng: float,
@@ -392,9 +484,6 @@ async def enrich_walkability(
     )
     amenities = await nearby_amenities(lat, lng)
 
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-    return {
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-        "walk_to_town": {"value": walk_to_town_minutes, "unit": "minute"} if walk_to_town_minutes is not None else None,
-        "amenities": amenities,
-    }
+    return WalkabilityPayload(
+        walk_to_town_minutes=walk_to_town_minutes, amenities=amenities
+    ).to_dict()
