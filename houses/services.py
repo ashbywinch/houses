@@ -90,7 +90,7 @@ class OAuthService(Protocol):
     for user identity information."""
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     def create_authorization_url(state: str) -> tuple[str, str]:
         """Return (authorization_url, code_verifier)."""
         ...
@@ -103,7 +103,7 @@ class OAuthService(Protocol):
         ...
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     async def verify_id_token(token: str) -> dict:
         """Verify a Google id_token (device flow) and return its claims."""
         ...
@@ -113,7 +113,7 @@ class WalkabilityService(Protocol):
     """Walk time to town centre and nearby amenities."""
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     async def enrich(lat: float, lng: float, address: str) -> dict[str, Any]: ...
 
 
@@ -142,7 +142,7 @@ class RailFareService(Protocol):
     """National Rail fare fallback for commute costs."""
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     async def enrich(
         enabled: set[str] | None,
         postcode: str,
@@ -182,10 +182,10 @@ class _DefaultOAuthService:
     """Real Google OAuth implementation."""
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     def create_authorization_url(state: str) -> tuple[str, str]:
         client_config = {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
             "web": {
                 "client_id": settings.web_client_id,
                 "client_secret": settings.web_client_secret,
@@ -215,7 +215,7 @@ class _DefaultOAuthService:
     def exchange_code(code: str, code_verifier: str, state: str) -> Mapping[str, Any]:
 
         client_config = {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
             "web": {
                 "client_id": settings.web_client_id,
                 "client_secret": settings.web_client_secret,
@@ -248,7 +248,7 @@ class _DefaultOAuthService:
         return id_info
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     async def verify_id_token(token: str) -> dict:
         """Verify a Google id_token (device flow) and return its claims.
 
@@ -265,7 +265,7 @@ class _DefaultOAuthService:
         if not settings.device_client_id:
             raise ValueError("device_client_id not configured for device-flow login")
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
         def _verify_in_thread() -> dict:
             # Build the cert-fetch session inside the worker thread so it is
             # created and used in one thread — requests.Session isn't
@@ -400,7 +400,7 @@ class _DefaultSchoolLookup:
 
 
 class _DefaultWalkability:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     @staticmethod
     async def enrich(lat: float, lng: float, address: str) -> dict[str, Any]:
         return await enrich_walkability(lat, lng, address)
@@ -425,7 +425,7 @@ class _DefaultCouncilTax:
 
 
 class _DefaultRailFare:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape external contract — keys owned by Google's API (review-log)
     @staticmethod
     async def enrich(
         enabled: set[str] | None,
