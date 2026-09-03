@@ -85,8 +85,21 @@ NOC_SUB_OPERATORS: dict[str, list[str]] = {
 }
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def extract_operator_fares(operator: OperatorRef, options: FareExtractionOptions) -> dict | None:
+@dataclass(frozen=True)
+class OperatorFares:
+    """The extraction result for one operator: zones, fares, stop coords."""
+
+    stop_zones: dict[str, str]
+    zone_fares: dict[str, dict[str, float]]
+    stop_coords: list[dict]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
+        return dict(stop_zones=self.stop_zones, zone_fares=self.zone_fares, stop_coords=self.stop_coords)
+
+
+def extract_operator_fares(operator: OperatorRef, options: FareExtractionOptions) -> OperatorFares | None:
     noc, display_name = operator.noc, operator.display_name
     datasets = get_bods_datasets(noc, options.api_key)
     if not datasets:
@@ -115,8 +128,9 @@ def extract_operator_fares(operator: OperatorRef, options: FareExtractionOptions
         len(merged.fares),
     )
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"stop_zones": combined_zones, "zone_fares": merged.fares, "stop_coords": combined_stop_coords}
+    return OperatorFares(
+        stop_zones=combined_zones, zone_fares=merged.fares, stop_coords=combined_stop_coords
+    )
 
 
 @dataclass(frozen=True)
@@ -317,8 +331,9 @@ def main():
 
         logger.info("Processing %s (%s)...", display_name, noc)
         try:
-            op_data = extract_operator_fares(OperatorRef(noc, display_name), fare_options)
-            if op_data:
+            fare_result = extract_operator_fares(OperatorRef(noc, display_name), fare_options)
+            if fare_result:
+                op_data = fare_result.to_dict()
                 all_operator_data[display_name] = op_data
                 with ckpt.open("w") as f:
                     json.dump(op_data, f, indent=2)
