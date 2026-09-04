@@ -266,8 +266,24 @@ def parse_netex_fares(
     return NetexFareParser(root, stations, naptan).run()
 
 
-# lucidlint: ignore latent-class the 27 methods all read the same parse state (root, stops, zone_fares) — no
 # field-disjoint partition exists to split along; size is a review signal, not a split order (review-log)
+@dataclass(frozen=True)
+class _StopCoordinates:
+    """The parsed coordinates of a ScheduledStopPoint (either may be absent)."""
+
+    lat: float | None
+    lon: float | None
+
+        # lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
+    def with_fallback(self, naptan: dict[str, tuple[float, float]], atco: str) -> _StopCoordinates:
+        """NaPTAN lookup fills both coordinates when the XML carried none."""
+        if self.lat is None and self.lon is None:
+            coords = naptan.get(atco.removeprefix("atco:"))
+            if coords is not None:
+                return _StopCoordinates(lat=coords[0], lon=coords[1])
+        return self
+
+
 class NetexFareParser:
     """One-shot parser for a BODS NeTEx fares XML document.
 
@@ -361,18 +377,13 @@ class NetexFareParser:
         if not atco:
             return None
 
-        lat, lon = self._stop_coordinates(ssp)
-        if lat is None and lon is None and self.naptan is not None:
-            atco_key = atco.removeprefix("atco:")
-            coords = self.naptan.get(atco_key)
-            if coords is not None:
-                lat, lon = coords
+        coords = self._stop_coordinates(ssp).with_fallback(self.naptan or {}, atco)
+        lat, lon = coords.lat, coords.lon
 
         return atco, NetexStop(name=name, lat=lat, lon=lon, near_station=False)
 
-    # lucidlint: ignore record-shape (lat, lon) coordinate pair — positional pair, named fields add noise (review-log)
     @staticmethod
-    def _stop_coordinates(ssp: ET.Element) -> tuple[float | None, float | None]:
+    def _stop_coordinates(ssp: ET.Element) -> _StopCoordinates:
         lat_el = _first_found(
             ssp.find(".//netex:Latitude", NS),
             ssp.find(".//netex:latitude", NS),
@@ -381,9 +392,10 @@ class NetexFareParser:
             ssp.find(".//netex:Longitude", NS),
             ssp.find(".//netex:longitude", NS),
         )
-        lat = float(lat_el.text) if lat_el is not None and lat_el.text else None
-        lon = float(lon_el.text) if lon_el is not None and lon_el.text else None
-        return lat, lon
+        return _StopCoordinates(
+            lat=float(lat_el.text) if lat_el is not None and lat_el.text else None,
+            lon=float(lon_el.text) if lon_el is not None and lon_el.text else None,
+        )
 
     def _stops_have_near_station(self) -> bool:
         near_count = sum(1 for s in self.stops.values() if s.near_station)
