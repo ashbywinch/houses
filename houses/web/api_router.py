@@ -359,11 +359,24 @@ async def get_all_properties():
     return dict(scored)
 
 
+@dataclass(frozen=True)
+class _CurrentHome:
+    """One current-status property in the current-homes listing."""
+
+    rid: str
+    address: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(rid=self.rid, address=self.address)
+
+
 @api_router.get("/properties/current-homes")
 async def list_current_homes():
     """The family's CURRENT house(s) — properties marked status=current —
     so a person can link their settings home fields to the right one."""
-    result: list[dict[str, str]] = []
+    result: list[_CurrentHome] = []
     for rid in _registry_rids():
         prop = _registry_property(rid)
         if prop is None:
@@ -373,9 +386,8 @@ async def list_current_homes():
             continue
         att = prop.best_address.latest_attempt()
         address = str(att.value_or_none()) if att.succeeded and att.value_or_none() else ""
-        # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the shape
-        result.append({"rid": str(rid), "address": address})
-    return {"homes": result}
+        result.append(_CurrentHome(rid=str(rid), address=address))
+    return {"homes": [h.to_dict() for h in result]}
 
 
 @api_router.get("/properties/{rid}")
