@@ -207,6 +207,20 @@ async def _require_auth(request, call_next):
     return await call_next(request)
 
 
+@dataclass(frozen=True)
+class _PropertyListing:
+    """The /properties response: the legacy tab selector echo plus one
+    PropertyNodes JSON document per registered property."""
+
+    tab: str
+    properties: list[dict]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
+        return dict(tab=self.tab, properties=self.properties)
+
+
 @app.get("/properties")
 async def list_properties(
     tab: str = Query(default="view", description="Legacy selector ('view'|'data'); both serve the same registry rows"),
@@ -217,7 +231,6 @@ async def list_properties(
     best_address / best_location / rightmove_url / rightmove_price /
     rightmove_bedrooms / postcode), sourced from the SQLite database via
     the property registry — the sheet is gone.
-
     Query parameters:
     - **tab** (legacy): accepted for backwards compatibility; the registry
       is the same regardless of tab.
@@ -228,8 +241,7 @@ async def list_properties(
         if prop is None:
             continue
         props.append(await prop.to_json())
-    # lucidlint: ignore record-shape per-tab listing aggregator — serialization boundary (coding-standards.md)
-    return dict(tab=tab, properties=props)
+    return _PropertyListing(tab=tab, properties=props).to_dict()
 
 
 def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
