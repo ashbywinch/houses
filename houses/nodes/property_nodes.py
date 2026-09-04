@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from money import Money
@@ -35,6 +36,228 @@ if TYPE_CHECKING:
     from houses.nodes.commute import CommuteSelectorNode
     from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
     from houses.services import Services
+
+
+@dataclass(frozen=True)
+class _PropertyJson:
+    """Wire shape of PropertyNodes.to_json."""
+
+    rid: str
+    best_address: Any
+    best_location: Any
+    rightmove_url: Any
+    rightmove_price: Any
+    rightmove_bedrooms: Any
+    postcode: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _SchoolEntry:
+    """The {school: ...} wrapper used per school stage."""
+
+    school: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(school=self.school)
+
+
+@dataclass(frozen=True)
+class _SchoolsJson:
+    """Wire shape of the schools block (primary and secondary)."""
+
+    primary: _SchoolEntry
+    secondary: _SchoolEntry
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _TriageJson:
+    """Wire shape of the triage block."""
+
+    favourite: Any
+    dismissed: Any
+    is_viewed: Any
+    user_notes: Any
+    triage_status: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _FreshnessJson:
+    """Wire shape of the freshness block."""
+
+    property_added_at: str | None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(property_added_at=self.property_added_at)
+
+
+@dataclass(frozen=True)
+class _SummaryJson:
+    """Wire shape of PropertyNodes.to_json_summary."""
+
+    rid: str
+    best_address: Any
+    best_location: Any
+    rightmove_price: Any
+    rightmove_bedrooms: Any
+    group_monthly_cost: Any
+    town_name: Any
+    commutes: dict
+    schools: dict
+    walkability: Any
+    epc: Any
+    triage: dict
+    freshness: dict
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _LocationJson:
+    """Wire shape of the detail location block."""
+
+    best_location: Any
+    geocode: Any
+    rightmove_location: Any
+    precise_location: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _AffordabilityJson:
+    """Wire shape of the detail affordability block."""
+
+    stamp_duty: Any
+    council_tax: Any
+    works_estimates: Any
+    total_works: Any
+    total_equity: Any
+    life_insurance_total: Any
+    mortgage_required: Any
+    monthly_mortgage: Any
+    monthly_sinking_fund: Any
+    monthly_commute_cost: Any
+    rental_income: Any
+    group_monthly_cost: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _CouncilTaxApportionmentJson:
+    """Wire shape of the council-tax apportionment block."""
+
+    main_payers: Any
+    annexe_payers: Any
+    ignored: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _AreaJson:
+    """Wire shape of the detail area block."""
+
+    walkability: Any
+    town_description: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class _CommentsJson:
+    """Wire shape of the detail comments block."""
+
+    status: Any
+    status_reason: Any
+    group_notes: Any
+    ashby_comments: Any
+    design_needed: Any
+    planning_needed: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+
+@dataclass(frozen=True)
+class _SettingsFinancial:
+    """The financial settings block: status plus the aggregate value."""
+
+    status: str
+    value: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(status=self.status, value=self.value)
+
+
+@dataclass(frozen=True)
+class _SettingsBlock:
+    """The settings section of the detail payload."""
+
+    persons: Any
+    financial: _SettingsFinancial
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(persons=self.persons, financial=self.financial.to_dict())
+
+
+@dataclass(frozen=True)
+class _DetailJson:
+    """Wire shape of PropertyNodes.to_json_detail."""
+
+    rid: str
+    best_address: Any
+    user_entered_address: Any
+    rightmove_url: Any
+    rightmove_price: Any
+    rightmove_bedrooms: Any
+    town_name: Any
+    epc: Any
+    location: dict
+    commutes: dict
+    schools: dict
+    affordability: dict
+    council_tax_apportionment: dict
+    area: dict
+    triage: dict
+    comments: dict
+    settings: _SettingsBlock
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d["settings"] = self.settings.to_dict()
+        return d
 
 
 class PropertyNodes:
@@ -279,18 +502,18 @@ class PropertyNodes:
     def _on_node_changed(self) -> None:
         self.changed.emit()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json(self) -> dict[str, Any]:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {
-            "rid": self.rid,
-            "best_address": await self.best_address.to_json(),
-            "best_location": await self.best_location.to_json(),
-            "rightmove_url": await self.rightmove_url.to_json(),
-            "rightmove_price": await self.rightmove_price.to_json(),
-            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
-            "postcode": await self.postcode.to_json(),
-        }
+        rec = _PropertyJson(
+            rid=self.rid,
+            best_address=await self.best_address.to_json(),
+            best_location=await self.best_location.to_json(),
+            rightmove_url=await self.rightmove_url.to_json(),
+            rightmove_price=await self.rightmove_price.to_json(),
+            rightmove_bedrooms=await self.rightmove_bedrooms.to_json(),
+            postcode=await self.postcode.to_json(),
+        )
+        return rec.to_dict()
 
     def schedule_code_stale_nodes(self) -> None:
         """Schedule (never await) recompute for derived nodes whose
@@ -334,120 +557,108 @@ class PropertyNodes:
         assert self.commute_breakdown is not None, "commute pipeline not built"
         return await self.commute_breakdown.to_json()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json_summary(self) -> dict[str, Any]:
+        triage = _TriageJson(
+            favourite=await self.favourite.to_json_value(),
+            dismissed=await self.dismissed.to_json_value(),
+            is_viewed=await self.is_viewed.to_json_value(),
+            user_notes=await self.user_notes.to_json_value(),
+            triage_status=await self.triage_status.to_json_value(),
+        )
+        schools = _SchoolsJson(
+            primary=_SchoolEntry(school=await self.primary_school.to_json_value()),
+            secondary=_SchoolEntry(school=await self.secondary_school.to_json_value()),
+        )
+        rec = _SummaryJson(
+            rid=self.rid,
+            best_address=await self.best_address.to_json_value(),
+            best_location=await self.best_location.to_json_value(),
+            rightmove_price=await self.rightmove_price.to_json_value(),
+            rightmove_bedrooms=await self.rightmove_bedrooms.to_json_value(),
+            group_monthly_cost=await self.group_monthly_cost.to_json_value(),
+            town_name=await self.town_name.to_json_value(),
+            commutes={k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
+            schools=schools.to_dict(),
+            walkability=await self.walkability.to_json_value(),
+            epc=await self.epc.to_json_value(),
+            triage=triage.to_dict(),
+            freshness=_FreshnessJson(property_added_at=property_created_at(self.rid)).to_dict(),
+        )
+        return rec.to_dict()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        result = {
-            "rid": self.rid,
-            "best_address": await self.best_address.to_json_value(),
-            "best_location": await self.best_location.to_json_value(),
-            "rightmove_price": await self.rightmove_price.to_json_value(),
-            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json_value(),
-            "group_monthly_cost": await self.group_monthly_cost.to_json_value(),
-            "town_name": await self.town_name.to_json_value(),
-            "commutes": {k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "schools": {
-                "primary": {
-                    "school": await self.primary_school.to_json_value(),
-                },
-                "secondary": {
-                    "school": await self.secondary_school.to_json_value(),
-                },
-            },
-            "walkability": await self.walkability.to_json_value(),
-            "epc": await self.epc.to_json_value(),
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "triage": {
-                "favourite": await self.favourite.to_json_value(),
-                "dismissed": await self.dismissed.to_json_value(),
-                "is_viewed": await self.is_viewed.to_json_value(),
-                "user_notes": await self.user_notes.to_json_value(),
-                "triage_status": await self.triage_status.to_json_value(),
-            },
-        }
-        result["freshness"] = {
-            "property_added_at": property_created_at(self.rid),
-        }
-        return result
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json_detail(self) -> dict[str, Any]:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {
-            "rid": self.rid,
-            "best_address": await self.best_address.to_json(),
-            "user_entered_address": await self.user_entered_address.to_json(),
-            "rightmove_url": await self.rightmove_url.to_json(),
-            "rightmove_price": await self.rightmove_price.to_json(),
-            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
-            "town_name": await self.town_name.to_json(),
-            "epc": await self.epc.to_json(),
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "location": {
-                "best_location": await self.best_location.to_json(),
-                "geocode": await self.geocode.to_json(),
-                "rightmove_location": await self.rightmove_location.to_json(),
-                "precise_location": await self.precise_location.to_json(),
-            },
-            "commutes": {k: await v.to_json() for k, v in self.commute_selectors.items()},
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "schools": {
-                "primary": {
-                    "school": await self.primary_school.to_json(),
-                },
-                "secondary": {
-                    "school": await self.secondary_school.to_json(),
-                },
-            },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "affordability": {
-                "stamp_duty": await self.stamp_duty.to_json(),
-                "council_tax": await self.council_tax.to_json(),
-                "works_estimates": await self.works_estimates.to_json(),
-                "total_works": await self.total_works.to_json(),
-                "total_equity": await self.total_equity.to_json(),
-                "life_insurance_total": await self.life_insurance_total.to_json(),
-                "mortgage_required": await self.mortgage_required.to_json(),
-                "monthly_mortgage": await self.monthly_mortgage.to_json(),
-                "monthly_sinking_fund": await self.monthly_sinking_fund.to_json(),
-                "monthly_commute_cost": await self._commute_breakdown_json(),
-                "rental_income": await self.rental_income.to_json(),
-                "group_monthly_cost": await self.group_monthly_cost.to_json(),
-            },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "council_tax_apportionment": {
-                "main_payers": await self.council_tax_payers.to_json_value(),
-                "annexe_payers": await self.annexe_payers.to_json_value(),
-                "ignored": await self.annexe_ignored.to_json_value(),
-            },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "area": {
-                "walkability": await self.walkability.to_json(),
-                "town_description": await self.town_desc.to_json(),
-            },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "triage": {
-                "favourite": await self.favourite.to_json(),
-                "dismissed": await self.dismissed.to_json(),
-                "is_viewed": await self.is_viewed.to_json(),
-                "user_notes": await self.user_notes.to_json(),
-                "triage_status": await self.triage_status.to_json(),
-            },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "comments": {
-                "status": await self.comment_status.to_json(),
-                "status_reason": await self.comment_status_reason.to_json(),
-                "group_notes": await self.comment_group_notes.to_json(),
-                "ashby_comments": await self.comment_ashby_comments.to_json(),
-                "design_needed": await self.comment_design_needed.to_json(),
-                "planning_needed": await self.comment_planning_needed.to_json(),
-            },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-            "settings": {
-                "persons": await self._svc.persons_source.to_json(),
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-                "financial": {"status": "succeeded", "value": aggregate_dict(self._svc.setting_nodes)},
-            },
-        }
+        location = _LocationJson(
+            best_location=await self.best_location.to_json(),
+            geocode=await self.geocode.to_json(),
+            rightmove_location=await self.rightmove_location.to_json(),
+            precise_location=await self.precise_location.to_json(),
+        )
+        schools = _SchoolsJson(
+            primary=_SchoolEntry(school=await self.primary_school.to_json()),
+            secondary=_SchoolEntry(school=await self.secondary_school.to_json()),
+        )
+        affordability = _AffordabilityJson(
+            stamp_duty=await self.stamp_duty.to_json(),
+            council_tax=await self.council_tax.to_json(),
+            works_estimates=await self.works_estimates.to_json(),
+            total_works=await self.total_works.to_json(),
+            total_equity=await self.total_equity.to_json(),
+            life_insurance_total=await self.life_insurance_total.to_json(),
+            mortgage_required=await self.mortgage_required.to_json(),
+            monthly_mortgage=await self.monthly_mortgage.to_json(),
+            monthly_sinking_fund=await self.monthly_sinking_fund.to_json(),
+            monthly_commute_cost=await self._commute_breakdown_json(),
+            rental_income=await self.rental_income.to_json(),
+            group_monthly_cost=await self.group_monthly_cost.to_json(),
+        )
+        apportionment = _CouncilTaxApportionmentJson(
+            main_payers=await self.council_tax_payers.to_json_value(),
+            annexe_payers=await self.annexe_payers.to_json_value(),
+            ignored=await self.annexe_ignored.to_json_value(),
+        )
+        area = _AreaJson(
+            walkability=await self.walkability.to_json(),
+            town_description=await self.town_desc.to_json(),
+        )
+        triage = _TriageJson(
+            favourite=await self.favourite.to_json(),
+            dismissed=await self.dismissed.to_json(),
+            is_viewed=await self.is_viewed.to_json(),
+            user_notes=await self.user_notes.to_json(),
+            triage_status=await self.triage_status.to_json(),
+        )
+        comments = _CommentsJson(
+            status=await self.comment_status.to_json(),
+            status_reason=await self.comment_status_reason.to_json(),
+            group_notes=await self.comment_group_notes.to_json(),
+            ashby_comments=await self.comment_ashby_comments.to_json(),
+            design_needed=await self.comment_design_needed.to_json(),
+            planning_needed=await self.comment_planning_needed.to_json(),
+        )
+        rec = _DetailJson(
+            rid=self.rid,
+            best_address=await self.best_address.to_json(),
+            user_entered_address=await self.user_entered_address.to_json(),
+            rightmove_url=await self.rightmove_url.to_json(),
+            rightmove_price=await self.rightmove_price.to_json(),
+            rightmove_bedrooms=await self.rightmove_bedrooms.to_json(),
+            town_name=await self.town_name.to_json(),
+            epc=await self.epc.to_json(),
+            location=location.to_dict(),
+            commutes={k: await v.to_json() for k, v in self.commute_selectors.items()},
+            schools=schools.to_dict(),
+            affordability=affordability.to_dict(),
+            council_tax_apportionment=apportionment.to_dict(),
+            area=area.to_dict(),
+            triage=triage.to_dict(),
+            comments=comments.to_dict(),
+            settings=_SettingsBlock(
+                persons=await self._svc.persons_source.to_json(),
+                financial=_SettingsFinancial(
+                    status="succeeded", value=aggregate_dict(self._svc.setting_nodes)
+                ),
+            ),
+        )
+        return rec.to_dict()
