@@ -370,19 +370,44 @@ class MatrixBatchConfig:
     fetch: Callable | None = None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+@dataclass(frozen=True)
+class IsochroneSnapshot:
+    """The drive_isochrone.json document: metadata header plus one
+    destination block per configured destination."""
+
+    engine_version: str
+    profile: str
+    speed_model: str
+    generated_at: str
+    metadata: IsochroneMetadata
+    destinations: list[IsochroneDestination]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the JSON wire shape (coding-standards.md)
+        return dict(
+            # lucidlint: ignore record-shape metadata header assembly (coding-standards.md)
+            metadata=dict(
+                engine_version=self.engine_version, profile=self.profile,
+                speed_model=self.speed_model, **self.metadata.to_dict(),
+                generated_at=self.generated_at,
+            ),
+            destinations=[d.to_dict() for d in self.destinations],
+        )
+
+
 async def build_raw(
     located: list[LocatedDestination],
     config: MatrixBatchConfig,
     generated_at: str,
-) -> dict:
+) -> IsochroneSnapshot:
     """Geocode-backed matrix batch → the raw isochrone payload.
 
     Payload values are bare unit-named numbers (the wire format); all
     computation above is Quantity.
     """
     fetch = config.fetch or fetch_matrix
-    records: list[dict] = []
+    records: list[IsochroneDestination] = []
     for ld in located:
         dest = ld.destination
         point = ld.point
@@ -396,7 +421,7 @@ async def build_raw(
             durations.extend(parse_durations(data, len(req.sources)))
             if _REQUEST_DELAY_S:
                 await asyncio.sleep(_REQUEST_DELAY_S)
-        rec = _RawDestinationRecord(
+        rec = IsochroneDestination(
             label=dest.label,
             postcode=dest.postcode,
             lat=point.lat,
@@ -404,42 +429,37 @@ async def build_raw(
             threshold_min=int(dest.threshold_min.to("minute").magnitude),
             cell_km=config.cell_km.to("km").magnitude,
             slack_min=round(slack_minutes(config.cell_km).to("minute").magnitude, MINUTES_DECIMALS),
-            grid=_RawGridBounds(
+            grid=IsochroneGridBounds(
                 lat_min=bbox.lat_min, lat_max=bbox.lat_max,
                 lon_min=bbox.lon_min, lon_max=bbox.lon_max,
             ),
             cells=[
-                _RawGridCell(
+                IsochroneGridCell(
                     r=cell.row, c=cell.col, lat=cell.lat, lon=cell.lon,
                     duration_min=None if dur is None else round(dur.to("minute").magnitude, MINUTES_DECIMALS),
                 )
                 for cell, dur in zip(cells, durations, strict=True)
             ],
         )
-        records.append(rec.to_dict())
-    meta = _RawMetadata(
+        records.append(rec)
+    metadata = IsochroneMetadata(
         threshold_min=int(min(ld.destination.threshold_min for ld in located).to("minute").magnitude),
         cell_km=config.cell_km.to("km").magnitude,
         region_km=config.region_km.to("km").magnitude,
         destinations=[
-            _RawDestinationMeta(
+            IsochroneDestinationSummary(
                 label=ld.destination.label,
                 postcode=ld.destination.postcode,
                 threshold_min=int(ld.destination.threshold_min.to("minute").magnitude),
-            ).to_dict()
+            )
             for ld in located
         ],
         count=len(records),
     )
-    # lucidlint: ignore record-shape raw payload assembly — serialization boundary owns the shape (coding-standards.md)
-    return {
-        # lucidlint: ignore record-shape metadata header — serialization boundary owns the shape (coding-standards.md)
-        "metadata": dict(
-            engine_version=ENGINE_VERSION, profile="driving-car", speed_model="free-flow",
-            **meta.to_dict(), generated_at=generated_at,
-        ),
-        "destinations": records,
-    }
+    return IsochroneSnapshot(
+        engine_version=ENGINE_VERSION, profile="driving-car", speed_model="free-flow",
+        generated_at=generated_at, metadata=metadata, destinations=records,
+    )
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -538,7 +558,7 @@ def outer_loop(cells: set[GridCell], grid: Grid) -> list[GeoPoint] | None:
     return max(loops, key=lambda loop: abs(_signed_area(loop)))
 
 @dataclass(frozen=True)
-class _RawGridBounds:
+class IsochroneGridBounds:
     """Serialized grid bounds of a destination block in drive_isochrone.json."""
 
     lat_min: float
@@ -553,7 +573,7 @@ class _RawGridBounds:
 
 
 @dataclass(frozen=True)
-class _RawGridCell:
+class IsochroneGridCell:
     """One grid-cell center with its drive duration, serialized."""
 
     r: int
@@ -569,7 +589,7 @@ class _RawGridCell:
 
 
 @dataclass(frozen=True)
-class _RawDestinationRecord:
+class IsochroneDestination:
     """One destination's full serialized block in drive_isochrone.json."""
 
     label: str
@@ -579,8 +599,8 @@ class _RawDestinationRecord:
     threshold_min: int
     cell_km: float
     slack_min: float
-    grid: _RawGridBounds
-    cells: list[_RawGridCell]
+    grid: IsochroneGridBounds
+    cells: list[IsochroneGridCell]
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
@@ -594,7 +614,7 @@ class _RawDestinationRecord:
 
 
 @dataclass(frozen=True)
-class _RawDestinationMeta:
+class IsochroneDestinationSummary:
     """The metadata-level destination summary in drive_isochrone.json."""
 
     label: str
@@ -608,14 +628,14 @@ class _RawDestinationMeta:
 
 
 @dataclass(frozen=True)
-class _RawMetadata:
+class IsochroneMetadata:
     """Serialized metadata header of drive_isochrone.json (engine/profile
     keys are added at assembly)."""
 
     threshold_min: int
     cell_km: float
     region_km: float
-    destinations: list[dict]
+    destinations: list[IsochroneDestinationSummary]
     count: int
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
@@ -1241,11 +1261,12 @@ async def _fetch_raw(
             ),
         ))
     try:
-        raw = await build_raw(
+        snapshot = await build_raw(
             located,
             MatrixBatchConfig(cell_km=cell_km, region_km=region_km, key=key),
             generated_at=datetime.now(UTC).isoformat(),
         )
+        raw = snapshot.to_dict()
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             # auth failures never fix themselves by retrying
