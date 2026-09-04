@@ -643,7 +643,8 @@ class IsochroneMetadata:
         # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
         return dict(
             threshold_min=self.threshold_min, cell_km=self.cell_km,
-            region_km=self.region_km, destinations=self.destinations,
+            region_km=self.region_km,
+            destinations=[d.to_dict() for d in self.destinations],
             count=self.count,
         )
 
