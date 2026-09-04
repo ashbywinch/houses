@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import logging
 import re
-from collections import namedtuple
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # lucidlint: ignore global-state statutory Band-D ratio table; never mutated (data, not state)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape statutory ratio table — data, not a record (review-log)
 BAND_RATIOS = {
     "A": 6 / 9,
     "B": 7 / 9,
@@ -280,6 +279,27 @@ def _lookup_yearly_cost(
     return None
 
 
+@dataclass(frozen=True)
+class _VoaRow:
+    """One VOA valuation row as cached/serialized (band, address, council).
+
+    ``postcode`` defaults to "" because stubbed rows in tests and some
+    legacy cached entries carry no postcode."""
+
+    band: str
+    address: str
+    postcode: str = ""
+    local_authority: str | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the cached wire shape (coding-standards.md)
+        return dict(
+            band=self.band, address=self.address, postcode=self.postcode,
+            local_authority=self.local_authority,
+        )
+
+
 class CachedVOAClient:
     """Async context manager that wraps ``VOAClient`` with disk caching.
 
@@ -290,7 +310,6 @@ class CachedVOAClient:
     to/from the ``data/api_cache/`` disk cache.
     """
 
-    _VoaRow = namedtuple("_VoaRow", ["band", "address", "postcode", "local_authority"])
 
     def __init__(self):
         self._inner: VOAClient | None = None
@@ -312,15 +331,17 @@ class CachedVOAClient:
             for r in cached.get("rows", []):
                 r.setdefault("postcode", "")
                 r.setdefault("local_authority", "")
-                rows.append(self._VoaRow(**r))
+                rows.append(_VoaRow(**r))
             return type("Page", (), {"rows": rows})()
 
         if self._inner is None:
             raise RuntimeError("CachedVOAClient used before __aenter__")
         result = await self._inner.fetch_page(postcode, page=page)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         rows = [
-            {"band": r.band, "address": r.address, "postcode": r.postcode, "local_authority": r.local_authority}
+            _VoaRow(
+                band=r.band, address=r.address, postcode=r.postcode,
+                local_authority=r.local_authority,
+            ).to_dict()
             for r in result.rows
         ]
         set_cached("GET", key, None, None, {"rows": rows})
@@ -348,16 +369,13 @@ async def _fetch_voa_results(
         async with CachedVOAClient() as client:
             page = await client.fetch_page(postcode)
     return [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        {
-            "address": str(r.address),
-            "band": str(r.band),
-            "local_authority": str(r.local_authority or ""),
-        }
+        _VoaRow(
+            band=str(r.band), address=str(r.address),
+            local_authority=str(r.local_authority or ""),
+        ).to_dict()
         for r in page.rows
         if r.address and r.band
-    ]
-
+]
 
 def _building_identifier(address: str):
     """The building descriptor dict, its id, and its normalized id."""
