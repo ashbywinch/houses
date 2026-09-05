@@ -23,7 +23,7 @@ jobs:
       # of the PR head, an attacker branch could ship its own pyproject.toml
       # overriding [openai] api_base; with no checkout there is no working-tree
       # config to read at all.
-      - uses: the-pr-agent/pr-agent@b249e568e0c0fb6c674ace55fe95d02f62f8f3b3
+      - uses: the-pr-agent/pr-agent@15c058349ea1a0f61cf1ee45563777665f40aa06
         id: pr-agent
         env:
           OPENAI_KEY: ${{ secrets.CLOUDFLARE_AIGATEWAY_TOKEN }}
