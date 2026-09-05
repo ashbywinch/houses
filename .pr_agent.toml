@@ -1,9 +1,8 @@
-# PR-Agent configuration. The AUTHORITATIVE copy lives on the
-# pr-agent-config branch (maintainer-controlled); this tree copy is for
-# humans. Keep the two in sync.
+# PR-Agent configuration — the authoritative copy. The review bot reads
+# this file from main; PR branches can never influence it.
 #
-# Standards: skill://new-repo-scaffold §2b/§6 — the config branch is pinned in
-# .github/workflows/pr-agent.yml and must NEVER be ${{ github.head_ref }}.
+# Standards: skill://new-repo-scaffold §2b/§6 — the bot's config ref is
+# pinned in .github/workflows/pr-agent.yml and must NEVER be ${{ github.head_ref }}.
 
 [openai]
 # The canonical LLM endpoint (skill://cloudflare-ai-gateway): Cloudflare

@@ -40,31 +40,6 @@ jobs:
           tar -xzf gitleaks.tgz gitleaks
           ./gitleaks git --no-banner -v
 
-      - name: Config-drift check (.pr_agent.toml on main vs pr-agent-config branch)
-        # Only meaningful on main: the bot reads the branch copy; main's copy is
-        # documentation. On PR branches main legitimately lags an in-flight
-        # config sync, so running here would false-fail every PR. After a merge
-        # the main push run verifies the two didn't drift.
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set +e
-          gh api "repos/${{ github.repository }}/contents/.pr_agent.toml?ref=main" --jq '.content' > /tmp/main_b64 2>/tmp/drift_err
-          M1=$?
-          gh api "repos/${{ github.repository }}/contents/.pr_agent.toml?ref=pr-agent-config" --jq '.content' > /tmp/config_b64 2>>/tmp/drift_err
-          M2=$?
-          if [ $M1 -ne 0 ] || [ $M2 -ne 0 ]; then
-            echo "::error::config fetch failed (missing pr-agent-config branch?): $(tail -c 400 /tmp/drift_err)"
-            exit 1
-          fi
-          base64 -d /tmp/main_b64 > /tmp/main_copy.toml
-          base64 -d /tmp/config_b64 > /tmp/config_copy.toml
-          if ! diff -q /tmp/main_copy.toml /tmp/config_copy.toml >/dev/null; then
-            echo "::error::.pr_agent.toml on main drifted from the pr-agent-config branch — the bot reads the branch copy; sync them"
-            exit 1
-          fi
-
       - name: Coverage
         run: make coverage
 
