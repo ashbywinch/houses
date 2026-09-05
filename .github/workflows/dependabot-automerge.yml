@@ -29,4 +29,6 @@ jobs:
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr merge --auto --merge "$PR_URL"
+        # --rebase, not --merge: the houses-protect-main ruleset requires
+        # linear history, so merge commits are rejected on this repo.
+        run: gh pr merge --auto --rebase "$PR_URL"
