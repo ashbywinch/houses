@@ -28,6 +28,8 @@ def fail(user_message: str, dev_detail: str) -> int:
 # lucidlint: ignore record-shape compares wire-format payload dicts — serialization boundary owns the shape
 def same_payload(existing: dict[str, Any], new: dict[str, Any]) -> bool:
     """Byte-identical apart from ``generated_at`` (the determinism contract)."""
+    if not isinstance(existing, dict) or not isinstance(new, dict):
+        return False
     if json.dumps(existing.get("searches"), sort_keys=True) != json.dumps(new.get("searches"), sort_keys=True):
         return False
     if not isinstance(existing.get("metadata"), dict) or not isinstance(new.get("metadata"), dict):

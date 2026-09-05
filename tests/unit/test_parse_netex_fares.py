@@ -7,6 +7,8 @@ document before the records refactor.
 
 from __future__ import annotations
 
+import json
+
 from scripts.parse_netex_fares import (
     Station,
     dataset_description_matches,
@@ -146,10 +148,11 @@ class TestStops:
 
     # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
     def test_naptan_fallback_fills_missing_coordinates(self):
-        xml = XML.replace("<Latitude>51.5</Latitude>\n    <Longitude>-0.1</Longitude>\n    ", "")
-        result = parse_netex_fares(xml, [STATION_AT_FOO], naptan={"010A": (51.5, -0.1)})
+        xml = XML.replace("    <Latitude>51.5</Latitude>\n    <Longitude>-0.1</Longitude>\n", "")
+        result = parse_netex_fares(xml, [STATION_AT_FOO], naptan={"010A": (51.5005, -0.1005)})
         assert result is not None
-        assert any(c["name"] == "Foo Lane" for c in result["stop_coords"])
+        coords = [c for c in result["stop_coords"] if c["name"] == "Foo Lane"]
+        assert coords and coords[0]["lat"] == 51.5005 and coords[0]["lon"] == -0.1005
 
 
 class TestStopZones:
@@ -195,6 +198,19 @@ class TestNetworkFares:
         assert nf["price"] == 4.5
         assert nf["product_type"] == "adult_day"
         assert "010a" in nf["covered_stops"]
+
+    def test_tariff_first_fare_zone_ref_only_pins_wire_shape(self):
+        xml = XML.replace(
+            '<Tariff id="t1">\n    <FareZoneRef ref="Z1"/>\n  </Tariff>',
+            '<Tariff id="t1">\n    <FareZoneRef ref="Z1"/>\n    <FareZoneRef ref="Z2"/>\n  </Tariff>',
+        )
+        result = parse_netex_fares(xml, [STATION_AT_FOO])
+        assert result is not None
+        nf = result["network_fares"][0]
+        # Shipped contract: only the FIRST FareZoneRef of the Tariff contributes stops.
+        assert nf["covered_stops"] == ["010a"]
+        # The parse result is the wire shape — JSON-serializable end to end.
+        json.dumps(result)
 
 
 class TestHelpers:

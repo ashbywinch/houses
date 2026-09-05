@@ -126,7 +126,7 @@ class NetworkFare:
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-        return dict(price=self.price, product_type=self.product_type, covered_stops=self.covered_stops)
+        return dict(price=self.price, product_type=self.product_type, covered_stops=sorted(self.covered_stops))
 
 
 def load_stations() -> list[Station]:
@@ -321,9 +321,10 @@ class NetexFareParser:
 
         self._parse_distance_matrix_prices()
 
-        if b"PreassignedFareProduct" in xml_bytes(self.root):
+        marker_bytes = xml_bytes(self.root)
+        if b"PreassignedFareProduct" in marker_bytes:
             self._parse_fare_products()
-        if b"FareTable" in xml_bytes(self.root):
+        if b"FareTable" in marker_bytes:
             self._parse_fare_tables()
 
         if not self.zone_fares:
@@ -809,6 +810,7 @@ class NetexFareParser:
                                         mt = _unprefixed(m.tag)
                                         if "ref" in mt.lower() and m.text:
                                             covered_stops.add(m.text.strip().lower())
+                        break
                 break
         return covered_stops
 
