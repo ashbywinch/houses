@@ -29,13 +29,14 @@ jobs:
           OPENAI_KEY: ${{ secrets.CLOUDFLARE_AIGATEWAY_TOKEN }}
           OPENAI_BASE_URL: https://gateway.ai.cloudflare.com/v1/e21a5be58ac1e8f7d5619539feb2dc3d/default/compat
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Config MUST come from a maintainer-controlled branch: a PR branch
+          # Config MUST come from a maintainer-controlled ref: a PR branch
           # could ship its own .pr_agent.toml pointing api_base at an attacker
           # endpoint, and the API key would be sent there as the Bearer token.
+          # main qualifies — every merge into it is ruleset-gated.
           # (Source-verified at the pinned SHA: .pr_agent.toml is fetched via
-          # the API from this branch; 404 falls back to the default branch —
+          # the API from this ref; 404 falls back to the default branch —
           # never the working tree.)
-          PR_AGENT_CONFIG_BRANCH: pr-agent-config
+          PR_AGENT_CONFIG_BRANCH: main
 
       - name: Check review succeeded
         env:
