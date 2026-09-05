@@ -1,9 +1,13 @@
 name: Dependabot auto-merge
 
-on: pull_request
+# pull_request_target, not pull_request: Dependabot pull_request runs get a
+# read-only GITHUB_TOKEN, so the merge call below would always 403. Safe here:
+# the actor guard admits only dependabot[bot], and nothing from the PR is
+# checked out or executed.
+on: pull_request_target
 
 permissions:
-  contents: read
+  contents: write # gh pr merge --auto needs it (GitHub's documented dependabot automerge pattern)
   pull-requests: write
 
 jobs:
@@ -16,9 +20,10 @@ jobs:
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-      # Patch/minor only. Majors stay human (CI green != compatible), and
-      # github-actions ref bumps need the SHA-pin treatment per the house
-      # standard - never auto-merged.
+      # Patch/minor only — keyed on update-type, not dependency-group, so
+      # ungrouped security updates stay covered. Majors stay human (CI green
+      # != compatible), and github-actions ref bumps need the SHA-pin
+      # treatment per the house standard - never auto-merged.
       - name: Enable auto-merge for patch and minor updates
         if: ${{ steps.metadata.outputs.package-ecosystem != 'github_actions' && (steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor') }}
         env:
