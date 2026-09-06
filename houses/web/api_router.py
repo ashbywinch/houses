@@ -7,6 +7,7 @@ import logging
 import typing
 from collections import Counter
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ from pint import Quantity as _Quantity
 from pydantic import BaseModel, Field, field_validator
 
 import dag.scheduler
-from dag.evaluate import evaluate
+from dag.persistence import node_result_before
 from dag.scheduler import AsyncQueueScheduler, flush_processor
 from houses.comments import add_comment, get_comments
 from houses.geopoint import GeoPoint
@@ -39,7 +40,6 @@ from houses.services_provider import get_services
 from houses.web.auth import SESSION_MAX_AGE, effective_session_user, get_serializer
 from houses.web.broadcaster import register_client
 from houses.web.monthly_delta import attach as attach_monthly_delta
-from houses.web.monthly_delta import outcome_delta_vs_home, resolve_baseline
 
 
 def _registry_property(rid: str):
@@ -82,23 +82,6 @@ class IsochronePaths:
 
 api_router = APIRouter(prefix="/api")
 
-
-@dataclass(frozen=True)
-class _WhatIfOutcome:
-    """One property's what-if evaluation as serialized to the response."""
-
-    succeeded: bool
-    group: object | None = None
-    error: str | None = None
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        d: dict = dict(succeeded=self.succeeded)
-        if self.succeeded:
-            d["group"] = self.group
-        else:
-            d["error"] = self.error
-        return d
 
 
 @dataclass(frozen=True)
@@ -171,71 +154,81 @@ def _merge_what_if_persons(updates: list, current: list) -> list:
     merged.extend(p for p in current if p.name not in merged_names)
     return merged
 
-async def _what_if_results(merged: list):
-    """Evaluate every registry property's group_monthly_cost under the
-    merged persons; skipped properties are simply absent from the map.
+def _require_family_member(request: Request) -> None:
+    """A what-if changes the whole household's numbers: any signed-in
+    family member (session linked to a person) or a superuser may apply
+    or restore one."""
+    session_user = effective_session_user(request)
+    if not session_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    view = SessionPersons(
+        persons=list(get_services().persons_source.latest_attempt().value_or_none() or []),
+        session_user=session_user,
+    )
+    if not session_user.get("is_superuser") and not view.session_name():
+        raise HTTPException(status_code=403, detail="This account is not linked to a family member")
 
-    Each succeeded outcome's ``group`` gains ``delta_vs_home`` — the
-    hypothetical figures minus the REAL baseline's. Null without a
-    baseline or for the baseline property itself.
+
+@api_router.post("/what-if/apply")
+async def what_if_apply(body: dict, request: Request):
+    """Apply what-if person values THROUGH THE DAG.
+
+    The merged persons are written via the normal settings push, so the
+    DAG recomputes everything downstream (totals, commute breakdown,
+    deltas) and the broadcaster pushes every surface — there is no side
+    evaluation to keep in sync.
+
+    On the inactive->active transition the whatif_started_at marker is
+    set: node_results is append-only history, so the pre-what-if persons
+    attempt stays in the DAG and restore simply re-appends the attempt
+    the marker points before. No numbers are copied anywhere.
     """
-    # Resolved BEFORE the first evaluate(): inside one, the staged
-    # hypothetical attempts would shadow the real ones.
-    baseline = resolve_baseline(get_services().property_registry)
-    results: dict[str, dict] = {}
-    for rid in _registry_rids():
-        prop = _registry_property(rid)
-# lucidlint: ignore special-case sentinel handling is the contract here
-        if prop is None:
-            continue
-        group_node = getattr(prop, "group_monthly_cost", None)
-        if group_node is None:
-            continue
-        attempts = await evaluate(group_node, overrides={"persons": merged})
-        group_att = attempts[group_node._id]
-        value = group_att.value_or_none()
-        if group_att.succeeded and value is not None:
-            # Fresh dict — never mutate the attempt's own value object.
-            group = dict(value)
-            group["delta_vs_home"] = outcome_delta_vs_home(group, rid, baseline)
-            results[rid] = _WhatIfOutcome(succeeded=True, group=group).to_dict()
-        elif group_att.impossible:
-            results[rid] = _WhatIfOutcome(
-                succeeded=False, error=group_att.error
-            ).to_dict()
-        else:
-            results[rid] = _WhatIfOutcome(succeeded=False, error="pending").to_dict()
-    return results
-
-
-@api_router.post("/what-if")
-# lucidlint: ignore record-shape incoming request body is the caller's wire
-# payload — parsed defensively at the boundary (coding-standards.md)
-async def post_what_if(body: dict):
-    """Pure what-if: evaluate every property's total monthly cost under
-    candidate person settings (Part D).
-
-    The body carries per-person updates in the same shape as
-    ``PATCH /settings/person/{name}``; each is merged into the current
-    person. Nothing is persisted — the DAG is evaluated with the
-    candidate values staged and discarded (``dag.evaluate``), so the
-    real scheduler, database, and node state are untouched.
-
-    Response: ``{"results": {rid: {"succeeded": bool,
-    "group": {"couple"|"others": {"value", "stddev"}, ...,
-              "delta_vs_home": {"couple"|"others": {"value", "approx"} | null}
-                               | null}
-              | "error": str}}}`` — delta_vs_home is the hypothetical minus
-    the REAL current home's figure (null without exactly one current home).
-    """
+    _require_family_member(request)
     updates = body.get("persons")
     if not isinstance(updates, list) or not updates:
         raise HTTPException(status_code=422, detail="persons required")
 
     svc = get_services()
+    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    if not started:
+        # Mark the boundary BEFORE the scenario push: the persons attempt
+        # latest before this instant is the restore reference.
+        started = datetime.now(UTC).isoformat()
+        svc.whatif_started_at.push(started, "what-if")
+
     current = list(svc.persons_source.latest_attempt().value_or_none() or [])
     merged = _merge_what_if_persons(updates, current)
-    return {"results": await _what_if_results(merged)}
+    svc.persons_source.push(merged, "what-if")
+    return {"active": True}
+
+
+@api_router.post("/what-if/restore")
+async def what_if_restore(request: Request):
+    """End the what-if: re-append the pre-what-if persons attempt (the
+    one the started-at marker points before) through the normal settings
+    write, and clear the marker."""
+    _require_family_member(request)
+    svc = get_services()
+    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    if not started:
+        raise HTTPException(status_code=409, detail="No what-if is active")
+
+    row = node_result_before(svc.persons_source._id, started)
+    if row is None or not isinstance(row.get("value"), list):
+        raise HTTPException(status_code=409, detail="No pre-what-if persons attempt found to restore")
+
+    persons = svc.persons_source._adapter.validate_python(row["value"])
+    svc.persons_source.push(persons, "what-if-restore")
+    svc.whatif_started_at.push("", "what-if-restore")
+    return {"active": False}
+
+
+@api_router.get("/what-if/state")
+async def what_if_state():
+    """Whether what-if numbers are currently live (the started-at marker
+    is set)."""
+    started = (get_services().whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    return {"active": bool(started)}
 
 
 @api_router.get("/properties/{rid}/staleness")

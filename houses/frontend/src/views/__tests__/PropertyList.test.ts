@@ -9,6 +9,8 @@ vi.mock('../../services/api', () => ({
   fetchAllSummaries: vi.fn(),
   fetchPropertyDetail: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue({}),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
+  restoreWhatIf: vi.fn().mockResolvedValue(undefined),
   patchTriage: vi.fn(),
 }))
 
@@ -671,5 +673,41 @@ describe('PropertyList — extra vs your home (baseline)', () => {
     // over; prop-d has no computable delta even though its 1200 total
     // would pass — unknowns are excluded, never treated as 0.
     expect(addrs).toEqual(['10 Cheap St', '20 Mid Rd'])
+  })
+})
+
+describe('PropertyList — what-if mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData)
+  })
+  it('shows the active banner and a restore button when what-if is on', async () => {
+    const wrapper = await mountWithBaseline(mockData)
+    usePropertiesStore().setWhatIfActive(true)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('What-if numbers are showing — these are not your real figures.')
+    const restore = wrapper.findAll('button').find(b => b.text().includes('Back to real numbers'))
+    expect(restore).toBeDefined()
+
+    await restore!.trigger('click')
+    await flushPromises()
+    expect(api.restoreWhatIf).toHaveBeenCalledTimes(1)
+    expect(usePropertiesStore().whatIfActive).toBe(false)
+    expect(wrapper.text()).not.toContain('not your real figures')
+  })
+
+  it('shows no banner when what-if is off', async () => {
+    const wrapper = await mountWithBaseline(mockData)
+    expect(wrapper.find('.whatif-banner').exists()).toBe(false)
+  })
+
+  it('renders card figures straight from the summaries in what-if mode', async () => {
+    const wrapper = await mountWithBaseline(mockData)
+    usePropertiesStore().setWhatIfActive(true)
+    await wrapper.vm.$nextTick()
+    // the server has already applied the what-if through the DAG, so the
+    // cards show the (new) summary figures — no client-side overlay exists
+    expect(wrapper.text()).toContain('10 Cheap St')
+    expect(wrapper.text()).toContain('£1,500/mo')
   })
 })

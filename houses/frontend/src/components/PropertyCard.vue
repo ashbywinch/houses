@@ -89,15 +89,12 @@ const monthlyCostApprox = computed(() => {
   return g.succeeded && ((g.value?.couple?.stddev ?? 0) > 0 || (g.value?.others?.stddev ?? 0) > 0)
 })
 
-// Part D: a hypothetical total from the "What if…" panel (overlaid by
-// PropertyList) is marked so it is never mistaken for a real number.
-const isWhatIf = computed(() => props.data.group_monthly_cost.provenance?.label === 'what-if')
 
 // The headline's TWO numbers: the joint owners (the couple) and the
-// other adults, labelled dynamically — overlaid by the what-if.
+// other adults, labelled dynamically — straight from the summary.
+// In what-if mode the summary already IS the scenario: the server
+// applied it through the DAG, so nothing is overlaid here.
 const groupCost = computed(() => {
-  const wt = store.whatIfTotals?.[props.rid]
-  if (wt) return wt
   const g = props.data.group_monthly_cost
   return g?.succeeded && g.value ? g.value : null
 })
@@ -319,6 +316,7 @@ async function toggleViewed() {
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
+        <span v-if="store.whatIfActive" class="card__whatif">what-if</span>
         <span v-if="data.is_current_home" class="card__baseline-chip">Your home · baseline</span>
         <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
           <template v-if="showDeltas">
@@ -341,7 +339,6 @@ async function toggleViewed() {
               {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
             </span>
           </template>
-          <span v-if="isWhatIf" class="card__whatif">what-if</span>
         </span>
         <span
           v-else

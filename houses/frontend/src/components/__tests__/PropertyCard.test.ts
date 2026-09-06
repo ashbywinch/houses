@@ -470,8 +470,8 @@ function mountWithBaseline(cardOverrides?: Partial<PropertySummary>) {
   store.summaries['home'] = makeSummary({ rid: 'home', is_current_home: true, monthly_baseline: homeBaseline })
   store.groupLabels = { coupleLabel: 'S&L', othersLabel: 'Ashby' }
   const card = makeSummary(cardOverrides)
-  // The candidate lives in the store too — that is where deltaFor and
-  // the what-if overlay read from.
+  // The candidate lives in the store too — that is where deltaFor
+  // reads from.
   store.summaries[card.rid] = card
   const wrapper = mount(PropertyCard, { props: { rid: card.rid, data: card }, global: { plugins: [pinia] } })
   return { wrapper, store }
@@ -532,21 +532,34 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     expect(wrapper.find('.card__baseline-chip').exists()).toBe(false)
   })
 
-  it('prefers the what-if overlay delta over the summary delta', async () => {
-    const { wrapper, store } = mountWithBaseline({ group_monthly_cost: { succeeded: true, value: deltaGroup, error: null, provenance: { label: 'test' } } })
-    store.whatIfTotals = {
-      '123': {
-        couple: { value: '900', stddev: 0 },
-        others: { value: '200', stddev: 0 },
-        couple_label: 'S&L',
-        others_label: 'Ashby',
-        delta_vs_home: { couple: { value: '-883.61', approx: false }, others: null },
-      },
-    }
-    await wrapper.vm.$nextTick()
-    const lines = wrapper.findAll('.card__cost-line')
-    expect(lines[0].text()).toContain('−£884/mo')
-    expect(lines[0].text()).not.toContain('1,308')
-    expect(lines[1].text()).toContain('—')
+  it('shows the what-if chip on every card when the mode is active', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.whatIfActive = true
+    const a = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    const b = mount(PropertyCard, { props: { rid: '456', data: makeSummary({ rid: '456' }) }, global: { plugins: [pinia] } })
+    expect(a.find('.card__whatif').text()).toBe('what-if')
+    expect(b.find('.card__whatif').text()).toBe('what-if')
+    // the chip marks the MODE — it renders next to the address, not
+    // attached to a particular card's money block
+    expect(a.find('.card__top .card__whatif').exists()).toBe(true)
+  })
+
+  it('shows no what-if chip when the mode is off', () => {
+    const wrapper = mountCard({ rid: '123', data: makeSummary() })
+    expect(wrapper.find('.card__whatif').exists()).toBe(false)
+  })
+
+  it('renders summary figures with no overlay while what-if is active', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.whatIfActive = true
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    // the numbers on the card ARE the summary — the server has already
+    // applied the what-if through the DAG, nothing is overlaid client-side
+    expect(wrapper.text()).toContain('£2,100/mo')
+    expect(wrapper.text()).toContain('£400/mo')
   })
 })

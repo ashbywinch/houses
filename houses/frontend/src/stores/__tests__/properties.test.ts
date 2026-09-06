@@ -7,6 +7,7 @@ vi.mock('../../services/api', () => ({
   fetchPropertyDetail: vi.fn(),
   fetchAllSummaries: vi.fn(),
   fetchSettings: vi.fn(),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
   addProperty: vi.fn(),
   retryScrape: vi.fn(),
   patchPropertyDetails: vi.fn(),
@@ -289,18 +290,57 @@ describe('properties store — baseline + delta accessors', () => {
     expect(store.deltaFor('a')?.others).toBeNull()
   })
 
-  it('delta accessor prefers the what-if overlay and clears back', () => {
+  it('deltaFor reads the summary only — no what-if overlay', () => {
     const store = usePropertiesStore()
     store.summaries = {
       a: summaryFixture('a', {
         group_monthly_cost: { succeeded: true, value: { couple: { value: '3091.67', stddev: 0 }, others: null, couple_label: 'S&L', others_label: 'Ashby', delta_vs_home: { couple: { value: '+1308.06', approx: true }, others: null } }, error: null, provenance: { label: 'test' } },
       }),
     }
-    store.applyWhatIf({
-      a: { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: null, couple_label: 'S&L', others_label: 'Ashby', delta_vs_home: { couple: { value: '-883.61', approx: false }, others: null } } },
-    })
-    expect(store.deltaFor('a')?.couple?.value).toBe('-883.61')
-    store.clearWhatIf()
+    store.setWhatIfActive(true)
     expect(store.deltaFor('a')?.couple?.value).toBe('+1308.06')
+    expect(store.deltaFor('missing')).toBeNull()
+  })
+
+  it('coupleTotalFor and groupCostFor read the summary only', () => {
+    const store = usePropertiesStore()
+    store.summaries = { a: summaryFixture('a') }
+    store.setWhatIfActive(true)
+    expect(store.coupleTotalFor('a')).toBe(2100)
+    expect(store.groupCostFor('a')?.couple?.value).toBe('2100')
+    // a failed summary is no figure at all — even in what-if mode
+    store.summaries.b = summaryFixture('b', {
+      group_monthly_cost: { succeeded: false, value: null, error: 'no council tax', provenance: { label: 'test' } },
+    })
+    expect(store.coupleTotalFor('b')).toBeNull()
+    expect(store.groupCostFor('b')).toBeNull()
+  })
+
+  it('whatIfActive defaults false and is set by setWhatIfActive', () => {
+    const store = usePropertiesStore()
+    expect(store.whatIfActive).toBe(false)
+    store.setWhatIfActive(true)
+    expect(store.whatIfActive).toBe(true)
+    store.setWhatIfActive(false)
+    expect(store.whatIfActive).toBe(false)
+  })
+
+  it('loadAll picks up the what-if state with the summaries', async () => {
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue({})
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+    const store = usePropertiesStore()
+    await store.loadAll()
+    expect(store.whatIfActive).toBe(true)
+  })
+
+  it('loadAll keeps going when the what-if state fetch fails', async () => {
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue({
+      a: summaryFixture('a'),
+    })
+    vi.mocked(api.fetchWhatIfState).mockRejectedValueOnce(new Error('down'))
+    const store = usePropertiesStore()
+    await store.loadAll()
+    expect(store.rids).toEqual(['a'])
+    expect(store.error).toBeNull()
   })
 })

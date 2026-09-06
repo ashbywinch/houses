@@ -6,6 +6,7 @@ import {
   fetchAllSummaries,
   fetchPropertyDetail,
   fetchSettings,
+  fetchWhatIfState,
   patchPropertyDetails,
   patchTriage,
   removeProperty,
@@ -45,21 +46,16 @@ export const usePropertiesStore = defineStore('properties', () => {
   // the unknown marker, instead of collapsing to one.
   const groupLabels = ref<{ coupleLabel: string; othersLabel: string }>({ coupleLabel: '', othersLabel: '' })
 
-  // ── What-if (Part D) ──────────────────────────────────────────
-  // Hypothetical monthly totals per property while the "What if…"
-  // panel is active; null when showing real numbers.
-  const whatIfTotals = ref<Record<string, GroupMonthlyCost> | null>(null)
+  // ── What-if mode ─────────────────────────────────────────────
+  // Applying a what-if writes the scenario persons through the NORMAL
+  // settings write, so the DAG recomputes every surface server-side
+  // and the websocket broadcast refreshes them. This flag only marks
+  // the MODE: banners and chips say "these are not your real figures"
+  // until restoreWhatIf puts the original numbers back.
+  const whatIfActive = ref(false)
 
-  function applyWhatIf(results: Record<string, { succeeded: boolean; group?: GroupMonthlyCost | null }>) {
-    const totals: Record<string, GroupMonthlyCost> = {}
-    for (const [rid, r] of Object.entries(results)) {
-      if (r.succeeded && r.group) totals[rid] = r.group
-    }
-    whatIfTotals.value = Object.keys(totals).length > 0 ? totals : null
-  }
-
-  function clearWhatIf() {
-    whatIfTotals.value = null
+  function setWhatIfActive(v: boolean) {
+    whatIfActive.value = v
   }
 
   // ── Extra vs your home (approved deltas design) ───────────────
@@ -75,30 +71,20 @@ export const usePropertiesStore = defineStore('properties', () => {
     return null
   })
 
-  /** The property's delta vs the home: the what-if overlay (hypothetical
-   *  totals vs the REAL baseline) wins over the summary's own delta. */
+  /** The property's delta vs the home, straight from the summary. */
   function deltaFor(rid: string): DeltaVsHome | null {
-    const wt = whatIfTotals.value?.[rid]?.delta_vs_home
-    if (wt) return wt
     const g = summaries.value[rid]?.group_monthly_cost
     return g?.succeeded && g.value ? (g.value.delta_vs_home ?? null) : null
   }
 
-
-  /** The monthly total to show/filter/sort by for a property: the
-   * hypothetical value when the what-if is active, else the real one. */
-  /** The couple's monthly figure (the deal-breaker) — what-if overlay
-   *  when active, else the real summary value. */
+  /** The couple's monthly figure (the deal-breaker) from the summary. */
   function coupleTotalFor(rid: string): number | null {
-    const wt = whatIfTotals.value?.[rid]
-    const g = wt ?? (summaries.value[rid]?.group_monthly_cost?.succeeded ? summaries.value[rid]?.group_monthly_cost?.value : null)
-    if (!g?.couple) return null
-    return Number(g.couple.value)
+    const s = summaries.value[rid]?.group_monthly_cost
+    if (!s?.succeeded || !s.value?.couple) return null
+    return Number(s.value.couple.value)
   }
 
   function groupCostFor(rid: string): GroupMonthlyCost | null {
-    const wt = whatIfTotals.value?.[rid]
-    if (wt) return wt
     const s = summaries.value[rid]?.group_monthly_cost
     return s?.succeeded && s.value ? s.value : null
   }
@@ -124,11 +110,17 @@ export const usePropertiesStore = defineStore('properties', () => {
           }
         }
       }
-      } catch (e) {
+    } catch (e) {
       console.error('Failed to load properties:', e)
       error.value = 'Something went wrong loading properties. Please try again.'
     } finally {
       loading.value = false
+    }
+    try {
+      whatIfActive.value = await fetchWhatIfState()
+    } catch (e) {
+      // best-effort — keep the last known mode, never block the list
+      console.error('Failed to load what-if state:', e)
     }
   }
 
@@ -266,7 +258,7 @@ export const usePropertiesStore = defineStore('properties', () => {
     rids, summaries, details, triage, settings, loading, error,
     commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels, listScrollY,
     addByUrl, retryPropertyScrape, saveDetails, removeFromList,
-    whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor, baseline, deltaFor,
+    whatIfActive, setWhatIfActive, coupleTotalFor, groupCostFor, baseline, deltaFor,
     loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
 })

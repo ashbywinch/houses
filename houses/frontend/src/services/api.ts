@@ -1,4 +1,4 @@
-import type { GroupMonthlyCost, PropertyDetail, PropertySummary } from '../types'
+import type { PropertyDetail, PropertySummary } from '../types'
 import { useAuthStore } from '../stores/auth'
 import router from '../router'
 
@@ -134,21 +134,41 @@ export function patchPerson(name: string, body: Record<string, unknown>): Promis
   }).then(checkFor401)
 }
 
-export interface WhatIfResult {
-  succeeded: boolean
-  group: GroupMonthlyCost | null
-  error?: string
-}
-
-export async function postWhatIf(persons: Record<string, unknown>[]): Promise<Record<string, WhatIfResult>> {
-  const r = await fetch(`${BASE}/what-if`, {
+export async function applyWhatIf(persons: unknown[]): Promise<void> {
+  const r = await fetch(`${BASE}/what-if/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ persons }),
   }).then(checkFor401)
   if (!r.ok) throw new Error(`What-if failed: ${r.status}`)
-  const data = await parseJson<{ results: Record<string, WhatIfResult> }>(r)
-  return data.results
+}
+
+export async function restoreWhatIf(): Promise<void> {
+  const r = await fetch(`${BASE}/what-if/restore`, {
+    method: 'POST',
+    headers: authHeaders(),
+  }).then(checkFor401)
+  if (!r.ok) {
+    // 409 when nothing is active — the body carries the server's detail
+    const text = await r.text()
+    let detail = text
+    try {
+      const parsed: unknown = JSON.parse(text)
+      if (parsed && typeof parsed === 'object' && 'detail' in parsed && typeof parsed.detail === 'string') {
+        detail = parsed.detail
+      }
+    } catch {
+      // non-JSON body — surface the raw text
+    }
+    throw new Error(detail || `Restore failed: ${r.status}`)
+  }
+}
+
+export async function fetchWhatIfState(): Promise<boolean> {
+  const r = await fetch(`${BASE}/what-if/state`, { headers: authHeaders() }).then(checkFor401)
+  if (!r.ok) throw new Error(`What-if state failed: ${r.status}`)
+  const data = await parseJson<{ active: boolean }>(r)
+  return data.active
 }
 
 export async function fetchCurrentHomes(): Promise<{ rid: string; address: string }[]> {

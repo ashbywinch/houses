@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
-import type { PropertySummary } from '../types'
 import Header from '../components/Header.vue'
 import PropertyCard from '../components/PropertyCard.vue'
 import WhatIfPanel from '../components/WhatIfPanel.vue'
 import MapView, { type MapLayer, type MapMarker } from '../components/MapView.vue'
+import * as api from '../services/api'
 
 const store = usePropertiesStore()
 
@@ -145,23 +145,24 @@ function monthlyCostNum(rid: string) {
   return m
 }
 
-/** The couple's EXTRA vs the home (what-if overlay respected) — the
- *  "max extra vs home" filter works on this, with unknown deltas
- *  excluded, never treated as 0. */
+/** The couple's EXTRA vs the home from the summary — the "max extra
+ *  vs home" filter works on this, with unknown deltas excluded, never
+ *  treated as 0. */
 function extraVsHomeNum(rid: string): number {
   const d = store.deltaFor(rid)?.couple
   if (!d) return Infinity
   return Number(d.value)
 }
-/** Card data with the hypothetical total overlaid while the what-if is
- *  active (labelled 'what-if' so the card can mark it as a preview). */
-function cardData(rid: string): PropertySummary {
-  const s = store.summaries[rid]
-  const wt = store.whatIfTotals?.[rid]
-  if (!s || !wt) return s
-  return {
-    ...s,
-    group_monthly_cost: { succeeded: true, value: wt, error: null, provenance: { label: 'what-if' } },
+
+/** Restore the real numbers from the list banner. The DAG recomputes
+ *  everything server-side and the websocket broadcast refreshes the
+ *  cards; this only clears the mode flag. */
+async function backToReal() {
+  try {
+    await api.restoreWhatIf()
+    store.setWhatIfActive(false)
+  } catch (e) {
+    console.error('Failed to restore real numbers:', e)
   }
 }
 function bestCommuteMin(rid: string) {
@@ -387,7 +388,7 @@ const ceilingLimitText = computed(() => {
       <span class="legend-item"><i class="legend-dot legend-dot--muted"></i>no route</span>
     </div>
 
-    <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
+    <WhatIfPanel />
 
     <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
 
@@ -401,6 +402,13 @@ const ceilingLimitText = computed(() => {
       Full totals and breakdowns live on each property's page.
     </p>
 
+    <!-- What-if mode: the server is showing the scenario numbers, so
+         say so once above the list, with the way back. -->
+    <div v-if="store.whatIfActive" class="whatif-banner" role="status">
+      <span>What-if numbers are showing — these are not your real figures.</span>
+      <button class="btn btn--ghost whatif-banner__restore" @click="backToReal">Back to real numbers</button>
+    </div>
+
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
     <div v-else-if="displayedRids.length === 0" class="empty-state">
@@ -413,7 +421,7 @@ const ceilingLimitText = computed(() => {
     </div>
     <div v-else class="card-list" role="list">
       <template v-for="rid in displayedRids" :key="rid">
-        <PropertyCard :rid :data="cardData(rid)" />
+        <PropertyCard :rid :data="store.summaries[rid]" />
       </template>
     </div>
 
@@ -595,6 +603,17 @@ const ceilingLimitText = computed(() => {
 .commute-status-dismiss {
   margin-left: auto; background: none; border: none; color: var(--amber-text);
   opacity: 0.6; cursor: pointer; padding: 2px; font-size: 1.1rem; line-height: 1; min-width: 32px; min-height: 32px;
+}
+
+/* What-if mode banner — same visual family as .commute-status */
+.whatif-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 0 0; padding: 8px 12px;
+  background: var(--pill-bg); border-radius: var(--radius-sm);
+  font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.35;
+}
+.whatif-banner__restore {
+  margin-left: auto; flex-shrink: 0; font-size: 0.75rem; padding: 6px 10px;
 }
 
 .legend-strip {
