@@ -619,7 +619,7 @@ describe('PropertyList — extra vs your home (baseline)', () => {
     const wrapper = await mountWithBaseline(deltaData())
     const legends = wrapper.findAll('.baseline-legend')
     expect(legends).toHaveLength(1)
-    expect(legends[0].text()).toContain('Monthly figures are the change vs your home — 31 Isambard Road, Southall, UB2 4GN')
+    expect(legends[0].text()).toContain('The house cards below show what-if numbers — 31 Isambard Road, Southall, UB2 4GN')
     expect(legends[0].text()).toContain('S&L £1,784/mo')
     expect(legends[0].text()).toContain('Ashby £653/mo')
     expect(legends[0].text()).toContain("Full totals and breakdowns live on each property's page.")
@@ -627,7 +627,7 @@ describe('PropertyList — extra vs your home (baseline)', () => {
 
   it('hides the legend and keeps today\'s labels without a baseline', async () => {
     const wrapper = await mountWithBaseline(mockData)
-    expect(wrapper.find('.baseline-legend').exists()).toBe(false)
+    expect(wrapper.find('.baseline-legend').exists()).toBe(false)  // no baseline = no legend
     await wrapper.findAll('.controls-row .pill')[0].trigger('click')
     const options = wrapper.findAll('.sheet__select option').map(o => o.text())
     expect(options).toContain('Monthly Cost')

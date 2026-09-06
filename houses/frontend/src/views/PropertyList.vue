@@ -386,9 +386,6 @@ const ceilingLimitText = computed(() => {
       {{ store.groupLabels.othersLabel }} {{ store.baseline.others ? '£' + Math.round(Number(store.baseline.others.value)).toLocaleString() + '/mo' : '£—/mo' }}).
       Full totals and breakdowns live on each property's page.
     </p>
-    <p v-if="!store.baseline" class="baseline-legend" role="note" style="margin-top: var(--sp-4);">
-      Monthly figures are the change vs your home. Full totals and breakdowns live on each property's page.
-    </p>
 
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
