@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { PropertySummary } from '../types'
+import type { CommuteSummary, PersonCommuteLeg, PropertySummary } from '../types'
 import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
 import { simpleOfsted, ofstedClass } from '../formatters/format'
@@ -230,11 +230,42 @@ function commuteAddress(c: unknown, key: string): string {
   return typeof address === 'string' && address ? address : commuteLabel(c, key)
 }
 
+/** The summary's commute-breakdown entry for this row (key
+ *  'person/label'), or null when the summary carries no breakdown
+ *  for the destination — the row then falls back to the raw daily
+ *  fare. */
+function summaryLeg(key: string, label: string): PersonCommuteLeg | null {
+  const m = props.data.monthly_commute_cost
+  const commutes = m?.succeeded
+    ? m.value?.persons?.[key.split('/')[0]]?.commutes
+    : undefined
+  return commutes?.find((c) => c.label === label) ?? null
+}
+
+/** The person's MONTHLY contribution for a breakdown destination
+ *  (whole pounds from the yearly figure) plus the trips/year
+ *  tooltip for the pill. */
+function monthlyOf(leg: PersonCommuteLeg | null): { cost: number; title: string } | null {
+  if (leg === null) return null
+  const yearly = parseFloat(leg.yearly_gbp)
+  if (!Number.isFinite(yearly)) return null
+  return { cost: Math.round(yearly / 12), title: `${leg.trips_per_week} days/wk · £${leg.yearly_gbp}/yr` }
+}
+
+/** Adult rows for the commute section, enriched with the summary
+ *  breakdown's monthly figure when it carries the destination. A
+ *  destination with trips_per_week 0 takes NO row at all — no pill,
+ *  no muted line. */
 const adultCommutes = computed(() => {
   if (!props.data.commutes) return {}
-  return Object.fromEntries(
-    Object.entries(props.data.commutes).filter(([, v]) => !isChildCommute(v.commute))
-  )
+  const rows: Record<string, { commute: CommuteSummary['commute']; monthly: { cost: number; title: string } | null }> = {}
+  for (const [key, v] of Object.entries(props.data.commutes)) {
+    if (isChildCommute(v.commute)) continue
+    const leg = summaryLeg(key, commuteLabel(v.commute, key))
+    if (leg?.trips_per_week === 0) continue
+    rows[key] = { commute: v.commute, monthly: monthlyOf(leg) }
+  }
+  return rows
 })
 
 function isChildCommute(c: unknown): boolean {
@@ -367,12 +398,14 @@ async function toggleViewed() {
               class="pill-link"
               target="_blank"
               rel="noopener"
+              :title="c.monthly?.title"
             >
               <CommutePill
                 :label="''"
                 :duration="commuteDuration(c.commute)"
                 :mode="commuteMode(c.commute)"
-                :cost="commuteCost(c.commute)"
+                :cost="c.monthly?.cost ?? commuteCost(c.commute)"
+                :costSuffix="c.monthly ? '/mo' : undefined"
                 :goodMax="pillThresholds(key, commuteMode(c.commute) === 'walk').goodMax"
                 :fineMax="pillThresholds(key, commuteMode(c.commute) === 'walk').fineMax"
               />

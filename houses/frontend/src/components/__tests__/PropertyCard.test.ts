@@ -265,6 +265,118 @@ describe('PropertyCard commute attribution (P2)', () => {
   })
 })
 
+describe('PropertyCard summary commute breakdown (monthly)', () => {
+  it('drops the commute row entirely when the destination has no trips', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, label: 'Pimlico', person: { name: 'Simon' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+      monthly_commute_cost: {
+        succeeded: true,
+        value: {
+          persons: {
+            Simon: {
+              daily_gbp: '0.00', yearly_gbp: '0.00',
+              commutes: [{ label: 'Pimlico', trips_per_week: 0, weeks_per_year: 0, yearly_gbp: '0.00' }],
+            },
+          },
+          yearly_total_gbp: 0,
+        },
+        error: null, provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).not.toContain('Simon → Pimlico')
+  })
+
+  it('shows the monthly share with a trips tooltip when the destination has trips', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Bracknell': {
+          commute: {
+            succeeded: true, value: { duration: { value: 65, unit: 'minute' }, mode: 'train', label: 'Bracknell', person: { name: 'Simon' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+      monthly_commute_cost: {
+        succeeded: true,
+        value: {
+          persons: {
+            Simon: {
+              daily_gbp: '25.00', yearly_gbp: '5980.00',
+              commutes: [{ label: 'Bracknell', trips_per_week: 1, weeks_per_year: 46, yearly_gbp: '5980.00' }],
+            },
+          },
+          yearly_total_gbp: 5980,
+        },
+        error: null, provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Simon → Bracknell')
+    // 5980 / 12 → 498.33, whole pounds
+    expect(wrapper.text()).toContain('£498/mo')
+    const title = wrapper.find('a.pill-link').attributes('title') ?? ''
+    expect(title).toContain('1 days/wk')
+    expect(title).toContain('£5980.00/yr')
+  })
+
+  it('keeps the daily fare when the summary carries no breakdown', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, mode: 'tube', label: 'Pimlico', person: { name: 'Simon' }, daily_cost: { amount: '12.50', currency: 'GBP' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Simon → Pimlico')
+    const pill = wrapper.find('.pill')
+    expect(pill.text()).toContain('£12.50')
+    expect(pill.text()).not.toContain('/mo')
+    expect(wrapper.find('a.pill-link').attributes('title')).toBeUndefined()
+  })
+
+  it('keeps the daily fare when the breakdown lacks the destination', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, mode: 'tube', label: 'Pimlico', person: { name: 'Simon' }, daily_cost: { amount: '12.50', currency: 'GBP' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+      monthly_commute_cost: {
+        succeeded: true,
+        value: {
+          persons: {
+            Simon: {
+              daily_gbp: '25.00', yearly_gbp: '5980.00',
+              commutes: [{ label: 'Aldgate', trips_per_week: 3, weeks_per_year: 46, yearly_gbp: '5980.00' }],
+            },
+          },
+          yearly_total_gbp: 5980,
+        },
+        error: null, provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    const pill = wrapper.find('.pill')
+    expect(pill.text()).toContain('£12.50')
+    expect(pill.text()).not.toContain('/mo')
+  })
+})
+
 describe('PropertyCard affordability honesty (P2)', () => {
   it('shows a muted can-not-calculate marker when the total is impossible', () => {
     const summary = makeSummary({

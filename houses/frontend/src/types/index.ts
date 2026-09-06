@@ -186,6 +186,31 @@ export interface CommuteBreakdown {
   formula_explanation: string
 }
 
+/** One destination inside a person's summary commute breakdown. */
+export interface PersonCommuteLeg {
+  label: string
+  trips_per_week: number
+  weeks_per_year: number
+  yearly_gbp: string
+}
+
+/** Per-person slice of the summary commute breakdown: 2dp GBP
+ *  strings plus the destinations behind the person's total. */
+export interface PersonCommuteBreakdown {
+  daily_gbp: string
+  yearly_gbp: string
+  commutes: PersonCommuteLeg[]
+}
+
+/** Commute cost as carried on the property SUMMARY payload
+ *  (/api/properties/all + websocket summaries): per-person slices
+ *  and the household yearly total — same value shape as the detail
+ *  page's affordability.monthly_commute_cost. */
+export interface SummaryCommuteCost {
+  persons: Record<string, PersonCommuteBreakdown>
+  yearly_total_gbp: number
+}
+
 export interface CommuteSummary {
   commute: AttemptValue<CommuteValue> & { is_child?: boolean }
 }
@@ -228,6 +253,9 @@ export interface PropertySummary {
   }
   town_name?: AttemptValue<string>
   total_monthly_cost?: AttemptValue<MeasurementValue>
+  /** Per-person/destination commute cost; absent until the DAG has
+   *  computed it for the summary payload. */
+  monthly_commute_cost?: AttemptValue<SummaryCommuteCost>
   group_monthly_cost: AttemptValue<GroupMonthlyCost>
   walkability: AttemptValue<Record<string, unknown>>
   epc?: AttemptValue<{ band: string; potential?: string }>
