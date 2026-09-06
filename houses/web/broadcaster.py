@@ -22,12 +22,13 @@ logger = logging.getLogger(__name__)
 _broadcast_queue: asyncio.Queue[str] = asyncio.Queue()
 _websocket_clients: set[WebSocket] = set()
 
-
 def _reset():
-    """Reset broadcast queue and websocket clients for test isolation."""
+    """Reset broadcast state for test isolation."""
     # lucidlint: ignore global-state deliberate test seam — _reset() swaps the queue for test isolation
-    global _broadcast_queue
+    global _broadcast_queue, _pending_notify_rids, _notify_debounce_task
     _broadcast_queue = asyncio.Queue()
+    _pending_notify_rids = set()
+    _notify_debounce_task = None
     _websocket_clients.clear()
 
 
@@ -123,4 +124,36 @@ async def _broadcaster() -> None:
         except Exception as exc:
             logger.warning("Broadcast failed for %s: %s", rid, exc)
             continue
+
+
+_pending_notify_rids: set[str] = set()
+_notify_debounce_task: asyncio.Task | None = None
+_NOTIFY_DEBOUNCE_SECONDS = 0.4
+
+
+def notify_node_refreshed(node) -> None:
+    """THE DAG→frontend seam: a property node refreshed, so the property's
+    summary is queued for broadcast (coalesced — a cascade touching many
+    nodes of one property pushes that property once).
+
+    Any recompute path lands here automatically: settings edits, what-if
+    applies, scrape applies. Callers never remember to notify — the DAG
+    refresh is the notification.
+    """
+    global _notify_debounce_task
+    node_id = getattr(node, "_id", "") or ""
+    rid = node_id.split("/", 1)[0]
+    if not rid.isdigit() or len(rid) < 6:
+        return  # settings aggregates etc. — not a property node
+    _pending_notify_rids.add(rid)
+    if _notify_debounce_task is None or _notify_debounce_task.done():
+        _notify_debounce_task = asyncio.create_task(_flush_notifies())
+
+
+async def _flush_notifies() -> None:
+    await asyncio.sleep(_NOTIFY_DEBOUNCE_SECONDS)
+    rids = list(_pending_notify_rids)
+    _pending_notify_rids.clear()
+    for rid in rids:
+        await _broadcast_queue.put(rid)
 
