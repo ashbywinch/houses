@@ -61,6 +61,32 @@ export interface MoneyValue {
   currency: string
 }
 
+/** One side of a signed monthly delta vs the current home, as sent by
+ *  the server: explicit-sign 2dp GBP string + whether either side's
+ *  figure was estimated (≈). */
+export interface MonthlyDeltaSide {
+  value: string
+  approx: boolean
+}
+
+/** Per-group delta vs the current home; a group is null when either
+ *  side's figure is uncomputable. Null overall when there is no
+ *  baseline or the summary IS the baseline. */
+export interface DeltaVsHome {
+  couple: MonthlyDeltaSide | null
+  others: MonthlyDeltaSide | null
+}
+
+/** The current home's reference figures, attached to every summary by
+ *  the server when exactly one current home has computed totals. */
+export interface MonthlyBaseline {
+  rid: string
+  address: string
+  couple: MonthlyDeltaSide
+  others: MonthlyDeltaSide | null
+  others_rent_paid?: number
+}
+
 /** A value with an uncertainty — exact when stddev is absent/0 (Part A). */
 export interface GroupCostValue {
   value: string
@@ -102,6 +128,7 @@ export interface GroupMonthlyCost {
   couple_names?: string
   couple_breakdown?: GroupCostBreakdown
   others_breakdown?: GroupCostBreakdown
+  delta_vs_home?: DeltaVsHome | null
 }
 export interface MeasurementValue {
   value: MoneyValue
@@ -209,10 +236,14 @@ export interface PropertySummary {
   freshness?: {
     property_added_at: string | null
   }
+  is_current_home?: boolean
+  monthly_baseline?: MonthlyBaseline | null
 }
 
 export interface PropertyDetail {
   rid: string
+  is_current_home?: boolean
+  monthly_baseline?: MonthlyBaseline | null
   best_address: AttemptValue<string>
   rightmove_url: AttemptValue<string>
   rightmove_price: AttemptValue<MoneyValue>

@@ -129,11 +129,40 @@ const realOf = (rid: string): number | null => {
   return Number(g.value.couple.value)
 }
 
+/** The REAL summary's own delta vs the home (never the what-if
+ *  overlay — that side is counted separately below). */
+const summaryDeltaOf = (rid: string): number | null => {
+  const g = store.summaries[rid]?.group_monthly_cost
+  const d = g?.succeeded ? g.value?.delta_vs_home?.couple ?? null : null
+  return d ? Number(d.value) : null
+}
+const whatIfDeltaOf = (rid: string): number | null => {
+  const d = store.whatIfTotals?.[rid]?.delta_vs_home?.couple
+  return d ? Number(d.value) : null
+}
+
+function diffSentence(diff: number, label: string): string {
+  if (diff > 0) return `${diff} more house${diff === 1 ? '' : 's'} ${label}`
+  if (diff < 0) return `${-diff} fewer house${diff === -1 ? '' : 's'} ${label}`
+  return `No change in houses ${label}`
+}
+
 const deltaHeadline = computed(() => {
   const totals = store.whatIfTotals
   if (!totals) return ''
   let realUnder = 0
   let hypoUnder = 0
+  if (store.baseline) {
+    // Deltas active: count houses WITHIN £X/mo of home — real vs
+    // hypothetical delta, both vs the same real baseline.
+    for (const rid of store.rids) {
+      const real = summaryDeltaOf(rid)
+      if (real != null && real <= threshold.value) realUnder++
+      const hypo = whatIfDeltaOf(rid)
+      if (hypo != null && hypo <= threshold.value) hypoUnder++
+    }
+    return diffSentence(hypoUnder - realUnder, `within £${threshold.value.toLocaleString()}/mo of home`)
+  }
   for (const rid of store.rids) {
     const real = realOf(rid)
     if (real != null && real <= threshold.value) realUnder++
@@ -141,11 +170,7 @@ const deltaHeadline = computed(() => {
     const hypo = grp?.couple ? Number(grp.couple.value) : null
     if (hypo != null && hypo <= threshold.value) hypoUnder++
   }
-  const diff = hypoUnder - realUnder
-  const label = `under £${threshold.value.toLocaleString()}/mo`
-  if (diff > 0) return `${diff} more house${diff === 1 ? '' : 's'} ${label}`
-  if (diff < 0) return `${-diff} fewer house${diff === -1 ? '' : 's'} ${label}`
-  return `No change in houses ${label}`
+  return diffSentence(hypoUnder - realUnder, `under £${threshold.value.toLocaleString()}/mo`)
 })
 
 // ── Commit / exit ──────────────────────────────────────────────

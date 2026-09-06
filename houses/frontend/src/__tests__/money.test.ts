@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { integerPounds, normalizePence, wholePoundsValue } from '../formatters/money'
+import { integerPounds, normalizePence, signedPounds, wholePoundsValue } from '../formatters/money'
 
 describe('integerPounds (display only — never used on entry)', () => {
   it('leaves whole values untouched', () => {
@@ -56,5 +56,17 @@ describe('normalizePence', () => {
 
   it('caps at 2dp (pounds and pence only)', () => {
     expect(normalizePence('150.505')).toBe('150.51')
+  })
+})
+
+describe('signedPounds (delta display: whole pounds, explicit sign)', () => {
+  it('keeps positive deltas explicit and thousands-grouped', () => {
+    expect(signedPounds('+1308.06')).toBe('+£1,308')
+    expect(signedPounds('42')).toBe('+£42')
+  })
+
+  it('uses U+2212 and rounds negative deltas to whole pounds', () => {
+    expect(signedPounds('-411.28')).toBe('−£411')
+    expect(signedPounds('-883.61')).toBe('−£884')
   })
 })

@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import PropertyCard from '../PropertyCard.vue'
 import { usePropertiesStore } from '../../stores/properties'
-import type { PropertySummary } from '../../types'
+import type { MonthlyBaseline, PropertySummary } from '../../types'
 
 function mountCard(props: { rid: string; data: PropertySummary }) {
   const pinia = createPinia()
@@ -448,5 +448,105 @@ describe('PropertyCard commute colour bands', () => {
     // 70 min: over fine (60) → 'yikes' — the old hardcoded 75 would say 'tight'
     const yikes = mount(PropertyCard, { props: { rid: '123', data: commuteSummary(70) }, global: { plugins: [pinia] } })
     expect(yikes.find('.card__commute-data .pill').classes()).toContain('pill--bad')
+  })
+})
+
+// ── Extra vs your home (approved deltas design) ─────────────────────
+
+const homeBaseline: MonthlyBaseline = {
+  rid: 'home',
+  address: '31 Isambard Road, Southall, UB2 4GN',
+  couple: { value: '1783.61', approx: false },
+  others: { value: '652.92', approx: false },
+  others_rent_paid: 600,
+}
+
+/** Mount a candidate card with the current home present in the store —
+ *  that is what switches every non-home card into delta mode. */
+function mountWithBaseline(cardOverrides?: Partial<PropertySummary>) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const store = usePropertiesStore()
+  store.summaries['home'] = makeSummary({ rid: 'home', is_current_home: true, monthly_baseline: homeBaseline })
+  store.groupLabels = { coupleLabel: 'S&L', othersLabel: 'Ashby' }
+  const card = makeSummary(cardOverrides)
+  // The candidate lives in the store too — that is where deltaFor and
+  // the what-if overlay read from.
+  store.summaries[card.rid] = card
+  const wrapper = mount(PropertyCard, { props: { rid: card.rid, data: card }, global: { plugins: [pinia] } })
+  return { wrapper, store }
+}
+
+describe('PropertyCard — extra vs your home (deltas)', () => {
+  const deltaGroup = {
+    couple: { value: '3091.67', stddev: 0 },
+    others: { value: '241.64', stddev: 0 },
+    couple_label: 'S&L',
+    others_label: 'Ashby',
+    delta_vs_home: {
+      couple: { value: '+1308.06', approx: true },
+      others: { value: '-411.28', approx: false },
+    },
+  }
+
+  it('replaces totals with signed whole-pound deltas when the baseline is active', () => {
+    const { wrapper } = mountWithBaseline({ group_monthly_cost: { succeeded: true, value: deltaGroup, error: null, provenance: { label: 'test' } } })
+    const lines = wrapper.findAll('.card__cost-line')
+    expect(lines[0].text()).toContain('S&L')
+    expect(lines[0].text()).toContain('≈+£1,308/mo')
+    expect(lines[1].text()).toContain('Ashby')
+    expect(lines[1].text()).toContain('−£411/mo')
+    expect(lines[1].text()).not.toContain('≈')
+    expect(wrapper.text()).not.toContain('£3,091.67/mo')
+    expect(wrapper.text()).not.toContain('£241.64/mo')
+  })
+
+  it('shows — with the candidate\'s blocked reason when a group delta is unknown', () => {
+    const { wrapper } = mountWithBaseline({
+      group_monthly_cost: { succeeded: false, value: null, error: 'Council tax lookup failed', provenance: { label: 'test' } },
+    })
+    const lines = wrapper.findAll('.card__cost-line')
+    expect(lines[0].text()).toContain('—')
+    expect(lines[1].text()).toContain('—')
+    expect(lines[0].attributes('title')).toBe('Council tax lookup failed')
+  })
+
+  it('keeps totals and adds the baseline chip on the current home', () => {
+    const card = makeSummary({ is_current_home: true })
+    const pinia = createPinia()
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: card }, global: { plugins: [pinia] } })
+    const store = usePropertiesStore()
+    store.summaries['123'] = { ...card, monthly_baseline: homeBaseline }
+    expect(wrapper.text()).toContain('£2,100/mo')
+    expect(wrapper.text()).toContain('£400/mo')
+    expect(wrapper.find('.card__baseline-chip').text()).toBe('Your home · baseline')
+    expect(wrapper.text()).not.toContain('1,308')
+  })
+
+  it('renders today\'s totals when no baseline exists', () => {
+    const pinia = createPinia()
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    const lines = wrapper.findAll('.card__cost-line')
+    expect(lines[0].text()).toContain('£2,100/mo')
+    expect(lines[1].text()).toContain('£400/mo')
+    expect(wrapper.find('.card__baseline-chip').exists()).toBe(false)
+  })
+
+  it('prefers the what-if overlay delta over the summary delta', async () => {
+    const { wrapper, store } = mountWithBaseline({ group_monthly_cost: { succeeded: true, value: deltaGroup, error: null, provenance: { label: 'test' } } })
+    store.whatIfTotals = {
+      '123': {
+        couple: { value: '900', stddev: 0 },
+        others: { value: '200', stddev: 0 },
+        couple_label: 'S&L',
+        others_label: 'Ashby',
+        delta_vs_home: { couple: { value: '-883.61', approx: false }, others: null },
+      },
+    }
+    await wrapper.vm.$nextTick()
+    const lines = wrapper.findAll('.card__cost-line')
+    expect(lines[0].text()).toContain('−£884/mo')
+    expect(lines[0].text()).not.toContain('1,308')
+    expect(lines[1].text()).toContain('—')
   })
 })
