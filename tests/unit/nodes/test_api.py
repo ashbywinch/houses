@@ -1515,13 +1515,14 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:300]}"
         assert "whole number" in resp.json()["detail"]
-
-        # nothing was stored
+        # nothing was stored — the estimate map stays materialised-but-empty
+        # (construction seeds {} since 2026-09-06; the rejection must not
+        # change it)
         from houses.property_registry import get_property
 
         prop = get_property(rid)
         assert prop is not None
-        assert prop.works_estimates.latest_attempt().value_or_none() is None
+        assert prop.works_estimates.latest_attempt().value_or_none() == {}
 
     def test_works_estimate_propagates_to_detail(self):
         """After PATCH, GET detail must show updated mortgage

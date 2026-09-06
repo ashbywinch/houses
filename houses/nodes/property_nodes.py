@@ -496,6 +496,33 @@ class PropertyNodes:
                 self._slots.append(slot)
                 node.changed.connect(slot)
 
+        # ── Construction invariant: no pending empty-valid inputs ──────
+        # A pending input node permanently blocks every downstream
+        # refresh (equity → mortgage → monthly payment), which is how
+        # add-flow houses lost their Cost of Works rows until the next
+        # restart (2026-09-06). Inputs whose "empty" state is a valid
+        # fact are materialised HERE, at construction, so no creation
+        # path can skip it. Scrape-produced inputs (address, price,
+        # bedrooms, location) deliberately stay pending until the
+        # scrape lands.
+        for attr, make_default in self._EMPTY_VALID_INPUT_DEFAULTS.items():
+            node = getattr(self, attr, None)
+            if node is None:
+                continue
+            attempt = node.latest_attempt()
+            if attempt is None or attempt.pending:
+                node.push(make_default(), "default")
+
+    # Empty-valid input defaults, kept next to the node definitions.
+    # A new user-input node with an "empty is valid" semantic must be
+    # registered here.
+    _EMPTY_VALID_INPUT_DEFAULTS = {
+        "comment_status": lambda: "",
+        "comment_status_reason": lambda: "",
+        "works_estimates": dict,
+        "rental_income": lambda: Money(amount="0", currency="GBP"),
+    }
+
     def _build_commute_pipeline(self) -> None:
 
         build_commute_pipeline(self)

@@ -309,3 +309,22 @@ class TestPostcodeOnlyPayload:
         assert a.succeeded and a.value_or_none() == "SL7 2AP", (
             "a postcode sent without an address must still reach the DAG"
         )
+
+
+class TestAddMaterialisesInputDefaults:
+    @staticmethod
+    def test_add_materialises_empty_valid_inputs():
+        """A newly added property must come alive with its empty-valid
+        inputs materialised (works estimates {}, rental income £0, status
+        "") — a pending input starves the whole money cascade until the
+        next restart, which is how add-button houses lost their Cost of
+        Works rows entirely on live (2026-09-06)."""
+        _add_url_only()
+        from houses.services_provider import get_services
+
+        prop = get_services().property_registry.get(RID)
+        for name in ("works_estimates", "rental_income", "comment_status"):
+            att = getattr(prop, name).latest_attempt()
+            assert att is not None and att.succeeded, (
+                f"{name} must be materialised at construction, not left pending"
+            )

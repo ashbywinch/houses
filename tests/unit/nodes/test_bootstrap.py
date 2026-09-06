@@ -279,43 +279,37 @@ class TestUpgradeAddress:
 
 class TestSeedInputDefaults:
     """A pending input node with no producer permanently blocks every
-    downstream refresh (the DAG waits for pending deps).  The load paths
-    must materialise input defaults so the settings cascade can always
-    propagate — an empty sheet "Status" cell must not freeze the money
-    chain forever."""
+    downstream refresh (the DAG waits for pending deps).  PropertyNodes
+    construction itself materialises empty-valid input defaults, so NO
+    creation path — startup load, add flow, scrape apply — can leave one
+    pending: the invariant lives in __init__."""
 
     def _property(self, rid: str):
         from houses.nodes.property_nodes import PropertyNodes
 
         return PropertyNodes(rid)
 
-    def test_defaults_pending_inputs(self):
+    def test_construction_materialises_pending_inputs(self):
         from money import Money
 
-        from houses.nodes.bootstrap import _seed_input_defaults
-
         prop = self._property("99900001")  # nothing pushed — all pending
-        _seed_input_defaults(prop)
         assert prop.comment_status.latest_attempt().value_or_none() == ""
+        assert prop.comment_status_reason.latest_attempt().value_or_none() == ""
         assert prop.works_estimates.latest_attempt().value_or_none() == {}
-        assert prop.rental_income.latest_attempt().value_or_none() == Money("0", "GBP")
+        assert prop.rental_income.latest_attempt().value_or_none() == Money(amount="0", currency="GBP")
 
-    def test_defaults_do_not_overwrite_user_values(self):
-        from houses.nodes.bootstrap import _seed_input_defaults
-
+    def test_construction_does_not_overwrite_user_values(self):
         prop = self._property("99900002")
         prop.comment_status.push("Current", "user")
-        _seed_input_defaults(prop)
         assert prop.comment_status.latest_attempt().value_or_none() == "Current"
 
-    def test_settings_cascade_propagates_when_comment_status_was_never_seeded(self):
+    def test_settings_cascade_propagates_when_comment_status_was_never_persisted(self):
         """Production shape: comment_status has no DB row (empty sheet
-        cell) — with the fix, the load-path defaults unblock the cascade
-        and a settings change still flows to mortgage_required."""
+        cell) — construction materialises it, and a settings change still
+        flows to mortgage_required."""
         from fastapi.testclient import TestClient
 
         from houses.model.domain import Person
-        from houses.nodes.bootstrap import _seed_input_defaults
         from houses.server import app
         from houses.web.auth import _make_session_cookie
         from tests.unit.nodes.test_api import _push_persons
@@ -335,10 +329,9 @@ class TestSeedInputDefaults:
         prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
         prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
-        # NOTE: comment_status deliberately left pending (production shape)
+        # comment_status deliberately left unpersisted (production shape)
         from houses.property_registry import register_property
 
-        _seed_input_defaults(prop)
         register_property(rid, prop)
 
         from tests.unit.conftest import flush_all
