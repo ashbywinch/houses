@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { usePropertiesStore } from '../stores/properties'
 import { useWebSocket } from '../composables/useWebSocket'
-import { fetchAllSummaries, fetchSettings } from '../services/api'
+import { fetchAllSummaries, fetchSettings, fetchWhatIfState } from '../services/api'
+import { flushPromises } from '@vue/test-utils'
 
 vi.mock('../services/api', () => ({
   fetchAllSummaries: vi.fn().mockResolvedValue({}),
   fetchPropertyDetail: vi.fn().mockResolvedValue(null),
   fetchSettings: vi.fn().mockResolvedValue({}),
+  fetchWhatIfState: vi.fn<() => Promise<boolean>>(),
   patchTriage: vi.fn(),
 }))
 
@@ -237,5 +239,33 @@ describe('WebSocket settings broadcast', () => {
         resolve()
       }, 10)
     })
+  })
+
+  it('refreshes the what-if mode when the DAG broadcasts a settings node update', async () => {
+    const store = usePropertiesStore()
+    // Capture the socket's message handler so the broadcast is invoked
+    // directly — no wall-clock timers.
+    let deliver: ((msg: { data: string }) => void) | undefined
+    const { connect, disconnect } = useWebSocket((_url: string) => {
+      const ws = {
+        onopen: null,
+        onclose: null,
+        onmessage: null as ((msg: { data: string }) => void) | null,
+        close() { /* test calls disconnect() directly */ },
+      }
+      deliver = (msg: { data: string }) => ws.onmessage?.(msg)
+      // the handler only reads onmessage; a full socket is unnecessary
+      return ws as unknown as WebSocket
+    })
+    connect('ws://localhost/api/ws')
+
+    // a what-if applied on another device writes through the settings
+    // nodes — the broadcast must flip this device's mode flag
+    vi.mocked(fetchWhatIfState).mockResolvedValue(true)
+    deliver!({ data: JSON.stringify({ type: 'node_updated', node_id: 'settings/financial', data: {} }) })
+    await flushPromises()
+
+    expect(store.whatIfActive).toBe(true)
+    disconnect()
   })
 })

@@ -1,13 +1,15 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import WhatIfPanel from '../WhatIfPanel.vue'
 import { usePropertiesStore } from '../../stores/properties'
 
 vi.mock('../../services/api', () => ({
   fetchSettings: vi.fn(),
-  postWhatIf: vi.fn(),
-  patchPerson: vi.fn().mockResolvedValue(new Response()),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
+  applyWhatIf: vi.fn().mockResolvedValue(undefined),
+  restoreWhatIf: vi.fn().mockResolvedValue(undefined),
+  acceptWhatIf: vi.fn().mockResolvedValue(undefined),
   fetchAllSummaries: vi.fn().mockResolvedValue({}),
 }))
 
@@ -47,6 +49,14 @@ const settingsPersons = {
   },
 }
 
+/** The mounted panel wrapper — named once so helpers stay honest. */
+type PanelWrapper = VueWrapper<InstanceType<typeof WhatIfPanel>>
+
+/** The panel is collapsed by default — open it before interacting. */
+async function expand(wrapper: PanelWrapper) {
+  await wrapper.find('.whatif__toggle').trigger('click')
+}
+
 function mountPanel() {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -54,99 +64,68 @@ function mountPanel() {
   return { wrapper, store: usePropertiesStore() }
 }
 
-/** The panel is collapsed by default — open it before interacting. */
-async function expand(wrapper: ReturnType<typeof mount>) {
-  await wrapper.find('.whatif__toggle').trigger('click')
+
+/** Mount + flush the onMounted persons/state load. */
+async function mountOpenPanel() {
+  const { wrapper, store } = mountPanel()
+  await flushPromises()
+  await expand(wrapper)
+  await flushPromises()
+  return { wrapper, store }
 }
 
-/** Flush microtasks (onMounted load, async run) without wall-clock time. */
-async function settle() {
-  await vi.advanceTimersByTimeAsync(0)
-}
-
-/** Fire the 400ms debounce deterministically and flush its async body. */
-async function runDebouncedEval() {
-  await vi.advanceTimersByTimeAsync(500)
+function findButton(wrapper: PanelWrapper, text: string) {
+  const b = wrapper.findAll('button').find(b => b.text().includes(text))
+  expect(b, `expected a "${text}" button`).toBeDefined()
+  return b!
 }
 
 describe('WhatIfPanel', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
+    vi.clearAllMocks()
     vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
-    vi.mocked(api.postWhatIf).mockResolvedValue({
-      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } },
-    })
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
   })
 
   it('renders the family and the editable money fields', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
+    const { wrapper } = await mountOpenPanel()
     expect(wrapper.text()).toContain('What if…')
-    await expand(wrapper)
     expect(wrapper.text()).toContain('Simon')
     expect(wrapper.text()).toContain('Ashby')
     expect(wrapper.text()).toContain('Expected sale price (£)')
-    // nothing is "saved" until the user asks — badge hidden initially
+  })
+
+  it('explains that applying changes the saved numbers everywhere', async () => {
+    const { wrapper } = await mountOpenPanel()
+    expect(wrapper.text()).toContain('changes your saved numbers everywhere')
+    expect(wrapper.text()).toContain('come back with one click')
+    // The old "not saved" badge is gone — applying is what changes numbers.
     expect(wrapper.text()).not.toContain('not saved')
   })
 
   it('never shows children — they have no finances', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+    const { wrapper } = await mountOpenPanel()
     expect(wrapper.text()).not.toContain('George')
   })
 
   it('rejects pence as typed (whole pounds only)', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+    const { wrapper } = await mountOpenPanel()
     const sale = wrapper.findAll('.whatif-person__field input')[0]
     await sale.setValue('550000.50')
     expect((sale.element as HTMLInputElement).value).toBe('550000')
   })
 
   it('displays money as integer pounds (no decimals)', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+    const { wrapper } = await mountOpenPanel()
     // Simon's sale price is 550000.49 in the fixture → shown as 550000
     const sale = wrapper.findAll('.whatif-person__field input')[0]
     expect((sale.element as HTMLInputElement).value).toBe('550000')
   })
 
-  it('runs the what-if on edit and marks it not saved', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
-
-    // Ashby is not selling → her cash field carries the 'Cash available' label
-    const ashbyCash = wrapper
-      .findAll('.whatif-person__field')
-      .find(l => l.text().includes('Cash available for the deposit'))!
-      .find('input')
-    await ashbyCash.setValue('400000')
-
-    await runDebouncedEval()
-    expect(api.postWhatIf).toHaveBeenCalled()
-    const payload = vi.mocked(api.postWhatIf).mock.calls[0][0]
-    const ashby = payload.find((p: Record<string, unknown>) => p.name === 'Ashby')
-    expect(ashby?.cash_contribution).toEqual({ amount: '400000', currency: 'GBP' })
-
-    await settle()
-    expect(wrapper.text()).toContain('not saved')
-  })
-
   it('uses the common settings-card layout for person cards', async () => {
     // The What If person cards must reuse the standard card/heading/
     // toggle-row CSS — no inline margin bodges, no zeroed padding.
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+    const { wrapper } = await mountOpenPanel()
     const card = wrapper.find('.whatif-person')
     // card uses the common padding (not a bespoke 0 0.6rem override)
     const cardStyle = getComputedStyle(card.element)
@@ -162,85 +141,151 @@ describe('WhatIfPanel', () => {
     expect(toggle.element.getAttribute('style')).toBeNull()
   })
 
-  it('shows a delta headline against real totals', async () => {
+  it('furling an active what-if cancels it — the real numbers come back', async () => {
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
     const { wrapper, store } = mountPanel()
-    await settle()
-    await expand(wrapper)
-    store.rids = ['prop-a']
-    store.summaries = {
-      'prop-a': {
-        rid: 'prop-a',
-        best_address: { succeeded: true, value: '10 Cheap St', error: null, provenance: { label: 't' } },
-        best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 't' } },
-        rightmove_price: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: { label: 't' } },
-        rightmove_bedrooms: { succeeded: true, value: '2', error: null, provenance: { label: 't' } },
-        group_monthly_cost: { succeeded: true, value: { couple: { value: '1600', stddev: 0 }, others: { value: '400', stddev: 0 }, couple_label: 'S&L', others_label: 'A' }, error: null, provenance: { label: 't' } },
-        walkability: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
-        commutes: {},
-        schools: {
-          primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
-          secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
-        },
-      },
-    }
-    await settle()
+    await flushPromises()
+    expect(store.whatIfActive).toBe(true)
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(false)
 
-    const cashInputs = wrapper.findAll('.whatif-person__field input')
-    await cashInputs[cashInputs.length - 1].setValue('400000')
-    await runDebouncedEval()
-    await settle()
+    // the user furls the panel — that cancels the what-if
+    const toggle = wrapper.find('.whatif__toggle')
+    await toggle.trigger('click')
+    await flushPromises()
 
-    // real 1600 is NOT under 1500, hypothetical 900 IS → one more house
-    expect(wrapper.text()).toContain('1 more house under £1,500/mo')
+    expect(api.restoreWhatIf).toHaveBeenCalledTimes(1)
+    expect(store.whatIfActive).toBe(false)
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(true)
+
+    // unfurling again shows the inactive panel: Try scenario, editable fields
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Try scenario')
   })
 
-  it('applies the numbers to the family settings and clears the panel', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+  it('locks the scenario fields and shows exactly two exits while active', async () => {
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+    const { wrapper } = await mountPanel()
+    await flushPromises()
 
-    const cashInputs = wrapper.findAll('.whatif-person__field input')
-    await cashInputs[cashInputs.length - 1].setValue('400000')
-    await runDebouncedEval()
-    await settle()
-    expect(wrapper.text()).toContain('not saved')
+    const buttons = wrapper.findAll('.whatif__footer button')
+    expect(buttons.map(b => b.text())).toEqual(['Back to real numbers', 'Keep these numbers'])
 
-    await wrapper.findAll('button').find(b => b.text().includes('Use these numbers'))!.trigger('click')
-    await settle()
-
-    expect(api.patchPerson).toHaveBeenCalled()
-    expect(wrapper.text()).not.toContain('not saved')
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
+    expect((ashbyCash.element as HTMLInputElement).matches(":disabled")).toBe(true)
   })
 
-  it('backs out to real numbers without saving', async () => {
+  it('offers only Try scenario when nothing is active — fields editable', async () => {
+    const { wrapper } = await mountOpenPanel()
+
+    const buttons = wrapper.findAll('.whatif__footer button')
+    expect(buttons.map(b => b.text())).toEqual(['Try scenario'])
+
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
+    expect((ashbyCash.element as HTMLInputElement).disabled).toBe(false)
+  })
+
+  it('restores the real numbers from "Back to real numbers" and clears the flag', async () => {
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
     const { wrapper, store } = mountPanel()
-    await settle()
-    await expand(wrapper)
+    await flushPromises()
 
-    store.applyWhatIf({ 'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } } })
-    await settle()
-    expect(wrapper.text()).toContain('not saved')
+    await findButton(wrapper, 'Back to real numbers').trigger('click')
+    await flushPromises()
 
-    await wrapper.findAll('button').find(b => b.text().includes('Back to real numbers'))!.trigger('click')
-    await settle()
-    expect(store.whatIfTotals).toBeNull()
-    expect(wrapper.text()).not.toContain('not saved')
+    expect(api.restoreWhatIf).toHaveBeenCalledTimes(1)
+    expect(store.whatIfActive).toBe(false)
+  })
+
+  it('keeps the scenario from "Keep these numbers" without restoring', async () => {
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+    const { wrapper, store } = mountPanel()
+    await flushPromises()
+
+    await findButton(wrapper, 'Keep these numbers').trigger('click')
+    await flushPromises()
+
+    expect(api.acceptWhatIf).toHaveBeenCalledTimes(1)
+    expect(api.restoreWhatIf).not.toHaveBeenCalled()
+    expect(store.whatIfActive).toBe(false)
+  })
+
+  it('makes NO api call when a field is edited — the auto-eval is gone', async () => {
+    const { wrapper } = await mountOpenPanel()
+    const settingsCalls = vi.mocked(api.fetchSettings).mock.calls.length
+
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
+    await ashbyCash.setValue('400000')
+    await flushPromises()
+
+    expect(api.applyWhatIf).not.toHaveBeenCalled()
+    expect(api.restoreWhatIf).not.toHaveBeenCalled()
+    // the panel loaded persons once and never re-fetched on input
+    expect(vi.mocked(api.fetchSettings).mock.calls.length).toBe(settingsCalls)
+  })
+
+  it('applies the edited payload and flags the store on "Try scenario"', async () => {
+    const { wrapper, store } = await mountOpenPanel()
+
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
+    await ashbyCash.setValue('400000')
+
+    await findButton(wrapper, 'Try scenario').trigger('click')
+    await flushPromises()
+
+    expect(api.applyWhatIf).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(api.applyWhatIf).mock.calls[0][0] as Array<Record<string, unknown>>
+    const ashby = payload.find((p: Record<string, unknown>) => p.name === 'Ashby')
+    expect(ashby?.cash_contribution).toEqual({ amount: '400000', currency: 'GBP' })
+    // Simon's sale-price money is normalised to whole pounds in the payload
+    const simon = payload.find((p: Record<string, unknown>) => p.name === 'Simon')
+    expect(simon?.home_sale_price).toEqual({ amount: '550000', currency: 'GBP' })
+
+    expect(store.whatIfActive).toBe(true)
+  })
+
+  it('shows an error line and keeps the flag when Apply fails', async () => {
+    vi.mocked(api.applyWhatIf).mockRejectedValueOnce(new Error('500'))
+    const { wrapper, store } = await mountOpenPanel()
+
+    await findButton(wrapper, 'Try scenario').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain("Couldn't apply the what-if.")
+    expect(store.whatIfActive).toBe(false)
+  })
+
+  it('offers only "Try scenario" in the footer when nothing is active', async () => {
+    const { wrapper } = await mountOpenPanel()
+
+    findButton(wrapper, 'Try scenario')
+    expect(wrapper.findAll('button').some(b => b.text().includes('Back to real numbers'))).toBe(false)
+    expect(wrapper.findAll('button').some(b => b.text().includes('Keep these numbers'))).toBe(false)
   })
 })
 
 describe('WhatIfPanel — commute tab (MPG + max walk)', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
+    vi.clearAllMocks()
     vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
-    vi.mocked(api.postWhatIf).mockResolvedValue({
-      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } },
-    })
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
   })
 
-  it('sends the car MPG and max-walk in the what-if payload and commits them', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+  it('sends the car MPG and max-walk in the apply payload', async () => {
+    const { wrapper } = await mountOpenPanel()
     // switch to the Commutes tab
     await wrapper.findAll('.settings-tabs button')[1].trigger('click')
     await wrapper.vm.$nextTick()
@@ -249,9 +294,11 @@ describe('WhatIfPanel — commute tab (MPG + max walk)', () => {
     await mpg.setValue(38)
     const mw = wrapper.find('input[type="number"][min="0"]')
     await mw.setValue(25)
-    await runDebouncedEval()
-    expect(api.postWhatIf).toHaveBeenCalled()
-    const body = (api.postWhatIf as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Array<Record<string, unknown>>
+
+    await findButton(wrapper, 'Try scenario').trigger('click')
+    await flushPromises()
+
+    const body = vi.mocked(api.applyWhatIf).mock.calls[0][0] as Array<Record<string, unknown>>
     const simonBody = body.find((b: Record<string, unknown>) => b.name === 'Simon')
     expect(simonBody?.petrol_mpg).toBe(38)
     expect(simonBody?.bus_walk_penalty).toEqual({ value: 25, unit: 'minute' })
@@ -263,49 +310,31 @@ describe('WhatIfPanel — commute tab (MPG + max walk)', () => {
 
 describe('WhatIfPanel — has_car and empty money (reviewer findings)', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
+    vi.clearAllMocks()
     vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
-    vi.mocked(api.postWhatIf).mockResolvedValue({
-      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } },
-    })
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('sends has_car in the what-if payload so the toggle is not dead UI', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+  it('sends has_car in the apply payload so the toggle is not dead UI', async () => {
+    const { wrapper } = await mountOpenPanel()
     await wrapper.findAll('.settings-tabs button')[1].trigger('click')
     await wrapper.vm.$nextTick()
-    // Simon starts has_car=true; flip it off and run the evaluation
+    // Simon starts has_car=true; flip it off before applying
     const simon = wrapper.findAll('.whatif-person')[0]
     await simon.find('.switch').trigger('click')
-    await runDebouncedEval()
-    const body = (api.postWhatIf as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Array<Record<string, unknown>>
+
+    await findButton(wrapper, 'Try scenario').trigger('click')
+    await flushPromises()
+
+    const body = vi.mocked(api.applyWhatIf).mock.calls[0][0] as Array<Record<string, unknown>>
     const simonBody = body.find((b: Record<string, unknown>) => b.name === 'Simon')
     expect(simonBody?.has_car).toBe(false)
     const ashbyBody = body.find((b: Record<string, unknown>) => b.name === 'Ashby')
     expect(ashbyBody?.has_car).toBe(false)
   })
 
-  it('sends has_car when committing the numbers', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
-    await wrapper.findAll('button').find(b => b.text().includes('Use these numbers'))!.trigger('click')
-    await settle()
-    const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(name).toBe('Simon')
-    expect(body.has_car).toBe(true)
-  })
-
   it('normalises cleared whole-pound fields to 0 instead of sending empty', async () => {
-    const { wrapper } = mountPanel()
-    await settle()
-    await expand(wrapper)
+    const { wrapper } = await mountOpenPanel()
     // Ashby's cash field is cleared → the payload must send '0', not ''
     // (the server rejects empty amounts with 400)
     const ashbyCash = wrapper
@@ -313,78 +342,12 @@ describe('WhatIfPanel — has_car and empty money (reviewer findings)', () => {
       .find(l => l.text().includes('Cash available for the deposit'))!
       .find('input')
     await ashbyCash.setValue('')
-    await runDebouncedEval()
-    const body = (api.postWhatIf as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Array<Record<string, unknown>>
+
+    await findButton(wrapper, 'Try scenario').trigger('click')
+    await flushPromises()
+
+    const body = vi.mocked(api.applyWhatIf).mock.calls[0][0] as Array<Record<string, unknown>>
     const ashbyBody = body.find((b: Record<string, unknown>) => b.name === 'Ashby')
     expect(ashbyBody?.cash_contribution).toEqual({ amount: '0', currency: 'GBP' })
-  })
-})
-
-// ── Extra vs your home (approved deltas design) ─────────────────────
-
-describe('WhatIfPanel — headline counts deltas vs home when baseline active', () => {
-  const homeBaseline = {
-    rid: 'home',
-    address: '31 Isambard Road, Southall, UB2 4GN',
-    couple: { value: '1783.61', approx: false },
-    others: { value: '652.92', approx: false },
-    others_rent_paid: 600,
-  }
-
-  function summary(rid: string, couple: string, delta: string | null) {
-    return {
-      rid,
-      best_address: { succeeded: true, value: '10 Cheap St', error: null, provenance: { label: 't' } },
-      best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 't' } },
-      rightmove_price: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: { label: 't' } },
-      rightmove_bedrooms: { succeeded: true, value: '2', error: null, provenance: { label: 't' } },
-      group_monthly_cost: {
-        succeeded: true,
-        value: {
-          couple: { value: couple, stddev: 0 },
-          others: { value: '400', stddev: 0 },
-          couple_label: 'S&L',
-          others_label: 'A',
-          ...(delta ? { delta_vs_home: { couple: { value: delta, approx: false }, others: null } } : {}),
-        },
-        error: null,
-        provenance: { label: 't' },
-      },
-      walkability: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
-      commutes: {},
-      schools: {
-        primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
-        secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
-      },
-      ...(rid === 'home' ? { is_current_home: true, monthly_baseline: homeBaseline } : {}),
-    }
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
-    vi.mocked(api.postWhatIf).mockResolvedValue({})
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('counts houses within £X/mo of home by delta ≤ threshold', async () => {
-    const { wrapper, store } = mountPanel()
-    await settle()
-    store.rids = ['prop-a', 'home']
-    store.summaries = {
-      // real delta +2216.39 → NOT within £1500 of home
-      'prop-a': summary('prop-a', '4000', '+2216.39'),
-      'home': summary('home', '1783.61', null),
-    }
-    await expand(wrapper)
-    // hypothetical delta −883.61 → within £1500 of home
-    store.applyWhatIf({
-      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A', delta_vs_home: { couple: { value: '-883.61', approx: false }, others: null } } },
-    })
-    await settle()
-    expect(wrapper.text()).toContain('1 more house within £1,500/mo of home')
   })
 })

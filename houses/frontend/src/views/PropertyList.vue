@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
-import type { PropertySummary } from '../types'
 import Header from '../components/Header.vue'
 import PropertyCard from '../components/PropertyCard.vue'
 import WhatIfPanel from '../components/WhatIfPanel.vue'
@@ -145,25 +144,15 @@ function monthlyCostNum(rid: string) {
   return m
 }
 
-/** The couple's EXTRA vs the home (what-if overlay respected) — the
- *  "max extra vs home" filter works on this, with unknown deltas
- *  excluded, never treated as 0. */
+/** The couple's EXTRA vs the home from the summary — the "max extra
+ *  vs home" filter works on this, with unknown deltas excluded, never
+ *  treated as 0. */
 function extraVsHomeNum(rid: string): number {
   const d = store.deltaFor(rid)?.couple
   if (!d) return Infinity
   return Number(d.value)
 }
-/** Card data with the hypothetical total overlaid while the what-if is
- *  active (labelled 'what-if' so the card can mark it as a preview). */
-function cardData(rid: string): PropertySummary {
-  const s = store.summaries[rid]
-  const wt = store.whatIfTotals?.[rid]
-  if (!s || !wt) return s
-  return {
-    ...s,
-    group_monthly_cost: { succeeded: true, value: wt, error: null, provenance: { label: 'what-if' } },
-  }
-}
+
 function bestCommuteMin(rid: string) {
   const commutes = store.summaries[rid]?.commutes
   if (!commutes) return Infinity
@@ -387,14 +376,11 @@ const ceilingLimitText = computed(() => {
       <span class="legend-item"><i class="legend-dot legend-dot--muted"></i>no route</span>
     </div>
 
-    <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
+    <WhatIfPanel />
 
     <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
 
-    <!-- The delta legend: once per list, above the cards. Numbers are
-         the home's own reference figures, whole pounds to match the
-         cards' deltas. -->
-    <p v-if="store.baseline" class="baseline-legend" role="note">
+    <p v-if="store.baseline" class="baseline-legend" role="note" style="margin-top: var(--sp-4);">
       Monthly figures are the change vs your home — {{ store.baseline.address }}
       ({{ store.groupLabels.coupleLabel }} £{{ Math.round(Number(store.baseline.couple.value)).toLocaleString() }}/mo ·
       {{ store.groupLabels.othersLabel }} {{ store.baseline.others ? '£' + Math.round(Number(store.baseline.others.value)).toLocaleString() + '/mo' : '£—/mo' }}).
@@ -413,7 +399,7 @@ const ceilingLimitText = computed(() => {
     </div>
     <div v-else class="card-list" role="list">
       <template v-for="rid in displayedRids" :key="rid">
-        <PropertyCard :rid :data="cardData(rid)" />
+        <PropertyCard :rid :data="store.summaries[rid]" />
       </template>
     </div>
 

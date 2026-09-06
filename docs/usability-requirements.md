@@ -261,6 +261,27 @@ consequence immediately (the number that changed because of their input).
 - Acceptance: saving shows confirmation; the affected figure updates
   without further navigation.
 
+### B7. A what-if is a real change through the DAG, trivially reversible
+(Added 2026-09-06, user decision — supersedes the earlier "pure evaluation,
+nothing persisted" what-if.) Applying what-if values writes them through
+the normal settings write, so the DAG recomputes EVERYTHING downstream —
+every card figure, commute pill, delta and detail page — by the same
+automatic propagation as any settings change. No parallel calculation path
+may exist: surfaces are correct because the DAG computed them, never
+because a client re-derived them.
+- The pre-what-if values are kept by the DAG itself (its append-only
+  history); nothing is duplicated elsewhere.
+- Restore is one click and puts the exact original values back through
+  the same write; the user can leave mid-what-if and return later —
+  the state survives restarts and is unmistakably labelled.
+- While a what-if is active, EVERY surface showing scenario figures says
+  so (banner and per-card marker) — a figure must never be readable as
+  real when it is a scenario.
+- Acceptance: applying a what-if updates the commute breakdown the pills
+  render (not just totals); restore returns the exact original numbers;
+  state survives a simulated restart; restore with nothing active fails
+  clearly (409).
+
 ---
 
 ## Journey C — "Why can't this one be calculated?": blocked properties

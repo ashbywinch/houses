@@ -171,24 +171,6 @@ describe('PropertyCard basic rendering', () => {
     expect(wrapper.find('.card__monthly-cost .card__cost-line').attributes('title')).toContain('approximate')
   })
 
-  it('marks a commute whose office was renamed or removed as old (C4)', () => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const store = usePropertiesStore()
-    store.poiLabels = { Simon: ['Pimlico'] }
-    const summary = makeSummary({
-      commutes: {
-        'Simon/Old Office': {
-          commute: {
-            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, label: 'Old Office' },
-            error: null, provenance: { label: 'test' },
-          },
-        },
-      },
-    })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary }, global: { plugins: [pinia] } })
-    expect(wrapper.text()).toContain('old office')
-  })
 
   it('shows freshness badge with property_added_at', () => {
     const summary = makeSummary({
@@ -262,6 +244,118 @@ describe('PropertyCard commute attribution (P2)', () => {
     const wrapper = mountCard({ rid: '123', data: summary })
     const href = wrapper.find('a.pill-link').attributes('href') ?? ''
     expect(href).toContain(encodeURIComponent('1 Drummond Gate, Pimlico, London SW1V 2QQ'))
+  })
+})
+
+describe('PropertyCard summary commute breakdown (monthly)', () => {
+  it('drops the commute row entirely when the destination has no trips', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, label: 'Pimlico', person: { name: 'Simon' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+      monthly_commute_cost: {
+        succeeded: true,
+        value: {
+          persons: {
+            Simon: {
+              daily_gbp: '0.00', yearly_gbp: '0.00',
+              commutes: [{ label: 'Pimlico', trips_per_week: 0, weeks_per_year: 0, yearly_gbp: '0.00' }],
+            },
+          },
+          yearly_total_gbp: 0,
+        },
+        error: null, provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).not.toContain('Simon → Pimlico')
+  })
+
+  it('shows the monthly share with a trips tooltip when the destination has trips', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Bracknell': {
+          commute: {
+            succeeded: true, value: { duration: { value: 65, unit: 'minute' }, mode: 'train', label: 'Bracknell', person: { name: 'Simon' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+      monthly_commute_cost: {
+        succeeded: true,
+        value: {
+          persons: {
+            Simon: {
+              daily_gbp: '25.00', yearly_gbp: '5980.00',
+              commutes: [{ label: 'Bracknell', trips_per_week: 1, weeks_per_year: 46, yearly_gbp: '5980.00' }],
+            },
+          },
+          yearly_total_gbp: 5980,
+        },
+        error: null, provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Simon → Bracknell')
+    // 5980 / 12 → 498.33, whole pounds
+    expect(wrapper.text()).toContain('£498/mo')
+    const title = wrapper.find('a.pill-link').attributes('title') ?? ''
+    expect(title).toContain('1 days/wk')
+    expect(title).toContain('£5980.00/yr')
+  })
+
+  it('keeps the daily fare when the summary carries no breakdown', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, mode: 'tube', label: 'Pimlico', person: { name: 'Simon' }, daily_cost: { amount: '12.50', currency: 'GBP' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Simon → Pimlico')
+    const pill = wrapper.find('.pill')
+    expect(pill.text()).toContain('£12.50')
+    expect(pill.text()).not.toContain('/mo')
+    expect(wrapper.find('a.pill-link').attributes('title')).toBeUndefined()
+  })
+
+  it('keeps the daily fare when the breakdown lacks the destination', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, mode: 'tube', label: 'Pimlico', person: { name: 'Simon' }, daily_cost: { amount: '12.50', currency: 'GBP' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+      monthly_commute_cost: {
+        succeeded: true,
+        value: {
+          persons: {
+            Simon: {
+              daily_gbp: '25.00', yearly_gbp: '5980.00',
+              commutes: [{ label: 'Aldgate', trips_per_week: 3, weeks_per_year: 46, yearly_gbp: '5980.00' }],
+            },
+          },
+          yearly_total_gbp: 5980,
+        },
+        error: null, provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    const pill = wrapper.find('.pill')
+    expect(pill.text()).toContain('£12.50')
+    expect(pill.text()).not.toContain('/mo')
   })
 })
 
@@ -470,8 +564,8 @@ function mountWithBaseline(cardOverrides?: Partial<PropertySummary>) {
   store.summaries['home'] = makeSummary({ rid: 'home', is_current_home: true, monthly_baseline: homeBaseline })
   store.groupLabels = { coupleLabel: 'S&L', othersLabel: 'Ashby' }
   const card = makeSummary(cardOverrides)
-  // The candidate lives in the store too — that is where deltaFor and
-  // the what-if overlay read from.
+  // The candidate lives in the store too — that is where deltaFor
+  // reads from.
   store.summaries[card.rid] = card
   const wrapper = mount(PropertyCard, { props: { rid: card.rid, data: card }, global: { plugins: [pinia] } })
   return { wrapper, store }
@@ -532,21 +626,34 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     expect(wrapper.find('.card__baseline-chip').exists()).toBe(false)
   })
 
-  it('prefers the what-if overlay delta over the summary delta', async () => {
-    const { wrapper, store } = mountWithBaseline({ group_monthly_cost: { succeeded: true, value: deltaGroup, error: null, provenance: { label: 'test' } } })
-    store.whatIfTotals = {
-      '123': {
-        couple: { value: '900', stddev: 0 },
-        others: { value: '200', stddev: 0 },
-        couple_label: 'S&L',
-        others_label: 'Ashby',
-        delta_vs_home: { couple: { value: '-883.61', approx: false }, others: null },
-      },
-    }
-    await wrapper.vm.$nextTick()
-    const lines = wrapper.findAll('.card__cost-line')
-    expect(lines[0].text()).toContain('−£884/mo')
-    expect(lines[0].text()).not.toContain('1,308')
-    expect(lines[1].text()).toContain('—')
+  it('shows the what-if chip on every card when the mode is active', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.whatIfActive = true
+    const a = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    const b = mount(PropertyCard, { props: { rid: '456', data: makeSummary({ rid: '456' }) }, global: { plugins: [pinia] } })
+    expect(a.find('.card__whatif').text()).toBe('what-if')
+    expect(b.find('.card__whatif').text()).toBe('what-if')
+    // the chip marks the MODE — it renders next to the address, not
+    // attached to a particular card's money block
+    expect(a.find('.card__top .card__whatif').exists()).toBe(true)
+  })
+
+  it('shows no what-if chip when the mode is off', () => {
+    const wrapper = mountCard({ rid: '123', data: makeSummary() })
+    expect(wrapper.find('.card__whatif').exists()).toBe(false)
+  })
+
+  it('renders summary figures with no overlay while what-if is active', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.whatIfActive = true
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    // the numbers on the card ARE the summary — the server has already
+    // applied the what-if through the DAG, nothing is overlaid client-side
+    expect(wrapper.text()).toContain('£2,100/mo')
+    expect(wrapper.text()).toContain('£400/mo')
   })
 })

@@ -515,6 +515,12 @@ class Services:
     commute_thresholds_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds)
     )
+    # The what-if boundary marker: the ISO timestamp of the persons
+    # attempt that was live when the what-if was applied (empty = no
+    # what-if active). Persisted by the same settings-source mechanism.
+    whatif_started_at: UserInputNode[str] = dataclasses.field(
+        default_factory=lambda: _make_settings_source("whatif_started_at", str, lambda: "")
+    )
     # Per-request mutable state (lazily initialized by accessors)
     geo_state: Any | None = None
     geo_cache: dict | None = None
@@ -541,6 +547,12 @@ class Services:
                 "commute_thresholds",
                 dict,
                 make_default_thresholds,
+                self.latest_node_result_fn,
+            )
+            self.whatif_started_at = _make_settings_source(
+                "whatif_started_at",
+                str,
+                lambda: "",
                 self.latest_node_result_fn,
             )
         # Create individual setting nodes

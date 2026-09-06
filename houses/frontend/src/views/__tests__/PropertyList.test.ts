@@ -9,6 +9,7 @@ vi.mock('../../services/api', () => ({
   fetchAllSummaries: vi.fn(),
   fetchPropertyDetail: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue({}),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
   patchTriage: vi.fn(),
 }))
 
@@ -626,7 +627,7 @@ describe('PropertyList — extra vs your home (baseline)', () => {
 
   it('hides the legend and keeps today\'s labels without a baseline', async () => {
     const wrapper = await mountWithBaseline(mockData)
-    expect(wrapper.find('.baseline-legend').exists()).toBe(false)
+    expect(wrapper.find('.baseline-legend').exists()).toBe(false)  // no baseline = no legend
     await wrapper.findAll('.controls-row .pill')[0].trigger('click')
     const options = wrapper.findAll('.sheet__select option').map(o => o.text())
     expect(options).toContain('Monthly Cost')
@@ -671,5 +672,34 @@ describe('PropertyList — extra vs your home (baseline)', () => {
     // over; prop-d has no computable delta even though its 1200 total
     // would pass — unknowns are excluded, never treated as 0.
     expect(addrs).toEqual(['10 Cheap St', '20 Mid Rd'])
+  })
+})
+
+describe('PropertyList — what-if mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData)
+  })
+  it('keeps the state line inside the pinned panel — no separate banner', async () => {
+    const wrapper = await mountWithBaseline(mockData)
+    usePropertiesStore().setWhatIfActive(true)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.whatif-banner').exists()).toBe(false)
+    expect(wrapper.find('.whatif__cards-note').exists()).toBe(true)
+  })
+
+  it('shows no banner when what-if is off', async () => {
+    const wrapper = await mountWithBaseline(mockData)
+    expect(wrapper.find('.whatif-banner').exists()).toBe(false)
+  })
+
+  it('renders card figures straight from the summaries in what-if mode', async () => {
+    const wrapper = await mountWithBaseline(mockData)
+    usePropertiesStore().setWhatIfActive(true)
+    await wrapper.vm.$nextTick()
+    // the server has already applied the what-if through the DAG, so the
+    // cards show the (new) summary figures — no client-side overlay exists
+    expect(wrapper.text()).toContain('10 Cheap St')
+    expect(wrapper.text()).toContain('£1,500/mo')
   })
 })

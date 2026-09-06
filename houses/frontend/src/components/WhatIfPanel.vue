@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import * as api from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 import { blockPenceKey, integerPounds, normalizePence } from '../formatters/money'
@@ -29,19 +29,33 @@ interface PersonEdit {
   places_of_interest: PoiEdit[]
 }
 
-const props = defineProps<{ threshold?: number }>()
-
 const store = usePropertiesStore()
 const persons = ref<PersonEdit[]>([])
 const busy = ref(false)
 const errorMsg = ref('')
 const collapsed = ref(true)
 const activeTab = ref<'finances' | 'commutes'>('finances')
-let timer: ReturnType<typeof setTimeout> | null = null
 
-const active = computed(() => store.whatIfTotals != null)
+// The panel edits local copies and only touches the server from the
+// two footer buttons — nothing is evaluated while typing.
+const active = computed(() => store.whatIfActive)
 
-const threshold = computed(() => props.threshold ?? 1500)
+// While a what-if is active the panel is pinned open — the exits live
+// in its footer, so it stays up until the mode is resolved (toggle,
+// reload, it doesn't matter: Back or Keep are the only ways out).
+watch(active, v => {
+  if (v) collapsed.value = false
+}, { immediate: true })
+
+async function toggleCollapsed() {
+  // Furling an applied what-if cancels it — the real numbers come back
+  // through the same restore path as the button. Opening is always free.
+  if (!collapsed.value && active.value) {
+    const ok = await restore()
+    if (!ok) return // restore failed — stay open, the error is shown
+  }
+  collapsed.value = !collapsed.value
+}
 
 function money(amount: string): { amount: string; currency: string } {
   return { amount, currency: 'GBP' }
@@ -79,14 +93,14 @@ async function load() {
   } catch {
     errorMsg.value = "Couldn't load the family settings."
   }
+  try {
+    store.setWhatIfActive(await api.fetchWhatIfState())
+  } catch {
+    // best-effort — keep the last known mode
+  }
 }
 
-// ── Evaluation (debounced) ─────────────────────────────────────
-
-function scheduleEval() {
-  if (timer) clearTimeout(timer)
-  timer = setTimeout(run, 400)
-}
+// ── Apply / back / keep (the only writes) ─────────────────────
 
 function payload() {
   return persons.value.map(p => {
@@ -108,123 +122,81 @@ function payload() {
   })
 }
 
-async function run() {
+/** Writes the scenario persons through the NORMAL settings write: the
+ *  DAG recomputes every number server-side and the existing websocket
+ *  broadcast refreshes every surface. */
+async function apply() {
   busy.value = true
   errorMsg.value = ''
   try {
-    const results = await api.postWhatIf(payload())
-    store.applyWhatIf(results)
+    await api.applyWhatIf(payload())
+    store.setWhatIfActive(true)
   } catch {
-    errorMsg.value = "Couldn't run the what-if."
+    errorMsg.value = "Couldn't apply the what-if."
   } finally {
     busy.value = false
   }
 }
 
-// ── Delta headline ─────────────────────────────────────────────
-
-const realOf = (rid: string): number | null => {
-  const g = store.summaries[rid]?.group_monthly_cost
-  if (!g?.succeeded || !g.value?.couple) return null
-  return Number(g.value.couple.value)
-}
-
-/** The REAL summary's own delta vs the home (never the what-if
- *  overlay — that side is counted separately below). */
-const summaryDeltaOf = (rid: string): number | null => {
-  const g = store.summaries[rid]?.group_monthly_cost
-  const d = g?.succeeded ? g.value?.delta_vs_home?.couple ?? null : null
-  return d ? Number(d.value) : null
-}
-const whatIfDeltaOf = (rid: string): number | null => {
-  const d = store.whatIfTotals?.[rid]?.delta_vs_home?.couple
-  return d ? Number(d.value) : null
-}
-
-function diffSentence(diff: number, label: string): string {
-  if (diff > 0) return `${diff} more house${diff === 1 ? '' : 's'} ${label}`
-  if (diff < 0) return `${-diff} fewer house${diff === -1 ? '' : 's'} ${label}`
-  return `No change in houses ${label}`
-}
-
-const deltaHeadline = computed(() => {
-  const totals = store.whatIfTotals
-  if (!totals) return ''
-  let realUnder = 0
-  let hypoUnder = 0
-  if (store.baseline) {
-    // Deltas active: count houses WITHIN £X/mo of home — real vs
-    // hypothetical delta, both vs the same real baseline.
-    for (const rid of store.rids) {
-      const real = summaryDeltaOf(rid)
-      if (real != null && real <= threshold.value) realUnder++
-      const hypo = whatIfDeltaOf(rid)
-      if (hypo != null && hypo <= threshold.value) hypoUnder++
-    }
-    return diffSentence(hypoUnder - realUnder, `within £${threshold.value.toLocaleString()}/mo of home`)
+/** Puts the original numbers back — the DAG recomputes server-side
+ *  and the websocket broadcast refreshes every surface. */
+async function restore(): Promise<boolean> {
+  busy.value = true
+  errorMsg.value = ''
+  let ok = true
+  try {
+    await api.restoreWhatIf()
+    store.setWhatIfActive(false)
+  } catch {
+    ok = false
+    errorMsg.value = "Couldn't restore the real numbers."
+  } finally {
+    busy.value = false
   }
-  for (const rid of store.rids) {
-    const real = realOf(rid)
-    if (real != null && real <= threshold.value) realUnder++
-    const grp = totals[rid];
-    const hypo = grp?.couple ? Number(grp.couple.value) : null
-    if (hypo != null && hypo <= threshold.value) hypoUnder++
-  }
-  return diffSentence(hypoUnder - realUnder, `under £${threshold.value.toLocaleString()}/mo`)
-})
+  return ok
+}
 
-// ── Commit / exit ──────────────────────────────────────────────
-
-async function useTheseNumbers() {
+/** Keeps the scenario as the new real numbers — the server discards
+ *  the restore snapshot. */
+async function accept() {
   busy.value = true
   errorMsg.value = ''
   try {
-    for (const p of persons.value) {
-      const body: Record<string, unknown> = {
-        name: p.name,
-        selling_home: p.selling_home,
-        has_car: p.has_car,
-        petrol_mpg: p.petrol_mpg,
-        bus_walk_penalty: { ...p.bus_walk_penalty },
-      }
-      if (p.selling_home) {
-        body.home_sale_price = money(p.home_sale_price || '0')
-        body.outstanding_mortgage = money(p.outstanding_mortgage || '0')
-      }
-      body.cash_contribution = money(p.cash_contribution || '0')
-      body.life_insurance_monthly = money(p.life_insurance_monthly || '0')
-      body.places_of_interest = p.places_of_interest.map(poi => ({ ...poi }))
-      await api.patchPerson(p.name, body)
-    }
-    store.clearWhatIf()
-    await store.loadAll()
+    await api.acceptWhatIf()
+    store.setWhatIfActive(false)
   } catch {
-    errorMsg.value = "Couldn't save the what-if values."
+    errorMsg.value = "Couldn't accept the what-if numbers."
   } finally {
     busy.value = false
   }
 }
 
-function backToReal() {
-  store.clearWhatIf()
-}
 </script>
 
 <template>
-  <section class="whatif" :class="{ 'whatif--collapsed': collapsed }" aria-label="What if">
+  <section
+    class="whatif"
+    :class="{ 'whatif--collapsed': collapsed, 'whatif--pinned': active }"
+    aria-label="What if"
+  >
     <header class="whatif__header">
-      <button class="whatif__toggle" type="button" @click="collapsed = !collapsed">
+      <button
+        class="whatif__toggle"
+        type="button"
+        :aria-expanded="!collapsed"
+        @click="toggleCollapsed"
+      >
         <h2 class="whatif__title">What if…</h2>
+        <span class="whatif__state" v-if="active">Active</span>
         <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       </button>
-      <span v-if="active" class="whatif__badge">not saved</span>
     </header>
 
+
     <template v-if="!collapsed">
-      <p v-if="active" class="whatif__delta">{{ deltaHeadline }}</p>
       <p class="whatif__intro">
-        Try different numbers without changing the family settings. Nothing is saved until you
-        choose "Use these numbers". Money is in whole pounds.
+        What-if changes your saved numbers everywhere — on every card and page — until you go back.
+        Your original numbers are kept and come back with one click. Money is in whole pounds.
       </p>
 
       <!-- Same two tabs as the settings page: Finances | Commutes -->
@@ -245,30 +217,31 @@ function backToReal() {
         >Commutes</button>
       </nav>
 
+      <fieldset class="whatif__fieldset" :disabled="active">
       <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
         <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
           <div class="card-heading">{{ p.name }}</div>
           <label class="toggle-row">
             <span class="toggle-row__label">Selling a home to fund this purchase</span>
-            <ToggleSwitch v-model="p.selling_home" @change="scheduleEval" />
+            <ToggleSwitch v-model="p.selling_home" />
           </label>
 
           <div v-if="p.selling_home" class="whatif-person__fields">
             <label class="whatif-person__field">
               Expected sale price (£)
-              <WholePoundsField v-model="p.home_sale_price" @input="scheduleEval" />
+              <WholePoundsField v-model="p.home_sale_price" />
               <span class="band-helper">What you expect to get when you sell it. Whole pounds only.</span>
             </label>
             <label class="whatif-person__field">
               Mortgage remaining (£)
-              <WholePoundsField v-model="p.outstanding_mortgage" @input="scheduleEval" />
+              <WholePoundsField v-model="p.outstanding_mortgage" />
               <span class="band-helper">What you still owe on the home you're selling. Whole pounds only.</span>
             </label>
           </div>
 
           <label class="whatif-person__field">
             {{ p.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
-            <WholePoundsField v-model="p.cash_contribution" @input="scheduleEval" />
+            <WholePoundsField v-model="p.cash_contribution" />
             <span class="band-helper">{{ p.selling_home ? 'Savings or gifts, on top of the sale proceeds.' : 'Savings, gifts, or the proceeds of a sale.' }}</span>
           </label>
           <label class="whatif-person__field">
@@ -278,7 +251,7 @@ function backToReal() {
               inputmode="decimal"
               :value="p.life_insurance_monthly"
               @keydown="blockPenceKey"
-              @input="(e) => { p.life_insurance_monthly = (e.target as HTMLInputElement).value; scheduleEval() }"
+              @input="(e) => { p.life_insurance_monthly = (e.target as HTMLInputElement).value }"
               @blur="(e) => { p.life_insurance_monthly = normalizePence((e.target as HTMLInputElement).value) }"
             />
             <span class="band-helper">Pence allowed.</span>
@@ -290,14 +263,13 @@ function backToReal() {
         <div v-for="p in persons" :key="p.name" class="settings-card dest-card whatif-person">
           <label class="toggle-row">
             <span class="toggle-row__label">Has a car</span>
-            <ToggleSwitch v-model="p.has_car" @change="scheduleEval" />
+            <ToggleSwitch v-model="p.has_car" />
           </label>
           <label v-if="p.has_car" class="whatif-person__field">
             Your car's petrol economy (MPG)
             <input
               v-model.number="p.petrol_mpg"
               type="number" min="1" inputmode="numeric"
-              @input="scheduleEval"
             />
           </label>
           <label class="whatif-person__field">
@@ -305,7 +277,6 @@ function backToReal() {
             <input
               v-model.number="p.bus_walk_penalty.value"
               type="number" min="0" inputmode="numeric"
-              @input="scheduleEval"
             />
           </label>
           <div v-if="p.places_of_interest.length" class="whatif-person__pois">
@@ -314,23 +285,29 @@ function backToReal() {
               <input
                 v-model.number="poi.trips_per_week"
                 type="number" min="0" max="7" inputmode="numeric"
-                @input="scheduleEval"
               />
             </label>
           </div>
         </div>
       </div>
+      </fieldset>
 
-    <p v-if="busy" class="whatif__status">Updating…</p>
+    <p v-if="busy" class="whatif__status">Saving…</p>
     <p v-if="errorMsg" class="whatif__error">{{ errorMsg }}</p>
 
     <footer class="whatif__footer">
-      <button class="whatif__btn whatif__btn--ghost" :disabled="!active" @click="backToReal">
-        Back to real numbers
-      </button>
-      <button class="whatif__btn whatif__btn--primary" :disabled="!active || busy" @click="useTheseNumbers">
-        Use these numbers
-      </button>
+      <p v-if="active" class="whatif__cards-note">The house cards below show these numbers.</p>
+      <div class="whatif__footer-buttons">
+        <button v-if="!active" class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
+          Try scenario
+        </button>
+        <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="restore">
+          Back to real numbers
+        </button>
+        <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="accept">
+          Keep these numbers
+        </button>
+      </div>
     </footer>
     </template>
   </section>
@@ -338,7 +315,10 @@ function backToReal() {
 
 <style scoped>
 .whatif {
-  padding: 12px 0 0;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  padding: var(--sp-3);
 }
 .whatif__header {
   display: flex;
@@ -351,52 +331,59 @@ function backToReal() {
   justify-content: space-between;
   width: 100%;
   min-height: 44px;
-  padding: 12px 14px;
-  border: 1.5px dashed var(--text-muted);
-  border-radius: var(--radius);
-  background: var(--card-bg);
+  padding: 0;
+  border: none;
+  background: none;
   cursor: pointer;
-  transition: background 0.15s;
   color: inherit;
   font: inherit;
+  text-align: left;
 }
 .whatif__toggle:hover {
-  background: var(--pill-bg);
+  background: none;
+}
+
+.whatif--pinned .whatif__toggle {
+  cursor: default;
+}
+
+.whatif--pinned .whatif__toggle:hover {
+  background: none;
 }
 .whatif__chevron {
-  font-size: 0.8rem;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.whatif__fieldset {
+  border: none;
+  padding: 0;
+  margin: var(--sp-3) 0 0;
+  min-width: 0;
+}
+.whatif__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) 0;
+}
+.whatif__footer-buttons {
+  display: flex;
+  gap: var(--sp-2);
+}
+.whatif__cards-note {
+  margin: 0;
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 .whatif__title {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   font-weight: var(--fw-semibold);
-  color: var(--text-secondary);
-}
-.whatif__badge {
-  font-size: 0.6875rem;
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #fff;
-  background: var(--blue);
-  border-radius: var(--radius-full);
-  padding: 0.15rem 0.6rem;
-  white-space: nowrap;
-}
-.whatif__delta {
-  padding: 10px 12px;
-  background: var(--green-bg);
-  border-radius: var(--radius-sm);
-  font-size: 0.875rem;
-  font-weight: var(--fw-semibold);
-  color: var(--green-text);
-  margin: 10px 0 0;
-  text-align: center;
 }
 .whatif__intro {
-  margin: 0.6rem 0 0.4rem;
-  font-size: 0.8125rem;
+  margin: var(--sp-3) 0 var(--sp-2);
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 .whatif-person__head {
@@ -487,4 +474,12 @@ function backToReal() {
   background: var(--blue);
   color: #fff;
 }
+
+.whatif__cards-note {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  text-align: left;
+}
+
 </style>

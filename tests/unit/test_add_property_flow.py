@@ -309,3 +309,100 @@ class TestPostcodeOnlyPayload:
         assert a.succeeded and a.value_or_none() == "SL7 2AP", (
             "a postcode sent without an address must still reach the DAG"
         )
+
+
+class TestAddMaterialisesInputDefaults:
+    @staticmethod
+    def test_add_materialises_empty_valid_inputs():
+        """A newly added property must come alive with its empty-valid
+        inputs materialised (works estimates {}, rental income £0, status
+        "") — a pending input starves the whole money cascade until the
+        next restart, which is how add-button houses lost their Cost of
+        Works rows entirely on live (2026-09-06)."""
+        _add_url_only()
+        from houses.services_provider import get_services
+
+        prop = get_services().property_registry.get(RID)
+        for name in ("works_estimates", "rental_income", "comment_status"):
+            att = getattr(prop, name).latest_attempt()
+            assert att is not None and att.succeeded, (
+                f"{name} must be materialised at construction, not left pending"
+            )
+
+
+class TestAddFlowWorksEditing:
+    """THE user journey: add a house with the button, open it, and edit
+    the Cost of Works — the pencil must be there and the value must
+    persist. (2026-09-06 live bug: newly added houses had no works rows
+    at all, so there was nothing to edit.)"""
+
+    @staticmethod
+    async def test_new_add_button_house_is_editable_by_ashby():
+        from money import Money
+
+        from houses.model.domain import Person
+        from houses.nodes.property_nodes import PropertyNodes
+        from houses.property_registry import register_property
+        from houses.services_provider import get_services
+
+        def _push_persons(*persons):
+            get_services().persons_source.push(list(persons), "user")
+
+        _push_persons(
+            Person(name="Simon", has_car=True, email="simon@example.com", is_superuser=True,
+                   home_sale_price=Money(amount="550000", currency="GBP"),
+                   outstanding_mortgage=Money(amount="373000", currency="GBP")),
+            Person(name="Lorena", has_car=False, email="lorena@example.com"),
+            Person(name="Ashby", has_car=True, email="emily.winch@gmail.com",
+                   cash_contribution=Money(amount="300000", currency="GBP")),
+        )
+        rid = "42345679"
+        prop = PropertyNodes(rid)
+        from houses.geopoint import GeoPoint
+
+        prop.rightmove_price.push(Money(amount="500000", currency="GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.comment_status.push("", "test")
+        register_property(rid, prop)
+        from dag.scheduler import flush_processor
+
+        await flush_processor()
+
+        from fastapi.testclient import TestClient
+
+        from houses.server import app
+
+        client = TestClient(app)
+        client.cookies.set("session", _make_session_cookie(
+            email="emily.winch@gmail.com", name="Ashby", picture="", is_superuser=False))
+
+        # The construction invariant: works estimates materialised, not pending
+        detail = client.get(f"/api/properties/{rid}/detail").json()
+        works = detail["affordability"]["works_estimates"]
+        assert works["succeeded"], f"works estimates must be materialised, got: {works.get('error')}"
+
+        detail = client.get(f"/api/properties/{rid}/detail").json()
+        works = detail["affordability"]["works_estimates"]
+        assert works["succeeded"], f"works estimates must be materialised, got: {works.get('error')}"
+
+        # The construction invariant: works estimates materialised, not pending
+        detail = client.get(f"/api/properties/{rid}/detail").json()
+        works = detail["affordability"]["works_estimates"]
+        assert works["succeeded"], f"works estimates must be materialised, got: {works.get('error')}"
+
+        # Ashby saves her Cost of Works estimate
+        resp = client.patch(
+            f"/api/properties/{rid}/works-estimate",
+            json={"person": "Ashby", "value": 25000},
+        )
+        assert resp.status_code == 200, resp.text
+
+        # It persists and shows in the detail
+        detail_after = client.get(f"/api/properties/{rid}/detail").json()
+        stored = detail_after["affordability"]["works_estimates"]["value"]
+        assert stored.get("Ashby", {}).get("amount") == "25000.00"
