@@ -318,7 +318,7 @@ async function accept() {
   border: 1.5px solid var(--border);
   border-radius: var(--radius);
   background: var(--card-bg);
-  padding: var(--sp-3) var(--sp-3) 0;
+  padding: var(--sp-3);
 }
 .whatif__header {
   display: flex;
