@@ -271,17 +271,6 @@ const adultCommutes = computed(() => {
 function isChildCommute(c: unknown): boolean {
   return (c as Record<string, unknown> | undefined)?.is_child === true
 }
-
-/** C4: a commute whose destination label is no longer among the
- *  person's current POIs (renamed/removed in Settings) is stale. */
-function isStaleOffice(key: string): boolean {
-  const person = key.split('/')[0]
-  const label = key.split('/').slice(1).join('/')
-  const current = store.poiLabels[person]
-  if (!current) return false
-  return !current.includes(label)
-}
-
 /** C?: the commute colour bands are the person's own thresholds
  *  (Settings → 'commute bands'), not a global constant: good = the
  *  green→amber boundary, fine = amber→red. Falls back to the walk /
@@ -390,7 +379,6 @@ async function toggleViewed() {
       <div v-if="data.commutes" class="card__commutes">
         <div v-for="(c, key) in adultCommutes" :key="key" class="card__commute-row">
           <span class="card__commute-person">{{ commutePerson(c.commute, key) }} → {{ commuteLabel(c.commute, key) }}</span>
-          <span v-if="isStaleOffice(key)" class="card__commute-stale" title="This office was renamed or removed in Settings — the commute shown is from an old version">old office</span>
           <div class="card__commute-data">
             <a
               v-if="location"
@@ -588,17 +576,6 @@ async function toggleViewed() {
   flex-direction: column;
   gap: 6px;
   margin-bottom: 10px;
-}
-.card__commute-stale {
-  font-size: 0.65rem;
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--orange);
-  border: 1px solid var(--orange);
-  border-radius: var(--radius-full);
-  padding: 0.05rem 0.4rem;
-  white-space: nowrap;
 }
 .card__change-dest {
   display: inline-block;

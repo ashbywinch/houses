@@ -171,24 +171,6 @@ describe('PropertyCard basic rendering', () => {
     expect(wrapper.find('.card__monthly-cost .card__cost-line').attributes('title')).toContain('approximate')
   })
 
-  it('marks a commute whose office was renamed or removed as old (C4)', () => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const store = usePropertiesStore()
-    store.poiLabels = { Simon: ['Pimlico'] }
-    const summary = makeSummary({
-      commutes: {
-        'Simon/Old Office': {
-          commute: {
-            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, label: 'Old Office' },
-            error: null, provenance: { label: 'test' },
-          },
-        },
-      },
-    })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary }, global: { plugins: [pinia] } })
-    expect(wrapper.text()).toContain('old office')
-  })
 
   it('shows freshness badge with property_added_at', () => {
     const summary = makeSummary({
