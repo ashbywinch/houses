@@ -141,29 +141,27 @@ describe('WhatIfPanel', () => {
     expect(toggle.element.getAttribute('style')).toBeNull()
   })
 
-  it('pins itself open while a what-if is active — no collapse after a reload', async () => {
+  it('a live what-if is a normal open disclosure — furl and unfurl at will', async () => {
     vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
     const { wrapper, store } = mountPanel()
     await flushPromises()
     expect(store.whatIfActive).toBe(true)
 
-    // one solid card: header chip names the state in plain English and
-    // there is no collapse affordance while the scenario is live
-    expect(wrapper.find('.whatif--pinned').exists()).toBe(true)
-    expect(wrapper.find('.whatif__state').text()).toBe('What-if numbers showing')
-    expect(wrapper.find('.whatif__chevron').exists()).toBe(false)
+    // open without any click — the state fetch already said active
     const toggle = wrapper.find('.whatif__toggle')
-    expect((toggle.element as HTMLButtonElement).disabled).toBe(true)
-    expect(toggle.attributes('title')).toBe('Resolve the what-if first')
+    expect((toggle.element as HTMLButtonElement).disabled).toBe(false)
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('.whatif__state').text()).toBe('Active')
+    expect(wrapper.find('.whatif__chevron').text()).toBe('▾')
 
-    // the exits and the cards note live inside the same card
-    expect(wrapper.text()).toContain('The house cards below show these numbers.')
-    findButton(wrapper, 'Back to real numbers')
-    findButton(wrapper, 'Keep these numbers')
-
-    // clicking the disabled toggle must not collapse the body
+    // furling must not end the what-if: the applied numbers stay applied
     await toggle.trigger('click')
-    expect(wrapper.find('.whatif:not(.whatif--collapsed)').exists()).toBe(true)
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(true)
+    expect(store.whatIfActive).toBe(true)
+
+    // and unfurl again
+    await toggle.trigger('click')
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(false)
   })
 
   it('locks the scenario fields and shows exactly two exits while active', async () => {

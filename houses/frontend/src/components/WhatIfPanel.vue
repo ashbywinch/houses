@@ -48,7 +48,9 @@ watch(active, v => {
 }, { immediate: true })
 
 function toggleCollapsed() {
-  if (!active.value) collapsed.value = !collapsed.value
+  // A live what-if is a normal open disclosure: furling never ends it —
+  // the applied numbers stay applied until Back / Keep resolves them.
+  collapsed.value = !collapsed.value
 }
 
 function money(amount: string): { amount: string; currency: string } {
@@ -174,17 +176,15 @@ async function accept() {
       <button
         class="whatif__toggle"
         type="button"
-        :disabled="active"
-        title="Resolve the what-if first"
         :aria-expanded="!collapsed"
         @click="toggleCollapsed"
       >
-        <h2 class="whatif__title">
-          What if…<span v-if="active" class="whatif__state">What-if numbers showing</span>
-        </h2>
-        <span v-if="!active" class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
+        <h2 class="whatif__title">What if…</h2>
+        <span class="whatif__state" v-if="active">Active</span>
+        <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       </button>
     </header>
+
 
     <template v-if="!collapsed">
       <p class="whatif__intro">
