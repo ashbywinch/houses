@@ -47,9 +47,13 @@ watch(active, v => {
   if (v) collapsed.value = false
 }, { immediate: true })
 
-function toggleCollapsed() {
-  // A live what-if is a normal open disclosure: furling never ends it —
-  // the applied numbers stay applied until Back / Keep resolves them.
+async function toggleCollapsed() {
+  // Furling an applied what-if cancels it — the real numbers come back
+  // through the same restore path as the button. Opening is always free.
+  if (!collapsed.value && active.value) {
+    const ok = await restore()
+    if (!ok) return // restore failed — stay open, the error is shown
+  }
   collapsed.value = !collapsed.value
 }
 
@@ -136,17 +140,20 @@ async function apply() {
 
 /** Puts the original numbers back — the DAG recomputes server-side
  *  and the websocket broadcast refreshes every surface. */
-async function restore() {
+async function restore(): Promise<boolean> {
   busy.value = true
   errorMsg.value = ''
+  let ok = true
   try {
     await api.restoreWhatIf()
     store.setWhatIfActive(false)
   } catch {
+    ok = false
     errorMsg.value = "Couldn't restore the real numbers."
   } finally {
     busy.value = false
   }
+  return ok
 }
 
 /** Keeps the scenario as the new real numbers — the server discards
@@ -290,15 +297,17 @@ async function accept() {
 
     <footer class="whatif__footer">
       <p v-if="active" class="whatif__cards-note">The house cards below show these numbers.</p>
-      <button v-if="!active" class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
-        Try scenario
-      </button>
-      <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="restore">
-        Back to real numbers
-      </button>
-      <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="accept">
-        Keep these numbers
-      </button>
+      <div class="whatif__footer-buttons">
+        <button v-if="!active" class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
+          Try scenario
+        </button>
+        <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="restore">
+          Back to real numbers
+        </button>
+        <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="accept">
+          Keep these numbers
+        </button>
+      </div>
     </footer>
     </template>
   </section>
@@ -306,10 +315,10 @@ async function accept() {
 
 <style scoped>
 .whatif {
-  border: 1.5px solid var(--slate-300, var(--text-muted));
+  border: 1.5px solid var(--border);
   border-radius: var(--radius);
   background: var(--card-bg);
-  padding: 12px 14px;
+  padding: var(--sp-3) var(--sp-3) 0;
 }
 .whatif__header {
   display: flex;
@@ -342,24 +351,39 @@ async function accept() {
   background: none;
 }
 .whatif__chevron {
-  font-size: 0.8rem;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
-
 .whatif__fieldset {
   border: none;
   padding: 0;
-  margin: 0;
+  margin: var(--sp-3) 0 0;
   min-width: 0;
+}
+.whatif__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) 0;
+}
+.whatif__footer-buttons {
+  display: flex;
+  gap: var(--sp-2);
+}
+.whatif__cards-note {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--text-muted);
 }
 .whatif__title {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   font-weight: var(--fw-semibold);
 }
 .whatif__intro {
-  margin: 0.6rem 0 0.4rem;
-  font-size: 0.8125rem;
+  margin: var(--sp-3) 0 var(--sp-2);
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 .whatif-person__head {

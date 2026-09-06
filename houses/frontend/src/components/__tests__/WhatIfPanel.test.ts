@@ -141,27 +141,27 @@ describe('WhatIfPanel', () => {
     expect(toggle.element.getAttribute('style')).toBeNull()
   })
 
-  it('a live what-if is a normal open disclosure — furl and unfurl at will', async () => {
+  it('furling an active what-if cancels it — the real numbers come back', async () => {
     vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
     const { wrapper, store } = mountPanel()
     await flushPromises()
     expect(store.whatIfActive).toBe(true)
-
-    // open without any click — the state fetch already said active
-    const toggle = wrapper.find('.whatif__toggle')
-    expect((toggle.element as HTMLButtonElement).disabled).toBe(false)
-    expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(wrapper.find('.whatif__state').text()).toBe('Active')
-    expect(wrapper.find('.whatif__chevron').text()).toBe('▾')
-
-    // furling must not end the what-if: the applied numbers stay applied
-    await toggle.trigger('click')
-    expect(wrapper.find('.whatif--collapsed').exists()).toBe(true)
-    expect(store.whatIfActive).toBe(true)
-
-    // and unfurl again
-    await toggle.trigger('click')
     expect(wrapper.find('.whatif--collapsed').exists()).toBe(false)
+
+    // the user furls the panel — that cancels the what-if
+    const toggle = wrapper.find('.whatif__toggle')
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(api.restoreWhatIf).toHaveBeenCalledTimes(1)
+    expect(store.whatIfActive).toBe(false)
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(true)
+
+    // unfurling again shows the inactive panel: Try scenario, editable fields
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Try scenario')
   })
 
   it('locks the scenario fields and shows exactly two exits while active', async () => {
