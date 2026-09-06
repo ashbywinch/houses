@@ -376,14 +376,6 @@ const ceilingLimitText = computed(() => {
       <span class="legend-item"><i class="legend-dot legend-dot--muted"></i>no route</span>
     </div>
 
-    <!-- What-if mode FIRST, above the pinned panel: the banner names the
-         state, the pinned panel below owns the exits (Back to real
-         numbers / Keep these numbers), and the cards under it all show
-         scenario figures. -->
-    <div v-if="store.whatIfActive" class="whatif-banner" role="status">
-      <span>The house cards below show what-if numbers — not your real figures. Resolve the what-if in the panel above.</span>
-    </div>
-
     <WhatIfPanel />
 
     <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
@@ -592,14 +584,6 @@ const ceilingLimitText = computed(() => {
 .commute-status-dismiss {
   margin-left: auto; background: none; border: none; color: var(--amber-text);
   opacity: 0.6; cursor: pointer; padding: 2px; font-size: 1.1rem; line-height: 1; min-width: 32px; min-height: 32px;
-}
-
-/* What-if mode banner — same visual family as .commute-status */
-.whatif-banner {
-  display: flex; align-items: center; gap: 8px;
-  margin: 10px 0 0; padding: 8px 12px;
-  background: var(--pill-bg); border-radius: var(--radius-sm);
-  font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.35;
 }
 
 .legend-strip {

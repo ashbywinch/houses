@@ -165,16 +165,23 @@ async function accept() {
 </script>
 
 <template>
-  <section class="whatif" :class="{ 'whatif--collapsed': collapsed, 'whatif--pinned': active }" aria-label="What if">
+  <section
+    class="whatif"
+    :class="{ 'whatif--collapsed': collapsed, 'whatif--pinned': active }"
+    aria-label="What if"
+  >
     <header class="whatif__header">
       <button
         class="whatif__toggle"
         type="button"
         :disabled="active"
         title="Resolve the what-if first"
+        :aria-expanded="!collapsed"
         @click="toggleCollapsed"
       >
-        <h2 class="whatif__title">What if…</h2>
+        <h2 class="whatif__title">
+          What if…<span v-if="active" class="whatif__state">showing</span>
+        </h2>
         <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       </button>
     </header>
@@ -282,6 +289,7 @@ async function accept() {
     <p v-if="errorMsg" class="whatif__error">{{ errorMsg }}</p>
 
     <footer class="whatif__footer">
+      <p v-if="active" class="whatif__cards-note">The house cards below show these numbers.</p>
       <button v-if="!active" class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
         Try scenario
       </button>
@@ -440,6 +448,13 @@ async function accept() {
 .whatif__btn--primary {
   background: var(--blue);
   color: #fff;
+}
+
+.whatif__cards-note {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  text-align: left;
 }
 
 </style>

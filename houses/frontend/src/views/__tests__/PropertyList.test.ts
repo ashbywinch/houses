@@ -680,12 +680,12 @@ describe('PropertyList — what-if mode', () => {
     vi.clearAllMocks()
     vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData)
   })
-  it('shows the text-only banner when what-if is on — the pinned panel owns the exits', async () => {
+  it('keeps the state line inside the pinned panel — no separate banner', async () => {
     const wrapper = await mountWithBaseline(mockData)
     usePropertiesStore().setWhatIfActive(true)
     await wrapper.vm.$nextTick()
-    expect(wrapper.text()).toContain('The house cards below show what-if numbers — not your real figures. Resolve the what-if in the panel above.')
-    expect(wrapper.find('.whatif-banner button').exists()).toBe(false)
+    expect(wrapper.find('.whatif-banner').exists()).toBe(false)
+    expect(wrapper.find('.whatif__cards-note').exists()).toBe(true)
   })
 
   it('shows no banner when what-if is off', async () => {
