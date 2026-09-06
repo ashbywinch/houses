@@ -121,18 +121,6 @@ async function apply() {
   }
 }
 
-async function backToReal() {
-  busy.value = true
-  errorMsg.value = ''
-  try {
-    await api.restoreWhatIf()
-    store.setWhatIfActive(false)
-  } catch (e) {
-    errorMsg.value = e instanceof Error && e.message ? e.message : "Couldn't go back to your real numbers."
-  } finally {
-    busy.value = false
-  }
-}
 </script>
 
 <template>
@@ -246,12 +234,10 @@ async function backToReal() {
     <p v-if="errorMsg" class="whatif__error">{{ errorMsg }}</p>
 
     <footer class="whatif__footer">
-      <button class="whatif__btn whatif__btn--ghost" :disabled="!active || busy" @click="backToReal">
-        Back to real numbers
-      </button>
       <button class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
-        Apply what-if
+        Try scenario
       </button>
+      <span v-if="active" class="whatif__active-note">What-if numbers are showing — restore from the banner above.</span>
     </footer>
     </template>
   </section>
@@ -395,5 +381,10 @@ async function backToReal() {
 .whatif__btn--primary {
   background: var(--blue);
   color: #fff;
+}
+
+.whatif__active-note {
+  font-size: 12px;
+  color: var(--slate-500);
 }
 </style>

@@ -147,7 +147,7 @@ describe('WhatIfPanel', () => {
     expect(store.whatIfActive).toBe(true)
     await expand(wrapper)
     expect(wrapper.text()).toContain('What-if numbers are showing')
-    expect(findButton(wrapper, 'Back to real numbers').element.disabled).toBe(false)
+    expect(wrapper.text()).toContain('restore from the banner above')
   })
 
   it('makes NO api call when a field is edited — the auto-eval is gone', async () => {
@@ -167,7 +167,7 @@ describe('WhatIfPanel', () => {
     expect(vi.mocked(api.fetchSettings).mock.calls.length).toBe(settingsCalls)
   })
 
-  it('applies the edited payload and flags the store on "Apply what-if"', async () => {
+  it('applies the edited payload and flags the store on "Try scenario"', async () => {
     const { wrapper, store } = await mountOpenPanel()
 
     const ashbyCash = wrapper
@@ -176,7 +176,7 @@ describe('WhatIfPanel', () => {
       .find('input')
     await ashbyCash.setValue('400000')
 
-    await findButton(wrapper, 'Apply what-if').trigger('click')
+    await findButton(wrapper, 'Try scenario').trigger('click')
     await flushPromises()
 
     expect(api.applyWhatIf).toHaveBeenCalledTimes(1)
@@ -194,33 +194,19 @@ describe('WhatIfPanel', () => {
     vi.mocked(api.applyWhatIf).mockRejectedValueOnce(new Error('500'))
     const { wrapper, store } = await mountOpenPanel()
 
-    await findButton(wrapper, 'Apply what-if').trigger('click')
+    await findButton(wrapper, 'Try scenario').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain("Couldn't apply the what-if.")
     expect(store.whatIfActive).toBe(false)
   })
 
-  it('goes back to real numbers: restoreWhatIf clears the store flag', async () => {
+  it('offers no restore button in the panel — the banner owns it', async () => {
     vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
-    const { wrapper, store } = await mountOpenPanel()
-
-    await findButton(wrapper, 'Back to real numbers').trigger('click')
-    await flushPromises()
-
-    expect(api.restoreWhatIf).toHaveBeenCalledTimes(1)
-    expect(store.whatIfActive).toBe(false)
-  })
-
-  it('shows the server detail when going back fails', async () => {
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
-    vi.mocked(api.restoreWhatIf).mockRejectedValueOnce(new Error('No what-if is active'))
     const { wrapper } = await mountOpenPanel()
 
-    await findButton(wrapper, 'Back to real numbers').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('No what-if is active')
+    expect(wrapper.text()).not.toContain('Back to real numbers')
+    expect(api.restoreWhatIf).not.toHaveBeenCalled()
   })
 })
 
@@ -242,7 +228,7 @@ describe('WhatIfPanel — commute tab (MPG + max walk)', () => {
     const mw = wrapper.find('input[type="number"][min="0"]')
     await mw.setValue(25)
 
-    await findButton(wrapper, 'Apply what-if').trigger('click')
+    await findButton(wrapper, 'Try scenario').trigger('click')
     await flushPromises()
 
     const body = vi.mocked(api.applyWhatIf).mock.calls[0][0] as Array<Record<string, unknown>>
@@ -270,7 +256,7 @@ describe('WhatIfPanel — has_car and empty money (reviewer findings)', () => {
     const simon = wrapper.findAll('.whatif-person')[0]
     await simon.find('.switch').trigger('click')
 
-    await findButton(wrapper, 'Apply what-if').trigger('click')
+    await findButton(wrapper, 'Try scenario').trigger('click')
     await flushPromises()
 
     const body = vi.mocked(api.applyWhatIf).mock.calls[0][0] as Array<Record<string, unknown>>
@@ -290,7 +276,7 @@ describe('WhatIfPanel — has_car and empty money (reviewer findings)', () => {
       .find('input')
     await ashbyCash.setValue('')
 
-    await findButton(wrapper, 'Apply what-if').trigger('click')
+    await findButton(wrapper, 'Try scenario').trigger('click')
     await flushPromises()
 
     const body = vi.mocked(api.applyWhatIf).mock.calls[0][0] as Array<Record<string, unknown>>
