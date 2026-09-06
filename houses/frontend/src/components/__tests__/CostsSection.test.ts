@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import CostsSection from '../CostsSection.vue'
 import * as api from '../../services/api'
+import type { MonthlyBaseline } from '../../types'
 
 vi.mock('../../services/api', () => ({
   patchWorksEstimate: vi.fn().mockResolvedValue(new Response()),
@@ -399,3 +400,65 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
     })
     expect(wrapper.text()).not.toContain('Annexe council tax')
   })
+
+// ── Extra vs your home (approved deltas design) ─────────────────────
+
+describe('CostsSection — vs your home rows', () => {
+  const homeBaseline: MonthlyBaseline = {
+    rid: 'home',
+    address: '31 Isambard Road, Southall, UB2 4GN',
+    couple: { value: '1783.61', approx: false },
+    others: { value: '652.92', approx: false },
+    others_rent_paid: 600,
+  }
+
+  const group = {
+    couple: { value: '3091.67', stddev: 0 },
+    others: { value: '241.64', stddev: 0 },
+    couple_label: 'S+L',
+    others_label: 'Ashby',
+    delta_vs_home: {
+      couple: { value: '+1308.06', approx: true },
+      others: { value: '-411.28', approx: false },
+    },
+  }
+
+  function mountWith(overrides: Record<string, unknown>) {
+    return mountCosts({
+      affordability: { group_monthly_cost: { succeeded: true, value: group, error: null, provenance: {} } },
+      ...overrides,
+    })
+  }
+
+  it('adds one vs-your-home row per group total with the arithmetic tooltip', () => {
+    const wrapper = mountWith({ monthlyBaseline: homeBaseline })
+    const rows = wrapper.findAll('.costs-row--vs')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('vs your home (31 Isambard Road)')
+    expect(rows[0].text()).toContain('≈ +£1,308/mo')
+    expect(rows[0].attributes('title')).toBe('£3091.67 − £1783.61 = +1308.06. ≈ = council tax estimated.')
+    expect(rows[1].text()).toContain('−£411/mo')
+    expect(rows[1].attributes('title')).toBe('£241.64 − £652.92 = -411.28. ≈ = council tax estimated.')
+  })
+
+  it('notes the kept rent when the home\'s other adults pay rent and their delta drops', () => {
+    const wrapper = mountWith({ monthlyBaseline: homeBaseline })
+    expect(wrapper.find('.costs-note--rent').text()).toBe('Her £600 rent is not counted after the move.')
+  })
+
+  it('shows no rent note when the home\'s other adults pay no rent', () => {
+    const wrapper = mountWith({ monthlyBaseline: { ...homeBaseline, others_rent_paid: 0 } })
+    expect(wrapper.find('.costs-note--rent').exists()).toBe(false)
+  })
+
+  it('shows no vs rows on the baseline property itself', () => {
+    const wrapper = mountWith({ monthlyBaseline: homeBaseline, isCurrentHome: true })
+    expect(wrapper.findAll('.costs-row--vs')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('vs your home')
+  })
+
+  it('shows no vs rows without a baseline attachment', () => {
+    const wrapper = mountWith({})
+    expect(wrapper.findAll('.costs-row--vs')).toHaveLength(0)
+  })
+})

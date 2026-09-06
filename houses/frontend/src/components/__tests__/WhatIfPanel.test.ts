@@ -319,3 +319,72 @@ describe('WhatIfPanel — has_car and empty money (reviewer findings)', () => {
     expect(ashbyBody?.cash_contribution).toEqual({ amount: '0', currency: 'GBP' })
   })
 })
+
+// ── Extra vs your home (approved deltas design) ─────────────────────
+
+describe('WhatIfPanel — headline counts deltas vs home when baseline active', () => {
+  const homeBaseline = {
+    rid: 'home',
+    address: '31 Isambard Road, Southall, UB2 4GN',
+    couple: { value: '1783.61', approx: false },
+    others: { value: '652.92', approx: false },
+    others_rent_paid: 600,
+  }
+
+  function summary(rid: string, couple: string, delta: string | null) {
+    return {
+      rid,
+      best_address: { succeeded: true, value: '10 Cheap St', error: null, provenance: { label: 't' } },
+      best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 't' } },
+      rightmove_price: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: { label: 't' } },
+      rightmove_bedrooms: { succeeded: true, value: '2', error: null, provenance: { label: 't' } },
+      group_monthly_cost: {
+        succeeded: true,
+        value: {
+          couple: { value: couple, stddev: 0 },
+          others: { value: '400', stddev: 0 },
+          couple_label: 'S&L',
+          others_label: 'A',
+          ...(delta ? { delta_vs_home: { couple: { value: delta, approx: false }, others: null } } : {}),
+        },
+        error: null,
+        provenance: { label: 't' },
+      },
+      walkability: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+      commutes: {},
+      schools: {
+        primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
+        secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
+      },
+      ...(rid === 'home' ? { is_current_home: true, monthly_baseline: homeBaseline } : {}),
+    }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
+    vi.mocked(api.postWhatIf).mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('counts houses within £X/mo of home by delta ≤ threshold', async () => {
+    const { wrapper, store } = mountPanel()
+    await settle()
+    store.rids = ['prop-a', 'home']
+    store.summaries = {
+      // real delta +2216.39 → NOT within £1500 of home
+      'prop-a': summary('prop-a', '4000', '+2216.39'),
+      'home': summary('home', '1783.61', null),
+    }
+    await expand(wrapper)
+    // hypothetical delta −883.61 → within £1500 of home
+    store.applyWhatIf({
+      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A', delta_vs_home: { couple: { value: '-883.61', approx: false }, others: null } } },
+    })
+    await settle()
+    expect(wrapper.text()).toContain('1 more house within £1,500/mo of home')
+  })
+})

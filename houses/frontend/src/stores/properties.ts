@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import type { GroupMonthlyCost, PropertyDetail, PropertySummary, TriageEntry } from '../types'
+import { computed, ref } from 'vue'
+import type { DeltaVsHome, GroupMonthlyCost, MonthlyBaseline, PropertyDetail, PropertySummary, TriageEntry } from '../types'
 import {
   addProperty,
   fetchAllSummaries,
@@ -61,6 +61,29 @@ export const usePropertiesStore = defineStore('properties', () => {
   function clearWhatIf() {
     whatIfTotals.value = null
   }
+
+  // ── Extra vs your home (approved deltas design) ───────────────
+  // The current home's reference figures: the server attaches the same
+  // monthly_baseline to every summary while exactly one current home
+  // has computed totals, so the first non-null wins and stays fresh
+  // through the existing summary load / WS merge. Null everywhere when
+  // there is no usable baseline → the UI keeps today's rendering.
+  const baseline = computed<MonthlyBaseline | null>(() => {
+    for (const s of Object.values(summaries.value)) {
+      if (s?.monthly_baseline) return s.monthly_baseline
+    }
+    return null
+  })
+
+  /** The property's delta vs the home: the what-if overlay (hypothetical
+   *  totals vs the REAL baseline) wins over the summary's own delta. */
+  function deltaFor(rid: string): DeltaVsHome | null {
+    const wt = whatIfTotals.value?.[rid]?.delta_vs_home
+    if (wt) return wt
+    const g = summaries.value[rid]?.group_monthly_cost
+    return g?.succeeded && g.value ? (g.value.delta_vs_home ?? null) : null
+  }
+
 
   /** The monthly total to show/filter/sort by for a property: the
    * hypothetical value when the what-if is active, else the real one. */
@@ -243,7 +266,7 @@ export const usePropertiesStore = defineStore('properties', () => {
     rids, summaries, details, triage, settings, loading, error,
     commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels, listScrollY,
     addByUrl, retryPropertyScrape, saveDetails, removeFromList,
-    whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor,
+    whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor, baseline, deltaFor,
     loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
 })

@@ -3,7 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyList from '../PropertyList.vue'
-import type { PropertySummary } from '../../types'
+import type { MonthlyBaseline, PropertySummary } from '../../types'
 
 vi.mock('../../services/api', () => ({
   fetchAllSummaries: vi.fn(),
@@ -559,3 +559,117 @@ describe('PropertyList map pins are interactive', () => {
 })
 
 
+// ── Extra vs your home (approved deltas design) ─────────────────────
+
+const homeBaseline: MonthlyBaseline = {
+  rid: 'prop-b',
+  address: '31 Isambard Road, Southall, UB2 4GN',
+  couple: { value: '1783.61', approx: false },
+  others: { value: '652.92', approx: false },
+  others_rent_paid: 600,
+}
+
+function deltaSummary(rid: string, address: string, couple: string, delta: { value: string; approx: boolean } | null): PropertySummary {
+  return {
+    ...mockData['prop-a'],
+    rid,
+    best_address: { succeeded: true, value: address, error: null, provenance: { label: 'test' } },
+    group_monthly_cost: {
+      succeeded: true,
+      value: {
+        couple: { value: couple, stddev: 0 },
+        others: { value: '500', stddev: 0 },
+        couple_label: 'S&L',
+        others_label: 'Ashby',
+        delta_vs_home: { couple: delta, others: delta },
+      },
+      error: null,
+      provenance: { label: 'test' },
+    },
+  }
+}
+
+function deltaData(): Record<string, PropertySummary> {
+  return {
+    'prop-a': deltaSummary('prop-a', '10 Cheap St', '1500', { value: '-283.61', approx: false }),
+    'prop-b': { ...deltaSummary('prop-b', '20 Mid Rd', '2000', { value: '+216.39', approx: false }), monthly_baseline: homeBaseline },
+    'prop-c': deltaSummary('prop-c', '30 Expensive Ave', '3500', { value: '+1716.39', approx: false }),
+    // Total known (1200 would pass a totals filter) but delta
+    // uncomputable — must drop OUT of an "extra vs home" filter.
+    'prop-d': deltaSummary('prop-d', '40 School Ln', '1200', null),
+  }
+}
+
+async function mountWithBaseline(summaries: Record<string, PropertySummary>) {
+  vi.mocked(api.fetchAllSummaries).mockResolvedValue(summaries)
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
+  await flushPromises()
+  // loadSettings (async, mocked empty settings) has settled by now —
+  // set the household labels the real settings response would produce.
+  usePropertiesStore().groupLabels = { coupleLabel: 'S&L', othersLabel: 'Ashby' }
+  await wrapper.vm.$nextTick()
+  return wrapper
+}
+
+describe('PropertyList — extra vs your home (baseline)', () => {
+  it('renders the baseline legend once above the cards', async () => {
+    const wrapper = await mountWithBaseline(deltaData())
+    const legends = wrapper.findAll('.baseline-legend')
+    expect(legends).toHaveLength(1)
+    expect(legends[0].text()).toContain('Monthly figures are the change vs your home — 31 Isambard Road, Southall, UB2 4GN')
+    expect(legends[0].text()).toContain('S&L £1,784/mo')
+    expect(legends[0].text()).toContain('Ashby £653/mo')
+    expect(legends[0].text()).toContain("Full totals and breakdowns live on each property's page.")
+  })
+
+  it('hides the legend and keeps today\'s labels without a baseline', async () => {
+    const wrapper = await mountWithBaseline(mockData)
+    expect(wrapper.find('.baseline-legend').exists()).toBe(false)
+    await wrapper.findAll('.controls-row .pill')[0].trigger('click')
+    const options = wrapper.findAll('.sheet__select option').map(o => o.text())
+    expect(options).toContain('Monthly Cost')
+    expect(options).not.toContain('Extra vs home/mo')
+    await wrapper.find('[aria-label="Close sort"]').trigger('click')
+    await wrapper.findAll('.controls-row .pill')[1].trigger('click')
+    expect(wrapper.findAll('.sheet__label').map(l => l.text())).toContain('Max monthly cost (£)')
+    expect(wrapper.find('.sheet__helper').exists()).toBe(false)
+  })
+
+  it('relabels the monthly sort to "Extra vs home/mo" when deltas are active', async () => {
+    const wrapper = await mountWithBaseline(deltaData())
+    await wrapper.findAll('.controls-row .pill')[0].trigger('click')
+    const options = wrapper.findAll('.sheet__select option').map(o => o.text())
+    expect(options).toContain('Extra vs home/mo')
+    expect(options).not.toContain('Monthly Cost')
+  })
+
+  it('orders identically when sorting by the delta (total − constant)', async () => {
+    const data = deltaData()
+    delete data['prop-d']
+    const wrapper = await mountWithBaseline(data)
+    await wrapper.findAll('.controls-row .pill')[0].trigger('click')
+    await wrapper.find('.sheet__select').setValue('monthly_cost')
+    await wrapper.vm.$nextTick()
+    const addrs = wrapper.findAll('.card__address-text').map(a => a.text())
+    // Totals 1500 < 2000 < 3500 ↔ deltas −283.61 < +216.39 < +1716.39 —
+    // the kept totals sort orders the deltas identically.
+    expect(addrs).toEqual(['10 Cheap St', '20 Mid Rd', '30 Expensive Ave'])
+  })
+
+  it('filters by max extra vs home, excluding unknown deltas', async () => {
+    const wrapper = await mountWithBaseline(deltaData())
+    await wrapper.findAll('.controls-row .pill')[1].trigger('click')
+    expect(wrapper.findAll('.sheet__label').map(l => l.text())).toContain('Max extra vs home (£/mo)')
+    expect(wrapper.find('.sheet__helper').text()).toBe('Your home is £1,784/mo')
+    await wrapper.find('.sheet__input').setValue('1300')
+    await wrapper.find('.sheet__apply').trigger('click')
+    await wrapper.vm.$nextTick()
+    const addrs = wrapper.findAll('.card__address-text').map(a => a.text())
+    // prop-a (−283.61) and prop-b (+216.39) pass; prop-c (+1716.39) is
+    // over; prop-d has no computable delta even though its 1200 total
+    // would pass — unknowns are excluded, never treated as 0.
+    expect(addrs).toEqual(['10 Cheap St', '20 Mid Rd'])
+  })
+})

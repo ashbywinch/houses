@@ -38,6 +38,8 @@ from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
 from houses.web.auth import SESSION_MAX_AGE, effective_session_user, get_serializer
 from houses.web.broadcaster import register_client
+from houses.web.monthly_delta import attach as attach_monthly_delta
+from houses.web.monthly_delta import outcome_delta_vs_home, resolve_baseline
 
 
 def _registry_property(rid: str):
@@ -169,10 +171,17 @@ def _merge_what_if_persons(updates: list, current: list) -> list:
     merged.extend(p for p in current if p.name not in merged_names)
     return merged
 
-
 async def _what_if_results(merged: list):
     """Evaluate every registry property's group_monthly_cost under the
-    merged persons; skipped properties are simply absent from the map."""
+    merged persons; skipped properties are simply absent from the map.
+
+    Each succeeded outcome's ``group`` gains ``delta_vs_home`` — the
+    hypothetical figures minus the REAL baseline's. Null without a
+    baseline or for the baseline property itself.
+    """
+    # Resolved BEFORE the first evaluate(): inside one, the staged
+    # hypothetical attempts would shadow the real ones.
+    baseline = resolve_baseline(get_services().property_registry)
     results: dict[str, dict] = {}
     for rid in _registry_rids():
         prop = _registry_property(rid)
@@ -184,10 +193,12 @@ async def _what_if_results(merged: list):
             continue
         attempts = await evaluate(group_node, overrides={"persons": merged})
         group_att = attempts[group_node._id]
-        if group_att.succeeded and group_att.value is not None:
-            results[rid] = _WhatIfOutcome(
-                succeeded=True, group=group_att.value_or_none()
-            ).to_dict()
+        value = group_att.value_or_none()
+        if group_att.succeeded and value is not None:
+            # Fresh dict — never mutate the attempt's own value object.
+            group = dict(value)
+            group["delta_vs_home"] = outcome_delta_vs_home(group, rid, baseline)
+            results[rid] = _WhatIfOutcome(succeeded=True, group=group).to_dict()
         elif group_att.impossible:
             results[rid] = _WhatIfOutcome(
                 succeeded=False, error=group_att.error
@@ -211,8 +222,11 @@ async def post_what_if(body: dict):
     real scheduler, database, and node state are untouched.
 
     Response: ``{"results": {rid: {"succeeded": bool,
-    "monthly_total": {"value": {"amount", "currency"}, "stddev"} | None,
-    "error"?: str}}}``.
+    "group": {"couple"|"others": {"value", "stddev"}, ...,
+              "delta_vs_home": {"couple"|"others": {"value", "approx"} | null}
+                               | null}
+              | "error": str}}}`` — delta_vs_home is the hypothetical minus
+    the REAL current home's figure (null without exactly one current home).
     """
     updates = body.get("persons")
     if not isinstance(updates, list) or not updates:
@@ -354,6 +368,7 @@ async def get_all_properties():
             continue
         summary = await prop.to_json_summary()
         _attach_scrape_state(summary, rid)
+        await attach_monthly_delta(summary, rid, get_services().property_registry)
         results[rid] = summary
     scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
     return dict(scored)
@@ -405,7 +420,9 @@ async def get_property_detail(rid: str):
     prop = _registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    return await prop.to_json_detail()
+    detail = await prop.to_json_detail()
+    await attach_monthly_delta(detail, rid, get_services().property_registry)
+    return detail
 
 
 @api_router.patch("/properties/{rid}/address")
