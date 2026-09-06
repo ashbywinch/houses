@@ -152,6 +152,9 @@ describe('WhatIfPanel', () => {
     const toggle = wrapper.find('.whatif__toggle')
     expect((toggle.element as HTMLButtonElement).disabled).toBe(true)
     expect(toggle.attributes('title')).toBe('Resolve the what-if first')
+    // the pinned header must not read as a closed dropdown
+    expect(wrapper.find('.whatif--pinned').exists()).toBe(true)
+    expect(wrapper.find('.whatif__chevron').exists()).toBe(false)
 
     // clicking the disabled toggle must not collapse the body
     await toggle.trigger('click')

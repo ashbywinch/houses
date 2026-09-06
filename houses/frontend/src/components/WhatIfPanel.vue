@@ -165,7 +165,7 @@ async function accept() {
 </script>
 
 <template>
-  <section class="whatif" :class="{ 'whatif--collapsed': collapsed }" aria-label="What if">
+  <section class="whatif" :class="{ 'whatif--collapsed': collapsed, 'whatif--pinned': active }" aria-label="What if">
     <header class="whatif__header">
       <button
         class="whatif__toggle"
@@ -175,7 +175,7 @@ async function accept() {
         @click="toggleCollapsed"
       >
         <h2 class="whatif__title">What if…</h2>
-        <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
+        <span v-if="!active" class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       </button>
     </header>
 
@@ -321,6 +321,15 @@ async function accept() {
 }
 .whatif__toggle:hover {
   background: var(--pill-bg);
+}
+
+.whatif--pinned .whatif__toggle {
+  border-style: solid;
+  cursor: default;
+}
+
+.whatif--pinned .whatif__toggle:hover {
+  background: var(--card-bg);
 }
 .whatif__chevron {
   font-size: 0.8rem;

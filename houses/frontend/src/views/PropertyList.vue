@@ -376,6 +376,14 @@ const ceilingLimitText = computed(() => {
       <span class="legend-item"><i class="legend-dot legend-dot--muted"></i>no route</span>
     </div>
 
+    <!-- What-if mode FIRST, above the pinned panel: the banner names the
+         state, the pinned panel below owns the exits (Back to real
+         numbers / Keep these numbers), and the cards under it all show
+         scenario figures. -->
+    <div v-if="store.whatIfActive" class="whatif-banner" role="status">
+      <span>The house cards below are showing what-if numbers — not your real figures. Resolve the what-if in the panel below.</span>
+    </div>
+
     <WhatIfPanel />
 
     <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
@@ -389,13 +397,6 @@ const ceilingLimitText = computed(() => {
       {{ store.groupLabels.othersLabel }} {{ store.baseline.others ? '£' + Math.round(Number(store.baseline.others.value)).toLocaleString() + '/mo' : '£—/mo' }}).
       Full totals and breakdowns live on each property's page.
     </p>
-
-    <!-- What-if mode: the server is showing the scenario numbers, so
-         say so once above the list. The pinned What-if panel owns the
-         way back (Back to real numbers / Keep these numbers). -->
-    <div v-if="store.whatIfActive" class="whatif-banner" role="status">
-      <span>What-if numbers are showing — these are not your real figures.</span>
-    </div>
 
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
