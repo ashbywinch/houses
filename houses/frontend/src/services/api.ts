@@ -164,6 +164,27 @@ export async function restoreWhatIf(): Promise<void> {
   }
 }
 
+export async function acceptWhatIf(): Promise<void> {
+  const r = await fetch(`${BASE}/what-if/accept`, {
+    method: 'POST',
+    headers: authHeaders(),
+  }).then(checkFor401)
+  if (!r.ok) {
+    // 409 when nothing is active — the body carries the server's detail
+    const text = await r.text()
+    let detail = text
+    try {
+      const parsed: unknown = JSON.parse(text)
+      if (parsed && typeof parsed === 'object' && 'detail' in parsed && typeof parsed.detail === 'string') {
+        detail = parsed.detail
+      }
+    } catch {
+      // non-JSON body — surface the raw text
+    }
+    throw new Error(detail || `Accept failed: ${r.status}`)
+  }
+}
+
 export async function fetchWhatIfState(): Promise<boolean> {
   const r = await fetch(`${BASE}/what-if/state`, { headers: authHeaders() }).then(checkFor401)
   if (!r.ok) throw new Error(`What-if state failed: ${r.status}`)

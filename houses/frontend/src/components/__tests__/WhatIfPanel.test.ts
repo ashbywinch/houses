@@ -9,6 +9,7 @@ vi.mock('../../services/api', () => ({
   fetchWhatIfState: vi.fn().mockResolvedValue(false),
   applyWhatIf: vi.fn().mockResolvedValue(undefined),
   restoreWhatIf: vi.fn().mockResolvedValue(undefined),
+  acceptWhatIf: vi.fn().mockResolvedValue(undefined),
   fetchAllSummaries: vi.fn().mockResolvedValue({}),
 }))
 
@@ -140,14 +141,55 @@ describe('WhatIfPanel', () => {
     expect(toggle.element.getAttribute('style')).toBeNull()
   })
 
-  it('shows the active note when a what-if is already applied', async () => {
+  it('pins itself open while a what-if is active — no collapse after a reload', async () => {
     vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
     const { wrapper, store } = mountPanel()
     await flushPromises()
     expect(store.whatIfActive).toBe(true)
-    await expand(wrapper)
+
+    // open without any click — the state fetch already said active
     expect(wrapper.text()).toContain('What-if numbers are showing')
-    expect(wrapper.text()).toContain('restore from the banner above')
+    const toggle = wrapper.find('.whatif__toggle')
+    expect((toggle.element as HTMLButtonElement).disabled).toBe(true)
+    expect(toggle.attributes('title')).toBe('Resolve the what-if first')
+
+    // clicking the disabled toggle must not collapse the body
+    await toggle.trigger('click')
+    expect(wrapper.text()).toContain('What-if numbers are showing')
+  })
+
+  it('keeps the exits in its footer while active: Back, Keep, Try scenario', async () => {
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+    const { wrapper } = mountPanel()
+    await flushPromises()
+    findButton(wrapper, 'Back to real numbers')
+    findButton(wrapper, 'Keep these numbers')
+    findButton(wrapper, 'Try scenario')
+  })
+
+  it('restores the real numbers from "Back to real numbers" and clears the flag', async () => {
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+    const { wrapper, store } = mountPanel()
+    await flushPromises()
+
+    await findButton(wrapper, 'Back to real numbers').trigger('click')
+    await flushPromises()
+
+    expect(api.restoreWhatIf).toHaveBeenCalledTimes(1)
+    expect(store.whatIfActive).toBe(false)
+  })
+
+  it('keeps the scenario from "Keep these numbers" without restoring', async () => {
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+    const { wrapper, store } = mountPanel()
+    await flushPromises()
+
+    await findButton(wrapper, 'Keep these numbers').trigger('click')
+    await flushPromises()
+
+    expect(api.acceptWhatIf).toHaveBeenCalledTimes(1)
+    expect(api.restoreWhatIf).not.toHaveBeenCalled()
+    expect(store.whatIfActive).toBe(false)
   })
 
   it('makes NO api call when a field is edited — the auto-eval is gone', async () => {
@@ -201,12 +243,12 @@ describe('WhatIfPanel', () => {
     expect(store.whatIfActive).toBe(false)
   })
 
-  it('offers no restore button in the panel — the banner owns it', async () => {
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+  it('offers only "Try scenario" in the footer when nothing is active', async () => {
     const { wrapper } = await mountOpenPanel()
 
-    expect(wrapper.text()).not.toContain('Back to real numbers')
-    expect(api.restoreWhatIf).not.toHaveBeenCalled()
+    findButton(wrapper, 'Try scenario')
+    expect(wrapper.findAll('button').some(b => b.text().includes('Back to real numbers'))).toBe(false)
+    expect(wrapper.findAll('button').some(b => b.text().includes('Keep these numbers'))).toBe(false)
   })
 })
 

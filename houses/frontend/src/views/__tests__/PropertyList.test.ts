@@ -10,7 +10,6 @@ vi.mock('../../services/api', () => ({
   fetchPropertyDetail: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue({}),
   fetchWhatIfState: vi.fn().mockResolvedValue(false),
-  restoreWhatIf: vi.fn().mockResolvedValue(undefined),
   patchTriage: vi.fn(),
 }))
 
@@ -681,19 +680,12 @@ describe('PropertyList — what-if mode', () => {
     vi.clearAllMocks()
     vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData)
   })
-  it('shows the active banner and a restore button when what-if is on', async () => {
+  it('shows the text-only banner when what-if is on — the pinned panel owns the exits', async () => {
     const wrapper = await mountWithBaseline(mockData)
     usePropertiesStore().setWhatIfActive(true)
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('What-if numbers are showing — these are not your real figures.')
-    const restore = wrapper.findAll('button').find(b => b.text().includes('Back to real numbers'))
-    expect(restore).toBeDefined()
-
-    await restore!.trigger('click')
-    await flushPromises()
-    expect(api.restoreWhatIf).toHaveBeenCalledTimes(1)
-    expect(usePropertiesStore().whatIfActive).toBe(false)
-    expect(wrapper.text()).not.toContain('not your real figures')
+    expect(wrapper.find('.whatif-banner button').exists()).toBe(false)
   })
 
   it('shows no banner when what-if is off', async () => {

@@ -5,7 +5,6 @@ import Header from '../components/Header.vue'
 import PropertyCard from '../components/PropertyCard.vue'
 import WhatIfPanel from '../components/WhatIfPanel.vue'
 import MapView, { type MapLayer, type MapMarker } from '../components/MapView.vue'
-import * as api from '../services/api'
 
 const store = usePropertiesStore()
 
@@ -154,17 +153,6 @@ function extraVsHomeNum(rid: string): number {
   return Number(d.value)
 }
 
-/** Restore the real numbers from the list banner. The DAG recomputes
- *  everything server-side and the websocket broadcast refreshes the
- *  cards; this only clears the mode flag. */
-async function backToReal() {
-  try {
-    await api.restoreWhatIf()
-    store.setWhatIfActive(false)
-  } catch (e) {
-    console.error('Failed to restore real numbers:', e)
-  }
-}
 function bestCommuteMin(rid: string) {
   const commutes = store.summaries[rid]?.commutes
   if (!commutes) return Infinity
@@ -403,10 +391,10 @@ const ceilingLimitText = computed(() => {
     </p>
 
     <!-- What-if mode: the server is showing the scenario numbers, so
-         say so once above the list, with the way back. -->
+         say so once above the list. The pinned What-if panel owns the
+         way back (Back to real numbers / Keep these numbers). -->
     <div v-if="store.whatIfActive" class="whatif-banner" role="status">
       <span>What-if numbers are showing — these are not your real figures.</span>
-      <button class="btn btn--ghost whatif-banner__restore" @click="backToReal">Back to real numbers</button>
     </div>
 
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
@@ -611,9 +599,6 @@ const ceilingLimitText = computed(() => {
   margin: 10px 0 0; padding: 8px 12px;
   background: var(--pill-bg); border-radius: var(--radius-sm);
   font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.35;
-}
-.whatif-banner__restore {
-  margin-left: auto; flex-shrink: 0; font-size: 0.75rem; padding: 6px 10px;
 }
 
 .legend-strip {

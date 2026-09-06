@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import * as api from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 import { blockPenceKey, integerPounds, normalizePence } from '../formatters/money'
@@ -39,6 +39,17 @@ const activeTab = ref<'finances' | 'commutes'>('finances')
 // The panel edits local copies and only touches the server from the
 // two footer buttons — nothing is evaluated while typing.
 const active = computed(() => store.whatIfActive)
+
+// While a what-if is active the panel is pinned open — the exits live
+// in its footer, so it stays up until the mode is resolved (toggle,
+// reload, it doesn't matter: Back or Keep are the only ways out).
+watch(active, v => {
+  if (v) collapsed.value = false
+}, { immediate: true })
+
+function toggleCollapsed() {
+  if (!active.value) collapsed.value = !collapsed.value
+}
 
 function money(amount: string): { amount: string; currency: string } {
   return { amount, currency: 'GBP' }
@@ -83,7 +94,7 @@ async function load() {
   }
 }
 
-// ── Apply / back (the only two writes) ─────────────────────────
+// ── Apply / back / keep (the only writes) ─────────────────────
 
 function payload() {
   return persons.value.map(p => {
@@ -121,12 +132,48 @@ async function apply() {
   }
 }
 
+/** Puts the original numbers back — the DAG recomputes server-side
+ *  and the websocket broadcast refreshes every surface. */
+async function restore() {
+  busy.value = true
+  errorMsg.value = ''
+  try {
+    await api.restoreWhatIf()
+    store.setWhatIfActive(false)
+  } catch {
+    errorMsg.value = "Couldn't restore the real numbers."
+  } finally {
+    busy.value = false
+  }
+}
+
+/** Keeps the scenario as the new real numbers — the server discards
+ *  the restore snapshot. */
+async function accept() {
+  busy.value = true
+  errorMsg.value = ''
+  try {
+    await api.acceptWhatIf()
+    store.setWhatIfActive(false)
+  } catch {
+    errorMsg.value = "Couldn't accept the what-if numbers."
+  } finally {
+    busy.value = false
+  }
+}
+
 </script>
 
 <template>
   <section class="whatif" :class="{ 'whatif--collapsed': collapsed }" aria-label="What if">
     <header class="whatif__header">
-      <button class="whatif__toggle" type="button" @click="collapsed = !collapsed">
+      <button
+        class="whatif__toggle"
+        type="button"
+        :disabled="active"
+        title="Resolve the what-if first"
+        @click="toggleCollapsed"
+      >
         <h2 class="whatif__title">What if…</h2>
         <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       </button>
@@ -237,7 +284,12 @@ async function apply() {
       <button class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
         Try scenario
       </button>
-      <span v-if="active" class="whatif__active-note">What-if numbers are showing — restore from the banner above.</span>
+      <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="restore">
+        Back to real numbers
+      </button>
+      <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="accept">
+        Keep these numbers
+      </button>
     </footer>
     </template>
   </section>
@@ -383,8 +435,4 @@ async function apply() {
   color: #fff;
 }
 
-.whatif__active-note {
-  font-size: 12px;
-  color: var(--slate-500);
-}
 </style>

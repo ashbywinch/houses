@@ -231,6 +231,23 @@ async def what_if_state():
     return {"active": bool(started)}
 
 
+
+@api_router.post("/what-if/accept")
+async def what_if_accept(request: Request):
+    """Accept the what-if: the scenario becomes the real numbers. The
+    marker clears and the snapshot is discarded — restore can no longer
+    reach the pre-what-if values."""
+    _require_family_member(request)
+    svc = get_services()
+    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    if not started:
+        raise HTTPException(status_code=409, detail="No what-if is active")
+    svc.whatif_started_at.push("", "what-if-accept")
+    return {"active": False}
+
+
+@api_router.get("/what-if/state")
+
 @api_router.get("/properties/{rid}/staleness")
 async def staleness_check(rid: str, nodes: str = ""):
     """Check which DAG nodes are stale for a given property.
