@@ -236,3 +236,16 @@ CostsSection vs-rows, WhatIfPanel headline. Deltas are never computed
 client-side. Tests: 20 delta unit tests + route/broadcaster coverage (84 in
 scope), 22 new frontend tests; no-baseline rendering is byte-identical to the
 previous UI.
+
+**Same-day supersession (what-if flow).** Hours after the above landed, the
+user redefined the what-if itself: applying a what-if is a REAL change
+written through the normal settings push — the DAG recomputes everything
+downstream and every surface is scenario-true by construction — and restore
+re-appends the pre-what-if attempt from the DAG's own append-only history
+(`node_results`); nothing is copied, nothing is recomputed client-side.
+The overlay machinery this section describes (what-if deltas vs a real
+baseline, the within-£X headline, store overlay accessors) is deleted in
+PR "fix: what-if persists through the DAG — apply/restore/state". The
+requirement is recorded as B7 in usability-requirements.md. Deltas on
+cards (vs the current home) are unchanged — they simply always reflect
+whatever the DAG currently holds, what-if or not.
