@@ -175,12 +175,11 @@ async function accept() {
         @click="toggleCollapsed"
       >
         <h2 class="whatif__title">What if…</h2>
-        <span v-if="!active" class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
+        <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       </button>
     </header>
 
     <template v-if="!collapsed">
-      <p v-if="active" class="whatif__note">What-if numbers are showing — these are not your real figures.</p>
       <p class="whatif__intro">
         What-if changes your saved numbers everywhere — on every card and page — until you go back.
         Your original numbers are kept and come back with one click. Money is in whole pounds.
@@ -204,6 +203,7 @@ async function accept() {
         >Commutes</button>
       </nav>
 
+      <fieldset class="whatif__fieldset" :disabled="active">
       <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
         <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
           <div class="card-heading">{{ p.name }}</div>
@@ -276,12 +276,13 @@ async function accept() {
           </div>
         </div>
       </div>
+      </fieldset>
 
     <p v-if="busy" class="whatif__status">Saving…</p>
     <p v-if="errorMsg" class="whatif__error">{{ errorMsg }}</p>
 
     <footer class="whatif__footer">
-      <button class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
+      <button v-if="!active" class="whatif__btn whatif__btn--primary" :disabled="busy" @click="apply">
         Try scenario
       </button>
       <button v-if="active" class="whatif__btn whatif__btn--ghost" :disabled="busy" @click="restore">
@@ -335,20 +336,17 @@ async function accept() {
   font-size: 0.8rem;
   color: var(--text-muted);
 }
+
+.whatif__fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
 .whatif__title {
   margin: 0;
   font-size: 0.875rem;
   font-weight: var(--fw-semibold);
-  color: var(--text-secondary);
-}
-.whatif__note {
-  padding: 10px 12px;
-  background: var(--pill-bg);
-  border-radius: var(--radius-sm);
-  font-size: 0.875rem;
-  font-weight: var(--fw-semibold);
-  margin: 10px 0 0;
-  text-align: center;
 }
 .whatif__intro {
   margin: 0.6rem 0 0.4rem;

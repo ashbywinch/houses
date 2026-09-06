@@ -148,26 +148,45 @@ describe('WhatIfPanel', () => {
     expect(store.whatIfActive).toBe(true)
 
     // open without any click — the state fetch already said active
-    expect(wrapper.text()).toContain('What-if numbers are showing')
     const toggle = wrapper.find('.whatif__toggle')
     expect((toggle.element as HTMLButtonElement).disabled).toBe(true)
     expect(toggle.attributes('title')).toBe('Resolve the what-if first')
-    // the pinned header must not read as a closed dropdown
+    // an open dropdown looks open: the chevron points down and stays
     expect(wrapper.find('.whatif--pinned').exists()).toBe(true)
-    expect(wrapper.find('.whatif__chevron').exists()).toBe(false)
+    expect(wrapper.find('.whatif__chevron').exists()).toBe(true)
+    expect(wrapper.find('.whatif__chevron').text()).toBe('▾')
 
     // clicking the disabled toggle must not collapse the body
     await toggle.trigger('click')
-    expect(wrapper.text()).toContain('What-if numbers are showing')
+    expect(wrapper.find('.whatif:not(.whatif--collapsed)').exists()).toBe(true)
   })
 
-  it('keeps the exits in its footer while active: Back, Keep, Try scenario', async () => {
+  it('locks the scenario fields and shows exactly two exits while active', async () => {
     vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
-    const { wrapper } = mountPanel()
+    const { wrapper } = await mountPanel()
     await flushPromises()
-    findButton(wrapper, 'Back to real numbers')
-    findButton(wrapper, 'Keep these numbers')
-    findButton(wrapper, 'Try scenario')
+
+    const buttons = wrapper.findAll('.whatif__footer button')
+    expect(buttons.map(b => b.text())).toEqual(['Back to real numbers', 'Keep these numbers'])
+
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
+    expect((ashbyCash.element as HTMLInputElement).matches(":disabled")).toBe(true)
+  })
+
+  it('offers only Try scenario when nothing is active — fields editable', async () => {
+    const { wrapper } = await mountOpenPanel()
+
+    const buttons = wrapper.findAll('.whatif__footer button')
+    expect(buttons.map(b => b.text())).toEqual(['Try scenario'])
+
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
+    expect((ashbyCash.element as HTMLInputElement).disabled).toBe(false)
   })
 
   it('restores the real numbers from "Back to real numbers" and clears the flag', async () => {

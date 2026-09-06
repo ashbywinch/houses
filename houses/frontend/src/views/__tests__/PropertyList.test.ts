@@ -684,7 +684,7 @@ describe('PropertyList — what-if mode', () => {
     const wrapper = await mountWithBaseline(mockData)
     usePropertiesStore().setWhatIfActive(true)
     await wrapper.vm.$nextTick()
-    expect(wrapper.text()).toContain('What-if numbers are showing — these are not your real figures.')
+    expect(wrapper.text()).toContain('The house cards below show what-if numbers — not your real figures. Resolve the what-if in the panel above.')
     expect(wrapper.find('.whatif-banner button').exists()).toBe(false)
   })
 

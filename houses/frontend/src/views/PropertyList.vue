@@ -381,7 +381,7 @@ const ceilingLimitText = computed(() => {
          numbers / Keep these numbers), and the cards under it all show
          scenario figures. -->
     <div v-if="store.whatIfActive" class="whatif-banner" role="status">
-      <span>The house cards below are showing what-if numbers — not your real figures. Resolve the what-if in the panel below.</span>
+      <span>The house cards below show what-if numbers — not your real figures. Resolve the what-if in the panel above.</span>
     </div>
 
     <WhatIfPanel />
