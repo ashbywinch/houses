@@ -619,7 +619,7 @@ describe('PropertyList — extra vs your home (baseline)', () => {
     const wrapper = await mountWithBaseline(deltaData())
     const legends = wrapper.findAll('.baseline-legend')
     expect(legends).toHaveLength(1)
-    expect(legends[0].text()).toContain('The house cards below show what-if numbers — 31 Isambard Road, Southall, UB2 4GN')
+    expect(legends[0].text()).toContain('Monthly figures are the change vs your home — 31 Isambard Road, Southall, UB2 4GN')
     expect(legends[0].text()).toContain('S&L £1,784/mo')
     expect(legends[0].text()).toContain('Ashby £653/mo')
     expect(legends[0].text()).toContain("Full totals and breakdowns live on each property's page.")
