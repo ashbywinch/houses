@@ -381,7 +381,7 @@ const ceilingLimitText = computed(() => {
     <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
 
     <p v-if="store.baseline" class="baseline-legend" role="note" style="margin-top: var(--sp-4);">
-      The house cards below show what-if numbers — {{ store.baseline.address }}
+      Monthly figures are the change vs your home — {{ store.baseline.address }}
       ({{ store.groupLabels.coupleLabel }} £{{ Math.round(Number(store.baseline.couple.value)).toLocaleString() }}/mo ·
       {{ store.groupLabels.othersLabel }} {{ store.baseline.others ? '£' + Math.round(Number(store.baseline.others.value)).toLocaleString() + '/mo' : '£—/mo' }}).
       Full totals and breakdowns live on each property's page.
