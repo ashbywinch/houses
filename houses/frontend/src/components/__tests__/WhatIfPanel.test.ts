@@ -147,14 +147,19 @@ describe('WhatIfPanel', () => {
     await flushPromises()
     expect(store.whatIfActive).toBe(true)
 
-    // open without any click — the state fetch already said active
+    // one solid card: header chip names the state in plain English and
+    // there is no collapse affordance while the scenario is live
+    expect(wrapper.find('.whatif--pinned').exists()).toBe(true)
+    expect(wrapper.find('.whatif__state').text()).toBe('What-if numbers showing')
+    expect(wrapper.find('.whatif__chevron').exists()).toBe(false)
     const toggle = wrapper.find('.whatif__toggle')
     expect((toggle.element as HTMLButtonElement).disabled).toBe(true)
     expect(toggle.attributes('title')).toBe('Resolve the what-if first')
-    // an open dropdown looks open: the chevron points down and stays
-    expect(wrapper.find('.whatif--pinned').exists()).toBe(true)
-    expect(wrapper.find('.whatif__chevron').exists()).toBe(true)
-    expect(wrapper.find('.whatif__chevron').text()).toBe('▾')
+
+    // the exits and the cards note live inside the same card
+    expect(wrapper.text()).toContain('The house cards below show these numbers.')
+    findButton(wrapper, 'Back to real numbers')
+    findButton(wrapper, 'Keep these numbers')
 
     // clicking the disabled toggle must not collapse the body
     await toggle.trigger('click')

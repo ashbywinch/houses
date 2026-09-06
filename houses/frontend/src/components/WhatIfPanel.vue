@@ -180,9 +180,9 @@ async function accept() {
         @click="toggleCollapsed"
       >
         <h2 class="whatif__title">
-          What if…<span v-if="active" class="whatif__state">showing</span>
+          What if…<span v-if="active" class="whatif__state">What-if numbers showing</span>
         </h2>
-        <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
+        <span v-if="!active" class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       </button>
     </header>
 
@@ -306,7 +306,10 @@ async function accept() {
 
 <style scoped>
 .whatif {
-  padding: 12px 0 0;
+  border: 1.5px solid var(--slate-300, var(--text-muted));
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  padding: 12px 14px;
 }
 .whatif__header {
   display: flex;
@@ -319,26 +322,24 @@ async function accept() {
   justify-content: space-between;
   width: 100%;
   min-height: 44px;
-  padding: 12px 14px;
-  border: 1.5px dashed var(--text-muted);
-  border-radius: var(--radius);
-  background: var(--card-bg);
+  padding: 0;
+  border: none;
+  background: none;
   cursor: pointer;
-  transition: background 0.15s;
   color: inherit;
   font: inherit;
+  text-align: left;
 }
 .whatif__toggle:hover {
-  background: var(--pill-bg);
+  background: none;
 }
 
 .whatif--pinned .whatif__toggle {
-  border-style: solid;
   cursor: default;
 }
 
 .whatif--pinned .whatif__toggle:hover {
-  background: var(--card-bg);
+  background: none;
 }
 .whatif__chevron {
   font-size: 0.8rem;
