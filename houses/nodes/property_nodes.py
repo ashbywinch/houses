@@ -114,7 +114,6 @@ class _SummaryJson:
     rightmove_price: Any
     rightmove_bedrooms: Any
     group_monthly_cost: Any
-    monthly_commute_cost: Any
     town_name: Any
     commutes: dict
     schools: dict
@@ -605,7 +604,6 @@ class PropertyNodes:
             rightmove_price=await self.rightmove_price.to_json_value(),
             rightmove_bedrooms=await self.rightmove_bedrooms.to_json_value(),
             group_monthly_cost=await self.group_monthly_cost.to_json_value(),
-            monthly_commute_cost=await self._commute_breakdown_json(),
             town_name=await self.town_name.to_json_value(),
             commutes={k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
             schools=schools.to_dict(),
@@ -638,8 +636,8 @@ class PropertyNodes:
             mortgage_required=await self.mortgage_required.to_json(),
             monthly_mortgage=await self.monthly_mortgage.to_json(),
             monthly_sinking_fund=await self.monthly_sinking_fund.to_json(),
-            monthly_commute_cost=await self._commute_breakdown_json(),
             rental_income=await self.rental_income.to_json(),
+            monthly_commute_cost=await self._commute_breakdown_json(),
             group_monthly_cost=await self.group_monthly_cost.to_json(),
         )
         apportionment = _CouncilTaxApportionmentJson(
