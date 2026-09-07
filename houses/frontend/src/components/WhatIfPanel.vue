@@ -320,6 +320,10 @@ async function accept() {
   background: var(--card-bg);
   padding: var(--sp-3);
 }
+.whatif--collapsed {
+  /* Slim closed bar: the 44px touch row plus a standard gutter. */
+  padding: var(--sp-2) var(--sp-3);
+}
 .whatif__header {
   display: flex;
   align-items: center;
@@ -389,25 +393,25 @@ async function accept() {
 .whatif-person__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
+  gap: var(--sp-2) var(--sp-4);
   align-items: center;
-  margin-bottom: 0.4rem;
+  margin-bottom: var(--sp-1);
 }
 .whatif-person__toggle {
   font-size: 0.85rem;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--sp-1);
 }
 .whatif-person__fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem 1rem;
+  gap: var(--sp-2) var(--sp-4);
 }
 .whatif-person__field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--sp-1);
   margin-bottom: var(--sp-2);
   color: var(--text-secondary);
   font-size: var(--fs-sm);
@@ -426,7 +430,7 @@ async function accept() {
 }
 .whatif-person__field .band-helper { font-size: var(--fs-2xs); }
 .whatif-person__field input {
-  padding: 4px 10px;
+  padding: var(--sp-1) var(--sp-3);
   border: none;
   background: var(--pill-bg);
   border-radius: var(--radius-sm);
@@ -440,23 +444,18 @@ async function accept() {
 .whatif__status {
   color: var(--text-muted);
   font-size: 0.85rem;
-  margin: 0.4rem 0 0;
+  margin: var(--sp-1) 0 0;
 }
 .whatif__error {
   color: var(--red);
   font-size: 0.85rem;
-  margin: 0.4rem 0 0;
-}
-.whatif__footer {
-  display: flex;
-  gap: 8px;
-  margin-top: 14px;
+  margin: var(--sp-1) 0 0;
 }
 .whatif__btn {
   flex: 1;
   border: none;
   border-radius: var(--radius-sm);
-  padding: 10px;
+  padding: var(--sp-2) var(--sp-3);
   font-size: 0.8125rem;
   font-weight: var(--fw-semibold);
   cursor: pointer;
@@ -476,7 +475,7 @@ async function accept() {
 }
 
 .whatif__cards-note {
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
   font-size: 0.8125rem;
   color: var(--text-muted);
   text-align: left;
