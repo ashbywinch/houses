@@ -142,7 +142,12 @@ describe('WhatIfPanel', () => {
   })
 
   it('furling an active what-if cancels it — the real numbers come back', async () => {
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+    // active at mount (two loads: the pin-open watch + onMounted); after the
+    // furl-restore the state endpoint says inactive, so the unfurl re-syncs
+    vi.mocked(api.fetchWhatIfState)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValue(false)
     const { wrapper, store } = mountPanel()
     await flushPromises()
     expect(store.whatIfActive).toBe(true)
@@ -164,7 +169,10 @@ describe('WhatIfPanel', () => {
     expect(wrapper.text()).toContain('Try scenario')
   })
 
-  it('locks the scenario fields and shows exactly two exits while active', async () => {
+  it('keeps the scenario fields editable while active and shows exactly two exits', async () => {
+    // An active what-if is EDITABLE — tweaking numbers mid-scenario and
+    // re-trying is the whole point. Only an in-flight write disables the
+    // fields (the fieldset binds :disabled="busy").
     vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
     const { wrapper } = await mountPanel()
     await flushPromises()
@@ -176,7 +184,7 @@ describe('WhatIfPanel', () => {
       .findAll('.whatif-person__field')
       .find(l => l.text().includes('Cash available for the deposit'))!
       .find('input')
-    expect((ashbyCash.element as HTMLInputElement).matches(":disabled")).toBe(true)
+    expect((ashbyCash.element as HTMLInputElement).matches(":disabled")).toBe(false)
   })
 
   it('offers only Try scenario when nothing is active — fields editable', async () => {
