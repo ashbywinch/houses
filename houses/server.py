@@ -93,6 +93,18 @@ def _on_node_refreshed(node):
     )
 
 
+
+def _on_persons_changed():
+    """Rebuild commute pipelines where a destination was added or
+    removed. Runs on the DAG processor thread (persons pushes land
+    there); a no-op when the destination set is unchanged."""
+    from houses.nodes.commute_pipeline_builder import refresh_commute_pipelines
+
+    rebuilt = refresh_commute_pipelines()
+    if rebuilt:
+        logger.info("rebuilt commute pipelines for %d property(ies)", rebuilt)
+
+
 def _deploy_hash() -> str:
     """Return the short git HEAD hash, or ``""`` when git is unavailable."""
     try:
@@ -188,6 +200,9 @@ async def lifespan(_app: FastAPI):
     _main_loop = asyncio.get_running_loop()
     set_after_refresh(_on_node_refreshed)
     start_processor()
+    # Destination added/removed in settings → commute pipelines rebuild
+    # (runs on the processor thread — persons pushes land there).
+    _sp.get_services().persons_source.changed.connect(_on_persons_changed)
     _bc_task = asyncio.create_task(_broadcaster_mod._broadcaster())
 
     logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))
