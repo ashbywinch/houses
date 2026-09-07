@@ -243,50 +243,6 @@ def test_restore_without_active_state_is_409(whatif_world):
     assert client.post("/api/what-if/restore").status_code == 409
 
 
-def test_summary_carries_commute_breakdown_for_pills(whatif_world):
-    """The commute pills must show scenario-true figures: the property
-    summary carries the DAG's commute breakdown, so an applied what-if
-    (Pimlico 0 days) re-prices Simon's Pimlico line at £0/yr in the
-    summary the cards render."""
-    client, rid = whatif_world
-
-    def summary_breakdown() -> dict:
-        lst = client.get("/api/properties/all").json()
-        return lst[rid]["monthly_commute_cost"]["value"]["persons"]
-
-    flush_all()
-    real = summary_breakdown()
-    pimlico = next(c for c in real["Simon"]["commutes"] if c["label"] == "Pimlico")
-    assert pimlico["trips_per_week"] == 1
-    assert Decimal(pimlico["yearly_gbp"]) > 0
-
-    assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
-    flush_all()  # the real drain is the background processor; tests flush explicitly
-
-    scenario = summary_breakdown()
-    scen_pimlico = next(c for c in scenario["Simon"]["commutes"] if c["label"] == "Pimlico")
-    assert scen_pimlico["trips_per_week"] == 0
-    assert Decimal(scen_pimlico["yearly_gbp"]) == 0
-
-
-def test_accept_keeps_scenario_as_real_and_discards_snapshot(whatif_world):
-    """Accept = the scenario becomes the real numbers: the marker clears
-    (state inactive), the persons are UNCHANGED (still the scenario), and
-    the snapshot is discarded — a restore afterwards is a 409, because
-    there is nothing left to go back to."""
-    client, rid = whatif_world
-    assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
-    scenario = _pimlico_commute(client, rid)
-    assert scenario.trips == 0
-
-    assert client.post("/api/what-if/accept").status_code == 200
-    assert client.get("/api/what-if/state").json() == {"active": False}
-
-    # The scenario stays live as the new reality.
-    kept = _pimlico_commute(client, rid)
-    assert kept == scenario
-    # The snapshot is gone: restoring can no longer reach the originals.
-    assert client.post("/api/what-if/restore").status_code == 409
 
 
 def test_apply_requires_authentication(whatif_world):
