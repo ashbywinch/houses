@@ -204,7 +204,6 @@ class _CommentsJson:
         return asdict(self)
 
 
-
 @dataclass(frozen=True)
 class _SettingsFinancial:
     """The financial settings block: status plus the aggregate value."""
@@ -416,6 +415,11 @@ class PropertyNodes:
         self.commute_selectors: dict[str, CommuteSelectorNode] = {}
         self.commute_breakdown: CommuteBreakdownNode | None = None
         self._build_commute_pipeline()
+        # Destination added/removed in settings → this property's commute
+        # pipelines rebuild here (the pipelines are graph STRUCTURE — they
+        # cannot recompute themselves; the component owns that imperative
+        # through the DAG's own signal).
+        self._svc.persons_source.changed.connect(self._on_persons_changed)
         # The builder always attaches the breakdown node; narrow the
         # Optional declaration for the config wiring below.
         assert self.commute_breakdown is not None, "commute pipeline not built"
@@ -532,6 +536,28 @@ class PropertyNodes:
 
         build_commute_pipeline(self)
 
+    def _on_persons_changed(self) -> None:
+        """Rebuild this property's commute pipelines when the destination
+        set changed (a POI added or removed in settings). A no-op for
+        trips/car/MPG edits — those nodes read the persons source live.
+        Runs on the DAG processor thread (persons pushes land there)."""
+        wanted = {
+            f"{p.name}/{q.label}" for p in (self._svc.persons_source._value or []) for q in (p.places_of_interest or [])
+        }
+        if wanted == set(self.commute_selectors):
+            return
+
+        # Teardown pipelines whose destination was removed: disconnect
+        # every node under the removed keys (drops scheduler registration
+        # and signal slots).
+        for key in set(self.commute_selectors) - wanted:
+            prefix = f"{self.rid}/{key}/"
+            for nid, node in list(get_scheduler().registered_nodes().items()):
+                if nid.startswith(prefix):
+                    node.disconnect()
+
+        build_commute_pipeline(self)
+
     def _on_node_changed(self) -> None:
         self.changed.emit()
 
@@ -582,8 +608,7 @@ class PropertyNodes:
                 queue.extend(node._get_active_deps())
         self._code_refresh_epoch = _dag_derived._CODE_VERSION_EPOCH
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _commute_breakdown_json(self) -> dict:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""
@@ -689,9 +714,7 @@ class PropertyNodes:
             comments=comments.to_dict(),
             settings=_SettingsBlock(
                 persons=await self._svc.persons_source.to_json(),
-                financial=_SettingsFinancial(
-                    status="succeeded", value=aggregate_dict(self._svc.setting_nodes)
-                ),
+                financial=_SettingsFinancial(status="succeeded", value=aggregate_dict(self._svc.setting_nodes)),
             ),
         )
         return rec.to_dict()
