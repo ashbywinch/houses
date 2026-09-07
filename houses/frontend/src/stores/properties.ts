@@ -28,6 +28,7 @@ export const usePropertiesStore = defineStore('properties', () => {
   // The green→amber boundary (good_max_minutes) — the 'commute colour
   // bands' — set per person in Settings and read by the card pills.
   const commuteGoods = ref<Record<string, number>>({})
+  const poiTrips = ref<Record<string, Record<string, number>>>({})
   const poiLabels = ref<Record<string, string[]>>({})
   // C9: houses over the family commute ceiling are hidden only when the
   // user opts in — persisted here so the choice survives navigation.
@@ -127,7 +128,7 @@ export const usePropertiesStore = defineStore('properties', () => {
   interface PersonEntry {
     name: string
     is_child?: boolean
-    places_of_interest?: { label: string }[]
+    places_of_interest?: { label: string; trips_per_week?: number }[]
     home_sale_price?: { amount: string }
     outstanding_mortgage?: { amount: string }
     home_co_owners?: { name: string; share?: number }[]
@@ -154,9 +155,12 @@ export const usePropertiesStore = defineStore('properties', () => {
         }
         commuteGoods.value[name] = t.good_max_minutes ?? 45
         labels[name] = (p?.places_of_interest ?? []).map(poi => poi.label)
-      }
+        poiTrips.value[name] = Object.fromEntries(
+          (p?.places_of_interest ?? []).map(poi => [poi.label, poi.trips_per_week ?? 1])
+        )
       commuteCeilings.value = ceilings
       poiLabels.value = labels
+      }
       // Mirror the DAG's joint_owner_names: current-home holders +
       // co-owners form the couple; every other adult is an other.
       const adults = persons.filter(p => !p.is_child)
@@ -256,7 +260,7 @@ export const usePropertiesStore = defineStore('properties', () => {
 
   return {
     rids, summaries, details, triage, settings, loading, error,
-    commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels, listScrollY,
+    commuteCeilings, commuteGoods, poiLabels, poiTrips, showOverCeiling, groupLabels, listScrollY,
     addByUrl, retryPropertyScrape, saveDetails, removeFromList,
     whatIfActive, setWhatIfActive, coupleTotalFor, groupCostFor, baseline, deltaFor,
     loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
