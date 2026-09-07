@@ -257,3 +257,41 @@ def build_commute_pipeline(prop) -> None:
         commute_selectors=prop.commute_selectors,
         persons_source=prop._svc.persons_source,
     )
+
+
+def refresh_commute_pipelines() -> int:
+    """Rebuild commute pipelines for properties whose destination set
+    changed (a POI added or removed in settings). Called when the persons
+    source changes; runs on the processor thread in production.
+
+    Returns the number of properties rebuilt. Trips/car/MPG edits do NOT
+    rebuild — those nodes read the persons source live; only adding or
+    removing a destination changes the pipeline shape.
+    """
+    from dag.scheduler import get_scheduler
+    from houses.property_registry import get_property, list_properties
+
+    persons = get_services().persons_source._value or []
+    wanted = {f"{p.name}/{q.label}" for p in persons for q in (p.places_of_interest or [])}
+
+    rebuilt = 0
+    for rid in list_properties():
+        prop = get_property(rid)
+        if prop is None or not hasattr(prop, "commute_selectors"):
+            continue
+        existing = set(prop.commute_selectors)
+        if existing == wanted:
+            continue
+
+        # Teardown pipelines whose destination was removed: disconnect
+        # every node under the removed keys (kills scheduler registration
+        # and signal slots), then rebuild the whole set fresh.
+        for key in existing - wanted:
+            prefix = f"{rid}/{key}/"
+            for nid, node in list(get_scheduler().registered_nodes().items()):
+                if nid.startswith(prefix):
+                    node.disconnect()
+
+        build_commute_pipeline(prop)
+        rebuilt += 1
+    return rebuilt
