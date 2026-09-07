@@ -197,6 +197,19 @@ class TestSettingsWriteGuard:
 
         guard_settings_write(**self._guard_kwargs(app=True))  # must not raise
 
+
+    def test_guard_refuses_pytest_write_when_isolation_not_armed(self, monkeypatch):
+        """The 2026-09-06 leak: a pytest-process settings write reached the
+        REAL database because the isolation fixture was not armed at the
+        moment of the write. When the caller claims pytest mode but
+        dag.persistence.testing is False, the guard must refuse."""
+        from dag import persistence as _persistence
+        from houses.nodes.settings import guard_settings_write
+
+        monkeypatch.setattr(_persistence, "testing", False)
+        with pytest.raises(RuntimeError, match="isolation fixture is not armed"):
+            guard_settings_write(testing=True, app_mode=False, scripts_may_write=False)
+
     def test_settings_node_push_blocked_outside_the_app(self):
         from houses.model.domain import Person
         from houses.nodes.settings import SettingsNode

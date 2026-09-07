@@ -173,26 +173,6 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
 
 
 
-def _seed_input_defaults(prop) -> None:
-    """Materialise defaults for input nodes that are still pending.
-
-    A pending input node with no producer permanently blocks every
-    downstream refresh: ``refresh()`` waits for pending deps, so an empty
-    sheet "Status" cell (or a DB row that was never written) freezes the
-    whole money cascade — equity → mortgage → monthly payment — forever.
-    Defaults match the sheet path's semantics: empty status = not
-    "Current", no works estimates = {}, no rental income = £0.  Never
-    overwrite a value the user (or a source) already set.
-    """
-    if prop.comment_status.latest_attempt().pending:
-        prop.comment_status.push("", "default")
-    if prop.comment_status_reason.latest_attempt().pending:
-        prop.comment_status_reason.push("", "default")
-    if prop.works_estimates.latest_attempt().pending:
-        prop.works_estimates.push({}, "default")
-    if prop.rental_income.latest_attempt().pending:
-        prop.rental_income.push(Money(amount="0", currency="GBP"), "default")
-
 
 def load_property_nodes_from_db() -> int:
     """Create PropertyNodes for every RID found in the DB.
@@ -203,7 +183,6 @@ def load_property_nodes_from_db() -> int:
     count = 0
     for rid in property_rids():
         prop = PropertyNodes(rid)
-        _seed_input_defaults(prop)
         register_property(rid, prop)
         # PRD contract: reads and writes are non-blocking; recomputes are
         # scheduled by whatever makes them necessary.  A deploy makes

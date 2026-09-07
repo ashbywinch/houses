@@ -1,5 +1,6 @@
 import { ref, onUnmounted, getCurrentInstance } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
+import { fetchWhatIfState } from '../services/api'
 
 const MAX_RETRIES = 10
 const BASE_DELAY = 1000
@@ -53,6 +54,12 @@ export function useWebSocket(factory?: (url: string) => WebSocket) {
         // polling or navigation.
         if (msg.type === 'node_updated' && isSettingsNode(msg.node_id)) {
           store.loadSettings()
+          // A what-if applied on another device writes through the same
+          // settings nodes — refresh the mode flag so this device's
+          // banner and chips flip without a reload.
+          fetchWhatIfState()
+            .then(active => store.setWhatIfActive(active))
+            .catch(e => console.error('Failed to refresh what-if state:', e))
         }
       } catch {
         // ignore parse errors

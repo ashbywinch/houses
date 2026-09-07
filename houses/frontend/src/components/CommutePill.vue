@@ -11,6 +11,9 @@ const props = defineProps<{
   mode?: string
   goodMax?: number
   fineMax?: number
+  /** Renders the cost whole-pound with this suffix (e.g. '/mo')
+   *  and skips the TfL daily-max cap — for monthly figures. */
+  costSuffix?: string
 }>()
 const colour = computed(() => {
   const d = props.duration
@@ -28,8 +31,13 @@ const colour = computed(() => {
 const displayText = computed(() => {
   const durStr = formatDuration(props.duration)
   const modeStr = props.mode ? ` ${props.mode}` : ''
-  const cap = props.cost != null && props.cost >= 100
-  const costStr = props.cost != null ? ` · £${props.cost.toFixed(2)}${cap ? ' (max)' : ''}` : ''
+  const monthly = props.costSuffix != null && props.cost != null
+  const cap = !monthly && props.cost != null && props.cost >= 100
+  const costStr = props.cost == null
+    ? ''
+    : monthly
+      ? ` · £${Math.round(props.cost)}${props.costSuffix}`
+      : ` · £${props.cost.toFixed(2)}${cap ? ' (max)' : ''}`
   if (props.label) return `${props.label} ${durStr}${modeStr}${costStr}`
   return `${durStr}${modeStr}${costStr}`
 })

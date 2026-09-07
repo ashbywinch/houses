@@ -417,3 +417,58 @@ class TestBroadcasterBaselineFreshness:
                 await task
 
         assert [m["rid"] for m in ws.messages] == ["880002"]
+
+    @pytest.mark.asyncio
+    async def test_notify_node_refreshed_pushes_property_summaries(self):
+        """THE DAG contract: any node refresh notifies the frontend. A
+        property node refresh queues that rid; the debounced flush pushes
+        one fresh summary per changed property."""
+        from types import SimpleNamespace
+
+        import houses.web.broadcaster as bcast
+
+        bcast._reset()
+        registry, _base, _cand = _baseline_pair()
+        await flush_processor()
+
+        ws = _FakeWS()
+        bcast._websocket_clients.add(cast(WebSocket, ws))
+        task = asyncio.create_task(bcast._broadcaster())
+
+        # Two property nodes refresh (e.g. a what-if apply touched the
+        # persons input): both rids are notified.
+        bcast.notify_node_refreshed(SimpleNamespace(_id="880002/group_monthly_cost"))
+        bcast.notify_node_refreshed(SimpleNamespace(_id="880001/works_estimates"))
+        try:
+            await _until(
+                lambda: {m["rid"] for m in ws.messages} >= {"880001", "880002"},
+                message="both notified rids must be pushed",
+            )
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        # The sweep may add extra pushes (Keep-scenario side effects);
+        # both notified rids must have arrived.
+        rids = {m["rid"] for m in ws.messages}
+        assert {"880001", "880002"} <= rids
+        assert all(m["type"] == "property_updated" for m in ws.messages)
+
+    @pytest.mark.asyncio
+    async def test_notify_node_refreshed_ignores_non_property_nodes(self):
+        from types import SimpleNamespace
+
+        import houses.web.broadcaster as bcast
+
+        bcast._reset()
+        registry, _base, _cand = _baseline_pair()
+        await flush_processor()
+
+        ws = _FakeWS()
+        bcast._websocket_clients.add(cast(WebSocket, ws))
+        bcast.notify_node_refreshed(SimpleNamespace(_id="persons"))
+        bcast.notify_node_refreshed(SimpleNamespace(_id="settings/mortgage_rate"))
+        await asyncio.sleep(0.05)
+
+        assert ws.messages == [], "non-property nodes must not trigger property broadcasts"

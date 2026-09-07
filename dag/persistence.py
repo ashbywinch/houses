@@ -257,6 +257,33 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     result["_code_version"] = row["code_version"]
     return result
 
+
+def node_result_before(node_id: str, before: str) -> dict[str, Any] | None:
+    """Return the most recent to_json() dict for a node STRICTLY BEFORE
+    the ISO-8601 timestamp *before*, or None.
+
+    node_results is append-only history ("each call appends a new row"),
+    so this is a reference into the DAG's own past — e.g. the what-if
+    restore reads the persons attempt from before the scenario started.
+    """
+    if not _table_exists("node_results"):
+        init_db()
+        return None
+    _ensure_code_version_column()
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
+        " WHERE node_id=? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+        (node_id, before),
+    ).fetchone()
+    if row is None:
+        return None
+    result = json.loads(decompress_result(row["result_json"]))
+    result["_dep_timestamps"] = json.loads(row["dep_timestamps"]) if row["dep_timestamps"] else {}
+    result["_persisted_at"] = row["created_at"]
+    result["_code_version"] = row["code_version"]
+    return result
+
 def _table_exists(name: str) -> bool:
     conn = _get_db()
     row = conn.execute(

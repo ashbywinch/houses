@@ -63,6 +63,12 @@ def guard_settings_write(
     if scripts_may_write is None:
         scripts_may_write = os.environ.get("HOUSES_SCRIPTS_MAY_WRITE") == "1"
     if testing:
+        if not _persistence.testing:
+            raise RuntimeError(
+                "Refusing a settings write while pytest is running but the "
+                "DB-isolation fixture is not armed — it would reach the real "
+                "database (observed in the wild 2026-09-06)."
+            )
         return  # pytest isolation fixtures
     if app_mode:
         return  # the running uvicorn app (lifespan set the flag)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { PropertySummary } from '../types'
+import type { CommuteSummary, PersonCommuteLeg, PropertySummary } from '../types'
 import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
 import { simpleOfsted, ofstedClass } from '../formatters/format'
@@ -89,15 +89,12 @@ const monthlyCostApprox = computed(() => {
   return g.succeeded && ((g.value?.couple?.stddev ?? 0) > 0 || (g.value?.others?.stddev ?? 0) > 0)
 })
 
-// Part D: a hypothetical total from the "What if…" panel (overlaid by
-// PropertyList) is marked so it is never mistaken for a real number.
-const isWhatIf = computed(() => props.data.group_monthly_cost.provenance?.label === 'what-if')
 
 // The headline's TWO numbers: the joint owners (the couple) and the
-// other adults, labelled dynamically — overlaid by the what-if.
+// other adults, labelled dynamically — straight from the summary.
+// In what-if mode the summary already IS the scenario: the server
+// applied it through the DAG, so nothing is overlaid here.
 const groupCost = computed(() => {
-  const wt = store.whatIfTotals?.[props.rid]
-  if (wt) return wt
   const g = props.data.group_monthly_cost
   return g?.succeeded && g.value ? g.value : null
 })
@@ -233,27 +230,47 @@ function commuteAddress(c: unknown, key: string): string {
   return typeof address === 'string' && address ? address : commuteLabel(c, key)
 }
 
+/** The summary's commute-breakdown entry for this row (key
+ *  'person/label'), or null when the summary carries no breakdown
+ *  for the destination — the row then falls back to the raw daily
+ *  fare. */
+function summaryLeg(key: string, label: string): PersonCommuteLeg | null {
+  const m = props.data.monthly_commute_cost
+  const commutes = m?.succeeded
+    ? m.value?.persons?.[key.split('/')[0]]?.commutes
+    : undefined
+  return commutes?.find((c) => c.label === label) ?? null
+}
+
+/** The person's MONTHLY contribution for a breakdown destination
+ *  (whole pounds from the yearly figure) plus the trips/year
+ *  tooltip for the pill. */
+function monthlyOf(leg: PersonCommuteLeg | null): { cost: number; title: string } | null {
+  if (leg === null) return null
+  const yearly = parseFloat(leg.yearly_gbp)
+  if (!Number.isFinite(yearly)) return null
+  return { cost: Math.round(yearly / 12), title: `${leg.trips_per_week} days/wk · £${leg.yearly_gbp}/yr` }
+}
+
+/** Adult rows for the commute section, enriched with the summary
+ *  breakdown's monthly figure when it carries the destination. A
+ *  destination with trips_per_week 0 takes NO row at all — no pill,
+ *  no muted line. */
 const adultCommutes = computed(() => {
   if (!props.data.commutes) return {}
-  return Object.fromEntries(
-    Object.entries(props.data.commutes).filter(([, v]) => !isChildCommute(v.commute))
-  )
+  const rows: Record<string, { commute: CommuteSummary['commute']; monthly: { cost: number; title: string } | null }> = {}
+  for (const [key, v] of Object.entries(props.data.commutes)) {
+    if (isChildCommute(v.commute)) continue
+    const leg = summaryLeg(key, commuteLabel(v.commute, key))
+    if (leg?.trips_per_week === 0) continue
+    rows[key] = { commute: v.commute, monthly: monthlyOf(leg) }
+  }
+  return rows
 })
 
 function isChildCommute(c: unknown): boolean {
   return (c as Record<string, unknown> | undefined)?.is_child === true
 }
-
-/** C4: a commute whose destination label is no longer among the
- *  person's current POIs (renamed/removed in Settings) is stale. */
-function isStaleOffice(key: string): boolean {
-  const person = key.split('/')[0]
-  const label = key.split('/').slice(1).join('/')
-  const current = store.poiLabels[person]
-  if (!current) return false
-  return !current.includes(label)
-}
-
 /** C?: the commute colour bands are the person's own thresholds
  *  (Settings → 'commute bands'), not a global constant: good = the
  *  green→amber boundary, fine = amber→red. Falls back to the walk /
@@ -319,6 +336,7 @@ async function toggleViewed() {
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
+        <span v-if="store.whatIfActive" class="card__whatif">what-if</span>
         <span v-if="data.is_current_home" class="card__baseline-chip">Your home · baseline</span>
         <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
           <template v-if="showDeltas">
@@ -341,7 +359,6 @@ async function toggleViewed() {
               {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
             </span>
           </template>
-          <span v-if="isWhatIf" class="card__whatif">what-if</span>
         </span>
         <span
           v-else
@@ -362,7 +379,6 @@ async function toggleViewed() {
       <div v-if="data.commutes" class="card__commutes">
         <div v-for="(c, key) in adultCommutes" :key="key" class="card__commute-row">
           <span class="card__commute-person">{{ commutePerson(c.commute, key) }} → {{ commuteLabel(c.commute, key) }}</span>
-          <span v-if="isStaleOffice(key)" class="card__commute-stale" title="This office was renamed or removed in Settings — the commute shown is from an old version">old office</span>
           <div class="card__commute-data">
             <a
               v-if="location"
@@ -370,12 +386,14 @@ async function toggleViewed() {
               class="pill-link"
               target="_blank"
               rel="noopener"
+              :title="c.monthly?.title"
             >
               <CommutePill
                 :label="''"
                 :duration="commuteDuration(c.commute)"
                 :mode="commuteMode(c.commute)"
-                :cost="commuteCost(c.commute)"
+                :cost="c.monthly?.cost ?? commuteCost(c.commute)"
+                :costSuffix="c.monthly ? '/mo' : undefined"
                 :goodMax="pillThresholds(key, commuteMode(c.commute) === 'walk').goodMax"
                 :fineMax="pillThresholds(key, commuteMode(c.commute) === 'walk').fineMax"
               />
@@ -558,17 +576,6 @@ async function toggleViewed() {
   flex-direction: column;
   gap: 6px;
   margin-bottom: 10px;
-}
-.card__commute-stale {
-  font-size: 0.65rem;
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--orange);
-  border: 1px solid var(--orange);
-  border-radius: var(--radius-full);
-  padding: 0.05rem 0.4rem;
-  white-space: nowrap;
 }
 .card__change-dest {
   display: inline-block;

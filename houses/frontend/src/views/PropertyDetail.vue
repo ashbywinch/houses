@@ -224,6 +224,7 @@ async function saveAddress() {
         <div class="summary-address-row">
           <h1 class="summary-address">
             {{ address }}
+            <span v-if="store.whatIfActive" class="summary-whatif-chip">what-if</span>
             <button
               v-if="!editingAddress"
               class="summary-address-edit"
@@ -450,6 +451,18 @@ async function saveAddress() {
   margin: 0;
   color: var(--slate-900);
   line-height: var(--lh-tight);
+}
+.summary-whatif-chip {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 0.65rem;
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-full);
+  padding: 0.05rem 0.4rem;
 }
 .summary-address-edit {
   color: var(--blue);

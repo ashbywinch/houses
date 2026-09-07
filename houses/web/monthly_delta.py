@@ -95,7 +95,10 @@ def resolve_baseline(registry) -> MonthlyBaseline | None:
     if len(homes) != 1:
         return None
     prop = registry.get(homes[0])
-    att = prop.group_monthly_cost.latest_attempt()
+    node = getattr(prop, "group_monthly_cost", None)
+    if node is None:
+        return None
+    att = node.latest_attempt()
     value = att.value_or_none() if att.succeeded else None
     if not isinstance(value, dict) or _figure_value(value.get("couple")) is None:
         return None
