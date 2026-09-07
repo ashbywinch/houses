@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import queue
 import sqlite3
 import threading
 import zlib
@@ -28,6 +29,91 @@ logger = logging.getLogger(__name__)
 DB_PATH: Path | None = None
 testing: bool = False
 _connection_cache = threading.local()
+
+
+# ---------------------------------------------------------------- Save queue
+# Persistence writes are enqueued and drained by a single consumer so the
+# event loop never blocks on I/O. Production: a daemon worker thread.
+# Tests: the test calls flush_pending_saves() to drain on the test thread
+# (deterministic, in-memory DB stays single-thread). queue.Queue provides
+# the thread-safe handoff; no other lock is needed because only the
+# consumer ever calls save_node_result.
+_save_queue: "queue.Queue[tuple | None]" = queue.Queue()
+_save_thread: threading.Thread | None = None
+
+
+def _save_one(item: tuple) -> None:
+    """Process one queued save item. Errors are logged, never raised: a
+    single bad payload must not kill the worker thread or leak unfinished
+    tasks (task_done always runs). Shared by the production worker and
+    the test-thread flush — one code path, tested deterministically.
+    """
+    try:
+        node_id, result_dict, dep_timestamps, created_at, code_version = item
+        save_node_result(node_id, result_dict, dep_timestamps, created_at=created_at, code_version=code_version)
+    except Exception:
+        logger.exception("failed to persist node %s", item[0])
+    finally:
+        _save_queue.task_done()
+
+
+def _save_worker() -> None:
+    while True:
+        item = _save_queue.get()
+        if item is None:
+            _save_queue.task_done()
+            break
+        _save_one(item)
+
+
+def _ensure_save_thread() -> None:
+    global _save_thread
+    if _save_thread is None or not _save_thread.is_alive():
+        _save_thread = threading.Thread(target=_save_worker, daemon=True, name="dag-save")
+        _save_thread.start()
+
+
+def enqueue_save(
+    node_id: str,
+    result_dict: dict,
+    dep_timestamps: dict[str, str] | None,
+    created_at: str,
+    code_version: str | None,
+) -> None:
+    """Queue a node-result write; returns immediately, never blocks on I/O.
+
+    Production: the worker thread drains the queue. Tests (per.testing):
+    no worker — the test drains on the test thread via
+    flush_pending_saves(), deterministically, on its own :memory: DB.
+    """
+    if not testing:
+        _ensure_save_thread()
+    _save_queue.put((node_id, result_dict, dep_timestamps, created_at, code_version))
+
+
+def flush_pending_saves() -> None:
+    """Drain the save queue on the calling thread.
+
+    Production shutdown drains remaining writes; tests call this after an
+    operation that persisted. DB reads (latest_node_result,
+    node_result_before) also flush first — read-your-writes by design.
+    """
+    while True:
+        try:
+            item = _save_queue.get_nowait()
+        except queue.Empty:
+            break
+        if item is None:
+            _save_queue.task_done()
+            break
+        _save_one(item)
+
+
+def reset_save_queue() -> None:
+    """Drop queued writes and stop the worker (test isolation only)."""
+    global _save_thread
+    _save_queue = queue.Queue()
+    _save_thread = None
 
 
 class DagJSONEncoder(json.JSONEncoder):
@@ -238,7 +324,12 @@ def save_node_result(
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def latest_node_result(node_id: str) -> dict[str, Any] | None:
-    """Return the most recent to_json() dict for a node, or None."""
+    """Return the most recent to_json() dict for a node, or None.
+
+    Reads never block on writes: this reads committed DB state as-is.
+    Callers that need queued writes flushed first call
+    flush_pending_saves() explicitly.
+    """
     if not _table_exists("node_results"):
         init_db()
         return None
@@ -265,6 +356,7 @@ def node_result_before(node_id: str, before: str) -> dict[str, Any] | None:
     node_results is append-only history ("each call appends a new row"),
     so this is a reference into the DAG's own past — e.g. the what-if
     restore reads the persons attempt from before the scenario started.
+    Reads never block on writes — see latest_node_result.
     """
     if not _table_exists("node_results"):
         init_db()

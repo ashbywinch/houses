@@ -213,6 +213,9 @@ async def what_if_restore(request: Request):
     if not started:
         raise HTTPException(status_code=409, detail="No what-if is active")
 
+    from dag.persistence import flush_pending_saves
+
+    flush_pending_saves()  # restore reads persisted history; drain its own queued writes first
     row = node_result_before(svc.persons_source._id, started)
     if row is None or not isinstance(row.get("value"), list):
         raise HTTPException(status_code=409, detail="No pre-what-if persons attempt found to restore")

@@ -26,30 +26,32 @@ def _inject_test_scheduler():
 
 @pytest.fixture(autouse=True)
 def _sqlite_memory():
-    """Replace the global DB connection with a temp-file database shared
-    across threads (a :memory: database is per-connection and invisible
-    to the background save thread)."""
-    import tempfile
+    """Isolated in-memory database + empty save queue per test.
+
+    Persistence goes through the persistence save queue (same
+    architecture as production). Tests drain it on the test thread via
+    per.flush_pending_saves() — deterministic, no background thread,
+    so :memory: is safe (one thread touches the connection).
+    """
 
     saved = per._get_db
     per.testing = True
-    db_path = tempfile.mktemp(suffix=".db")
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     per._get_db = lambda: conn
     per.init_db()
-    db.testing = True
+    # Fresh, idle queue: never start the background worker in tests.
+    per.reset_save_queue()
     from houses.database import init_db as init_app_db
 
+    db.testing = True
     init_app_db()
     yield
     per.testing = False
     db.testing = False
     conn.close()
-    import os
-    os.unlink(db_path)
     per._get_db = saved
-
+    per.reset_save_queue()
 
 from houses.council_tax import _reset as _reset_council_tax  # noqa: E402
 from houses.property_registry import _reset as _reset_property_registry  # noqa: E402

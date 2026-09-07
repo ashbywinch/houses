@@ -25,8 +25,9 @@ BusRouteNode._default_google_routes_post = None
 
 
 def flush_all() -> None:
-    """Synchronously drain the stale queue — call this after seeding data
-    to compute derived nodes before reading results."""
+    """Synchronously drain the stale queue AND the persistence save
+    queue — call this after seeding data to compute derived nodes and
+    land their writes before reading results."""
 
     try:
         loop = asyncio.get_event_loop()
@@ -36,6 +37,9 @@ def flush_all() -> None:
     # ONE drain: a node's refresh queues its dependents inside the same
     # drain loop, so a second call could only mask a queue bug.
     loop.run_until_complete(flush_processor())
+    from dag.persistence import flush_pending_saves
+
+    flush_pending_saves()
 
 
 def _make_mock_services():

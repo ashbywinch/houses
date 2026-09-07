@@ -159,6 +159,10 @@ def test_originals_stay_in_dag_history_after_apply(whatif_world):
 
     assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
 
+    from dag.persistence import flush_pending_saves
+
+    flush_pending_saves()  # drain queued pre-what-if writes
+
     from dag.persistence import node_result_before
 
     svc = get_services()
