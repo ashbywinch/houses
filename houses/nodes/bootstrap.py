@@ -182,6 +182,20 @@ def load_property_nodes_from_db() -> int:
 
     count = 0
     for rid in property_rids():
+        # The RID contract is Rightmove's: all digits, 6-10 chars (see
+        # UserInputNode's construction guard). Rows with any other RID are
+        # TEST-DATA POLLUTION — they must never reach this DB, and if they
+        # do, startup fails loudly instead of silently serving them:
+        # delete the offending rows immediately (back the rows up first)
+        # and fix whatever wrote them.
+        if not rid.isdigit() or not 6 <= len(rid) <= 10:
+            raise RuntimeError(
+                f"node_results contains test-data rows under invalid property "
+                f"RID {rid!r}. Test data must never live in the real DB — "
+                f"back up and DELETE those rows immediately, then fix the "
+                f"code path that wrote them. See docs/dag-library.md → "
+                f"'Thread rules', rule 6."
+            )
         prop = PropertyNodes(rid)
         register_property(rid, prop)
         # PRD contract: reads and writes are non-blocking; recomputes are

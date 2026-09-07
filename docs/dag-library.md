@@ -162,6 +162,10 @@ Rules (every one is enforced — guard messages cite this section):
 5. **Freshness is push-delivered.** A read racing a cascade returns the
    previous snapshot; the broadcaster corrects it. Never poll, never
    re-read to "check for updates".
+6. **Test data never enters the real DB.** Every property RID is 6-10
+   digits; rows under any other RID are pollution. If any appear, delete
+   them immediately (back the rows up first) and fix the writer — the
+   startup loader refuses to boot over them.
 
 Shutdown sentinels the processor: remaining work drains in order, then
 the loop stops (bounded join — `systemctl stop` must not hang).
@@ -183,7 +187,14 @@ never needed — reads are snapshot-safe by design.
 
 Every node's `to_json()` includes a `provenance` dict. On failure, read the failed node's `node_results`, then its deps' — repeat to the root cause.
 
-**Never delete DB rows, clear caches, or restart the server to investigate** — that destroys the evidence. Read the provenance chain instead.
+**Investigating a suspicious value: never delete rows, clear caches, or
+restart to make a question go away** — that destroys the evidence. Read
+the provenance chain instead. The one exception is **test-data rows in
+the real DB** (any property RID that is not 6-10 digits, or one-shot
+debug node ids): they must be removed IMMEDIATELY on discovery — back up
+the rows, delete them, fix whatever wrote them. The startup loader
+refuses to boot over them.
+
 
 ### DB isolation for tests
 

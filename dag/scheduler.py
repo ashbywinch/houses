@@ -259,6 +259,7 @@ def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
 _processor_thread: threading.Thread | None = None
 _processor_loop: asyncio.AbstractEventLoop | None = None
 _processor_sched: AsyncQueueScheduler | None = None
+_processor_task: asyncio.Task | None = None
 
 
 def current_processor_thread() -> threading.Thread | None:
@@ -293,6 +294,7 @@ def start_processor() -> None:
     from dag.persistence import testing as _testing
 
     if _testing:
+        logger.debug("DAG processor not started (testing mode)")
         return
     if _processor_thread is not None and _processor_thread.is_alive():
         return
@@ -303,12 +305,26 @@ def start_processor() -> None:
 
     def _run() -> None:
         asyncio.set_event_loop(_processor_loop)
-        _processor_loop.create_task(_processor_sched._background_loop())
-        _processor_loop.run_forever()
+
+        async def _main() -> None:
+            # Created INSIDE the running loop — a bare loop.create_task()
+            # before run_forever() has no running loop and kills the thread.
+            global _processor_task
+            _processor_task = asyncio.create_task(_processor_sched._background_loop())
+            with contextlib.suppress(asyncio.CancelledError):
+                await _processor_task
+
+        _processor_loop.run_until_complete(_main())
         _processor_loop.close()
 
     _processor_thread = threading.Thread(target=_run, name="dag-processor", daemon=True)
     _processor_thread.start()
+    logger.info("DAG processor thread started (%s)", _processor_thread.name)
+
+
+def _cancel_background_task() -> None:
+    if _processor_task is not None and not _processor_task.done():
+        _processor_task.cancel()
 
 
 def stop_processor(timeout: float = 10.0) -> int:
@@ -335,13 +351,14 @@ def stop_processor(timeout: float = 10.0) -> int:
         abandoned = asyncio.run_coroutine_threadsafe(_drain(), _processor_loop).result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         logger.error("processor drain did not finish within %ss", timeout)
-    _processor_loop.call_soon_threadsafe(_processor_loop.stop)
+    _processor_loop.call_soon_threadsafe(_cancel_background_task)
     _processor_thread.join(timeout=timeout)
     if _processor_thread.is_alive():
         logger.error("processor thread did not stop within %ss", timeout)
     _processor_thread = None
     _processor_loop = None
     _processor_sched = None
+    _processor_task = None
     return abandoned
 
 
