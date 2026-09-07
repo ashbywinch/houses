@@ -338,6 +338,10 @@ async function accept() {
   background: var(--card-bg);
   padding: 0 var(--sp-3);
 }
+.whatif--collapsed {
+  /* Slim closed bar: the 44px touch row plus a standard gutter. */
+  padding: var(--sp-2) var(--sp-3);
+}
 .whatif__header {
   display: flex;
   align-items: center;
