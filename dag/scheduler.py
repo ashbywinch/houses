@@ -97,11 +97,32 @@ class AsyncQueueScheduler(RefreshScheduler):
         """Work items enqueued since the last complete drain (flush guard)."""
         return self._enqueued_since_flush
 
+    @property
+    def queue_depth(self) -> int:
+        """Pending work items (operator visibility)."""
+        self._ensure_primitives()
+        queue, wakeup = self._queue, self._wakeup
+        assert queue is not None and wakeup is not None
+        return queue.qsize() + (1 if wakeup.is_set() else 0)
+
+    @property
+    def wakeup_set(self) -> bool:
+        """Whether the processor was woken for pending work."""
+        self._ensure_primitives()
+        wakeup = self._wakeup
+        assert wakeup is not None
+        return wakeup.is_set()
+
     def __init__(self, respect_time: bool = True) -> None:
-        self._queue: asyncio.PriorityQueue[QueueEvent] = asyncio.PriorityQueue()
+        # The queue and wakeup are created LAZILY, on whichever event loop
+        # will actually drain them (the processor loop in production, the
+        # test loop in tests). Constructing them eagerly binds asyncio
+        # primitives to a loop that may never run — the processor then
+        # blocks forever on its first queue.get() and nothing drains.
+        self._queue: asyncio.PriorityQueue[QueueEvent] | None = None
+        self._wakeup: asyncio.Event | None = None
         self._scheduled: dict[str, QueueEvent] = {}
         self._registered: dict[str, DerivedNode] = {}
-        self._wakeup: asyncio.Event = asyncio.Event()
         self._after_refresh_callback: Callable[[DerivedNode], object] | None = None
         self._respect_time: bool = respect_time
         self._enqueued_since_flush = 0
@@ -130,16 +151,37 @@ class AsyncQueueScheduler(RefreshScheduler):
         """Every DerivedNode currently registered, by node id."""
         return dict(self._registered)
 
+    def _ensure_primitives(self) -> None:
+        if self._queue is None:
+            self._queue = asyncio.PriorityQueue()
+        if self._wakeup is None:
+            self._wakeup = asyncio.Event()
+
+    def _put_event(self, event: QueueEvent) -> None:
+        # Runs ON the draining loop (or inline in single-threaded
+        # contexts) — never cross-thread on an asyncio primitive.
+        self._ensure_primitives()
+        queue, wakeup = self._queue, self._wakeup
+        assert queue is not None and wakeup is not None
+        queue.put_nowait(event)
+        wakeup.set()
+
     @override
     def _enqueue(self, node: DerivedNode, scheduled_at: float) -> None:
-        """Queue the node unless already queued, then wake the processor."""
+        """Queue the node unless already queued, then wake the processor.
+
+        Thread-safe by routing through the draining loop: asyncio
+        primitives must only be touched on the loop that owns them."""
         if node._id in self._scheduled:
             return
         event = QueueEvent(scheduled_at=scheduled_at, node_id=node._id, node=node)
         self._scheduled[node._id] = event
         self._enqueued_since_flush += 1
-        self._queue.put_nowait(event)
-        self._wakeup.set()
+        loop = _processor_loop
+        if loop is not None:
+            loop.call_soon_threadsafe(self._put_event, event)
+        else:
+            self._put_event(event)
 
     @override
     def schedule(self, node: DerivedNode) -> None:
@@ -164,15 +206,18 @@ class AsyncQueueScheduler(RefreshScheduler):
         Returns the number processed and resets the since-flush counter
         (the conftest flush_all() no-op guard reads it).
         """
+        self._ensure_primitives()
+        queue, wakeup = self._queue, self._wakeup
+        assert queue is not None and wakeup is not None
         drained = 0
         now_ts = datetime.now(UTC).timestamp() if self._respect_time else float("inf")
-        while not self._queue.empty():
+        while not queue.empty():
             try:
-                event = self._queue.get_nowait()
+                event = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
             if event.scheduled_at > now_ts:
-                await self._queue.put(event)
+                await queue.put(event)
                 break
             self._scheduled.pop(event.node_id, None)
             await event.node.refresh()
@@ -181,8 +226,11 @@ class AsyncQueueScheduler(RefreshScheduler):
         return drained
 
     async def _background_loop(self) -> None:
+        self._ensure_primitives()
+        queue, wakeup = self._queue, self._wakeup
+        assert queue is not None and wakeup is not None
         while True:
-            event = await self._queue.get()
+            event = await queue.get()
             now_ts = datetime.now(UTC).timestamp()
             delay = event.scheduled_at - now_ts
 
@@ -198,10 +246,10 @@ class AsyncQueueScheduler(RefreshScheduler):
                     await asyncio.sleep(0)
                     continue
             else:
-                await self._queue.put(event)
-                self._wakeup.clear()
+                await queue.put(event)
+                wakeup.clear()
                 with contextlib.suppress(asyncio.TimeoutError):
-                    await asyncio.wait_for(self._wakeup.wait(), timeout=delay)
+                    await asyncio.wait_for(wakeup.wait(), timeout=delay)
             await asyncio.sleep(0)
 
 
@@ -342,7 +390,7 @@ def stop_processor(timeout: float = 10.0) -> int:
     async def _drain() -> int:
         while True:
             await sched.process_pending()
-            if sched._queue.empty():
+            if sched.queue_depth == 0:
                 break
         return len(sched._scheduled)
 

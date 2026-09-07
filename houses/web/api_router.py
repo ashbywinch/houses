@@ -1126,9 +1126,9 @@ async def debug_scheduler():
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
-        "queue_size": sched._queue.qsize(),
+        "queue_size": sched.queue_depth,
         "scheduled_count": len(sched._scheduled),
-        "wakeup_set": sched._wakeup.is_set(),
+        "wakeup_set": sched.wakeup_set,
         "queue": queue_snapshot,
     }
 
