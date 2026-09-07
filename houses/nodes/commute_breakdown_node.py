@@ -73,6 +73,12 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 name = "?"
             commutes: list[dict] = []
             for poi in pois or ():
+                if poi.trips_per_week == 0:
+                    # Zero days a week: the destination is not commuted.
+                    # It must not appear at all — a 0-trip commute must
+                    # never be recorded as a £0/free commute (it hasn't
+                    # become free; it doesn't happen).
+                    continue
                 key = f"{name}/{poi.label}"
                 commute_node = self._commute_selectors.get(key)
                 if commute_node is None:

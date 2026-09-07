@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import override
 
 import pytest
@@ -105,6 +106,7 @@ class TestCommuteSelectorNode:
         await flush_processor()
 
         a = await node.attempt()
+        print("ATTEMPT-DEBUG succeeded:", a.succeeded, "| pending:", a.pending, "| error:", a.error)
         assert a.succeeded
         val = a.value_or_none()
         assert val is not None
@@ -1852,6 +1854,7 @@ class TestCommuteChainProvenanceFormula:
             [
                 {
                     "name": "Simon",
+                    "has_car": True,
                     "places_of_interest": [
                         PlaceOfInterest(label="Bracknell", address="", trips_per_week=1, weeks_per_year=46)
                     ],
@@ -1970,3 +1973,74 @@ async def test_max_walk_what_if_rescores_without_replanning():
 
     # The route-planning node never re-ran: one plan, two re-scores.
     assert walk.calls == 1
+
+
+class TestZeroTripsNotCommuted:
+    """Zero days a week = not commuted: the destination vanishes from the
+    breakdown and the pills — it must never be recorded as a £0/free
+    commute (it hasn't become free; it doesn't happen)."""
+
+    @pytest.mark.asyncio
+    async def test_zero_trip_destination_is_excluded_from_breakdown(self):
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
+
+        persons_src = UserInputNode("zt0_persons", list)
+        persons_src.push(
+            [
+                {
+                    "name": "Simon",
+                    "places_of_interest": [
+                        PlaceOfInterest(label="Pimlico", address="", trips_per_week=0, weeks_per_year=46),
+                        PlaceOfInterest(label="Bracknell", address="", trips_per_week=1, weeks_per_year=46),
+                    ],
+                }
+            ],
+            "test",
+        )
+        pimlico_src = UserInputNode[Commute]("zt0_pimlico", Commute)
+        bracknell_src = UserInputNode[Commute]("zt0_bracknell", Commute)
+        pimlico_src.push(_drive_commute(duration_min=16, cost_gbp=5.0), "test")
+        bracknell_src.push(_drive_commute(duration_min=90, cost_gbp=10.0), "test")
+        node = CommuteBreakdownNode(
+            "zt0_breakdown",
+            commute_selectors={"Simon/Pimlico": pimlico_src, "Simon/Bracknell": bracknell_src},
+            persons_source=persons_src,
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        simon = val["persons"]["Simon"]
+        assert [c["label"] for c in simon["commutes"]] == ["Bracknell"], (
+            "a 0-trip destination is not commuted and must not be recorded"
+        )
+        assert all(Decimal(c["yearly_gbp"]) > 0 for c in simon["commutes"]), (
+            "no zero-price commute records"
+        )
+
+    def test_commuted_destinations_excludes_zero_trips(self):
+        from houses.nodes.property_nodes import PropertyNodes
+        from houses.property_registry import register_property
+        from houses.services_provider import get_services
+
+        svc = get_services()
+        svc.persons_source.push(
+            [
+                {
+                    "name": "Simon",
+                    "has_car": True,
+                    "places_of_interest": [
+                        {"label": "Pimlico", "address": "", "trips_per_week": 1, "weeks_per_year": 46},
+                        {"label": "Bracknell", "address": "", "trips_per_week": 0, "weeks_per_year": 46},
+                    ],
+                }
+            ],
+            "user",
+        )
+        prop = PropertyNodes("42424246")
+        register_property("42424246", prop)
+        # the pipeline exists (structure is per destination)…
+        assert "Simon/Bracknell" in prop.commute_selectors
+        # …but the pill is omitted for a 0-trip destination
+        assert prop._commuted_destinations() == {"Simon/Pimlico"}
