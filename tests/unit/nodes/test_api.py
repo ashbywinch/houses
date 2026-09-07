@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import typing
 from decimal import Decimal
 
@@ -1366,6 +1367,159 @@ class TestWhatIfApi:
             )
             assert resp.status_code == 400, f"{field}: expected 400, got {resp.status_code}: {resp.text}"
             assert "whole number of pounds" in resp.json()["detail"], f"{field}: {resp.json()['detail']}"
+
+
+class TestMonthlyDeltaApi:
+    """The "extra vs your home" wire fields: /properties/all, the detail
+    route, and the what-if response — always vs THE single current home."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+        from money import Money
+
+        from houses.model.domain import Person
+        from houses.server import app
+        from houses.services_provider import get_services
+
+        _push_persons(
+            Person(
+                name="Simon",
+                has_car=True,
+                email="simon@example.com",
+                is_superuser=True,  # live settings are authoritative
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+            ),
+            Person(name="Lorena", has_car=False, email="lorena@example.com"),
+            Person(name="Ashby", has_car=True, rent_paid_monthly=Money("600", "GBP")),
+        )
+        registry = get_services().property_registry
+        registry.clear()
+        client = TestClient(app)
+        _inject_session(client)
+        return client, registry
+
+    def _seed(self, reg, rid: str, *, status: str = ""):
+        from money import Money
+
+        from houses.geopoint import GeoPoint
+        from houses.nodes.property_nodes import PropertyNodes
+
+        prop = PropertyNodes(rid)
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push(f"{rid} Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push(f"{rid} Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.user_entered_address.push(f"{rid} Test St, SW1V 2QQ", "test")
+        prop.works_estimates.push({}, "test")
+        prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push(status, "test")
+        reg.register(rid, prop)
+        return prop
+
+    def test_properties_all_carries_delta_fields(self):
+        client, reg = self._setup()
+        self._seed(reg, "880001", status="current")
+        self._seed(reg, "880002")
+        flush_all()
+
+        data = client.get("/api/properties/all").json()
+        base, cand = data["880001"], data["880002"]
+        for summary in (base, cand):
+            assert isinstance(summary["is_current_home"], bool)
+            assert "monthly_baseline" in summary
+
+        assert base["is_current_home"] is True
+        assert base["monthly_baseline"]["rid"] == "880001"
+        assert base["group_monthly_cost"]["value"]["delta_vs_home"] is None
+
+        assert cand["is_current_home"] is False
+        assert cand["monthly_baseline"]["rid"] == "880001"
+        baseline = cand["monthly_baseline"]
+        assert baseline["address"] == "880001 Test St, SW1V 2QQ"
+        assert baseline["others_rent_paid"] == 600.0
+        assert re.fullmatch(r"\d+\.\d{2}", baseline["couple"]["value"])
+
+        delta = cand["group_monthly_cost"]["value"]["delta_vs_home"]
+        assert delta["couple"]["approx"] is (
+            cand["group_monthly_cost"]["value"]["couple"]["stddev"] > 0 or baseline["couple"]["approx"]
+        )
+
+    def test_properties_all_null_baseline_without_current_home(self):
+        client, reg = self._setup()
+        self._seed(reg, "880001")
+        self._seed(reg, "880002")
+        flush_all()
+
+        data = client.get("/api/properties/all").json()
+        for rid in ("880001", "880002"):
+            summary = data[rid]
+            assert summary["is_current_home"] is False
+            assert summary["monthly_baseline"] is None
+            assert summary["group_monthly_cost"]["value"]["delta_vs_home"] is None
+
+    def test_detail_carries_delta_fields(self):
+        client, reg = self._setup()
+        self._seed(reg, "880001", status="current")
+        self._seed(reg, "880002")
+        flush_all()
+
+        detail = client.get("/api/properties/880002/detail").json()
+        assert detail["is_current_home"] is False
+        assert detail["monthly_baseline"]["rid"] == "880001"
+        delta = detail["affordability"]["group_monthly_cost"]["value"]["delta_vs_home"]
+        assert re.fullmatch(r"[+-]\d+\.\d{2}", delta["couple"]["value"]), delta["couple"]
+
+        own = client.get("/api/properties/880001/detail").json()
+        assert own["is_current_home"] is True
+        assert own["affordability"]["group_monthly_cost"]["value"]["delta_vs_home"] is None
+
+    def test_what_if_delta_is_against_the_real_baseline(self):
+        client, reg = self._setup()
+        self._seed(reg, "880001", status="current")
+        self._seed(reg, "880002")
+        flush_all()
+
+        real = client.get("/api/properties/all").json()
+        real_base_couple = Decimal(real["880001"]["group_monthly_cost"]["value"]["couple"]["value"])
+        real_cand_couple = Decimal(real["880002"]["group_monthly_cost"]["value"]["couple"]["value"])
+
+        resp = client.post(
+            "/api/what-if",
+            json={"persons": [{"name": "Simon", "home_sale_price": {"amount": "650000", "currency": "GBP"}}]},
+        )
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        assert results["880002"]["succeeded"], results["880002"].get("error")
+
+        hyp_cand = Decimal(results["880002"]["group"]["couple"]["value"])
+        hyp_base = Decimal(results["880001"]["group"]["couple"]["value"])
+        assert hyp_cand != real_cand_couple and hyp_base != real_base_couple, (
+            "test premise: the what-if must move BOTH properties' figures, "
+            "so a delta vs the HYPOTHETICAL baseline would differ from one vs the REAL baseline"
+        )
+
+        delta = results["880002"]["group"]["delta_vs_home"]
+        assert Decimal(delta["couple"]["value"]) == hyp_cand - real_base_couple, (
+            "what-if delta must use the REAL baseline figure, not the hypothetical one"
+        )
+        # The baseline's own outcome keeps a null delta (it IS the baseline).
+        assert results["880001"]["group"]["delta_vs_home"] is None
+
+    def test_what_if_delta_null_without_baseline(self):
+        client, reg = self._setup()
+        self._seed(reg, "880001")
+        flush_all()
+
+        resp = client.post(
+            "/api/what-if",
+            json={"persons": [{"name": "Simon", "home_sale_price": {"amount": "650000", "currency": "GBP"}}]},
+        )
+        assert resp.status_code == 200
+        group = resp.json()["results"]["880001"]["group"]
+        assert group["delta_vs_home"] is None
 
 
 class TestRegenerateApi:

@@ -196,3 +196,43 @@ address**, so:
 1. W2 (prove DAG propagation — decides whether UI work assumes working
    updates) → 2. W1 (money labels + deposit) → 3. W3 (cards) → 4. W4
    (address edit + Impossible) → 5. W5 → 6. W6 → verification + smoke.
+
+## 2026-09-06 — Monthly figures become "extra vs your home" (deltas)
+
+Approved by the user after two designer-agent rounds (the second, problem-first
+round rejected the first round's four on-card-delta variants and produced the
+audit this landed on). Status: implemented, `make test` green, live-smoked
+against the real household.
+
+**Decision.** The card money block shows THE CHANGE vs the current home,
+replacing totals, for both group rows — uniform for every viewer, no per-user
+special cases. The current-home card keeps its totals with a "Your home ·
+baseline" chip. A legend line above the list names the baseline once. Detail
+Costs keeps totals + breakdowns and gains a "vs your home" row per group with
+the arithmetic; the other adults' delta carries the rent-drop explanation. Sort
+relabels "Extra vs home/mo" (identical order — delta is total minus a
+constant), the max-monthly-cost filter becomes "max extra vs home", and the
+what-if headline counts "within £X/mo of home". Unknown totals stay a dash with
+the reason one interaction away.
+
+**Resolves.** Journey 1's actual question — "how much more per month than
+now?" — was previously a mental subtraction against an unmarked card
+(31 Isambard Road) repeated 45 times.
+
+**Requirement amendments made with the user (supersede earlier notes here):**
+- The W3 principle "every card addition must be … not add a row where
+  avoidable" is DEMOTED from requirement to heuristic. The requirement is task
+  success: clutter AND pushing information off to the detail page both fail it.
+- D1's "monthly payment from the list alone" now means the monthly **change
+  vs home** on cards (amended in usability-requirements.md, dated).
+
+**Implementation.** Server: `houses/web/monthly_delta.py` (exactly-one-current-
+home rule; approx = either side's stddev; what-if deltas vs the REAL baseline),
+attached at the serialization boundary in `get_all_properties`, the detail
+route and the broadcaster; a baseline update re-pushes every summary so no card
+keeps a stale delta. Frontend: store baseline/delta accessors (what-if overlay
+wins), PropertyCard delta branch + chip, PropertyList legend/filter/sort,
+CostsSection vs-rows, WhatIfPanel headline. Deltas are never computed
+client-side. Tests: 20 delta unit tests + route/broadcaster coverage (84 in
+scope), 22 new frontend tests; no-baseline rendering is byte-identical to the
+previous UI.

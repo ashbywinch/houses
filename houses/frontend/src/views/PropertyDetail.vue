@@ -352,6 +352,8 @@ async function saveAddress() {
         :persons="detail.settings?.persons"
         :rid="rid"
         :current-person="currentPerson"
+        :is-current-home="detail.is_current_home"
+        :monthly-baseline="detail.monthly_baseline"
       />
       <AnnexeSection
         v-if="detail.council_tax_apportionment && councilTaxAnnexe"

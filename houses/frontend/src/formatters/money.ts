@@ -15,6 +15,16 @@ export function integerPounds(value: string | undefined): string {
   return dot === -1 ? value : value.slice(0, dot)
 }
 
+/** Signed whole-pound delta for the "extra vs your home" figures —
+ *  the server sends a 2dp explicit-sign string ("+1308.06"); the card
+ *  shows whole pounds ("+£1,308"), negative with U+2212 ("−£411") as
+ *  fmt elsewhere. The sign is always explicit; never a bare number. */
+export function signedPounds(value: string): string {
+  const n = Math.round(Number(value))
+  const sign = n < 0 ? '−' : '+'
+  return sign + '£' + Math.abs(n).toLocaleString()
+}
+
 /** Block any printable non-digit key (letters, '.', ',', symbols,
  *  space) on whole-pound fields. Named keys (Backspace, Tab, arrows,
  *  Enter) and shortcuts pass through. */

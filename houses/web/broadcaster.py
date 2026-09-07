@@ -15,6 +15,7 @@ import logging
 from fastapi import WebSocket
 
 from houses.services_provider import get_services
+from houses.web.monthly_delta import attach as attach_monthly_delta
 
 logger = logging.getLogger(__name__)
 
@@ -69,31 +70,55 @@ async def _push_node_update(node) -> None:
         _websocket_clients.discard(ws)
 
 
-async def _broadcaster() -> None:
-    """Pop completed RIDs from the queue and push full-property summaries."""
+async def _push_summary(rid: str) -> dict | None:
+    """Build, delta-attach, and push one property's summary to all clients.
 
+    Returns the pushed summary, or None when the rid has no registry
+    property (it vanished between enqueue and dequeue)."""
+    prop = get_services().property_registry.get(rid)
+    if prop is None:
+        return None
+    summary = await prop.to_json_summary()
+    await attach_monthly_delta(summary, rid, get_services().property_registry)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
+    msg = json.dumps({"type": "property_updated", "rid": rid, "data": summary})
+    dead: list[WebSocket] = []
+    for ws in list(_websocket_clients):
+        try:
+            await ws.send_text(msg)
+        # lucidlint: ignore broad-except connection boundary — any send failure discards the dead client
+        except Exception as e:
+            logger.debug("client websocket send failed (discarding client): %s", e)
+            dead.append(ws)
+            continue
+    for ws in dead:
+        _websocket_clients.discard(ws)
+    return summary
+
+
+async def _broadcaster() -> None:
+    """Pop completed RIDs from the queue and push full-property summaries.
+
+    Freshness: when the pushed property IS the current home, every other
+    card's delta_vs_home just went stale — fresh summaries for the rest of
+    the registry are built and pushed DIRECTLY here (never re-enqueued
+    through the queue: that would loop)."""
     while True:
         rid = await _broadcast_queue.get()
         if not _websocket_clients:
             continue
-        prop = get_services().property_registry.get(rid)
-        if prop is None:
-            continue
         try:
-            summary = await prop.to_json_summary()
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
-            msg = json.dumps({"type": "property_updated", "rid": rid, "data": summary})
-            dead: list[WebSocket] = []
-            for ws in list(_websocket_clients):
-                try:
-                    await ws.send_text(msg)
-                # lucidlint: ignore broad-except connection boundary — any send failure discards the dead client
-                except Exception as e:
-                    logger.debug("client websocket send failed (discarding client): %s", e)
-                    dead.append(ws)
-                    continue
-            for ws in dead:
-                _websocket_clients.discard(ws)
+            summary = await _push_summary(rid)
+            if summary is not None and summary.get("is_current_home"):
+                for other_rid in get_services().property_registry.list_properties():
+                    if other_rid == rid:
+                        continue
+                    try:
+                        await _push_summary(other_rid)
+                    # lucidlint: ignore broad-except loop boundary — one stale summary must not kill the sweep
+                    except Exception as exc:
+                        logger.warning("Broadcast failed for %s: %s", other_rid, exc)
+                        continue
         # lucidlint: ignore broad-except loop boundary — one property's broadcast failure must not kill the broadcaster
         except Exception as exc:
             logger.warning("Broadcast failed for %s: %s", rid, exc)

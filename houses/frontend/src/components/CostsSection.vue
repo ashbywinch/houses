@@ -2,10 +2,11 @@
 import { computed, ref } from 'vue'
 import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
-import type { Provenance } from '../types'
+import type { MonthlyBaseline, Provenance } from '../types'
 import {
   blockWholePoundsKey,
   rejectWholePoundsPaste,
+  signedPounds,
   wholePoundsValue,
 } from '../formatters/money'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
@@ -17,6 +18,10 @@ const props = defineProps<{
   persons?: any
   rid?: string
   currentPerson?: string | null
+  /** "Extra vs your home" inputs (approved deltas design): the detail
+   *  payload's top-level flags, wired by PropertyDetail. */
+  isCurrentHome?: boolean
+  monthlyBaseline?: MonthlyBaseline | null
 }>()
 
 function epcStepClass(band: string): string {
@@ -95,6 +100,39 @@ const totalBlockedReason = computed(() => {
   if (!t || t.succeeded || t.error == null) return ''
   const detail = (t as { error_detail?: { user_message?: string } }).error_detail
   return detail?.user_message || t.error || ''
+})
+
+// ── Extra vs your home (approved deltas design) ─────────────
+// Totals and breakdowns stay untouched; the server-computed delta is
+// rendered as ONE extra row per group total (arithmetic on the
+// tooltip, figures verbatim from the wire — no client-side maths).
+// The baseline property itself gets no vs rows.
+
+const homeShortAddress = computed(() => (props.monthlyBaseline?.address ?? '').split(',')[0].trim())
+
+const deltaVsHome = computed(() => props.affordability?.group_monthly_cost?.value?.delta_vs_home ?? null)
+
+function vsRow(side: 'couple' | 'others'): { label: string; value: string; title: string } | null {
+  const d = deltaVsHome.value?.[side]
+  if (props.isCurrentHome || !d || !homeShortAddress.value) return null
+  const total = props.affordability?.group_monthly_cost?.value?.[side]?.value
+  const base = props.monthlyBaseline?.[side]?.value
+  return {
+    label: `vs your home (${homeShortAddress.value})`,
+    value: `${d.approx ? '≈ ' : ''}${signedPounds(d.value)}/mo`,
+    title: `£${total} − £${base} = ${d.value}. ≈ = council tax estimated.`,
+  }
+}
+const coupleVsRow = computed(() => vsRow('couple'))
+const othersVsRow = computed(() => vsRow('others'))
+
+/** When the home's other adults pay rent, their post-move figure
+ *  excludes it — worth calling out when their delta goes down. */
+const othersRentNote = computed(() => {
+  const d = deltaVsHome.value?.others
+  const rent = props.monthlyBaseline?.others_rent_paid ?? 0
+  if (props.isCurrentHome || !d || rent <= 0 || Number(d.value) >= 0) return null
+  return `Her £${rent.toLocaleString()} rent is not counted after the move.`
 })
 
 // ── Works estimate inline editing ─────────────────────
@@ -303,6 +341,10 @@ function canEdit(personName: string): boolean {
             {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.couple.value }}/mo
           </span>
         </div>
+        <div v-if="coupleVsRow" class="costs-row costs-row--sub costs-row--vs" :title="coupleVsRow.title">
+          <span class="costs-label">{{ coupleVsRow.label }}</span>
+          <span class="costs-value">{{ coupleVsRow.value }}</span>
+        </div>
         <div v-if="affordability.group_monthly_cost.value.couple_breakdown" class="costs-group-breakdown">
           <div v-for="(row, key) in coupleRows()" :key="key" class="costs-row costs-row--sub">
             <span class="costs-label">{{ row.label }}</span>
@@ -323,6 +365,11 @@ function canEdit(personName: string): boolean {
             {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.others.value }}/mo
           </span>
         </div>
+        <div v-if="othersVsRow" class="costs-row costs-row--sub costs-row--vs" :title="othersVsRow.title">
+          <span class="costs-label">{{ othersVsRow.label }}</span>
+          <span class="costs-value">{{ othersVsRow.value }}</span>
+        </div>
+        <p v-if="othersRentNote" class="costs-note costs-note--rent">{{ othersRentNote }}</p>
         <div v-if="affordability.group_monthly_cost.value.others_breakdown" class="costs-group-breakdown">
           <div v-for="(row, key) in othersRows()" :key="key" class="costs-row costs-row--sub">
             <span class="costs-label">{{ row.label }}</span>

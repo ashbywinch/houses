@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import type { MonthlyBaseline, PropertyDetail, PropertySummary } from '../../types'
 import { usePropertiesStore } from '../properties'
-import type { PropertyDetail } from '../../types'
 
 vi.mock('../../services/api', () => ({
   fetchPropertyDetail: vi.fn(),
@@ -227,5 +227,80 @@ describe('add-property flow', () => {
     await store.removeFromList('9091')
     expect(api.removeProperty).toHaveBeenCalledWith('9091')
     expect(store.summaries['9091']).toBeUndefined()
+  })
+})
+
+// ── Extra vs your home (approved deltas design) ─────────────────────
+
+const homeBaseline: MonthlyBaseline = {
+  rid: 'home',
+  address: '31 Isambard Road, Southall, UB2 4GN',
+  couple: { value: '1783.61', approx: false },
+  others: { value: '652.92', approx: false },
+  others_rent_paid: 600,
+}
+
+function summaryFixture(rid: string, overrides: Partial<PropertySummary> = {}): PropertySummary {
+  return {
+    rid,
+    best_address: { succeeded: true, value: '1 Main St', error: null, provenance: { label: 'test' } },
+    best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
+    rightmove_price: { succeeded: true, value: { amount: '500000', currency: 'GBP' }, error: null, provenance: { label: 'test' } },
+    rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
+    commutes: {},
+    schools: {
+      primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
+      secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
+    },
+    group_monthly_cost: { succeeded: true, value: { couple: { value: '2100', stddev: 0 }, others: { value: '400', stddev: 0 }, couple_label: 'S&L', others_label: 'Ashby' }, error: null, provenance: { label: 'test' } },
+    walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+    ...overrides,
+  }
+}
+
+describe('properties store — baseline + delta accessors', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('exposes the first non-null baseline across summaries', () => {
+    const store = usePropertiesStore()
+    store.summaries = {
+      a: summaryFixture('a'),
+      b: summaryFixture('b', { monthly_baseline: homeBaseline }),
+    }
+    expect(store.baseline).toEqual(homeBaseline)
+  })
+
+  it('baseline is null when no summary carries one', () => {
+    const store = usePropertiesStore()
+    store.summaries = { a: summaryFixture('a') }
+    expect(store.baseline).toBeNull()
+  })
+
+  it('delta accessor falls back to the summary delta', () => {
+    const store = usePropertiesStore()
+    store.summaries = {
+      a: summaryFixture('a', {
+        group_monthly_cost: { succeeded: true, value: { couple: { value: '3091.67', stddev: 0 }, others: null, couple_label: 'S&L', others_label: 'Ashby', delta_vs_home: { couple: { value: '+1308.06', approx: true }, others: null } }, error: null, provenance: { label: 'test' } },
+      }),
+    }
+    expect(store.deltaFor('a')?.couple).toEqual({ value: '+1308.06', approx: true })
+    expect(store.deltaFor('a')?.others).toBeNull()
+  })
+
+  it('delta accessor prefers the what-if overlay and clears back', () => {
+    const store = usePropertiesStore()
+    store.summaries = {
+      a: summaryFixture('a', {
+        group_monthly_cost: { succeeded: true, value: { couple: { value: '3091.67', stddev: 0 }, others: null, couple_label: 'S&L', others_label: 'Ashby', delta_vs_home: { couple: { value: '+1308.06', approx: true }, others: null } }, error: null, provenance: { label: 'test' } },
+      }),
+    }
+    store.applyWhatIf({
+      a: { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: null, couple_label: 'S&L', others_label: 'Ashby', delta_vs_home: { couple: { value: '-883.61', approx: false }, others: null } } },
+    })
+    expect(store.deltaFor('a')?.couple?.value).toBe('-883.61')
+    store.clearWhatIf()
+    expect(store.deltaFor('a')?.couple?.value).toBe('+1308.06')
   })
 })

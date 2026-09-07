@@ -304,10 +304,15 @@ Jobs to be done:
 > give up or guess.
 
 ### D1. Affordability is visible from the list
-The user can judge a property's affordability (asking price and monthly
-payment) from the property list alone, without opening each property.
-- Acceptance: list cards show price and monthly payment whenever they can
-  be calculated; when they can't, C1 applies.
+The user can judge a property's affordability from the property list alone,
+without opening each property.
+- (Amended 2026-09-06, user-approved: the list's monthly figure is **the
+  change vs the current home** — the comparison the scanning decision
+  actually turns on. The absolute total remains one step away: on the
+  detail Costs page and in the legend's baseline figures.)
+- Acceptance: list cards show price and monthly **change vs home**
+  whenever they can be calculated; when they can't, C1 applies (dash +
+  reason).
 
 ### D2. Settings are discoverable from the numbers
 From any place a commute or money number appears, the user can find where

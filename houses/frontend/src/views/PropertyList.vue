@@ -63,7 +63,7 @@ const showFilterSheet = ref(false)
 
 /** The Sort pill shows the active choice, so it never lies about what
  *  the list is ordered by. */
-const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)?.label ?? sortBy.value)
+const sortLabel = computed(() => sortOptions.value.find(o => o.value === sortBy.value)?.label ?? sortBy.value)
 const activeTab = ref<'properties' | 'favourites' | 'map'>('properties')
 const maxPriceFilter = ref<number | null>(null)
 const minBedroomsFilter = ref<number | null>(null)
@@ -115,16 +115,19 @@ const mapMarkers = computed<MapMarker[]>(() =>
   })),
 )
 
-const sortOptions = [
+/** With a baseline active the delta IS the monthly cost story (the
+ *  total minus a constant orders identically), so the option relabels;
+ *  the sort function itself never changes. */
+const sortOptions = computed(() => [
   { value: 'price_asc', label: 'Price: Low→High' },
   { value: 'price_desc', label: 'Price: High→Low' },
-  { value: 'monthly_cost', label: 'Monthly Cost' },
+  { value: 'monthly_cost', label: store.baseline ? 'Extra vs home/mo' : 'Monthly Cost' },
   { value: 'commute', label: 'Commute Time' },
   { value: 'weekly_commute', label: 'Weekly Commute (all)' },
   { value: 'ofsted', label: 'Ofsted Rating' },
   { value: 'bedrooms', label: 'Bedrooms' },
   { value: 'date_added', label: 'Date Added' },
-]
+])
 
 function priceNum(rid: string) {
   const p = store.summaries[rid]?.rightmove_price
@@ -142,6 +145,14 @@ function monthlyCostNum(rid: string) {
   return m
 }
 
+/** The couple's EXTRA vs the home (what-if overlay respected) — the
+ *  "max extra vs home" filter works on this, with unknown deltas
+ *  excluded, never treated as 0. */
+function extraVsHomeNum(rid: string): number {
+  const d = store.deltaFor(rid)?.couple
+  if (!d) return Infinity
+  return Number(d.value)
+}
 /** Card data with the hypothetical total overlaid while the what-if is
  *  active (labelled 'what-if' so the card can mark it as a preview). */
 function cardData(rid: string): PropertySummary {
@@ -255,7 +266,10 @@ const displayedRids = computed(() => {
     rids = rids.filter(rid => store.triage[rid]?.favourite)
   }
   if (maxPriceFilter.value != null) {
-    rids = rids.filter(rid => monthlyCostNum(rid) <= maxPriceFilter.value!)
+    // With a baseline the field is "max extra vs home" — same exclusion
+    // semantics (unknowns out), different measure.
+    const measure = store.baseline ? extraVsHomeNum : monthlyCostNum
+    rids = rids.filter(rid => measure(rid) <= maxPriceFilter.value!)
   }
   if (minBedroomsFilter.value != null) {
     rids = rids.filter(rid => bedroomNum(rid) >= minBedroomsFilter.value!)
@@ -377,6 +391,16 @@ const ceilingLimitText = computed(() => {
 
     <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
 
+    <!-- The delta legend: once per list, above the cards. Numbers are
+         the home's own reference figures, whole pounds to match the
+         cards' deltas. -->
+    <p v-if="store.baseline" class="baseline-legend" role="note">
+      Monthly figures are the change vs your home — {{ store.baseline.address }}
+      ({{ store.groupLabels.coupleLabel }} £{{ Math.round(Number(store.baseline.couple.value)).toLocaleString() }}/mo ·
+      {{ store.groupLabels.othersLabel }} {{ store.baseline.others ? '£' + Math.round(Number(store.baseline.others.value)).toLocaleString() + '/mo' : '£—/mo' }}).
+      Full totals and breakdowns live on each property's page.
+    </p>
+
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
     <div v-else-if="displayedRids.length === 0" class="empty-state">
@@ -414,7 +438,6 @@ const ceilingLimitText = computed(() => {
         </div>
       </div>
     </div>
-
     <div v-if="showFilterSheet" class="sheet-overlay" @click="showFilterSheet = false" />
     <div v-if="showFilterSheet" class="sheet" role="dialog" aria-label="Filter properties" aria-modal="true">
       <div class="sheet__handle" />
@@ -424,8 +447,9 @@ const ceilingLimitText = computed(() => {
       </div>
       <div class="sheet__body">
         <div class="sheet__section">
-          <label class="sheet__label">Max monthly cost (£)</label>
+          <label class="sheet__label">{{ store.baseline ? 'Max extra vs home (£/mo)' : 'Max monthly cost (£)' }}</label>
           <input v-model.number="maxPriceFilter" type="number" class="sheet__input" placeholder="e.g. 3000" min="0" step="100" />
+          <p v-if="store.baseline" class="sheet__helper">Your home is £{{ Math.round(Number(store.baseline.couple.value)).toLocaleString() }}/mo</p>
         </div>
         <div class="sheet__section">
           <label class="sheet__label">Min Bedrooms</label>
@@ -682,6 +706,16 @@ const ceilingLimitText = computed(() => {
   min-height: 44px;
   color: var(--text);
   background: var(--card-bg);
+}
+.sheet__helper {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.baseline-legend {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
 }
 .sheet__apply {
   width: 100%;

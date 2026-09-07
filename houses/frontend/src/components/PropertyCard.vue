@@ -5,6 +5,7 @@ import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
 import { simpleOfsted, ofstedClass } from '../formatters/format'
 import { schoolWalkMin } from '../formatters/school'
+import { signedPounds } from '../formatters/money'
 
 const store = usePropertiesStore()
 const props = defineProps<{
@@ -109,6 +110,43 @@ const coupleCost = computed(() => {
 const othersCost = computed(() => {
   const c = groupCost.value?.others
   return c ? Number(c.value) : null
+})
+
+// ── Extra vs your home (approved deltas design) ─────────────────────
+// While exactly one current home has computed totals, the server
+// attaches the baseline + per-group deltas to every summary and the
+// money lines show THE DELTA (never recomputed here). The current home
+// itself keeps its totals and gains the baseline chip; no baseline →
+// today's totals rendering, untouched.
+const showDeltas = computed(() => store.baseline != null && !props.data.is_current_home)
+
+const coupleDelta = computed(() => (showDeltas.value ? store.deltaFor(props.rid)?.couple ?? null : null))
+const othersDelta = computed(() => (showDeltas.value ? store.deltaFor(props.rid)?.others ?? null : null))
+
+function deltaLineText(d: { value: string; approx: boolean } | null): string {
+  if (!d) return '—'
+  return `${d.approx ? '≈' : ''}${signedPounds(d.value)}/mo`
+}
+
+/** Why a delta group is '—': the candidate side's uncomputable reason
+ *  (the baseline side is always computable when a baseline is active). */
+const deltaBlockedReason = computed(() => {
+  const g = props.data.group_monthly_cost
+  if (!g || g.succeeded) return "Can't calculate yet — see the property page (often Council Tax)"
+  const detail = (g as { error_detail?: { user_message?: string } }).error_detail
+  return detail?.user_message || g.error || "Can't calculate yet — see the property page (often Council Tax)"
+})
+
+const coupleLineTitle = computed(() => {
+  if (!showDeltas.value) return monthlyCostApprox.value ? 'Council tax estimated — total is approximate' : undefined
+  if (!coupleDelta.value) return deltaBlockedReason.value
+  return coupleDelta.value.approx || monthlyCostApprox.value ? 'Council tax estimated — total is approximate' : undefined
+})
+
+const othersLineTitle = computed(() => {
+  if (!showDeltas.value) return undefined
+  if (!othersDelta.value) return deltaBlockedReason.value
+  return othersDelta.value.approx ? 'Council tax estimated — total is approximate' : undefined
 })
 
 // Freshness badge — how many days ago the property was added
@@ -281,15 +319,28 @@ async function toggleViewed() {
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
+        <span v-if="data.is_current_home" class="card__baseline-chip">Your home · baseline</span>
         <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
-          <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
-            <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
-            {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
-          </span>
-          <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
-            <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
-            {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
-          </span>
+          <template v-if="showDeltas">
+            <span class="card__cost-line" :title="coupleLineTitle">
+              <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
+              {{ deltaLineText(coupleDelta) }}
+            </span>
+            <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others" :title="othersLineTitle">
+              <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
+              {{ deltaLineText(othersDelta) }}
+            </span>
+          </template>
+          <template v-else>
+            <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
+              <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
+              {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
+            </span>
+            <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
+              <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
+              {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
+            </span>
+          </template>
           <span v-if="isWhatIf" class="card__whatif">what-if</span>
         </span>
         <span
@@ -465,6 +516,16 @@ async function toggleViewed() {
   border-radius: var(--radius-full);
   padding: 0.05rem 0.4rem;
   vertical-align: middle;
+}
+.card__baseline-chip {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: var(--fw-semibold);
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-full);
+  padding: 0.05rem 0.4rem;
+  white-space: nowrap;
 }
 
 /* Specs row */
