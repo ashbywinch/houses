@@ -91,7 +91,7 @@ def _point_in_rect(point: GeoPoint, rect: Rect) -> bool:
 
 
 # lucidlint: ignore record-shape kept_stations ride in the committed searches payload's station shape
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def uncovered_cells(  # lucidlint: ignore record-shape returns a list of (row, col) grid lattice coordinates — keyed
     searches: list[dict],
     kept_stations: list[dict],
@@ -160,7 +160,7 @@ def _overlap_issues(rects: list[Rect]) -> list[str]:
     ]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _coverage_issues(rects: list[Rect], kept_stations: list[dict], buffer_km: float, positive, negative) -> list[str]:
     """Coverage contract: kept stations and positive controls covered, negative controls not."""
     issues: list[str] = []
@@ -183,7 +183,7 @@ def _coverage_issues(rects: list[Rect], kept_stations: list[dict], buffer_km: fl
 
 
 # lucidlint: ignore record-shape kept_stations ride in the committed searches payload's station shape
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def validate(
     payload: dict,
     kept_stations: list[dict],

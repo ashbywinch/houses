@@ -111,7 +111,7 @@ def _clean_price(raw: Any) -> float | None:
         return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _parse_json_ld(html: str) -> dict[str, Any]:
     """Extract property data from JSON-LD structured data."""
     m = _LD_JSON_RE.search(html)
@@ -149,7 +149,7 @@ def _parse_json_ld(html: str) -> dict[str, Any]:
     return result
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _parse_preloaded_state(html: str) -> dict[str, Any]:
     """Extract from window.__PRELOADED_STATE__ (Rightmove React app)."""
     for pattern in [_PRELOADED_RE, _INITIAL_STATE_RE]:
@@ -183,17 +183,17 @@ def _parse_preloaded_state(html: str) -> dict[str, Any]:
     return {}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _parse_map_coords(html: str) -> dict[str, Any]:
     """Fallback: extract lat/lng from inline map data in script tags."""
     m = _MAP_COORDS_RE.search(html)
     if m:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {"latitude": float(m.group(1)), "longitude": float(m.group(2))}
     return {}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _parse_page_model(html: str) -> dict[str, Any]:
     """Extract property data from window.__PAGE_MODEL (Rightmove's primary data format).
 

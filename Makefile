@@ -5,7 +5,7 @@
 # bash, everywhere.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
-.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve lucidlint lucidlint-update-baseline
+.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check check-architecture lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve lucidlint lucidlint-update-baseline
 
 # Variables
 PYTHON := .venv/bin/python
@@ -127,7 +127,7 @@ frontend-build: frontend-setup
 	@cd $(FRONTEND) && $(NPM) run build
 	@echo "${GREEN}✓ Frontend build complete${NC}"
 
-test: deps lint-check typecheck
+test: deps lint-check typecheck check-architecture
 	$(PYTEST) tests/unit/ -q --tb=short
 	$(PYTEST) tests/integration/ -q --tb=short
 	cd houses/frontend && npm test
@@ -135,7 +135,7 @@ test: deps lint-check typecheck
 # The exact gate a push must pass — run identically by CI and the
 # pre-push hook (single source of truth; no test run — too slow for a
 # hook, and CI's `make test` already includes these).
-check: lint-check typecheck
+check: lint-check typecheck check-architecture
 
 test-e2e: deps lint-check
 	@$(PYTEST) tests/e2e/ -m e2e -q
@@ -148,6 +148,15 @@ coverage: deps
 	@$(UV) run coverage xml
 	@$(UV) run coverage html
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"
+
+check-architecture:  # Thread rules (docs/dag-library.md): structural drift fails here; behavioral violations fail at runtime (assert_mutation_allowed)
+	@if grep -rn "threading.Thread" dag/ houses/ tools/ --include="*.py" | grep -v "dag/scheduler.py"; then \
+		echo "Thread rules: threads are created only in dag/scheduler.py" ; exit 1 ; fi
+	@if grep -rn "run_coroutine_threadsafe\|call_soon_threadsafe" dag/ houses/ --include="*.py" | grep -vE "dag/scheduler.py|houses/server.py|houses/web/broadcaster.py"; then \
+		echo "Thread rules: cross-loop handoff only via scheduler/broadcaster/server" ; exit 1 ; fi
+	@if grep -rn "enqueue_save\|_save_queue\|_drain_saves\|flush_pending_saves\|save_worker" dag/ houses/ tests/ --include="*.py"; then \
+		echo "Dead machinery: the save queue was replaced by the processor pipeline" ; exit 1 ; fi
+	@echo "${GREEN}check-architecture: OK${NC}"
 
 lint: deps lint-check
 

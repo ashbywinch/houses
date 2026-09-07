@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import queue
-import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,9 +10,8 @@ from pydantic import TypeAdapter
 
 from dag.attempt import Attempt, AttemptError, Provenance
 from dag.expression import Add, Div, Expression, Literal, Mul, Negate, Ref, Sub
-from dag.persistence import enqueue_save, latest_node_result
+from dag.persistence import latest_node_result, save_node_result
 from dag.signals import Signal
-
 
 
 @dataclass
@@ -43,6 +40,7 @@ class NodeJson:
             if v is not None:
                 d[k] = v
         return d
+
 
 T = TypeVar("T")
 
@@ -77,6 +75,7 @@ class PersistedNodeMixin(Generic[T]):
     the load/persist operations that read and write them. ``Node`` mixes
     this in; the host class provides ``_id`` and ``_adapter``.
     """
+
     # Provided by the mixing-in host (``Node.__init__``) — declared here
     # so the mixin's own methods type-check against them.
     _id: str
@@ -178,7 +177,7 @@ class PersistedNodeMixin(Generic[T]):
             )
             return None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _persist(
         self,
         result_dict: dict,
@@ -187,10 +186,9 @@ class PersistedNodeMixin(Generic[T]):
         code_version: str | None = None,
     ) -> None:
         now_str = datetime.now(UTC).isoformat()
-        # Enqueue only — the event loop never blocks on persistence I/O.
-        # Production: the persistence worker thread drains the queue.
-        # Tests: flush_pending_saves() drains on the test thread.
-        enqueue_save(self._id, result_dict, dep_timestamps, now_str, code_version)
+        # Persistence runs on the DAG processor thread (or a
+        # single-threaded context); save_node_result's guard enforces it.
+        save_node_result(self._id, result_dict, dep_timestamps, created_at=now_str, code_version=code_version)
         now = datetime.fromisoformat(now_str)
         self._persisted_at = now
         self._db_created_at = now_str
@@ -231,6 +229,7 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         Subclasses override this to return a Provenance describing
         how this node's value was derived."""
         ...
+
     # lucidlint: ignore record-shape to_json returns the serialized node record (coding-standards.md)
     async def to_json(self) -> dict:
         attempt = await self.attempt()
@@ -274,7 +273,7 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
             rec.source_url = self._source_url
         return rec.to_dict()
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _impossible(self, dep_attempts: dict[str, Attempt[Any]], extra: str = "") -> Attempt[T]:
         parts = [self._id]
         if extra:
@@ -303,8 +302,6 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         return Attempt.impossible(message)
 
 
-
-
 # ── Expression operators ────────────────────────────────
 # These let you use Node objects directly in expressions:
 #   self._price_node + self._stamp_duty_node - self._equity_node
@@ -327,9 +324,11 @@ def _with_ops(self, other):
 
 def _node_binop(expr_cls):
     """Build a binary Node operator that coerces both sides to Expressions."""
+
     def op(self, other):
         a, b = _with_ops(self, other)
         return expr_cls(a, b)
+
     return op
 
 

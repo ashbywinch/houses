@@ -151,7 +151,7 @@ class ApcoaCarParkLookup:
         self._registry._persist_results(station, car_park)
         return Attempt.succeeded(car_park)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _apcoa_lookup(self, station: Station) -> dict | None:
         """Scrape APCOA for a car park near *station*.
 

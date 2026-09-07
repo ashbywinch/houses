@@ -16,6 +16,7 @@ from dag.attempt import Attempt, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
 from dag.node import Node
 from dag.persistence import latest_node_result
+from dag.scheduler import assert_mutation_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def _validate_money(v) -> Money:
     raise ValueError(f"Cannot convert {type(v)} to Money")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _serialize_money(m) -> dict:
     # lucidlint: ignore record-shape wire-format dict — pydantic serializer payload, serialization boundary owns the
     return {
@@ -87,13 +88,11 @@ def _validate_quantity(v) -> Quantity:
     raise ValueError(f"Cannot convert {type(v)} to Quantity")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _serialize_quantity(q) -> dict:
     m = float(q.magnitude)
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {"value": int(m) if m == int(m) else m, "unit": str(q.units)}
-
-
 
 
 class MoneySchema:
@@ -110,8 +109,6 @@ class MoneySchema:
             _validate_money,
             serialization=core_schema.plain_serializer_function_ser_schema(_serialize_money),
         )
-
-
 
 
 class QuantitySchema:
@@ -150,7 +147,6 @@ def _install_third_party_schemas() -> None:
 
 
 _install_third_party_schemas()
-
 
 
 T = TypeVar("T")
@@ -208,6 +204,7 @@ class UserInputNode(Node[T], Generic[T]):
             source_label: Human-readable source identifier
                 (e.g. ``"Rightmove"``, ``"User correction"``, ``"TfL API"``).
         """
+        assert_mutation_allowed()  # push mutates _value — processor thread only
         self._value = self._adapter.validate_python(value)
         self._push_timestamp = datetime.now(UTC)
         self._source_label = source_label
@@ -227,7 +224,7 @@ class UserInputNode(Node[T], Generic[T]):
                 f"is bypassed).\n"
             )
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         result_dict: dict[str, Any] = {
             "status": "succeeded",
             "value": self._adapter.dump_python(self._value),
@@ -291,13 +288,13 @@ class UserInputNode(Node[T], Generic[T]):
         """JSON-safe projection of the stored value for provenance."""
         return project_value(self._value)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     @override
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""
         if self._value is None:
             return {"status": "pending", "value": None}
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {
             "status": "succeeded",
             "value": self._adapter.dump_python(self._value),

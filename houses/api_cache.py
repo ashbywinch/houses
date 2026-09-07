@@ -47,7 +47,7 @@ def set_cache_dir(path: str | Path) -> None:
     CACHE_DIR = Path(path)
 
 # lucidlint: ignore-file data-clump this module's public cache API deliberately threads one request identity (method,
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _make_key(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> str:
     parts = [method.upper(), url]
     if params:
@@ -62,8 +62,8 @@ def _cache_path(key: str) -> Path:
     return CACHE_DIR / f"{key}.json"
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def get_cached(
     method: str,
     url: str,
@@ -77,8 +77,8 @@ def get_cached(
     return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None, data: dict[str, Any]) -> None:
     """Store a JSON response so future identical requests skip the API."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -127,7 +127,7 @@ def _cached_secret_key() -> str:
     return _cached_secret_key_value
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> None:
     """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
     _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)

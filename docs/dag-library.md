@@ -129,6 +129,54 @@ When `compute()` changes such that old persisted results are semantically invali
 
 **When NOT to bump:** cosmetic refactors, adding logging, changing error messages, any change producing the same output for the same inputs.
 
+## Thread rules
+
+The DAG pipeline runs on ONE background thread — the processor. The
+uvicorn event loop never runs cascade work: it enqueues, serves reads
+from memory, and fans out broadcaster pushes.
+
+| Thread | Does | Never does |
+|---|---|---|
+| Event loop | requests, enqueues, in-memory reads, broadcaster fan-out | compute, persist, serialize DAG values |
+| Processor (`dag-processor`) | drain the ONE queue in order: recompute → persist → emit | touch the UI |
+
+Rules (every one is enforced — guard messages cite this section):
+
+1. **Mutate DAG state only on the processor.** Request handlers mutate
+   via `await run_on_processor(...)`; direct `push`/`refresh`/persistence
+   off the processor raises (`assert_mutation_allowed`). Startup,
+   scripts and tests never start a processor, so they are exempt by
+   construction — no flags to juggle.
+2. **Never mutate a value in place — replace it.** Nodes hold frozen
+   dataclasses / Pydantic models and swap whole values (`self._value =
+   ...`). That is what makes lock-free reads from the event loop safe:
+   a reader walks a snapshot that cannot change underneath it.
+3. **Persistence is a pipeline step.** `save_node_result` runs on the
+   processor, in cascade order; `node_results` history order == cascade
+   order. Nothing else writes the DB.
+4. **Reads never wait and never flush.** Latest-state readers use
+   `latest_attempt()`; history readers (`node_result_before`) use
+   timestamp predicates that exclude unwritten rows by construction
+   (what-if restore captures its boundary BEFORE the scenario push, so
+   `created_at < started` can never match in-flight work).
+5. **Freshness is push-delivered.** A read racing a cascade returns the
+   previous snapshot; the broadcaster corrects it. Never poll, never
+   re-read to "check for updates".
+
+Shutdown sentinels the processor: remaining work drains in order, then
+the loop stops (bounded join — `systemctl stop` must not hang).
+
+### Tests
+
+The pipeline is real in tests, driven synchronously: no processor thread
+(`start_processor` no-ops under `testing`; a fixture asserts none was
+started). `flush_all()` drains the queue once after the operation under
+test — compute and persistence land together. `drain_recompute()` is for
+read-helpers that need pending computation only. A no-op `flush_all()`
+raises: it means you are flushing to make a read see writes, which is
+never needed — reads are snapshot-safe by design.
+
+
 ## Debugging
 
 ### Tracing failures through provenance

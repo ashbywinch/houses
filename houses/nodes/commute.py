@@ -324,10 +324,10 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return result
 
     @override
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def to_json(self) -> dict:
         attempt = await self.attempt()
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         result: dict = {
             "status": attempt.status,
             "value": None,
@@ -353,7 +353,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     @override
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()

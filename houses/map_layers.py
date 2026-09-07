@@ -31,7 +31,7 @@ DRIVE_PATH = Path("data/commute/drive_searches.json")
 INTERSECTION_PATH = Path("data/commute/intersection.json")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _load(path: Path) -> dict | None:
     if not path.is_file():
         return None
@@ -116,7 +116,7 @@ def _intersection_layer(intersection_path: Path):
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def isochrone_layers(
     *,
     union_path: Path | None = None,

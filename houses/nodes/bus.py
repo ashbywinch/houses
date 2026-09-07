@@ -45,7 +45,7 @@ class BusRouteNode(DerivedNode[dict]):
         dest_str = dest_val if isinstance(dest_val, str) else f"{dest_val.lat},{dest_val.lon}"
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         body = {
             "origin": CommuteRouter._address_waypoint(origin_str).to_dict(),
             "destination": CommuteRouter._address_waypoint(dest_str).to_dict(),
@@ -138,7 +138,7 @@ class BodsFareNode(DerivedNode[dict]):
             fares = reader.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
             cheapest = cheapest_round_trip(fares, reader.national_max_single)
             if cheapest is not None:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
                 stop_fares[dep_name] = {
                     "amount": str(cheapest.amount),
                     "currency": "GBP",

@@ -51,7 +51,7 @@ def download_ods(url: str, dest: Path) -> None:
     logger.info("Saved %s (%.1f MB)", dest, len(resp.content) / BYTES_PER_MB)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def extract_rates(ods_path: Path) -> list[dict[str, str]]:
     with zipfile.ZipFile(ods_path) as z, z.open("content.xml") as f:
         tree = ET.parse(f)
@@ -104,7 +104,7 @@ def extract_rates(ods_path: Path) -> list[dict[str, str]]:
 
         rate = _fmt_rate(rate_raw)
 
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         rates.append({"code": code, "authority": auth, "class": cls, "band_d_rate": rate})
 
     return rates

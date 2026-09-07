@@ -577,7 +577,7 @@ class PropertyNodes:
         self._code_refresh_epoch = _dag_derived._CODE_VERSION_EPOCH
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _commute_breakdown_json(self) -> dict:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""

@@ -384,7 +384,7 @@ class _GroupCostCalculator:
             stddev = (main_payer_count / split.main_payer_total) * float(ctx.council_stddev) / float(MONTHS_PER_YEAR)
         if split.payers:
             stddev += (payer_count / len(split.payers)) * split.annexe_stddev / float(MONTHS_PER_YEAR)
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         breakdown = {
             "commutes": round(float(commutes), 2),
             "insurance": round(float(insurance), 2),
@@ -509,7 +509,7 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
     others_fig = _group_figure_result(calc, ctx, others, others_share, others_rent_paid)
     others_val, others_std, others_breakdown = others_fig.value, others_fig.stddev, others_fig.breakdown
     return Attempt.succeeded(
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         {
             # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
             "couple": {"value": f"{couple_val:.2f}", "stddev": couple_std},

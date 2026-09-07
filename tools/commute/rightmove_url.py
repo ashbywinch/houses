@@ -90,7 +90,7 @@ def build_search_url(
     max_price: int | None = None,
 ) -> str:
     """Build a Rightmove map search URL for the drawn polygon."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params = {
         "searchType": "MAP",
         "locationIdentifier": location_identifier(coords),

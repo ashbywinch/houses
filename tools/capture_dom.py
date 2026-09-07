@@ -89,13 +89,13 @@ def _default_state_file() -> Path:
     return Path(__file__).resolve().parent / ".auth-state.json"
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _storage_state(session_cookie: str) -> dict:
     """Playwright storageState carrying only the localhost session cookie."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
         "cookies": [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
             {
                 "name": "session",
                 "value": session_cookie,
@@ -185,7 +185,7 @@ async def _start_device_flow(client_id: str, client_secret: str) -> "DeviceFlowA
     and the poll cadence.
     """
     async with httpx.AsyncClient(timeout=30) as client:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         device_data = {"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE}
         if client_secret:
             device_data["client_secret"] = client_secret
@@ -235,7 +235,7 @@ async def _poll_for_id_token(client_id: str, client_secret: str, device_code: st
     """
     async with httpx.AsyncClient(timeout=30) as client:
         deadline = time.monotonic() + LOGIN_TIMEOUT_S
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         token_data = {
             "client_id": client_id,
             "device_code": device_code,

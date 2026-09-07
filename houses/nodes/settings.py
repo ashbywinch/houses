@@ -191,7 +191,7 @@ def make_default_persons() -> list[Person]:
     ]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def make_default_thresholds() -> dict[str, dict[str, int]]:
     return {
         "Simon": {"good_max_minutes": 30, "fine_max_minutes": 45},

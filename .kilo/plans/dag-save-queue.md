@@ -1,174 +1,171 @@
-# Plan: DAG persistence on a background save thread
+# Plan: the DAG pipeline on a background processor
 
-Replaces `/tmp/whatif-persistence-thread-plan.md` (superseded — its
-correctness argument leaned on a false premise; see history in the session
-of 2026-09-07).
+Supersedes the "background save thread" design (preserved at
+`992ad1f` on `fix/dag-save-queue-reconciliation`). The save-thread design
+stopped halfway: it moved only persistence off the event loop and left the
+cascade processor — the actual UI-locking workload — running as an asyncio
+task on the loop. This design evicts the whole pipeline.
 
 ## User requirements (non-negotiable)
 
-1. The event loop MUST NEVER be blocked by persistence I/O — not during a
-   cascade, not during rollout first-boot, not ever.
-2. Tests MAY use an in-memory database, drained on the test thread — this is
-   fine because tests are deterministic.
-3. Concurrency must be correct BY DESIGN, not because tests validate it.
+1. The event loop MUST NEVER run cascade work — no recomputes, no
+   persistence, no serialization. Not during a cascade, not during
+   first-boot settling, not ever. It handles requests, enqueues, serves
+   reads from memory, and fans out broadcaster pushes.
+2. One queue. Everything the DAG does runs in scheduled order on the
+   processor: invalidate → recompute → persist → emit. Persistence is a
+   pipeline step, not a competing workload.
+3. Concurrency correct BY DESIGN, not test-validated. The proof must fit
+   in a paragraph (it does — see "Why this is correct").
+4. Cascade latency may rise if the UI stays responsive (accepted:
+   compute → persist → compute serializes; milliseconds per node).
+5. Tests drive the same pipeline synchronously and deterministically.
 
-## Architecture invariant
+## Architecture
 
-**Writes: only the writer thread touches the DB. Everything else enqueues.**
-**Reads: any thread, any time, never wait.**
+```
+event loop (uvicorn)                     processor thread
+────────────────────                     ──────────────────────────────
+requests ──┐                             own private asyncio loop
+enqueue ───┼── ONE FIFO queue ──────────▶ drain in order:
+reads ─────┘                             1. recompute item: await
+broadcaster ◀── threadsafe handoff ──────    node.compute() (httpx/TfL/LLM)
+(fan-out)                                2. persist step: BLOCKING sqlite3
+                                             write — harmless here
+                                         3. emit: node changed →
+                                             run_coroutine_threadsafe →
+                                             broadcaster task on main loop
+shutdown: sentinel → drain → join
+```
 
-This is not new architecture — single-writer was always the design. The
-change moves the writer off the event loop.
+- **The event loop never computes and never persists.** Request handlers
+  enqueue work and serve in-memory state. This kills the original
+  complaint — cascades locking the UI — at the root: the whole pipeline,
+  not just its writes, leaves the loop.
+- **One queue, one consumer.** No save queue, no save thread, no
+  aiosqlite. Persistence is a blocking call on the processor, where
+  blocking is the *point*: it keeps every effect in one ordered pipeline.
+  The queue count follows from the executor count: one processor, one
+  queue.
+- **Order is total.** compute(N) → persist(N) → compute(N+1): the
+  append-only `node_results` history lands in exact cascade order —
+  what `node_result_before()` and `dep_timestamps` freshness assume.
+  Strictly stronger than the two-queue design it replaces.
 
-### Single writer, enforced
+### Why this is correct (the whole concurrency proof)
 
-- The DB write path is module-private: `_save_node_result()`. The public
-  surface is `enqueue_save()` only.
-- Runtime guard (fail-fast):
+A queue is the waiting room of its consumer. There are two executors:
 
-  ```python
-  def _save_node_result(...):
-      if not testing and threading.current_thread() is not _save_thread:
-          raise RuntimeError("single-writer violation; enqueue_save() instead")
-  ```
+- The **event loop** runs request handlers only.
+- The **processor thread** runs the pipeline. Its async computes need a
+  loop, so the thread owns a private one; its persistence is blocking,
+  which only a non-loop thread may do.
 
-  A future route author who writes directly gets a loud crash in dev, not a
-  silent second writer in prod.
+Memory safety between them rests on two existing house rules:
 
-### Reads never wait
+1. **Single writer.** All DAG mutation happens on the processor thread.
+2. **Immutable values, swapped by reference.** Nodes never mutate values
+   in place — `push`/compute *replace* whole frozen dataclasses /
+   Pydantic models (`self._value = ...` is one GIL-atomic assignment). A
+   request handler serializing a property walks a snapshot that cannot
+   change underneath it; worst case it is one step stale.
 
-- WAL is already on (`PRAGMA journal_mode=WAL`, per-thread connections) —
-  readers see committed state as-is, at most microseconds stale, and never
-  contend with the writer.
-- Two read kinds, neither needs the queue:
-  1. **Latest-state readers** (serialization, cards, detail pages) read
-     in-memory `latest_attempt()` — always current.
-  2. **History readers** (`node_result_before`) are safe by construction:
-     their timestamp predicates exclude in-flight writes. Worked example —
-     what-if restore: apply captures the boundary `started = now()` BEFORE
-     the scenario push (`api_router.py` — marker line precedes persons
-     push), every scenario write is stamped `created_at > started`, and the
-     restore query is `created_at < started`. In-flight rows can never
-     match; the wanted rows are older committed history. **No read ever
-     flushes. The only legitimate flush caller is shutdown.**
-- **Stale reads are a non-event** because freshness is push-delivered, not
-  poll-hoped: the broadcaster notifies readers when the cascade settles and
-  hands them the new values. Ordering invariant behind this: the broadcast
-  originates from the same in-memory cascade that enqueued the writes, and
-  the queue drains FIFO behind it — push consumers apply the pushed payload
-  (in-memory, current); only full-reload readers touch the DB, at human
-  timescales, long after the drain.
+Freshness is push-delivered, not poll-hoped: the broadcaster tells the
+frontend when things change (this already exists and does not change). A
+GET racing a cascade serves the current snapshot; the push corrects it.
+Stale reads are a non-event because readers are guaranteed to be notified.
 
-### Mechanism
-- `_persist()` calls `enqueue_save()` → `_ensure_save_thread()` (fallback,
-  one line: no-op under `testing`, moot under lifespan — but it saves
-  lifespan-less writers: data-fix scripts and REPL kernels that persist
-  would otherwise enqueue into a queue nothing drains) then
-  `_save_queue.put(item)`. Nothing else to reason about on the hot path.
-- Single consumer (daemon thread `dag-save`) drains FIFO and calls
-  `_save_node_result()`. `queue.Queue` is the only shared state; FIFO
-  preserves cascade order in the append-only `node_results` history, which
-  `node_result_before()` and `dep_timestamps` freshness depend on.
-- **Writer lifecycle owned by lifespan** (same pattern as `start_processor`):
-  - Startup: `_ensure_save_thread()` (no-ops under `testing`). Invariant:
-    the app serves ⇒ the writer exists — established before the first
-    request, not emergent from first traffic.
-  - Shutdown: `_save_queue.put(None)` (sentinel), worker drains remaining
-    FIFO then exits, `thread.join(timeout=10)`, log-and-proceed on timeout
-    (wedged disk must not hang `systemctl stop`; remainder is lost, same
-    trade as a crash, but visible). The worker's sentinel branch already
-    exists — it is just never sent today. This drain is what protects
-    deploys: SIGTERM → graceful uvicorn shutdown → lifespan teardown.
+### Reads never wait, never flush
+
+- **Latest-state readers** (serialization, cards, detail pages) read
+  in-memory attempts — always the current snapshot.
+- **History readers** (`node_result_before`) are safe by construction:
+  timestamp predicates exclude unwritten rows. Worked example — what-if
+  restore: apply captures the boundary `started = now()` BEFORE the
+  scenario push, every scenario write is stamped `created_at > started`,
+  and the restore query is `created_at < started`. In-flight work can
+  never match; the wanted rows are older committed history.
+- **No request path ever flushes or waits on the queue.** The only
+  drain outside the processor is shutdown.
+
+### Cross-thread details (work, not obstacles)
+
+- The processor thread owns a private `asyncio` loop for the async
+  compute functions (a thread can own a loop; it need not be uvicorn's).
+- `after_refresh` broadcaster pushes cross threads via
+  `run_coroutine_threadsafe(...)` onto the main loop's broadcaster task.
+- Node-state visibility: request handlers already interleave with
+  cascades today (at await points); moving the cascade to a thread
+  changes granularity, not kind. The immutable-swap rule above is what
+  makes it safe — keep it (it is already in coding-standards.md).
 
 ## Test strategy
 
-The queue is REAL in tests — tests mimic production, deterministically.
+The pipeline is REAL in tests — driven synchronously at the choke points
+the suite already uses.
 
-- `enqueue_save()` always enqueues. The `testing` flag gates only thread
-  start (lifespan's `_ensure_save_thread()` no-ops; no thread in tests).
-  The flush runs on the test thread — which is also why `:memory:` keeps
-  working.
-- **`flush_all()` gains the save-queue drain** — it already exists, already
-  means "make everything landed", and is already called by exactly the
-  tests that assert durable state. Ordering inside: process the recompute
-  queue to exhaustion first (processing enqueues saves), then drain saves.
-  Two loops, no waiting, no sleeps.
-- **Fixture setup clears the queue** (isolation, not semantics): a leftover
-  queued write from test A must never land in test B's fresh in-memory DB.
-  Fixture teardown uses the internal unguarded drain.
-- **No-op flush guard** — the wrong patterns (flush-per-write, double
-  flush, "flush so my read can see writes") all collapse to one signature:
-  a flush that drains nothing where nothing was enqueued since the last
-  flush. The conftest-level flush raises on that:
-
-  ```
-  flush_all() drained nothing and nothing was enqueued since the last
-  flush. flush_all() is a once-per-operation drain — writes land
-  asynchronously by design and reads never wait on the queue (WAL snapshot
-  + timestamp predicates). See docs/dag-library.md →
-  'Persistence: reads, writes, and the save queue'.
-  ```
-
-  Legit multi-flush tests (apply → flush → assert → restore → flush →
-  assert) never trip: each flush drains real work. The guard lives only in
-  the public `flush_all()`; persistence stays prod-clean.
-- **Existing tests are unchanged** — the suite already flushes at the right
-  granularity. Exception: genuinely wrong tests (the what-if tests, built
-  without the architecture in mind, then duct-taped with inline flushes)
-  are fixed as wrong: operation → one `flush_all()` → assert, duct tape
-  deleted.
-- Worker/queue unit tests are optional — concurrency itself is not
-  test-verified (requirement 3).
+- The processor never runs as a thread in tests (`testing` gates thread
+  start; the drain runs on the test thread — which is also why
+  `:memory:` keeps working).
+- **`flush_all()` drains the one queue to exhaustion** — recompute and
+  the persistence steps it produces — called ONCE after the operation
+  under test, before assertions.
+- **`drain_recompute()`** exists for read-helpers that need pending
+  *computation* to land before a serialized read (e.g. `_pimlico_commute`)
+  and must not touch persistence.
+- **Fixture setup clears the queue** (isolation); teardown drops quietly
+  via the internal path.
+- **No-op flush guard**: a `flush_all()` that drains nothing, where
+  nothing was enqueued since the last flush, raises with a pointer to
+  `docs/dag-library.md` → 'Persistence: reads, writes, and the queue'.
+  The wrong instincts (flush-per-write, flush-so-my-read-can-see-writes,
+  double flush) all fail loudly; legit multi-flush tests never trip.
+- Tests that were written against the old semantics (the what-if suite,
+  built without the architecture in mind, then duct-taped with inline
+  flushes) are fixed as wrong: operation → one `flush_all()` → assert.
 
 ## What changes
 
-| File | Change |
+| Area | Change |
 |---|---|
-| `dag/persistence.py` | Save queue + worker + sentinel drain; `_save_node_result` privatized + writer-thread guard; `enqueue_save()` = lazy-start fallback + one `put`; internal unguarded drain for fixtures |
-| `server.py` (lifespan) | Startup: start writer. Shutdown: sentinel + bounded join |
-| `tests/unit/conftest.py` | `flush_all()` drains saves after recompute; no-op-flush guard with doc pointer |
-| `tests/unit/isolation_fixtures.py` | Clear save queue at setup; internal drain at teardown |
-| `docs/dag-library.md` | New section: "Persistence: reads, writes, and the save queue" |
-| Cleanup | Delete route-handler `flush_pending_saves()` (`api_router.py` what-if restore); delete sprinkled per-test flushes; fold the queue machinery out of `dag/node.py` (PR #94 leftovers) into `persistence.py` |
+| `dag/scheduler.py` | Processor becomes a thread with a private loop draining ONE FIFO queue (recompute + persist steps in order); sentinel + bounded join; cross-thread broadcaster handoff |
+| `dag/persistence.py` | `save_node_result` stays the write path, called by the processor in order; writer-thread guard becomes processor-thread guard; **delete** the separate save queue/thread from the superseded design |
+| `dag/node.py` | `_persist()` enqueues a persist step (or the processor persists inline on compute completion — implementation detail, decided at the code) |
+| `houses/server.py` (lifespan) | Start processor thread at startup; sentinel + bounded join + log-and-proceed at shutdown |
+| `houses/web/broadcaster.py` | Accept threadsafe submission from the processor |
+| `tests/unit/conftest.py` | `flush_all()` drains the one queue; no-op guard; `drain_recompute()` split (done) |
+| `tests/unit/isolation_fixtures.py` | Queue clear at setup (done) |
+| `docs/dag-library.md` | Rewrite 'Persistence: reads, writes, and the save queue' section for the processor design |
+| Cleanup (done) | Route-handler flush deleted; sprinkled per-test flushes deleted; what-if tests fixed as wrong; worker-reliability tests relocated |
 
 ## What does NOT change
 
-- `_persist()` signature and call sites (DerivedNode.refresh,
-  UserInputNode.push).
-- Reads — `latest_attempt()`, `latest_node_result()`,
-  `node_result_before()` — and their callers' logic.
-- The broadcaster, the API routes, the frontend.
-- The existing test suite's flush discipline.
+- The broadcaster's UI contract: pushes on change — the frontend never
+  knows a thread exists.
+- Read endpoints and their semantics (serve the current snapshot).
+- `UserInputNode.push` semantics; `_persist()` call sites' shape.
+- The immutable-value rule — it is now load-bearing for memory safety.
 
 ## Accepted trades
 
-**Crash window.** Writes sit in the in-memory queue until drained; a crash
-inside the window loses those rows (they were never issued to SQLite — WAL
-is irrelevant here). The pre-change system bought durability by writing
-synchronously on the event loop; this change sells that durability back,
-which is exactly what requirement 1 demands. Costs, bounded:
-
-- Derived nodes: lost row → reload pending/stale → staleness machinery
-  schedules recompute. Self-healing; costs recompute time (docs already
-  normalize "first boot may take tens of minutes to settle").
-- User inputs (settings, what-if): lost edit silently reverts. Coherent,
-  no torn state — the marker and the values it gates are queued together,
-  and after restart the in-memory marker is gone anyway.
-- Window: milliseconds — the writer drains FIFO continuously; the queue is
-  only deep mid-cascade. Real exposure: crash-mid-cascade.
-
-Decision: accept. Single-family app, DB-file backups already exist
-(`docs/deployment-oracle-free-tier.md`); the alternative (sync writes for
-user inputs) reintroduces a second write path — the complexity this change
-exists to remove — to insure against a sub-second risk.
+- **Cascade latency**: compute → persist → compute serializes; a cascade
+  finishes later by (write+handoff) per node. The UI is responsive
+  throughout — that is the trade, deliberately chosen.
+- **Crash window**: work in the queue is lost on a crash (never issued to
+  SQLite). Derived nodes self-heal via staleness/recompute; user inputs
+  can revert; window is milliseconds outside mid-cascade. Accepted —
+  single-family app, DB-file backups exist
+  (`docs/deployment-oracle-free-tier.md`).
+- **GIL granularity**: request handlers can interleave with processor
+  steps at bytecode boundaries rather than await points. Immutable-swap
+  rule makes this safe; no per-read locking, ever.
 
 ## Reasoning summary
 
-One writer thread writes; everything else enqueues and never blocks. Reads
-are either memory-current or timestamp-predicated history that excludes
-in-flight writes by construction, and any stale read is corrected by a
-push. The queue has exactly two observers (producer, consumer) plus a
-shutdown drain; the writer's lifecycle lives in one function pair
-(lifespan start/shutdown). Tests drive the same path synchronously at the
-choke points the suite already uses, and a no-op flush fails loudly with a
-pointer to the docs. Nothing else is load-bearing.
+One queue, one processor, one writer thread's worth of discipline: the
+event loop serves, the processor works, values are immutable, freshness
+is pushed. Each queue is FIFO with a single consumer and the second stage
+only receives what the first finished — a chain, not a weave. The whole
+concurrency proof: request handlers read snapshots that cannot change
+under them, the processor is the only mutator, and the broadcaster tells
+everyone who cares. Nothing else is load-bearing.

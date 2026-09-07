@@ -46,10 +46,10 @@ class PlaceOfInterest:
     # derived by ``effective_acceptable_modes`` and is what routing uses.
     acceptable_modes: tuple[str, ...] = ()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {"label": self.label, "address": self.address, "acceptable_modes": list(self.acceptable_modes)}
 
 
@@ -96,14 +96,14 @@ class Person:
     # False means no current home: the deposit is cash only.
     selling_home: bool | None = None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display.
 
         Keeps the identity-relevant fields; money fields render through
         their canonical string form via the generic projector.
         """
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {
             "name": self.name,
             "has_car": self.has_car,

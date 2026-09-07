@@ -144,7 +144,7 @@ def _parse_price(value: str) -> Money | None:
     return Money(cleaned, "GBP")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore unused sheet-import entry point exercised by the source-values regression suite — startup uses the
 def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -> int:
     sheet = SheetRow(row=row, sources=sources)

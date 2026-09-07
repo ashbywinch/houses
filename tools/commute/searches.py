@@ -74,7 +74,7 @@ UnionPayload = dict[str, Any]
 SearchRecord = dict[str, Any]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def nearest_station_name(rect: Rect, kept_stations: list[dict]) -> str:
     """Human-readable name: the nearest kept station to the rectangle's centre."""
     centre = GeoPoint((rect.lat_min + rect.lat_max) / 2.0, (rect.lon_min + rect.lon_max) / 2.0)
@@ -105,9 +105,9 @@ def build_searches(
                 "rightmove_url": build_search_url(poly, min_beds=options.min_beds, property_type=options.property_type),
             }
         )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         "metadata": {
             "threshold_min": options.threshold_min,
             "destinations": options.destinations,
@@ -133,7 +133,7 @@ def shed_to_searches(
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _existing_searches(path: Path) -> dict | None:
     """Current searches.json payload, or None when absent/unreadable (will rewrite)."""
     if not path.exists():
@@ -170,7 +170,7 @@ def write_searches(payload: SearchesPayload, out_dir: str | Path) -> None:
     (out_dir / "searches.txt").write_text(_urls_text(payload))
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _urls_text(payload: dict) -> str:
     urls = [s["rightmove_url"] for s in payload["searches"]]
     return "\n".join(urls) + "\n"
@@ -204,7 +204,7 @@ def union_payload(
     grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), options.cell_km)
     cells = rasterize([GeoPoint(r["lat"], r["lon"]) for r in kept_stations], options.buffer_km, grid)
     components = [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         {
             "outline": [[p.lat, p.lon] for p in loop],
             "rightmove_url": build_search_url(

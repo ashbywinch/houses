@@ -52,6 +52,7 @@ async def test_after_refresh_does_not_broadcast():
             "Node-level broadcasts are for user-triggered changes only."
         )
 
+
 def _get_async_queue_scheduler():
     from dag.scheduler import AsyncQueueScheduler as _AsyncQS
     from dag.scheduler import get_scheduler
@@ -59,52 +60,3 @@ def _get_async_queue_scheduler():
     s = get_scheduler()
     assert isinstance(s, _AsyncQS)
     return s
-
-
-class TestSaveWorkerReliability:
-    """Save-queue contract: errors never kill the worker or leak unfinished
-    tasks; flush drains deterministically; reads see queued writes."""
-
-    def test_flush_processes_enqueued_write(self):
-        """flush_pending_saves() writes every queued item before returning."""
-        import dag.persistence as per
-
-        per.enqueue_save("flush_test/x", {"status": "succeeded", "value": 1}, None, "2026-01-01T00:00:00+00:00", None)
-        per.flush_pending_saves()  # reads never flush; the test drains
-        row = per.latest_node_result("flush_test/x")
-        assert row is not None and row["value"] == 1
-
-    def test_save_one_survives_failure(self, caplog):
-        """A failing save is logged and never raised, task_done still runs
-        (no queue hang), and the worker/flush keeps consuming.
-
-        Per the plan, tests never start the worker thread: _save_one is
-        the shared per-item code path for worker AND flush, so it is
-        tested directly on the test thread — deterministic.
-        """
-        import logging
-
-        import dag.persistence as per
-        from unittest.mock import patch
-
-        real = per.save_node_result
-        calls = {"n": 0}
-
-        def flaky(node_id, *a, **k):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise RuntimeError("disk full")
-            return real(node_id, *a, **k)
-
-        per.flush_pending_saves()  # drain bootstrap/fixture leftovers
-        per._save_queue.put(("flaky/a", {"v": 1}, None, "2026-01-01T00:00:01+00:00", None))
-        per._save_queue.put(("flaky/b", {"v": 2}, None, "2026-01-01T00:00:02+00:00", None))
-        with caplog.at_level(logging.ERROR):
-            with patch.object(per, "save_node_result", flaky):
-                per._save_one(per._save_queue.get())
-                per._save_one(per._save_queue.get())
-
-        assert calls["n"] == 2, "processing continues after an error"
-        assert any("flaky/a" in r.getMessage() for r in caplog.records), "failure must be logged"
-        assert per._save_queue.unfinished_tasks == 0, "task_done must run on error"
-        assert per.latest_node_result("flaky/b") is not None, "later item still persisted"

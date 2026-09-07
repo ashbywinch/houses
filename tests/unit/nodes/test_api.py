@@ -118,9 +118,7 @@ class TestPropertyApi:
 
         for bad in ("false", 1, "true", None):
             resp = client.patch("/api/properties/prop124/council-tax", json={"ignored": bad})
-            assert resp.status_code == 422, (
-                f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
-            )
+            assert resp.status_code == 422, f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
 
     def test_patch_council_tax_validates_all_fields_before_any_push(self):
         """A body with valid payers but an invalid ignored must 422
@@ -156,7 +154,8 @@ class TestPropertyApi:
             json={"main_payers": ["Simon"], "annexe_payers": ["Ashby"], "ignored": True},
         )
         assert resp.status_code == 200
-        flush_all()  # land the PATCH's queued write before simulating reload
+        # No flush needed: the PATCH endpoint drains the cascade inline
+        # before responding (the no-op-flush guard enforces this).
 
         # Reconstruct the property from the persisted rows — the choice
         # must NOT be clobbered by the constructor's default push.
@@ -221,9 +220,7 @@ class TestPropertyApi:
                 "the stale scan must schedule the code-stale commute pipeline"
             )
             await flush_processor()
-            assert selector.code_is_stale() is False, (
-                "the commute selector must be recomputed by the scheduled drain"
-            )
+            assert selector.code_is_stale() is False, "the commute selector must be recomputed by the scheduled drain"
         finally:
             _sp.reset(token)
 
@@ -1366,7 +1363,6 @@ class TestMonthlyDeltaApi:
         assert own["affordability"]["group_monthly_cost"]["value"]["delta_vs_home"] is None
 
 
-
 class TestRegenerateApi:
     """POST /api/admin/regenerate — force recompute of non-stale nodes."""
 
@@ -1438,8 +1434,9 @@ class TestRegenerateApi:
         )
         prop.council_tax._attempt = Attempt.impossible("pre-A3 state")
 
-        # A plain flush does NOT regenerate it — timestamps say fresh.
-        flush_all()
+        # Nothing is enqueued here — the write landed synchronously and
+        # the timestamps say fresh — so a plain flush is a no-op (the
+        # no-op-flush guard rejects it). Only a regenerate is the way out.
         assert prop.council_tax.latest_attempt().impossible
 
         resp = client.post("/api/admin/regenerate", json={"patterns": ["*/council_tax"]})

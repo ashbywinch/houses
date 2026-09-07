@@ -218,6 +218,7 @@ class Add(Expression):
     def to_formula_lines(self) -> list[FormulaLine]:
         return [line for term in self.terms for line in term.to_formula_lines()]
 
+
 def _divide_operands(left_value: Any, right_value: Any) -> Any:
     """Divide, coercing money-looking strings ("124.80") to Money first."""
     if isinstance(left_value, str):
@@ -341,10 +342,6 @@ class Div(Expression):
 # ── Financial Expressions ──
 
 
-
-
-
-
 # ── Control Flow Expressions ──
 
 
@@ -412,8 +409,6 @@ class Conditional(Expression):
         return lines
 
 
-
-
 class Field(Expression):
     """Extract a dict key from a node's evaluated value."""
 
@@ -457,7 +452,6 @@ class Attr(Expression):
         if v is None:
             return Attempt.impossible(f"Attr {self.attr!r} is None")
         return Attempt.succeeded(v)
-
 
 
 def _alternative_reason(name: str, att: Attempt) -> str:

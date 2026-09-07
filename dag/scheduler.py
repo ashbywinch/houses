@@ -1,19 +1,26 @@
 """Pluggable refresh scheduler for DerivedNodes.
 
-Production: ``AsyncQueueScheduler`` — background ``asyncio.PriorityQueue``.
-Tests: inject an isolated instance via ``set_scheduler()``.
+Production: ``AsyncQueueScheduler`` — ONE FIFO queue drained by the DAG
+processor thread, which owns a private asyncio loop for the async compute
+functions. The uvicorn event loop never runs cascade work; it enqueues
+work and reads in-memory snapshots.
+
+Tests: inject an isolated instance via ``set_scheduler()`` — no thread;
+``flush_processor()`` drains synchronously on the test thread.
 """
 
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
-import contextvars
+import inspect
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 
 if TYPE_CHECKING:
     from dag.derived_node import DerivedNode
@@ -37,9 +44,11 @@ class RefreshScheduler:
     Production: ``AsyncQueueScheduler`` — background ``asyncio.PriorityQueue``.
     Tests: provide an isolated instance with ``set_scheduler()``.
     """
+
     # Set per-instance via set_after_refresh(); AsyncQueueScheduler.after_refresh
     # delegates to it when non-None.
     _after_refresh_callback: Callable[[DerivedNode], object] | None = None
+
     @staticmethod
     def register(node: DerivedNode) -> None:
         """Called when a DerivedNode is created."""
@@ -66,8 +75,9 @@ class RefreshScheduler:
         """Schedule *node* for refresh at wall-clock time *dt*."""
 
     @staticmethod
-    async def process_pending() -> None:
-        """Synchronously process all currently scheduled nodes."""
+    async def process_pending() -> int:
+        """Synchronously process all currently scheduled nodes; returns the count processed."""
+        return 0
 
     @staticmethod
     def after_refresh(node: DerivedNode) -> None:
@@ -82,6 +92,11 @@ class AsyncQueueScheduler(RefreshScheduler):
     every event executes immediately on ``process_pending()``.
     """
 
+    @property
+    def enqueued_since_flush(self) -> int:
+        """Work items enqueued since the last complete drain (flush guard)."""
+        return self._enqueued_since_flush
+
     def __init__(self, respect_time: bool = True) -> None:
         self._queue: asyncio.PriorityQueue[QueueEvent] = asyncio.PriorityQueue()
         self._scheduled: dict[str, QueueEvent] = {}
@@ -89,6 +104,9 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._wakeup: asyncio.Event = asyncio.Event()
         self._after_refresh_callback: Callable[[DerivedNode], object] | None = None
         self._respect_time: bool = respect_time
+        self._enqueued_since_flush = 0
+        """Work items enqueued since the last complete drain — the conftest
+        flush_all() no-op guard reads it."""
 
     @override
     def register(self, node: DerivedNode) -> None:
@@ -119,6 +137,7 @@ class AsyncQueueScheduler(RefreshScheduler):
             return
         event = QueueEvent(scheduled_at=scheduled_at, node_id=node._id, node=node)
         self._scheduled[node._id] = event
+        self._enqueued_since_flush += 1
         self._queue.put_nowait(event)
         self._wakeup.set()
 
@@ -139,8 +158,13 @@ class AsyncQueueScheduler(RefreshScheduler):
             self._after_refresh_callback(node)
 
     @override
-    async def process_pending(self) -> None:
-        """Process all past-due events (or all events when ``_respect_time`` is False)."""
+    async def process_pending(self) -> int:
+        """Process all past-due events (or all events when ``_respect_time`` is False).
+
+        Returns the number processed and resets the since-flush counter
+        (the conftest flush_all() no-op guard reads it).
+        """
+        drained = 0
         now_ts = datetime.now(UTC).timestamp() if self._respect_time else float("inf")
         while not self._queue.empty():
             try:
@@ -152,6 +176,9 @@ class AsyncQueueScheduler(RefreshScheduler):
                 break
             self._scheduled.pop(event.node_id, None)
             await event.node.refresh()
+            drained += 1
+        self._enqueued_since_flush = 0
+        return drained
 
     async def _background_loop(self) -> None:
         while True:
@@ -178,44 +205,164 @@ class AsyncQueueScheduler(RefreshScheduler):
             await asyncio.sleep(0)
 
 
-# Production default — shared across all asyncio tasks.
-# ContextVar override is only for test injection (set_scheduler).
+# Production default — ONE scheduler for every thread: the event loop,
+# the TestClient portal, and the processor thread must all resolve the
+# same instance, or endpoints would schedule into a queue nobody drains.
+# The override is test injection only (isolation fixtures); it is a plain
+# module global because a ContextVar does not cross the portal thread.
 _default_scheduler: RefreshScheduler = AsyncQueueScheduler()
-_scheduler_var: contextvars.ContextVar[RefreshScheduler | None] = contextvars.ContextVar("_dag_scheduler", default=None)
+_override_scheduler: RefreshScheduler | None = None
 
 
 def get_scheduler() -> RefreshScheduler:
-    override = _scheduler_var.get()
-    return override if override is not None else _default_scheduler
+    return _override_scheduler if _override_scheduler is not None else _default_scheduler
 
 
 # lucidlint: ignore unused-setter test-injection API — isolation_fixtures and dag tests call set_scheduler()
 def set_scheduler(scheduler: RefreshScheduler) -> None:
     """Override the scheduler (used by tests to inject an isolated one)."""
-    _scheduler_var.set(scheduler)
+    global _override_scheduler
+    _override_scheduler = scheduler
 
 
-# lucidlint: ignore unused test seam — clears the ContextVar override in isolation fixtures across dag tests
+# lucidlint: ignore unused test seam — clears the override in isolation fixtures across dag tests
 def reset_scheduler() -> None:
-    """Reset to default (clears the ContextVar override)."""
-    _scheduler_var.set(None)
+    """Reset to default (clears the override)."""
+    global _override_scheduler
+    _override_scheduler = None
 
 
 # ── Module-level convenience aliases (delegating to current scheduler) ──
 
 
-async def flush_processor() -> None:
-    await get_scheduler().process_pending()
+async def flush_processor() -> int:
+    """Process all currently scheduled nodes on the current executor.
 
-
-def start_processor() -> asyncio.Task:
-    """Start the background refresh loop. Returns the asyncio Task."""
-    sched = get_scheduler()
-    if isinstance(sched, AsyncQueueScheduler):
-        return asyncio.create_task(sched._background_loop())
-    raise TypeError(f"Cannot start background processor on {type(sched).__name__}")
+    Production request paths reach the queue only via
+    ``run_on_processor(flush_processor)`` — asyncio primitives are bound
+    to whichever loop owns them.
+    """
+    return await get_scheduler().process_pending()
 
 
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
     sched = get_scheduler()
     sched._after_refresh_callback = callback
+
+
+# ── The DAG processor thread ─────────────────────────────────────────
+# ONE queue, ONE processor. The event loop never runs cascade work; the
+# processor owns recompute AND persistence (blocking sqlite3 is harmless
+# here — that is the point). See .kilo/plans/dag-save-queue.md.
+
+# lucidlint: ignore global-state bounded module cache/state — single processor thread, deliberate
+_processor_thread: threading.Thread | None = None
+_processor_loop: asyncio.AbstractEventLoop | None = None
+_processor_sched: AsyncQueueScheduler | None = None
+
+
+def current_processor_thread() -> threading.Thread | None:
+    """The processor thread once running; None in tests, lifespan-less
+    scripts and startup — single-threaded contexts where mutation is safe
+    by definition."""
+    return _processor_thread
+
+
+def assert_mutation_allowed() -> None:
+    """Guard: DAG state mutates only on the processor thread.
+
+    Fires only when the processor EXISTS and the caller is not it — the
+    one dangerous case. Startup, scripts and tests never start a
+    processor, so they are exempt by construction.
+    """
+    if _processor_thread is not None and threading.current_thread() is not _processor_thread:
+        raise RuntimeError(
+            "DAG mutation off the processor thread — enqueue work instead "
+            "(await run_on_processor(...) from request handlers). See "
+            "docs/dag-library.md → 'Thread rules'."
+        )
+
+
+def start_processor() -> None:
+    """Start the DAG processor on its own thread (private event loop).
+
+    No-op under ``dag.persistence.testing`` (tests drive the pipeline
+    synchronously) and when already running.
+    """
+    global _processor_thread, _processor_loop, _processor_sched
+    from dag.persistence import testing as _testing
+
+    if _testing:
+        return
+    if _processor_thread is not None and _processor_thread.is_alive():
+        return
+    sched = get_scheduler()
+    assert isinstance(sched, AsyncQueueScheduler)
+    _processor_sched = sched
+    _processor_loop = asyncio.new_event_loop()
+
+    def _run() -> None:
+        asyncio.set_event_loop(_processor_loop)
+        _processor_loop.create_task(_processor_sched._background_loop())
+        _processor_loop.run_forever()
+        _processor_loop.close()
+
+    _processor_thread = threading.Thread(target=_run, name="dag-processor", daemon=True)
+    _processor_thread.start()
+
+
+def stop_processor(timeout: float = 10.0) -> int:
+    """Drain past-due work through the processor, stop its loop, join it.
+
+    Returns the count of future-scheduled items (retries) abandoned;
+    caller logs it — a wedged drain must not hang ``systemctl stop``.
+    """
+    global _processor_thread, _processor_loop, _processor_sched
+    if _processor_loop is None or _processor_thread is None:
+        return 0
+    sched = _processor_sched
+    assert isinstance(sched, AsyncQueueScheduler)
+
+    async def _drain() -> int:
+        while True:
+            await sched.process_pending()
+            if sched._queue.empty():
+                break
+        return len(sched._scheduled)
+
+    abandoned = 0
+    try:
+        abandoned = asyncio.run_coroutine_threadsafe(_drain(), _processor_loop).result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        logger.error("processor drain did not finish within %ss", timeout)
+    _processor_loop.call_soon_threadsafe(_processor_loop.stop)
+    _processor_thread.join(timeout=timeout)
+    if _processor_thread.is_alive():
+        logger.error("processor thread did not stop within %ss", timeout)
+    _processor_thread = None
+    _processor_loop = None
+    _processor_sched = None
+    return abandoned
+
+
+async def run_on_processor(fn: Callable[[], Any]) -> Any:
+    """Run ``fn()`` on the processor thread and await its completion.
+
+    Request handlers mutate DAG state ONLY through this — direct node
+    mutation off the processor thread raises (see
+    ``assert_mutation_allowed``). Single-threaded contexts (tests,
+    startup, the processor itself) run inline.
+    """
+    if _processor_loop is None or threading.current_thread() is _processor_thread:
+        result = fn()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+    return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(_run_maybe_async(fn), _processor_loop))
+
+
+async def _run_maybe_async(fn: Callable[[], Any]) -> Any:
+    result = fn()
+    if inspect.isawaitable(result):
+        result = await result
+    return result

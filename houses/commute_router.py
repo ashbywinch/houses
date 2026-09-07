@@ -399,7 +399,7 @@ class CommuteRouter:
                         f"straight-line distance {dist_km:.1f} km exceeds {max_walk_km:.1f} km"
                     )
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         body = {
             "origin": self._address_waypoint(origin).to_dict(),
             "destination": self._address_waypoint(dest).to_dict(),
@@ -500,7 +500,7 @@ class CommuteRouter:
         """
         if isinstance(dest, str):
             dest = PlaceOfInterest(label="", address=dest)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         body = {
             "origin": self._address_waypoint(origin).to_dict(),
             "destination": self._address_waypoint(dest.address).to_dict(),
@@ -728,7 +728,7 @@ class CommuteRouter:
             errors = [a.error for a in candidates if a.error]
             return Attempt.impossible("; ".join(errors) if errors else "no route available")
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         def _tiebreak(c: Commute) -> tuple[int, float]:
             no_cost = 1 if c.daily_cost == Money(amount="0", currency="GBP") else 0
             return (no_cost, c.duration.magnitude or 0)
