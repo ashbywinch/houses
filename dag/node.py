@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import queue
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,6 +14,35 @@ from dag.attempt import Attempt, AttemptError, Provenance
 from dag.expression import Add, Div, Expression, Literal, Mul, Negate, Ref, Sub
 from dag.persistence import latest_node_result, save_node_result
 from dag.signals import Signal
+
+# Single background thread for all DAG persistence writes.
+# The event loop enqueues; this thread writes to SQLite. Callers never
+# block on I/O.
+_save_queue: queue.Queue = queue.Queue()
+_save_thread: threading.Thread | None = None
+
+
+def _save_worker() -> None:
+    while True:
+        item = _save_queue.get()
+        if item is None:
+            break
+        node_id, result_dict, dep_timestamps, created_at, code_version = item
+        save_node_result(node_id, result_dict, dep_timestamps, created_at=created_at, code_version=code_version)
+        _save_queue.task_done()
+
+
+def _ensure_save_thread() -> None:
+    global _save_thread
+    if _save_thread is None or not _save_thread.is_alive():
+        _save_thread = threading.Thread(target=_save_worker, daemon=True)
+        _save_thread.start()
+
+
+def _flush_persistence() -> None:
+    _ensure_save_thread()
+    _save_queue.join()
+
 
 
 @dataclass
@@ -184,7 +215,15 @@ class PersistedNodeMixin(Generic[T]):
         code_version: str | None = None,
     ) -> None:
         now_str = datetime.now(UTC).isoformat()
-        save_node_result(self._id, result_dict, dep_timestamps, created_at=now_str, code_version=code_version)
+        import dag.persistence as _per
+        if _per.testing:
+            # In tests: write synchronously for deterministic assertions.
+            save_node_result(self._id, result_dict, dep_timestamps, created_at=now_str, code_version=code_version)
+        else:
+            # In production: offload to the background save thread so the
+            # event loop is never blocked by I/O.
+            _ensure_save_thread()
+            _save_queue.put((self._id, result_dict, dep_timestamps, now_str, code_version))
         now = datetime.fromisoformat(now_str)
         self._persisted_at = now
         self._db_created_at = now_str

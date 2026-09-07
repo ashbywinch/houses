@@ -26,14 +26,15 @@ def _inject_test_scheduler():
 
 @pytest.fixture(autouse=True)
 def _sqlite_memory():
-    """Replace the global DB connection with an in-memory database.
+    """Replace the global DB connection with a temp-file database shared
+    across threads (a :memory: database is per-connection and invisible
+    to the background save thread)."""
+    import tempfile
 
-    Every test uses an isolated in-memory SQLite so no test writes
-    to the real ``data/houses.db``.
-    """
     saved = per._get_db
     per.testing = True
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    db_path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     per._get_db = lambda: conn
     per.init_db()
@@ -44,6 +45,9 @@ def _sqlite_memory():
     yield
     per.testing = False
     db.testing = False
+    conn.close()
+    import os
+    os.unlink(db_path)
     per._get_db = saved
 
 
