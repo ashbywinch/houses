@@ -132,15 +132,19 @@ def whatif_world():
     return client, rid
 
 
-def _pimlico_commute(client, rid: str) -> PimlicoCommute:
+def _pimlico_commute(client, rid: str) -> PimlicoCommute | None:
     """Simon's Pimlico commute as the DAG currently prices it — the same
-    node the commute pills render."""
+    node the commute pills render. None when the destination is not
+    commuted (0 days a week: it vanishes from the figures)."""
     drain_recompute()  # make pending computation land — reads never flush persistence
     detail = client.get(f"/api/properties/{rid}/detail").json()
     mcc = detail["affordability"]["monthly_commute_cost"]
     assert mcc["succeeded"], mcc.get("error")
     persons = mcc["value"]["persons"]
-    entry = next(c for c in persons["Simon"]["commutes"] if c["label"] == "Pimlico")
+    entries = [c for c in persons["Simon"]["commutes"] if c["label"] == "Pimlico"]
+    if not entries:
+        return None
+    entry = entries[0]
     return PimlicoCommute(int(entry["trips_per_week"]), Decimal(entry["yearly_gbp"]))
 
 
@@ -155,6 +159,7 @@ def test_originals_stay_in_dag_history_after_apply(whatif_world):
     started-at marker — that row IS the restore reference, no copy."""
     client, rid = whatif_world
     original = _pimlico_commute(client, rid)
+    assert original is not None
     assert original.trips == 1 and original.yearly > 0
 
     assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
@@ -173,18 +178,19 @@ def test_originals_stay_in_dag_history_after_apply(whatif_world):
     assert pimlico["trips_per_week"] == 1
 
     # And the live value is the scenario.
-    scenario = _pimlico_commute(client, rid)
-    assert scenario.trips == 0
+    # A 0-days scenario is not commuted: the destination vanishes from
+    # the figures entirely — never recorded as a £0 commute.
+    assert _pimlico_commute(client, rid) is None
 
 
 def test_apply_prices_scenario_through_the_dag(whatif_world):
     """Apply writes the scenario through the NORMAL settings write: the
-    DAG's own breakdown (the thing the commute pills render) shows £0
-    for a 0-days scenario — no separate evaluation path, nothing
-    hand-wired."""
+    DAG's own breakdown drops a 0-days destination from the figures —
+    no separate evaluation path, nothing hand-wired."""
     client, rid = whatif_world
 
     real = _pimlico_commute(client, rid)
+    assert real is not None
     assert real.trips == 1
     assert real.yearly > 0, "test premise: the conftest drive fake must price the commute"
 
@@ -192,9 +198,7 @@ def test_apply_prices_scenario_through_the_dag(whatif_world):
     assert resp.status_code == 200, resp.text
     assert client.get("/api/what-if/state").json()["active"] is True
 
-    scenario = _pimlico_commute(client, rid)
-    assert scenario.trips == 0
-    assert scenario.yearly == 0
+    assert _pimlico_commute(client, rid) is None
 
 
 def test_restore_reappends_original_and_marker_clears(whatif_world):
@@ -203,17 +207,20 @@ def test_restore_reappends_original_and_marker_clears(whatif_world):
     re-applied in between; the marker clears."""
     client, rid = whatif_world
     original = _pimlico_commute(client, rid)
+    assert original is not None
     assert original.trips == 1
 
     assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
     assert client.post("/api/what-if/apply", json={"persons": [_apply_body(3)]}).status_code == 200
     tweaked = _pimlico_commute(client, rid)
+    assert tweaked is not None
     assert tweaked.trips == 3
     assert tweaked.yearly == Decimal("5.50") * 3 * 46
 
     assert client.post("/api/what-if/restore").status_code == 200
     assert client.get("/api/what-if/state").json() == {"active": False}
     restored = _pimlico_commute(client, rid)
+    assert restored is not None
     assert restored == original
     # A second restore is a no-op (nothing active).
     assert client.post("/api/what-if/restore").status_code == 409

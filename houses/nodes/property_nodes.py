@@ -615,6 +615,18 @@ class PropertyNodes:
         assert self.commute_breakdown is not None, "commute pipeline not built"
         return await self.commute_breakdown.to_json()
 
+    def _commuted_destinations(self) -> set[str]:
+        """Selector keys whose destination is actually commuted (trips >
+        0). A destination with zero days a week is not commuted: no pill,
+        no cost entry — the commute hasn't become free, it doesn't
+        happen."""
+        return {
+            f"{p.name}/{q.label}"
+            for p in (self._svc.persons_source._value or [])
+            for q in (p.places_of_interest or [])
+            if q.trips_per_week > 0
+        }
+
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json_summary(self) -> dict[str, Any]:
         triage = _TriageJson(
@@ -636,7 +648,11 @@ class PropertyNodes:
             rightmove_bedrooms=await self.rightmove_bedrooms.to_json_value(),
             group_monthly_cost=await self.group_monthly_cost.to_json_value(),
             town_name=await self.town_name.to_json_value(),
-            commutes={k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
+            commutes={
+                k: {"commute": await v.to_json_value()}
+                for k, v in self.commute_selectors.items()
+                if k in self._commuted_destinations()
+            },
             schools=schools.to_dict(),
             walkability=await self.walkability.to_json_value(),
             epc=await self.epc.to_json_value(),
@@ -705,7 +721,11 @@ class PropertyNodes:
             town_name=await self.town_name.to_json(),
             epc=await self.epc.to_json(),
             location=location.to_dict(),
-            commutes={k: await v.to_json() for k, v in self.commute_selectors.items()},
+            commutes={
+                k: await v.to_json()
+                for k, v in self.commute_selectors.items()
+                if k in self._commuted_destinations()
+            },
             schools=schools.to_dict(),
             affordability=affordability.to_dict(),
             council_tax_apportionment=apportionment.to_dict(),
