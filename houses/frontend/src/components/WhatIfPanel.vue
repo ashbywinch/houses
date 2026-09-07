@@ -47,6 +47,13 @@ watch(active, v => {
   if (v) collapsed.value = false
 }, { immediate: true })
 
+// Unfurling always re-reads the server state: the panel is an editor of
+// LIVE family data, so a stale local copy (page open across changes made
+// elsewhere) must never be what a "Try" pushes.
+watch(collapsed, v => {
+  if (!v) void load()
+})
+
 async function toggleCollapsed() {
   // Furling an applied what-if cancels it — the real numbers come back
   // through the same restore path as the button. Opening is always free.
@@ -217,7 +224,7 @@ async function accept() {
         >Commutes</button>
       </nav>
 
-      <fieldset class="whatif__fieldset" :disabled="active">
+      <fieldset class="whatif__fieldset" :disabled="busy">
       <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
         <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
           <div class="card-heading">{{ p.name }}</div>
@@ -261,6 +268,7 @@ async function accept() {
 
       <div v-else class="settings-panel" role="tabpanel">
         <div v-for="p in persons" :key="p.name" class="settings-card dest-card whatif-person">
+          <div class="card-heading">{{ p.name }}</div>
           <label class="toggle-row">
             <span class="toggle-row__label">Has a car</span>
             <ToggleSwitch v-model="p.has_car" />
