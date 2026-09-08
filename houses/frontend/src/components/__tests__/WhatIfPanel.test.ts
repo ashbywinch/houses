@@ -205,6 +205,9 @@ describe('WhatIfPanel', () => {
     const { wrapper, store } = mountPanel()
     await flushPromises()
 
+    // Restoring clears the server marker: the state endpoint now
+    // reports false, and the panel reloads the real numbers.
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
     await findButton(wrapper, 'Back to real numbers').trigger('click')
     await flushPromises()
 
@@ -217,6 +220,8 @@ describe('WhatIfPanel', () => {
     const { wrapper, store } = mountPanel()
     await flushPromises()
 
+    // Accepting also clears the server marker.
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
     await findButton(wrapper, 'Keep these numbers').trigger('click')
     await flushPromises()
 
