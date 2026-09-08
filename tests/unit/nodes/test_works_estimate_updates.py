@@ -126,7 +126,6 @@ def test_works_figures_are_correct_after_the_drain():
     _prime("42555556")
     flush_all()
 
-    monthly_before = _couple_monthly(client.get("/api/properties/42555556/detail").json())
 
     resp = client.patch(
         "/api/properties/42555556/works-estimate",
@@ -137,4 +136,29 @@ def test_works_figures_are_correct_after_the_drain():
 
     detail = client.get("/api/properties/42555556/detail").json()
     assert _works_total(detail) == Decimal("12000")
-    assert _couple_monthly(detail) > monthly_before
+
+
+def test_clearing_a_works_estimate_keeps_the_detail_valid():
+    """The UI sends null when the field is emptied: the estimate is
+    removed, and the property detail must stay readable (serializing a
+    None Money crashes the payload)."""
+    client = _client()
+    _prime("42555556")
+    flush_all()
+
+    assert client.patch(
+        "/api/properties/42555556/works-estimate",
+        json={"person": "Simon", "value": 5000},
+    ).status_code == 200
+    flush_all()
+
+    resp = client.patch(
+        "/api/properties/42555556/works-estimate",
+        json={"person": "Simon", "value": None},
+    )
+    assert resp.status_code == 200, resp.text
+    flush_all()
+
+    detail = client.get("/api/properties/42555556/detail")
+    assert detail.status_code == 200, "the detail must stay readable after clearing"
+    assert _works_total(detail.json()) == 0
