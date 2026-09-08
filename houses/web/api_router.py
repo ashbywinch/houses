@@ -1076,6 +1076,11 @@ async def patch_works_estimate(
     current[person_name] = Money(str(value), "GBP") if value is not None else None
     prop.works_estimates.push(current, "user")
 
+    # The page refetches the detail as soon as this returns: drain the
+    # (pure-arithmetic) re-price inline so the refetch sees the new
+    # figures. The websocket summary push happens on top of the drain.
+    await run_on_processor(flush_processor)
+
     return {"status": "ok"}
 
 
