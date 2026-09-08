@@ -338,14 +338,6 @@ async function accept() {
   background: var(--card-bg);
   padding: 0 var(--sp-3);
 }
-.whatif--collapsed {
-  /* Closed bar: height emerges from the toggle's standard vertical
-   * padding — same rhythm as the page's other controls, no min-height. */
-  padding: 0 var(--sp-3);
-}
-.whatif--collapsed .whatif__toggle {
-  padding: var(--sp-2) 0;
-}
 .whatif__header {
   display: flex;
   align-items: center;
