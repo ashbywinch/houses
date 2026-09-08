@@ -167,6 +167,18 @@ Rules (every one is enforced — guard messages cite this section):
    them immediately (back the rows up first) and fix the writer — the
    startup loader refuses to boot over them.
 
+7. **The front end never blocks on the queue.** Edit endpoints return
+   as soon as the mutation is enqueued; the UI updates from the
+   websocket (`property_updated` per property, one coalesced
+   `settings_updated` per settings burst) — never from the request
+   timing. The one sanctioned exception: an endpoint the client
+   refetches immediately after (inline-edit saves such as works
+   estimate, address, location) drains the cascade inline first when
+   that re-price is pure arithmetic, so the immediate refetch sees the
+   new figures. Anything requiring external calls (routing, geocoding,
+   scraping) must NOT drain inline — the request would hang for the
+   whole backlog.
+
 Shutdown sentinels the processor: remaining work drains in order, then
 the loop stops (bounded join — `systemctl stop` must not hang).
 
