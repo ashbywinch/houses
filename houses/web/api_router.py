@@ -1077,12 +1077,9 @@ async def patch_works_estimate(
         current[person_name] = Money(str(value), "GBP") if value is not None else None
         prop.works_estimates.push(current, "user")
 
-    # The mutation goes through the processor (Thread rule 1); the drain
-    # after it is the sanctioned inline exception: the page refetches
-    # the detail as soon as this returns, and the works re-price is
-    # pure arithmetic. The websocket summary push rides the drain.
+    # Thread rule 7, no exceptions: enqueue and return. The drain runs in
+    # the background; this page's update lands via the summary broadcast.
     await run_on_processor(_apply)
-    await run_on_processor(flush_processor)
 
     return {"status": "ok"}
 

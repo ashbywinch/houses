@@ -441,14 +441,10 @@ describe('CostsSection — vs your home rows', () => {
     expect(rows[1].attributes('title')).toBe('£241.64 − £652.92 = -411.28. ≈ = council tax estimated.')
   })
 
-  it('notes the kept rent when the home\'s other adults pay rent and their delta drops', () => {
+  it('never renders a hand-written rent note — the derivation lives in provenance', () => {
     const wrapper = mountWith({ monthlyBaseline: homeBaseline })
-    expect(wrapper.find('.costs-note--rent').text()).toBe('Her £600 rent is not counted after the move.')
-  })
-
-  it('shows no rent note when the home\'s other adults pay no rent', () => {
-    const wrapper = mountWith({ monthlyBaseline: { ...homeBaseline, others_rent_paid: 0 } })
     expect(wrapper.find('.costs-note--rent').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('rent is not counted')
   })
 
   it('shows no vs rows on the baseline property itself', () => {

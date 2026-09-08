@@ -151,6 +151,13 @@ the numbers on screen stay stale. What the user should see: the edited
 element and its dependants change in place, while nothing else on the
 page moves.
 
+**P20 — People are named, never assumed; explanations come from
+provenance.** Refer to people by their names from server data. Never
+assume gender, pronouns, or household relationships in interface text.
+The explanation of a figure is its provenance (the DAG derivation,
+available one step away) — never a hand-written sentence embedded in a
+component that restates the arithmetic with assumed relationships.
+
 
 ## Language
 

@@ -26,6 +26,13 @@ watch(() => route.params.rid, (newRid) => {
   if (newRid) store.loadDetail(newRid as string)
 }, { immediate: true })
 
+// Freshness is push-delivered (dag-library Thread rule 5): when the
+// websocket applies a new summary for this property, re-read the
+// detail so the open page follows without a reload.
+watch(() => store.summaries[rid.value], () => {
+  if (rid.value) void store.loadDetail(rid.value, true)
+})
+
 // ── Section nav state ────────────────────────────────
 const activeSection = ref('summary')
 function scrollTo(id: string) {

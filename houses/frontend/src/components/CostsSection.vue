@@ -126,15 +126,6 @@ function vsRow(side: 'couple' | 'others'): { label: string; value: string; title
 const coupleVsRow = computed(() => vsRow('couple'))
 const othersVsRow = computed(() => vsRow('others'))
 
-/** When the home's other adults pay rent, their post-move figure
- *  excludes it — worth calling out when their delta goes down. */
-const othersRentNote = computed(() => {
-  const d = deltaVsHome.value?.others
-  const rent = props.monthlyBaseline?.others_rent_paid ?? 0
-  if (props.isCurrentHome || !d || rent <= 0 || Number(d.value) >= 0) return null
-  return `Her £${rent.toLocaleString()} rent is not counted after the move.`
-})
-
 // ── Works estimate inline editing ─────────────────────
 const editingPerson = ref<string | null>(null)
 const editValue = ref<string>('')
@@ -369,7 +360,6 @@ function canEdit(personName: string): boolean {
           <span class="costs-label">{{ othersVsRow.label }}</span>
           <span class="costs-value">{{ othersVsRow.value }}</span>
         </div>
-        <p v-if="othersRentNote" class="costs-note costs-note--rent">{{ othersRentNote }}</p>
         <div v-if="affordability.group_monthly_cost.value.others_breakdown" class="costs-group-breakdown">
           <div v-for="(row, key) in othersRows()" :key="key" class="costs-row costs-row--sub">
             <span class="costs-label">{{ row.label }}</span>
