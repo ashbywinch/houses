@@ -307,7 +307,9 @@ def test_scenario_reprices_the_monthly_figures(whatif_world):
 
     after = _monthly_figures(client, rid)
 
-    assert "Pimlico" not in after["commutes"]["Simon"], "a 0-days destination must vanish from the commute figures"
+    # The entry STAYS at £0.00 — provenance shows the honest
+    # "0x/wk · 46 wks/yr = £0.00/yr" multiplication; the figures exclude it.
+    assert after["commutes"]["Simon"]["Pimlico"] == "0.00", "0-days prices to £0.00, never vanish"
     assert float(after["commute_yearly_total"]) < float(before["commute_yearly_total"]), (
         f"the commute total must DROP when a commute drops to 0 days: "
         f"{before['commute_yearly_total']} -> {after['commute_yearly_total']}"

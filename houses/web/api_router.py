@@ -148,7 +148,7 @@ def _merge_what_if_persons(updates: list, current: list) -> list:
         if target is None:
             raise HTTPException(status_code=422, detail=f"unknown person {d['name']!r}")
         try:
-            merged.append(_person_from_dict(d, target))
+            merged.append(_person_from_dict(d, target, merge_destinations=True))
         except (ValueError, TypeError) as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         merged_names.add(d["name"])
@@ -869,13 +869,20 @@ def _parse_places_of_interest(pois: object) -> tuple:
     return tuple(normalized)
 
 
-def _person_from_dict(d: dict, target: Person) -> Person:
+def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = False) -> Person:
     """MERGE an API dict into an existing Person — never replace.
 
     Only the fields present in the body change; every unmentioned field
     keeps the target's value.  Replace semantics silently reset real data
     (emails, walk penalties, flags) whenever a client sends a partial
     body — that is exactly how the family emails were wiped.
+
+    ``merge_destinations``: merge ``places_of_interest`` BY LABEL — a
+    destination the body doesn't mention survives (a what-if scenario
+    only names the destinations it edits, and a partial panel copy must
+    never delete the rest of the household's destinations).  Without it,
+    the body's list replaces the tuple (the settings UI manages the full
+    destination list, where omission means removal).
     """
     updates = {k: v for k, v in d.items() if k != "thresholds"}
     for f in _PERSON_MONEY_FIELDS:
@@ -895,7 +902,13 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     if "places_of_interest" in updates:
-        updates["places_of_interest"] = _parse_places_of_interest(updates["places_of_interest"])
+        parsed = _parse_places_of_interest(updates["places_of_interest"])
+        if merge_destinations:
+            by_label = {q.label: q for q in parsed}
+            merged = tuple(by_label.pop(q.label, q) for q in target.places_of_interest)
+            updates["places_of_interest"] = merged + tuple(by_label.values())
+        else:
+            updates["places_of_interest"] = parsed
     return replace(target, **updates)
 
 

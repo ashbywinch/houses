@@ -108,8 +108,10 @@ def test_works_save_enqueues_and_returns_without_waiting():
 
     # THE CONTRACT: the save must not drain inline. Re-priced work is
     # still queued when the request returns.
-    queue_depth = getattr(sched.get_scheduler(), "queue_depth", 0)
-    assert queue_depth > 0, (
+    scheduler = sched.get_scheduler()
+    assert isinstance(scheduler, sched.AsyncQueueScheduler)
+    queued = scheduler.enqueued_since_flush
+    assert queued > 0, (
         "the save must leave the re-price queued, not drain inline"
     )
 

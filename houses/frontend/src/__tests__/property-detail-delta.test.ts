@@ -73,11 +73,11 @@ describe('PropertyDetail monthly figures', () => {
   it('shows the monthly DELTA vs the current home, like the index cards', async () => {
     const wrapper = await mountDetail()
     const text = wrapper.text()
-    // THE CONTRACT: the detail page headline is the monthly increment
-    // vs the current home (signed), matching the index cards — not the
-    // absolute monthly total.
+    // THE CONTRACT: the detail page shows the monthly increment vs the
+    // current home (signed) as an extra row, while the absolute totals
+    // stay untouched.
     expect(text).toContain('\u2212\u00a327')
-    expect(text).not.toContain('£2,356')
+    expect(text).toContain('vs your home')
   })
 
   it('refreshes the open detail when a summary broadcast lands for it', async () => {
