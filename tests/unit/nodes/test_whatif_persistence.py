@@ -256,3 +256,53 @@ def test_apply_requires_authentication(whatif_world):
     client, _ = whatif_world
     client.cookies.pop("session")
     assert client.post("/api/what-if/apply", json={"persons": []}).status_code == 401
+
+
+def _monthly_figures(client, rid: str) -> dict:
+    """The monthly figures a card renders: the commute totals, the
+    couple headline, and the per-person figures."""
+    drain_recompute()
+    detail = client.get(f"/api/properties/{rid}/detail").json()
+    mcc = detail["affordability"]["monthly_commute_cost"]
+    assert mcc["succeeded"], mcc.get("error")
+    group = detail["affordability"]["group_monthly_cost"]
+    assert group["succeeded"], group.get("error")
+    persons = mcc["value"]["persons"]
+    return {
+        "commutes": {name: {c["label"]: c["yearly_gbp"] for c in e["commutes"]} for name, e in persons.items()},
+        "commute_yearly_total": mcc["value"]["yearly_total_gbp"],
+        "couple_monthly": group["value"]["couple"]["value"],
+        "ashby_monthly": group["value"]["others"]["value"],
+    }
+
+
+def test_scenario_reprices_the_monthly_figures(whatif_world):
+    """Applying a what-if must re-price the monthly figures NEARLY
+    IMMEDIATELY (one drain — no refresh, no delay): dropping Pimlico to
+    0 days a week must (a) remove Pimlico from the commute figures, (b)
+    DROP the monthly totals by Pimlico's contribution, (c) leave the
+    untouched household members' figures alone."""
+    client, rid = whatif_world
+
+    before = _monthly_figures(client, rid)
+    assert float(before["commutes"]["Simon"]["Pimlico"]) > 0, "premise: Pimlico is priced"
+    assert float(before["ashby_monthly"]) > 0, "premise: Ashby's own figure is priced (cash contribution)"
+
+    assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
+    flush_all()
+
+    after = _monthly_figures(client, rid)
+
+    assert "Pimlico" not in after["commutes"]["Simon"], (
+        "a 0-days destination must vanish from the commute figures"
+    )
+    assert float(after["commute_yearly_total"]) < float(before["commute_yearly_total"]), (
+        f"the commute total must DROP when a commute drops to 0 days: "
+        f"{before['commute_yearly_total']} -> {after['commute_yearly_total']}"
+    )
+    assert float(after["couple_monthly"]) < float(before["couple_monthly"]), (
+        f"the couple headline must DROP when a commute drops to 0 days: "
+        f"{before['couple_monthly']} -> {after['couple_monthly']}"
+    )
+    # The untouched member's own figure must not move.
+    assert after["ashby_monthly"] == before["ashby_monthly"]

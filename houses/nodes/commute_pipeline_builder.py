@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from typing import Any, override
+
+from dag.attempt import Attempt
+from dag.derived_node import DerivedNode
 from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+from dag.node import Node
 from dag.user_input_node import UserInputNode
 from houses.commute_router import CommuteRouter
 from houses.model.domain import Commute, effective_acceptable_modes
@@ -249,10 +254,64 @@ def build_commute_pipeline(prop) -> None:
                 petrol_mpg_node=mpg_node,
                 petrol_cost_per_litre_node=prop._svc.setting_nodes.get("settings/petrol_cost_per_litre"),
             )
-            prop.commute_selectors[key] = final_fuel
+            tolerant = _TolerantCommuteNode(f"{prop.rid}/{key}/tolerant", commute_node=final_fuel)
+            prop.commute_selectors[key] = tolerant
 
     prop.commute_breakdown = CommuteBreakdownNode(
         f"{prop.rid}/commute_breakdown",
         commute_selectors=prop.commute_selectors,
         persons_source=prop._svc.persons_source,
     )
+
+
+class _TolerantCommuteNode(DerivedNode[Commute | None]):
+    """A commute pipeline seen tolerantly: the commute when it priced,
+    succeeded(None) when it failed, pending while it computes.
+
+    ONE failed commute (a TfL/Google hiccup, a rate limit under a
+    household-wide recompute) must not make the monthly figures vanish:
+    the household breakdown aggregates all commutes, and the framework
+    propagates an impossible dep into EVERY dependent — so the breakdown
+    must never hold the raw pipeline as a dep. This node's active deps
+    EXCLUDE the pipeline while it is failed (dynamic conditional deps —
+    the house pattern), and its compute converts the failure into
+    succeeded(None), which the breakdown skips.
+    """
+
+    def __init__(self, node_id: str, *, commute_node: DerivedNode[Commute]) -> None:
+        self._commute_node = commute_node
+        super().__init__(node_id, Commute | None, (commute_node,))
+
+    @override
+    def _get_active_deps(self) -> tuple[Node, ...]:
+        attempt = self._commute_node.latest_attempt()
+        if attempt is not None and (attempt.succeeded or attempt.pending):
+            return (self._commute_node,)
+        return ()
+
+    @override
+    def compute(self, *args: Attempt) -> Attempt[Commute | None]:
+        attempt = self._commute_node.latest_attempt()
+        if attempt is not None and attempt.succeeded:
+            value = attempt.value_or_none()
+            if value is not None:
+                return Attempt.succeeded(value)
+        if attempt is not None and attempt.pending:
+            return Attempt.pending()
+        return Attempt.succeeded(None)
+
+    @override
+    async def to_json_value(self) -> dict[str, Any]:
+        # Serve the WRAPPED commute's serialization (duration, costs,
+        # is_child — what the pills render), not the wrapper's.
+        attempt = self._commute_node.latest_attempt()
+        if attempt is not None and attempt.succeeded and attempt.value_or_none() is not None:
+            return await self._commute_node.to_json_value()
+        return await super().to_json_value()
+
+    @override
+    async def to_json(self) -> dict[str, Any]:
+        attempt = self._commute_node.latest_attempt()
+        if attempt is not None and attempt.succeeded and attempt.value_or_none() is not None:
+            return await self._commute_node.to_json()
+        return await super().to_json()
