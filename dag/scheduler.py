@@ -168,10 +168,7 @@ class AsyncQueueScheduler(RefreshScheduler):
 
     @override
     def _enqueue(self, node: DerivedNode, scheduled_at: float) -> None:
-        """Queue the node unless already queued, then wake the processor.
-
-        Thread-safe by routing through the draining loop: asyncio
-        primitives must only be touched on the loop that owns them."""
+        """Queue the node unless already queued, then wake the processor."""
         if node._id in self._scheduled:
             return
         event = QueueEvent(scheduled_at=scheduled_at, node_id=node._id, node=node)
