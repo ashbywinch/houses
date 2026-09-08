@@ -1072,10 +1072,12 @@ async def patch_works_estimate(
     _validate_works_value(value)
 
     def _apply() -> None:
-        current = prop.works_estimates.latest_attempt().value_or_none() or {}
-        # Store as Money — the Money rule applies to all monetary values.
-        current[person_name] = Money(str(value), "GBP") if value is not None else None
-        prop.works_estimates.push(current, "user")
+        estimates = dict(prop.works_estimates.latest_attempt().value_or_none() or {})
+        if value is None:
+            estimates.pop(person_name, None)  # emptied field: drop the estimate
+        else:
+            estimates[person_name] = Money(str(value), "GBP")
+        prop.works_estimates.push(estimates, "user")
 
     # Thread rule 7, no exceptions: enqueue and return. The drain runs in
     # the background; this page's update lands via the summary broadcast.
