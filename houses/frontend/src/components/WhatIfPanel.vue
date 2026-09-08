@@ -326,15 +326,7 @@ async function accept() {
   border: 1.5px solid var(--border);
   border-radius: var(--radius);
   background: var(--card-bg);
-  padding: var(--sp-3);
-}
-.whatif--collapsed {
-  /* Closed bar: height emerges from the toggle's standard vertical
-   * padding — same rhythm as the page's other controls, no min-height. */
   padding: 0 var(--sp-3);
-}
-.whatif--collapsed .whatif__toggle {
-  padding: var(--sp-2) 0;
 }
 .whatif__header {
   display: flex;
@@ -346,8 +338,7 @@ async function accept() {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: 44px;
-  padding: 0;
+  padding: var(--sp-2) 0;
   border: none;
   background: none;
   cursor: pointer;
@@ -373,7 +364,7 @@ async function accept() {
 .whatif__fieldset {
   border: none;
   padding: 0;
-  margin: var(--sp-3) 0 0;
+  margin: var(--sp-2) 0 0;
   min-width: 0;
 }
 .whatif__footer {
@@ -381,7 +372,7 @@ async function accept() {
   flex-direction: column;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3) 0;
+  padding: var(--sp-2) 0;
 }
 .whatif__footer-buttons {
   display: flex;
