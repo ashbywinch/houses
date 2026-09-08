@@ -43,8 +43,18 @@ const active = computed(() => store.whatIfActive)
 // While a what-if is active the panel is pinned open — the exits live
 // in its footer, so it stays up until the mode is resolved (toggle,
 // reload, it doesn't matter: Back or Keep are the only ways out).
+// When the mode ENDS (restore here, or another device restoring), the
+// panel re-reads the real numbers: it edits LIVE data and its local
+// copy holds the discarded scenario values.
+let sawActive = false
 watch(active, v => {
-  if (v) collapsed.value = false
+  if (v) {
+    collapsed.value = false
+    sawActive = true
+  } else if (sawActive) {
+    sawActive = false
+    void load()
+  }
 }, { immediate: true })
 
 // Unfurling always re-reads the server state: the panel is an editor of

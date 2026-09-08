@@ -226,6 +226,27 @@ def test_restore_reappends_original_and_marker_clears(whatif_world):
     assert client.post("/api/what-if/restore").status_code == 409
 
 
+def test_restore_responds_without_draining_the_cascade(whatif_world):
+    """Restore must answer immediately: the re-price cascade drains in
+    the background. A restore that flushed the queue inline would hang
+    the click for the whole backlog (the 2026-09-08 hang report)."""
+    from unittest.mock import patch
+
+    import dag.scheduler as sched
+
+    client, rid = whatif_world
+    assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
+
+    scheduler = sched.get_scheduler()
+    with patch.object(scheduler, "process_pending", wraps=scheduler.process_pending) as spy:
+        resp = client.post("/api/what-if/restore")
+        assert resp.status_code == 200
+        assert spy.call_count == 0, (
+            "restore must not drain the DAG queue inline — the cascade belongs to the background drain"
+        )
+    flush_all()  # settle the cascade the restore queued
+
+
 def test_restore_works_from_a_fresh_process(whatif_world):
     """Marker and history live in the DAG's persistence: after apply, a
     fresh services/node read still sees an active what-if, and restore
@@ -293,9 +314,7 @@ def test_scenario_reprices_the_monthly_figures(whatif_world):
 
     after = _monthly_figures(client, rid)
 
-    assert "Pimlico" not in after["commutes"]["Simon"], (
-        "a 0-days destination must vanish from the commute figures"
-    )
+    assert "Pimlico" not in after["commutes"]["Simon"], "a 0-days destination must vanish from the commute figures"
     assert float(after["commute_yearly_total"]) < float(before["commute_yearly_total"]), (
         f"the commute total must DROP when a commute drops to 0 days: "
         f"{before['commute_yearly_total']} -> {after['commute_yearly_total']}"
