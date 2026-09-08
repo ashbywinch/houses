@@ -18,6 +18,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from money import Money
 
+from houses.geopoint import GeoPoint
 from houses.model.domain import HomeCoOwner, Person, PlaceOfInterest
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
@@ -26,6 +27,7 @@ from houses.web.auth import get_serializer
 from tests.unit.conftest import flush_all
 
 REAL_BRACKNELL_ADDRESS = "Broad Lane, Bracknell"
+_TEST_LAT, _TEST_LON = 51.4934, -0.0098
 
 
 def _poi(label: str, trips: int, address: str = "Pimlico Rd, London") -> PlaceOfInterest:
@@ -87,6 +89,19 @@ def test_apply_changes_only_the_named_trip_count():
     )
     rid = "42555556"
     prop = PropertyNodes(rid)
+    # Prime the property the way a real scrape does — without these the
+    # address chain parks on unpushed user inputs and the commute
+    # pipeline never prices (the dormant-chain case).
+    prop.rightmove_price.push(Money(amount="500000", currency="GBP"), "test")
+    prop.rightmove_address.push("1 Test St", "test")
+    prop.rightmove_bedrooms.push("3", "test")
+    prop.rightmove_location.push(GeoPoint(_TEST_LAT, _TEST_LON), "test")
+    prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.precise_location.push(GeoPoint(_TEST_LAT, _TEST_LON), "test")
+    prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.works_estimates.push({}, "test")
+    prop.rental_income.push(Money(amount="0", currency="GBP"), "test")
+    prop.comment_status.push("", "test")
     register_property(rid, prop)
     flush_all()
 

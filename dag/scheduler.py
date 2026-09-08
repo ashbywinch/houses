@@ -128,6 +128,7 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._enqueued_since_flush = 0
         """Work items enqueued since the last complete drain — the conftest
         flush_all() no-op guard reads it."""
+        self._requeue_counts: dict[str, int] = {}
 
     @override
     def register(self, node: DerivedNode) -> None:
@@ -218,9 +219,80 @@ class AsyncQueueScheduler(RefreshScheduler):
                 break
             self._scheduled.pop(event.node_id, None)
             await event.node.refresh()
-            drained += 1
+            if event.node._attempt.pending:
+                self._requeue_after_deps(event)
+            else:
+                self._requeue_counts.pop(event.node_id, None)
+                drained += 1
         self._enqueued_since_flush = 0
+        if queue.empty():
+            # A complete drain must leave the gauge truthful: queue_depth
+            # counts a set wakeup as one pending item, so a flag left over
+            # from the last enqueue would report phantom work forever.
+            wakeup.clear()
         return drained
+
+    def _requeue_after_deps(self, event: QueueEvent) -> None:
+        """Re-queue a deferred event directly after the last of its deps.
+
+        A refresh that finds pending deps leaves the node pending and
+        returns without computing. Dropping the event there strands the
+        node pending forever — nothing re-schedules it. Put the event
+        back just after the last of the node's queued deps instead: it
+        retries the moment its inputs are ready, and never waits behind
+        unrelated long-backoff events.
+
+        A node may only defer once per not-yet-complete dep (the graph
+        is acyclic), so re-queues per node are bounded. Exceeding the
+        bound means a pending dep never enters the queue — a contract
+        bug — and must fail loudly rather than spin the drain.
+        """
+        # Local import: DerivedNode is TYPE_CHECKING-only at module scope
+        # (derived_node imports this module's get_scheduler).
+        from dag.derived_node import DerivedNode
+        active = [dep for dep in event.node._get_active_deps() if dep is not None]
+        # Re-queue only when the deferral waits on queueable work: a
+        # pending DerivedNode that is actually IN the queue (register
+        # schedules fresh nodes; deferrals re-queue). A pending node
+        # that is parked OUTSIDE the queue is dormant — it waits on an
+        # unpushed user input, nothing will ever pop for it, and the
+        # input's push signal already owns the wake-up for the whole
+        # downstream chain. Re-queueing behind a parked dep would spin
+        # the drain forever.
+        if not any(
+            isinstance(dep, DerivedNode)
+            and dep._attempt.pending
+            and dep._id in self._scheduled
+            for dep in active
+        ):
+            return
+        dep_ids = {dep._id for dep in active}
+        now = datetime.now(UTC).timestamp()
+        last_dep_at = max(
+            (
+                queued.scheduled_at
+                for node_id, queued in self._scheduled.items()
+                if node_id in dep_ids
+            ),
+            default=now,
+        )
+        queue = self._queue
+        assert queue is not None
+        requeued = QueueEvent(
+            scheduled_at=last_dep_at + 1e-6, node_id=event.node_id, node=event.node
+        )
+        count = self._requeue_counts.get(event.node_id, 0) + 1
+        if count > len(self._registered):
+            self._requeue_counts.pop(event.node_id, None)
+            raise RuntimeError(
+                f"{event.node_id} re-queued {count} times in one drain: "
+                "a pending dependency never enters the queue"
+            )
+        self._requeue_counts[event.node_id] = count
+        self._scheduled[event.node_id] = requeued
+        queue.put_nowait(requeued)
+        if self._wakeup is not None:
+            self._wakeup.set()
 
     async def _background_loop(self) -> None:
         self._ensure_primitives()
@@ -235,6 +307,10 @@ class AsyncQueueScheduler(RefreshScheduler):
                 self._scheduled.pop(event.node_id, None)
                 try:
                     await event.node.refresh()
+                    if event.node._attempt.pending:
+                        self._requeue_after_deps(event)
+                    else:
+                        self._requeue_counts.pop(event.node_id, None)
                 # lucidlint: ignore broad-except loop boundary — one node failure must not kill the processor
                 except Exception as exc:
                     # One node's failure must not kill the background loop —

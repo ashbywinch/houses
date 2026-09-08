@@ -285,7 +285,11 @@ class _TolerantCommuteNode(DerivedNode[Commute | None]):
     @override
     def _get_active_deps(self) -> tuple[Node, ...]:
         attempt = self._commute_node.latest_attempt()
-        if attempt is not None and (attempt.succeeded or attempt.pending):
+        # The commute node is a real dependency whenever its outcome can
+        # still change: fresh (no attempt yet), pending, or succeeded.
+        # Only a final impossible result is excluded — this wrapper exists
+        # to absorb that case instead of propagating it.
+        if attempt is None or attempt.pending or attempt.succeeded:
             return (self._commute_node,)
         return ()
 
