@@ -3,9 +3,9 @@ import { computed, ref } from 'vue'
 import type { CommuteSummary, PersonCommuteLeg, PropertySummary } from '../types'
 import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
+import GroupMonthlyLine from './GroupMonthlyLine.vue'
 import { simpleOfsted, ofstedClass } from '../formatters/format'
 import { schoolWalkMin } from '../formatters/school'
-import { signedPounds } from '../formatters/money'
 
 const store = usePropertiesStore()
 const props = defineProps<{
@@ -119,11 +119,6 @@ const showDeltas = computed(() => store.baseline != null && !props.data.is_curre
 
 const coupleDelta = computed(() => (showDeltas.value ? store.deltaFor(props.rid)?.couple ?? null : null))
 const othersDelta = computed(() => (showDeltas.value ? store.deltaFor(props.rid)?.others ?? null : null))
-
-function deltaLineText(d: { value: string; approx: boolean } | null): string {
-  if (!d) return '—'
-  return `${d.approx ? '≈' : ''}${signedPounds(d.value)}/mo`
-}
 
 /** Why a delta group is '—': the candidate side's uncomputable reason
  *  (the baseline side is always computable when a baseline is active). */
@@ -340,24 +335,34 @@ async function toggleViewed() {
         <span v-if="data.is_current_home" class="card__baseline-chip">Your home · baseline</span>
         <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
           <template v-if="showDeltas">
-            <span class="card__cost-line" :title="coupleLineTitle">
-              <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
-              {{ deltaLineText(coupleDelta) }}
-            </span>
-            <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others" :title="othersLineTitle">
-              <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
-              {{ deltaLineText(othersDelta) }}
-            </span>
+            <GroupMonthlyLine
+              :label="coupleLabel || store.groupLabels.coupleLabel"
+              :delta="coupleDelta"
+              line-class="card__cost-line"
+              :title="coupleLineTitle"
+            />
+            <GroupMonthlyLine
+              v-if="othersCost !== null || store.groupLabels.othersLabel"
+              :label="othersLabel || store.groupLabels.othersLabel"
+              :delta="othersDelta"
+              line-class="card__cost-line card__cost-line--others"
+              :title="othersLineTitle"
+            />
           </template>
           <template v-else>
-            <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
-              <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
-              {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
-            </span>
-            <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
-              <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
-              {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
-            </span>
+            <GroupMonthlyLine
+              :label="coupleLabel || store.groupLabels.coupleLabel"
+              :absolute="coupleCost"
+              :approx="monthlyCostApprox"
+              :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined"
+              line-class="card__cost-line"
+            />
+            <GroupMonthlyLine
+              v-if="othersCost !== null || store.groupLabels.othersLabel"
+              :label="othersLabel || store.groupLabels.othersLabel"
+              :absolute="othersCost"
+              line-class="card__cost-line card__cost-line--others"
+            />
           </template>
         </span>
         <span
