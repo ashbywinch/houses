@@ -73,13 +73,16 @@ class TestPropertyApi:
         resp = client.patch("/api/properties/prop123/address", json={"address": "20 New Rd, London"})
         assert resp.status_code == 200
 
+        # The request returns before the drain; the test environment has
+        # no background processor, so the drain is explicit here.
+        flush_all()
         detail_after = client.get("/api/properties/prop123/detail").json()
         assert detail_after["best_address"]["value"] == "20 New Rd, London"
 
-    def test_patch_address_drains_cascade_before_responding(self):
-        """The PATCH must recompute the downstream DAG (council tax, EPC)
-        BEFORE responding — the frontend refetches immediately and would
-        otherwise race the background cascade and show stale figures."""
+    def test_patch_address_recompute_lands_in_the_background_drain(self):
+        """Thread rule 7, no exceptions: the PATCH returns immediately.
+        The EPC and council tax recompute land in the background drain;
+        the test drains explicitly because it has no processor thread."""
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
@@ -100,8 +103,13 @@ class TestPropertyApi:
         )
         assert resp.status_code == 200
 
+        # The re-price lands in the background drain; the test has no
+        # processor thread, so the drain is explicit here. Production
+        # delivers the same figures through the websocket broadcast.
+        flush_all()
+
         assert any(addr == "20 New Rd, London SW1V 2QQ" for _, addr in epc_svc.calls), (
-            f"EPC must be recomputed with the new address before the PATCH returns, calls={epc_svc.calls}"
+            f"EPC must be recomputed with the new address, calls={epc_svc.calls}"
         )
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]

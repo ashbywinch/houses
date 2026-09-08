@@ -446,11 +446,10 @@ async def patch_address(rid: str, body: dict):
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
 
+    # Thread rule 7, no exceptions: enqueue and return. The address
+    # cascade (geocoding, EPC, council tax) drains in the background and
+    # the summary broadcast pushes the fresh figures to clients.
     await run_on_processor(lambda: prop.corrected_address.push(body.get("address", ""), "user"))
-    # Recompute before responding — the frontend refetches the detail
-    # immediately; the processor drains the cascade in order.
-    await run_on_processor(prop.best_address.refresh)
-    await run_on_processor(flush_processor)
     return {"status": "ok"}
 
 
@@ -465,10 +464,8 @@ async def patch_location(rid: str, body: dict):
     if lat is None or lon is None:
         raise HTTPException(status_code=422, detail="lat and lon are required")
     gp = GeoPoint(lat=lat, lon=lon)
+    # Thread rule 7, no exceptions: enqueue and return.
     await run_on_processor(lambda: prop.precise_location.push(gp, "user"))
-    # Recompute before responding — same race as the address PATCH.
-    await run_on_processor(prop.best_location.refresh)
-    await run_on_processor(flush_processor)
     return {"status": "ok"}
 
 
