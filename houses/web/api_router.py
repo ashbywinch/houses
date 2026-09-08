@@ -1089,14 +1089,17 @@ async def patch_works_estimate(
     value = body.get("value")
     _validate_works_value(value)
 
-    current = prop.works_estimates.latest_attempt().value_or_none() or {}
-    # Store as Money — the Money rule applies to all monetary values.
-    current[person_name] = Money(str(value), "GBP") if value is not None else None
-    prop.works_estimates.push(current, "user")
+    def _apply() -> None:
+        current = prop.works_estimates.latest_attempt().value_or_none() or {}
+        # Store as Money — the Money rule applies to all monetary values.
+        current[person_name] = Money(str(value), "GBP") if value is not None else None
+        prop.works_estimates.push(current, "user")
 
-    # The page refetches the detail as soon as this returns: drain the
-    # (pure-arithmetic) re-price inline so the refetch sees the new
-    # figures. The websocket summary push happens on top of the drain.
+    # The mutation goes through the processor (Thread rule 1); the drain
+    # after it is the sanctioned inline exception: the page refetches
+    # the detail as soon as this returns, and the works re-price is
+    # pure arithmetic. The websocket summary push rides the drain.
+    await run_on_processor(_apply)
     await run_on_processor(flush_processor)
 
     return {"status": "ok"}
