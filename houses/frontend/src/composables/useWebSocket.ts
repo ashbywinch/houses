@@ -1,6 +1,5 @@
 import { ref, onUnmounted, getCurrentInstance } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
-import { fetchWhatIfState } from '../services/api'
 
 const MAX_RETRIES = 10
 const BASE_DELAY = 1000
@@ -28,7 +27,7 @@ export function useWebSocket(factory?: (url: string) => WebSocket) {
   // refreshes the same way. Per-instance state means a closed socket
   // takes its un-applied buffer with it.
   let pendingUpdates: PendingUpdate[] = []
-  let pendingSettings = false
+  let pendingSettings: Record<string, unknown> | null = null
   let flushScheduled = false
   let disposed = false
 
@@ -55,15 +54,13 @@ export function useWebSocket(factory?: (url: string) => WebSocket) {
       }
       pendingUpdates = []
     }
-    if (pendingSettings) {
-      pendingSettings = false
-      void store.loadSettings()
-      // A what-if applied on another device writes through the same
-      // settings nodes — refresh the mode flag once per burst so this
-      // device's banner and chips flip without a reload.
-      fetchWhatIfState()
-        .then(active => store.setWhatIfActive(active))
-        .catch(e => console.error('Failed to refresh what-if state:', e))
+    if (pendingSettings !== null) {
+      const data = pendingSettings
+      pendingSettings = null
+      // The payload carries what_if_active, so a what-if applied on
+      // another device flips this device's banner and chips in the
+      // same pass — no extra round-trip.
+      store.applySettings(data as never)
     }
   }
 
@@ -91,25 +88,18 @@ export function useWebSocket(factory?: (url: string) => WebSocket) {
           pendingUpdates.push({ rid: msg.rid, data: msg.data, triage: msg.data?.triage })
           scheduleFlush()
         }
-        // The DAG broadcast already fires for settings nodes (the
-        // after-refresh hook covers every node) — refresh the cached
-        // settings (commute bands, ceilings, MPG, max walk) when a
-        // settings edit lands, so pills and filters stay live without
-        // polling or navigation. Coalesced: one refresh per burst.
-        if (msg.type === 'node_updated' && isSettingsNode(msg.node_id)) {
-          pendingSettings = true
+        // A settings node refreshed: the server pushes the WHOLE
+        // settings payload once (persons, thresholds, what-if flag).
+        // Applied with the property burst so every surface updates in
+        // the same pass.
+        if (msg.type === 'settings_updated' && msg.data) {
+          pendingSettings = msg.data
           scheduleFlush()
         }
       } catch {
         // ignore parse errors
       }
     }
-  }
-
-  /** Settings nodes: persons, commute_thresholds, and the individual
-   *  settings/* finance nodes. */
-  function isSettingsNode(nodeId: string): boolean {
-    return nodeId === 'persons' || nodeId === 'commute_thresholds' || nodeId.startsWith('settings/')
   }
 
   function disconnect() {

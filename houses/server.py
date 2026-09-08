@@ -55,13 +55,28 @@ hands broadcaster pushes to it (see _on_node_refreshed)."""
 
 
 def _on_node_refreshed(node):
-    """Broadcast per-node update after a genuine value change.
+    """The DAG→frontend seam, routed by what refreshed.
 
-    Runs on the DAG processor thread — hand the push to the main loop,
-    where the broadcaster task lives."""
+    Runs on the DAG processor thread — hand pushes to the main loop,
+    where the broadcaster task lives.
+
+    - A property node: queue that property's summary broadcast
+      (coalesced) — the phone renders cards from summaries.
+    - A settings node: push the settings payload once — the phone
+      re-renders settings, thresholds, and the what-if flag from it.
+
+    Internal node payloads are never broadcast: nothing renders a raw
+    DAG node."""
     if _main_loop is None:
         return
-    asyncio.run_coroutine_threadsafe(_broadcaster_mod._push_node_update(node), _main_loop)
+    node_id = getattr(node, "_id", "") or ""
+    rid = node_id.split("/", 1)[0]
+    if rid.isdigit() and len(rid) >= 6:
+        asyncio.run_coroutine_threadsafe(
+            _broadcaster_mod.notify_node_refreshed_async(node), _main_loop
+        )
+        return
+    asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
 
 
 def _deploy_hash() -> str:

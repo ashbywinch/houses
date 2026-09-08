@@ -76,13 +76,13 @@ describe('scenario update burst', () => {
     disconnect()
   })
 
-  it('coalesces a settings-node burst into one settings refresh', async () => {
-    // Create the store first: its constructor fetches settings once at
-    // init — that call is not part of the burst.
-    usePropertiesStore()
+  it('coalesces a settings-node burst into one settings application', async () => {
+    // The store must exist: applySettings writes into it.
+    const store = usePropertiesStore()
     const settingsMock = vi.mocked(fetchSettings)
     settingsMock.mockClear()
     settingsMock.mockResolvedValue({})
+
     const { connect, disconnect } = useWebSocket((_url: string) => {
       const ws = {
         onopen: null as any,
@@ -91,9 +91,15 @@ describe('scenario update burst', () => {
         close() { this.onclose?.() },
       }
       setTimeout(() => {
-        for (let i = 0; i < 10; i++) {
+        for (let i = 1; i <= 10; i++) {
           ws.onmessage?.({
-            data: JSON.stringify({ type: 'node_updated', node_id: 'persons' }),
+            data: JSON.stringify({
+              type: 'settings_updated',
+              data: {
+                persons: { value: [] },
+                commute_thresholds: { value: { Simon: { good_max_minutes: 30 + i, fine_max_minutes: 50 } } },
+              },
+            }),
           })
         }
       }, 0)
@@ -103,11 +109,13 @@ describe('scenario update burst', () => {
     connect('ws://localhost/api/ws')
     await new Promise<void>((resolve) => setTimeout(resolve, 50))
 
-    // THE CONTRACT: ten settings broadcasts in one tick refetch the
-    // cached settings once, not ten times.
-    expect(settingsMock).toHaveBeenCalledTimes(1)
+    // THE CONTRACT: ten settings pushes in one burst apply ONCE — the
+    // store reflects the LAST payload, and no refetch round-trips happen.
+    expect(store.commuteGoods['Simon']).toBe(40)
+    expect(settingsMock).not.toHaveBeenCalled()
     disconnect()
   })
+
   it('applies a 3-message burst as one batched store update', async () => {
     const store = usePropertiesStore()
     const { connect, disconnect } = useWebSocket((_url: string) => {

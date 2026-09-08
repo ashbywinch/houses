@@ -684,11 +684,19 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
 
 @api_router.get("/settings")
 async def get_settings(request: Request):
+    return await settings_payload(effective_session_user(request))
+
+
+async def settings_payload(session_user: dict | None = None) -> dict:
+    """The settings document: persons, financial aggregates, commute
+    thresholds, the household deposit, and the what-if flag. Shared by
+    the GET endpoint and the settings_updated websocket push, so both
+    surfaces always speak the same shape."""
     svc = get_services()
     persons_json = await svc.persons_source.to_json()
     attempt = svc.persons_source.latest_attempt()
     persons = [p for p in (attempt.value_or_none() or []) if isinstance(p, Person)]
-    view = SessionPersons(persons=persons, session_user=effective_session_user(request))
+    view = SessionPersons(persons=persons, session_user=session_user)
     session_name = view.session_name()
     _enrich_persons(persons_json.get("value"), view, session_name)
 
@@ -697,6 +705,7 @@ async def get_settings(request: Request):
     # computed server-side, never derived from parts by the client.
     breakdown = _deposit_breakdown(persons)
     deposit_persons, deposit_total, deposit_lines = breakdown.persons, breakdown.total, breakdown.lines
+    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
@@ -718,6 +727,7 @@ async def get_settings(request: Request):
                 "formula": {"lines": deposit_lines, "result": f"£{deposit_total.amount:,.2f}"},
             },
         },
+        "what_if_active": bool(started),
     }
 
 
