@@ -9,8 +9,7 @@ vi.mock('../services/api', () => ({
   fetchAllSummaries: vi.fn().mockResolvedValue({}),
   fetchPropertyDetail: vi.fn().mockResolvedValue(null),
   fetchSettings: vi.fn().mockResolvedValue({}),
-  fetchWhatIfState: vi.fn<() => Promise<boolean>>(),
-  patchTriage: vi.fn(),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
 }))
 
 /**
@@ -263,6 +262,9 @@ describe('WebSocket settings broadcast', () => {
     // nodes — the broadcast must flip this device's mode flag
     vi.mocked(fetchWhatIfState).mockResolvedValue(true)
     deliver!({ data: JSON.stringify({ type: 'node_updated', node_id: 'settings/financial', data: {} }) })
+    // The burst buffer applies updates on the next macrotask; wait it
+    // out, then let the fetch promise's microtasks land.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     await flushPromises()
 
     expect(store.whatIfActive).toBe(true)
