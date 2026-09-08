@@ -13,6 +13,21 @@ import {
   retryScrape,
 } from '../services/api'
 
+interface PersonEntry {
+  name: string
+  is_child?: boolean
+  places_of_interest?: { label: string; trips_per_week?: number }[]
+  home_sale_price?: { amount: string }
+  outstanding_mortgage?: { amount: string }
+  home_co_owners?: { name: string; share?: number }[]
+}
+
+export interface SettingsPayload {
+  persons?: { value?: PersonEntry[] }
+  commute_thresholds?: { value?: Record<string, { good_max_minutes?: number; fine_max_minutes?: number }> }
+  what_if_active?: boolean
+}
+
 export const usePropertiesStore = defineStore('properties', () => {
   const rids = ref<string[]>([])
   const summaries = ref<Record<string, PropertySummary>>({})
@@ -125,64 +140,59 @@ export const usePropertiesStore = defineStore('properties', () => {
     }
   }
 
-  interface PersonEntry {
-    name: string
-    is_child?: boolean
-    places_of_interest?: { label: string; trips_per_week?: number }[]
-    home_sale_price?: { amount: string }
-    outstanding_mortgage?: { amount: string }
-    home_co_owners?: { name: string; share?: number }[]
-  }
-  interface SettingsPayload {
-    persons?: { value?: PersonEntry[] }
-    commute_thresholds?: { value?: Record<string, { good_max_minutes?: number; fine_max_minutes?: number }> }
+  /** Applies a settings document to the store. One entry point for
+   * both surfaces that receive settings: the initial fetch and the
+   * websocket settings push. */
+  function applySettings(data: SettingsPayload) {
+    settings.value = data as unknown as { commute_thresholds?: { good: number; warn: number } }
+    const thresholds = data.commute_thresholds?.value ?? {}
+    const persons = data.persons?.value ?? []
+    const byName = new Map(persons.map(p => [p.name, p]))
+    const ceilings: Record<string, { fine: number; isChild: boolean }> = {}
+    const labels: Record<string, string[]> = {}
+    for (const [name, t] of Object.entries(thresholds)) {
+      const p = byName.get(name)
+      ceilings[name] = {
+        fine: t.fine_max_minutes ?? 75,
+        isChild: Boolean(p?.is_child),
+      }
+      commuteGoods.value[name] = t.good_max_minutes ?? 45
+      labels[name] = (p?.places_of_interest ?? []).map(poi => poi.label)
+      poiTrips.value[name] = Object.fromEntries(
+        (p?.places_of_interest ?? []).map(poi => [poi.label, poi.trips_per_week ?? 1])
+      )
+      commuteCeilings.value = ceilings
+      poiLabels.value = labels
+    }
+    // Mirror the DAG's joint_owner_names: current-home holders +
+    // co-owners form the couple; every other adult is an other.
+    const adults = persons.filter(p => !p.is_child)
+    const money = (v?: { amount: string }) => Number(v?.amount ?? 0) > 0
+    const owners = new Set<string>()
+    for (const p of adults) {
+      if (money(p.home_sale_price) || money(p.outstanding_mortgage) || (p.home_co_owners?.length ?? 0) > 0) {
+        owners.add(p.name)
+      }
+      for (const co of p.home_co_owners ?? []) owners.add(co.name)
+    }
+    if (owners.size === 0) {
+      for (const p of adults) owners.add(p.name)
+    }
+    groupLabels.value = {
+      coupleLabel: [...adults.filter(p => owners.has(p.name))].map(p => p.name[0]?.toUpperCase() ?? '').join('+'),
+      othersLabel: adults.filter(p => !owners.has(p.name)).map(p => p.name).join('+'),
+    }
+    if (data.what_if_active !== undefined) whatIfActive.value = data.what_if_active
   }
 
   async function loadSettings() {
     try {
-      const data = (await fetchSettings()) as SettingsPayload
-      settings.value = data as unknown as { commute_thresholds?: { good: number; warn: number } }
-      const thresholds = data.commute_thresholds?.value ?? {}
-      const persons = data.persons?.value ?? []
-      const byName = new Map(persons.map(p => [p.name, p]))
-      const ceilings: Record<string, { fine: number; isChild: boolean }> = {}
-      const labels: Record<string, string[]> = {}
-      for (const [name, t] of Object.entries(thresholds)) {
-        const p = byName.get(name)
-        ceilings[name] = {
-          fine: t.fine_max_minutes ?? 75,
-          isChild: Boolean(p?.is_child),
-        }
-        commuteGoods.value[name] = t.good_max_minutes ?? 45
-        labels[name] = (p?.places_of_interest ?? []).map(poi => poi.label)
-        poiTrips.value[name] = Object.fromEntries(
-          (p?.places_of_interest ?? []).map(poi => [poi.label, poi.trips_per_week ?? 1])
-        )
-      commuteCeilings.value = ceilings
-      poiLabels.value = labels
-      }
-      // Mirror the DAG's joint_owner_names: current-home holders +
-      // co-owners form the couple; every other adult is an other.
-      const adults = persons.filter(p => !p.is_child)
-      const money = (v?: { amount: string }) => Number(v?.amount ?? 0) > 0
-      const owners = new Set<string>()
-      for (const p of adults) {
-        if (money(p.home_sale_price) || money(p.outstanding_mortgage) || (p.home_co_owners?.length ?? 0) > 0) {
-          owners.add(p.name)
-        }
-        for (const co of p.home_co_owners ?? []) owners.add(co.name)
-      }
-      if (owners.size === 0) {
-        for (const p of adults) owners.add(p.name)
-      }
-      groupLabels.value = {
-        coupleLabel: [...adults.filter(p => owners.has(p.name))].map(p => p.name[0]?.toUpperCase() ?? '').join('+'),
-        othersLabel: adults.filter(p => !owners.has(p.name)).map(p => p.name).join('+'),
-      }
+      applySettings((await fetchSettings()) as SettingsPayload)
     } catch {
       // defaults used
     }
   }
+
   loadSettings()
 
   async function loadDetail(rid: string, force = false) {
@@ -263,6 +273,6 @@ export const usePropertiesStore = defineStore('properties', () => {
     commuteCeilings, commuteGoods, poiLabels, poiTrips, showOverCeiling, groupLabels, listScrollY,
     addByUrl, retryPropertyScrape, saveDetails, removeFromList,
     whatIfActive, setWhatIfActive, coupleTotalFor, groupCostFor, baseline, deltaFor,
-    loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
+    loadAll, loadSettings, applySettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
 })
