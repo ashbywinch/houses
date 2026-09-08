@@ -62,8 +62,9 @@ def _on_node_refreshed(node):
     if _main_loop is None:
         return
     asyncio.run_coroutine_threadsafe(_broadcaster_mod._push_node_update(node), _main_loop)
-
-
+    # The property summary broadcast: queue the rid (coalesced) so the
+    # phone receives a fresh property_updated with the new totals.
+    asyncio.run_coroutine_threadsafe(_broadcaster_mod.notify_node_refreshed_async(node), _main_loop)
 
 
 def _deploy_hash() -> str:

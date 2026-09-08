@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _broadcast_queue: asyncio.Queue[str] = asyncio.Queue()
 _websocket_clients: set[WebSocket] = set()
 
+
 def _reset():
     """Reset broadcast state for test isolation."""
     # lucidlint: ignore global-state deliberate test seam — _reset() swaps the queue for test isolation
@@ -131,7 +132,7 @@ _notify_debounce_task: asyncio.Task | None = None
 _NOTIFY_DEBOUNCE_SECONDS = 0.4
 
 
-def notify_node_refreshed(node) -> None:
+async def notify_node_refreshed_async(node) -> None:
     """THE DAG→frontend seam: a property node refreshed, so the property's
     summary is queued for broadcast (coalesced — a cascade touching many
     nodes of one property pushes that property once).
@@ -139,6 +140,10 @@ def notify_node_refreshed(node) -> None:
     Any recompute path lands here automatically: settings edits, what-if
     applies, scrape applies. Callers never remember to notify — the DAG
     refresh is the notification.
+
+    Runs on the MAIN loop (the broadcaster's loop): the processor hands
+    it over via run_coroutine_threadsafe, keeping every asyncio object
+    here owned by one loop.
     """
     global _notify_debounce_task
     node_id = getattr(node, "_id", "") or ""
@@ -156,4 +161,3 @@ async def _flush_notifies() -> None:
     _pending_notify_rids.clear()
     for rid in rids:
         await _broadcast_queue.put(rid)
-
