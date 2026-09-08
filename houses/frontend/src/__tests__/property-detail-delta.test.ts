@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { flushPromises, mount } from '@vue/test-utils'
 import PropertyDetail from '../views/PropertyDetail.vue'
+import { usePropertiesStore } from '../stores/properties'
 import { fetchPropertyDetail, fetchSettings } from '../services/api'
 
 vi.mock('../services/api', () => ({
@@ -77,6 +78,49 @@ describe('PropertyDetail monthly figures', () => {
     // absolute monthly total.
     expect(text).toContain('\u2212\u00a327')
     expect(text).not.toContain('£2,356')
+  })
+
+  it('refreshes the open detail when a summary broadcast lands for it', async () => {
+    const wrapper = await mountDetail()
+    const callsBefore = vi.mocked(fetchPropertyDetail).mock.calls.length
+    const store = usePropertiesStore()
+    expect(store.details['88275093']).toBeDefined()
+
+    // The backend re-priced: the next detail fetch returns the new
+    // figures (the works/recompute landed server-side).
+    const updated = {
+      ...detailFixture,
+      affordability: {
+        ...detailFixture.affordability,
+        group_monthly_cost: {
+          ...detailFixture.affordability.group_monthly_cost,
+          value: {
+            ...detailFixture.affordability.group_monthly_cost.value,
+            couple: { value: '2400.00', stddev: 0 },
+            delta_vs_home: {
+              couple: { value: '-31.00', approx: false },
+              others: { value: '-2.92', approx: false },
+            },
+          },
+        },
+      },
+    }
+    vi.mocked(fetchPropertyDetail).mockResolvedValue(updated as any)
+
+    // A property_updated broadcast replaced this property's summary
+    // (the websocket handler applies it into the store).
+    store.updateSummary('88275093', {
+      ...updated,
+      affordability: updated.affordability,
+    } as any)
+    await flushPromises()
+
+    // THE CONTRACT: the open detail page follows the broadcast — it
+    // re-reads the detail so its figures update without a reload.
+    expect(vi.mocked(fetchPropertyDetail).mock.calls.length).toBeGreaterThan(callsBefore)
+    // The re-priced delta is on screen: the increment moved with the
+    // new figures, in place.
+    expect(wrapper.text()).toContain('\u2212\u00a331')
   })
 
   it('the current home keeps its absolute totals', async () => {

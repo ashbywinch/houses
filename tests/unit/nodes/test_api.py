@@ -1576,8 +1576,14 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 200, resp.text[:500]
 
-        # The endpoint drains inline now: the immediate refetch must
-        # already see the re-priced figures (the 2026-09-08 contract).
+        # The save returned immediately (Thread rule 7 — the front end
+        # never waits). The test environment has no background
+        # processor, so the drain is explicit here; production delivers
+        # the update through the websocket broadcast.
+        from tests.unit.conftest import flush_all as _flush
+
+        _flush()
+
         resp = client.get(f"/api/properties/{rid}/detail")
         assert resp.status_code == 200, resp.text[:500]
         detail_after = resp.json()

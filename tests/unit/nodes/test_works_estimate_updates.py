@@ -1,15 +1,13 @@
 """Regression: saving a works estimate must update the property figures.
 
 User report (2026-09-08): changing the cost of works on the detail page
-updated nothing. The page saves with PATCH and immediately refetches
-the detail — the endpoint returned BEFORE the background drain had
-recomputed, so the refetch served the old figures.
+updated nothing.
 
-Contract: an edit endpoint that the UI refetches after (works estimate,
-like address/location/council-tax) must leave the figures ready when it
-returns. The re-price for works is pure arithmetic, so the inline drain
-is fast; the websocket summary broadcast still happens on top for the
-other devices.
+DAG thread rule 7, no exceptions: the save enqueues the mutation and
+returns immediately — it never drains the queue. The re-price lands in
+the background drain and reaches the page through the websocket
+broadcast; a read that races the drain returns the previous snapshot
+and the broadcaster corrects it.
 """
 from __future__ import annotations
 
@@ -69,53 +67,74 @@ def _prime(rid: str) -> None:
     register_property(rid, prop)
 
 
+def _works_total(detail: dict) -> Decimal:
+    return Decimal(detail["affordability"]["total_works"]["value"]["amount"])
+
+
 def _couple_monthly(detail: dict) -> Decimal:
     return Decimal(detail["affordability"]["group_monthly_cost"]["value"]["couple"]["value"])
 
 
-def test_works_estimate_refetch_shows_the_new_figures_immediately():
+def _client() -> TestClient:
     client = TestClient(app)
-    _prime("42555556")
-    flush_all()
-
-    cookie = client.cookies
-    cookie.set("session", get_serializer().dumps({
+    client.cookies.set("session", get_serializer().dumps({
         "email": "simon@example.com",
         "name": "Simon",
         "picture": "",
         "is_superuser": True,
         "impersonating": None,
     }))
+    return client
 
-    detail_before = client.get("/api/properties/42555556/detail").json()
-    monthly_before = _couple_monthly(detail_before)
-    works_before = detail_before["affordability"]["total_works"]["value"]["amount"]
-    assert Decimal(works_before) == 0, "test premise: no works estimated yet"
 
-    # THE USER'S FLOW: save a works estimate, then the page refetches
-    # the detail immediately (CostsSection.saveEdit → loadDetail(force)).
+def test_works_save_enqueues_and_returns_without_waiting():
+    """The save returns immediately: re-priced work is still pending on
+    the queue afterwards, and the immediate refetch serves the previous
+    snapshot (rule 5 — freshness is push-delivered)."""
+    client = _client()
+    _prime("42555556")
+    flush_all()
+
+    import dag.scheduler as sched
+
+    before = client.get("/api/properties/42555556/detail").json()
+    assert _works_total(before) == 0, "test premise: no works estimated yet"
+
     resp = client.patch(
         "/api/properties/42555556/works-estimate",
         json={"person": "Simon", "value": 12000},
     )
     assert resp.status_code == 200, resp.text
 
-    detail_after = client.get("/api/properties/42555556/detail").json()
-    works_after = Decimal(
-        detail_after["affordability"]["total_works"]["value"]["amount"]
+    # THE CONTRACT: the save must not drain inline. Re-priced work is
+    # still queued when the request returns.
+    queue_depth = getattr(sched.get_scheduler(), "queue_depth", 0)
+    assert queue_depth > 0, (
+        "the save must leave the re-price queued, not drain inline"
     )
-    monthly_after = _couple_monthly(detail_after)
 
-    # THE CONTRACT: the refetch the page performs right after saving
-    # must already see the re-priced figures — the works total is the
-    # new value and the headline has moved (the works' exact share of
-    # the headline is the monthly-cost apportionment's business, covered
-    # by test_monthly_costs).
-    assert works_after == Decimal("12000"), (
-        f"the refetch right after saving must show the new works total, "
-        f"got {works_after}"
+    # The drain lands; the figures are correct afterwards.
+    flush_all()
+    detail = client.get("/api/properties/42555556/detail").json()
+    assert _works_total(detail) == Decimal("12000")
+    assert _couple_monthly(detail) > _couple_monthly(before)
+
+
+def test_works_figures_are_correct_after_the_drain():
+    """Full sequence: save, drain once, every surface agrees."""
+    client = _client()
+    _prime("42555556")
+    flush_all()
+
+    monthly_before = _couple_monthly(client.get("/api/properties/42555556/detail").json())
+
+    resp = client.patch(
+        "/api/properties/42555556/works-estimate",
+        json={"person": "Simon", "value": 12000},
     )
-    assert monthly_after > monthly_before, (
-        f"the headline must move immediately after saving works: "
-        f"before={monthly_before} after={monthly_after}"
-    )
+    assert resp.status_code == 200
+    flush_all()
+
+    detail = client.get("/api/properties/42555556/detail").json()
+    assert _works_total(detail) == Decimal("12000")
+    assert _couple_monthly(detail) > monthly_before
