@@ -1576,13 +1576,8 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 200, resp.text[:500]
 
-        # The test environment has no background processor — drain the
-        # queue explicitly (production's lifespan processor does this
-        # automatically, and the WS broadcaster pushes the fresh totals).
-        from tests.unit.conftest import flush_all as _flush
-
-        _flush()
-
+        # The endpoint drains inline now: the immediate refetch must
+        # already see the re-priced figures (the 2026-09-08 contract).
         resp = client.get(f"/api/properties/{rid}/detail")
         assert resp.status_code == 200, resp.text[:500]
         detail_after = resp.json()
