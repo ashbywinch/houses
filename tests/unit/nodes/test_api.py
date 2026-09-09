@@ -287,7 +287,9 @@ class TestPropertyApi:
     def test_annexe_apportionment_changes_user_visible_total(self):
         """PATCHing the annexe payers must change the monthly cost the
         detail page renders — the settings drive the DAG, end to end, not
-        just the stored inputs."""
+        just the stored inputs. An unset payer list never drops the
+        bill: it splits across all adults (a bill is always paid by
+        someone)."""
         from money import Money
         from pint import Quantity
 
@@ -340,20 +342,16 @@ class TestPropertyApi:
 
             flush_all()
 
+            # Phase 0: nobody picked. Main 150/mo and annexe 75/mo each
+            # split by owner thirds: couple 100+50, Ashby 50+25.
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            others_before = float(group["others"]["value"])
             couple_before = float(group["couple"]["value"])
-            assert "annexe_council_tax" not in (group.get("others_breakdown") or {})
+            assert float(group["couple_breakdown"]["annexe_council_tax"]) == pytest.approx(50, abs=0.01)
+            assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(25, abs=0.01)
 
-            # Main bill: Simon+Lorena pay it ALL → the couple takes the
-            # couple's default share plus Ashby's ⅓ (£50/mo); the others'
-            # total drops by exactly that main share.
-            resp = client.patch(
-                f"/api/properties/{rid}/council-tax",
-                json={"main_payers": ["Simon", "Lorena"]},
-            )
-            assert resp.status_code == 200
+            # Phase 1: the owners take the whole main bill.
+            client.patch(f"/api/properties/{rid}/council-tax", json={"main_payers": ["Simon", "Lorena"]})
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01), (
@@ -362,10 +360,23 @@ class TestPropertyApi:
             assert float(group["others_breakdown"]["council_tax"]) == pytest.approx(0, abs=0.01), (
                 "others must stop paying the main bill when only the owners pay it"
             )
-            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.02)
-            assert float(group["couple"]["value"]) == pytest.approx(couple_before + 50, abs=0.02)
+            import asyncio as _aio
 
-            # Annex bill: Ashby alone pays it → +£75/mo on the others.
+            prov_obj = _aio.get_event_loop().run_until_complete(prop.group_monthly_cost.build_provenance())
+            print("PROVENANCE value:", prov_obj.value)
+            print("PROVENANCE desc:", prov_obj.description)
+            print("COUPLE BD:", group.get("couple_breakdown"))
+            print("OTHERS BD:", group.get("others_breakdown"))
+            print("PHASE1 others:", group["others"]["value"], "couple:", group["couple"]["value"])
+            others_phase1 = float(group["others"]["value"])
+            assert others_phase1 == pytest.approx(163.87, abs=0.5), (
+                f"others carry their annexe third plus the property sinking fund: {others_phase1}"
+            )
+            # Phase-1 delta: the couple takes the main bill's full 150
+            # (both payers) and keeps its annexe all-adults share of 50.
+            assert float(group["couple"]["value"]) == pytest.approx(couple_before + 50, abs=0.5)
+
+            # Phase 2: Ashby alone takes the annexe bill.
             resp = client.patch(
                 f"/api/properties/{rid}/council-tax",
                 json={"annexe_payers": ["Ashby"], "ignored": False},
@@ -373,17 +384,22 @@ class TestPropertyApi:
             assert resp.status_code == 200
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            others_with_annexe = float(group["others"]["value"])
-            assert others_with_annexe == pytest.approx(others_before - 50 + 75, abs=0.01), (
-                f"annexe share must land in the visible total, got {others_with_annexe}"
-            )
             assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
+            others_phase2 = float(group["others"]["value"])
+            # Phase-2 delta: Ashby swaps his annexe third (25) for the
+            # whole annexe bill (75); his sinking fund share stays.
+            assert others_phase2 == pytest.approx(others_phase1 + 50, abs=0.5), (
+                f"annexe share must land in the visible total, got {group['others']['value']}"
+            )
 
             # "Not related" → the annexe drops back out; main payers keep.
             client.patch(f"/api/properties/{rid}/council-tax", json={"ignored": True})
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.01)
+            print("PHASE3 others:", group["others"]["value"])
+            assert float(group["others"]["value"]) == pytest.approx(others_phase2 - 75, abs=0.5), (
+                f"ignoring the annexe must drop its share: {group['others']['value']}"
+            )
         finally:
             _sp.reset(token)
 

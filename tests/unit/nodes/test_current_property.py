@@ -728,7 +728,7 @@ class TestGroupMonthlyCostNode:
         assert float(val["others_breakdown"]["annexe_council_tax"]) == pytest.approx(25, abs=0.01)
 
     @pytest.mark.asyncio
-    async def test_annexe_contributes_nothing_until_payers_picked(self):
+    async def test_empty_annexe_payers_split_across_all_adults(self):
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
 
         node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe2")
@@ -759,8 +759,11 @@ class TestGroupMonthlyCostNode:
 
         val = (await node.attempt()).value_or_none()
         assert val is not None
-        assert float(val["couple"]["value"]) == pytest.approx(100, abs=0.01)
-        assert float(val["others"]["value"]) == pytest.approx(50, abs=0.01)
+        # Nobody picked: the annexe bill still gets paid — split across
+        # all adults (main 150: couple 100, others 50; annexe 75: couple
+        # 50, others 25).
+        assert float(val["couple"]["value"]) == pytest.approx(150, abs=0.01)
+        assert float(val["others"]["value"]) == pytest.approx(75, abs=0.02)
 
     @pytest.mark.asyncio
     async def test_ignored_annexe_contributes_nothing(self):
