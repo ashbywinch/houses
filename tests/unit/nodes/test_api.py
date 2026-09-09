@@ -365,9 +365,6 @@ class TestPropertyApi:
             prov_obj = _aio.get_event_loop().run_until_complete(prop.group_monthly_cost.build_provenance())
             print("PROVENANCE value:", prov_obj.value)
             print("PROVENANCE desc:", prov_obj.description)
-            print("COUPLE BD:", group.get("couple_breakdown"))
-            print("OTHERS BD:", group.get("others_breakdown"))
-            print("PHASE1 others:", group["others"]["value"], "couple:", group["couple"]["value"])
             others_phase1 = float(group["others"]["value"])
             assert others_phase1 == pytest.approx(163.87, abs=0.5), (
                 f"others carry their annexe third plus the property sinking fund: {others_phase1}"
