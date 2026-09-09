@@ -73,6 +73,17 @@ Staleness, re-computation, priority are the DAG's job. See `docs/dag-library.md`
 
 A business rule needed in two places (e.g. "user correction overrides Rightmove") belongs in a DAG node definition — not in both the import function and the card builder. Resolve once; everything else reads.
 
+### All calculation happens in the DAG
+
+Derived figures — including zero and excluded cases — are computed by
+DAG nodes and serialized for display. The front end renders node values
+verbatim: it must not re-derive, filter, or special-case figures (e.g.
+treating a 0-day destination as a special case in a component). If a
+number is wrong on screen, the bug is in a DAG node's inputs or compute
+— fix the node, and pin it with a node-level test. A component that
+computes instead of rendering is a bodge by definition.
+
+
 ## Houses-Specific Practices
 
 ### Datetimes: UTC, aware, explicit boundaries
