@@ -247,6 +247,50 @@ def test_restore_responds_without_draining_the_cascade(whatif_world):
     flush_all()  # settle the cascade the restore queued
 
 
+def test_detail_page_shows_zero_days_as_not_commuted(whatif_world):
+    """The DETAIL page must agree with the cards: an open what-if with a
+    destination at zero days excludes that destination from the property
+    detail figures and shows the scenario trips (0 days)."""
+    client, rid = whatif_world
+    assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
+
+    after = _pimlico_commute(client, rid)
+    assert after is None, (
+        f"the detail page must exclude a 0-days destination, got {after}"
+    )
+
+
+def test_commute_total_provenance_reflects_the_scenario_trips(whatif_world):
+    """The commute TOTAL and its provenance must agree with the open
+    what-if: Pimlico at 0 days contributes nothing and the derivation
+    never claims Pimlico at 1 day a week."""
+    client, rid = whatif_world
+    before = _pimlico_commute(client, rid)
+    assert before is not None and before.trips == 1
+
+    assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
+    # The apply returns before the drain (rule 7): the background drain
+    # lands the re-price; the test environment drains explicitly.
+    flush_all()
+
+    detail = client.get(f"/api/properties/{rid}/detail").json()
+    mcc = detail["affordability"]["monthly_commute_cost"]
+    assert mcc["succeeded"], mcc.get("error")
+    value = mcc["value"]
+    simon = value["persons"].get("Simon") or {}
+    labels = {c["label"]: c for c in simon.get("commutes") or []}
+    assert "Pimlico" not in labels, (
+        f"the total must exclude a 0-days destination, got {sorted(labels)}"
+    )
+    formula = mcc["provenance"].get("formula") or {}
+    lines = [str(line.get("label", "")) for line in (formula.get("lines") or [])]
+    pimlico_lines = [entry for entry in lines if "Pimlico" in entry]
+    assert pimlico_lines == [], (
+        f"the provenance must not claim Pimlico at 1 day a week under a "
+        f"zero-day scenario: {pimlico_lines}"
+    )
+
+
 def test_restore_works_from_a_fresh_process(whatif_world):
     """Marker and history live in the DAG's persistence: after apply, a
     fresh services/node read still sees an active what-if, and restore
