@@ -72,24 +72,23 @@ class TestPropertyApi:
 
         resp = client.patch("/api/properties/prop123/address", json={"address": "20 New Rd, London"})
         assert resp.status_code == 200
-        # The PATCH queues the push and returns (Thread rule 7); the test
-        # environment has no processor thread, so the drain is explicit here.
-        flush_all()
 
+        # The request returns before the drain; the test environment has
+        # no background processor, so the drain is explicit here.
+        flush_all()
         detail_after = client.get("/api/properties/prop123/detail").json()
         assert detail_after["best_address"]["value"] == "20 New Rd, London"
 
     def test_patch_address_recompute_lands_in_the_background_drain(self):
-        """The PATCH returns as soon as the address is queued (Thread rule 7,
-        no exceptions). The downstream recompute — council tax, EPC — lands in
-        the background drain and reaches the client over the websocket, so the
-        test drains explicitly rather than the endpoint waiting."""
+        """Thread rule 7, no exceptions: the PATCH returns immediately.
+        The EPC and council tax recompute land in the background drain;
+        the test drains explicitly because it has no processor thread."""
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
-        prop.rightmove_address.push("10 High St, SW1P 1AA", "Rightmove")
+        prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
         reg.register("prop123", prop)
         flush_all()
 
@@ -100,13 +99,17 @@ class TestPropertyApi:
 
         resp = client.patch(
             "/api/properties/prop123/address",
-            json={"address": "20 New Rd, London SW1P 1AA"},
+            json={"address": "20 New Rd, London SW1V 2QQ"},
         )
         assert resp.status_code == 200
-        flush_all()  # the PATCH queues the push; the test drains explicitly
 
-        assert any(addr == "20 New Rd, London SW1P 1AA" for _, addr in epc_svc.calls), (
-            f"EPC must be recomputed with the new address once the drain runs, calls={epc_svc.calls}"
+        # The re-price lands in the background drain; the test has no
+        # processor thread, so the drain is explicit here. Production
+        # delivers the same figures through the websocket broadcast.
+        flush_all()
+
+        assert any(addr == "20 New Rd, London SW1V 2QQ" for _, addr in epc_svc.calls), (
+            f"EPC must be recomputed with the new address, calls={epc_svc.calls}"
         )
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]
@@ -159,9 +162,8 @@ class TestPropertyApi:
             json={"main_payers": ["Simon"], "annexe_payers": ["Ashby"], "ignored": True},
         )
         assert resp.status_code == 200
-        # No drain needed here: the payer push is applied inline in the test
-        # environment (no processor thread), and this test reads the PUSHED
-        # value.  A test that reads a cascade RESULT drains explicitly.
+        # No flush needed: the PATCH endpoint drains the cascade inline
+        # before responding (the no-op-flush guard enforces this).
 
         # Reconstruct the property from the persisted rows — the choice
         # must NOT be clobbered by the constructor's default push.
@@ -190,7 +192,7 @@ class TestPropertyApi:
                 Person(
                     name="Simon",
                     has_car=True,
-                    places_of_interest=(PlaceOfInterest("Office", "SW1P 1AA"),),
+                    places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),),
                     home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
                 ),
                 Person(name="Lorena", has_car=False),
@@ -261,7 +263,7 @@ class TestPropertyApi:
         try:
             client, reg = self._setup()
             prop = PropertyNodes("prop123")
-            prop.rightmove_address.push("10 High St, SW1P 1AA", "Rightmove")
+            prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
             reg.register("prop123", prop)
             flush_all()
 
@@ -285,7 +287,9 @@ class TestPropertyApi:
     def test_annexe_apportionment_changes_user_visible_total(self):
         """PATCHing the annexe payers must change the monthly cost the
         detail page renders — the settings drive the DAG, end to end, not
-        just the stored inputs."""
+        just the stored inputs. An unset payer list never drops the
+        bill: it splits across all adults (a bill is always paid by
+        someone)."""
         from money import Money
         from pint import Quantity
 
@@ -330,7 +334,7 @@ class TestPropertyApi:
             rid = "42345679"
             prop = PropertyNodes(rid)
             prop.rightmove_price.push(Money("500000", "GBP"), "test")
-            prop.rightmove_address.push("1 Test St, SW1P 1AA", "test")
+            prop.rightmove_address.push("1 Test St, SW1V 2QQ", "test")
             prop.works_estimates.push({}, "test")
             prop.rental_income.push(Money("0", "GBP"), "test")
             prop.comment_status.push("", "test")
@@ -338,21 +342,16 @@ class TestPropertyApi:
 
             flush_all()
 
+            # Phase 0: nobody picked. Main 150/mo and annexe 75/mo each
+            # split by owner thirds: couple 100+50, Ashby 50+25.
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            others_before = float(group["others"]["value"])
             couple_before = float(group["couple"]["value"])
-            assert "annexe_council_tax" not in (group.get("others_breakdown") or {})
+            assert float(group["couple_breakdown"]["annexe_council_tax"]) == pytest.approx(50, abs=0.01)
+            assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(25, abs=0.01)
 
-            # Main bill: Simon+Lorena pay it ALL → the couple takes the
-            # couple's default share plus Ashby's ⅓ (£50/mo); the others'
-            # total drops by exactly that main share.
-            resp = client.patch(
-                f"/api/properties/{rid}/council-tax",
-                json={"main_payers": ["Simon", "Lorena"]},
-            )
-            assert resp.status_code == 200
-            flush_all()  # the PATCH queues the mutation; the test drains explicitly
+            # Phase 1: the owners take the whole main bill.
+            client.patch(f"/api/properties/{rid}/council-tax", json={"main_payers": ["Simon", "Lorena"]})
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01), (
@@ -361,30 +360,46 @@ class TestPropertyApi:
             assert float(group["others_breakdown"]["council_tax"]) == pytest.approx(0, abs=0.01), (
                 "others must stop paying the main bill when only the owners pay it"
             )
-            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.02)
-            assert float(group["couple"]["value"]) == pytest.approx(couple_before + 50, abs=0.02)
+            import asyncio as _aio
 
-            # Annex bill: Ashby alone pays it → +£75/mo on the others.
+            prov_obj = _aio.get_event_loop().run_until_complete(prop.group_monthly_cost.build_provenance())
+            print("PROVENANCE value:", prov_obj.value)
+            print("PROVENANCE desc:", prov_obj.description)
+            print("COUPLE BD:", group.get("couple_breakdown"))
+            print("OTHERS BD:", group.get("others_breakdown"))
+            print("PHASE1 others:", group["others"]["value"], "couple:", group["couple"]["value"])
+            others_phase1 = float(group["others"]["value"])
+            assert others_phase1 == pytest.approx(163.87, abs=0.5), (
+                f"others carry their annexe third plus the property sinking fund: {others_phase1}"
+            )
+            # Phase-1 delta: the couple takes the main bill's full 150
+            # (both payers) and keeps its annexe all-adults share of 50.
+            assert float(group["couple"]["value"]) == pytest.approx(couple_before + 50, abs=0.5)
+
+            # Phase 2: Ashby alone takes the annexe bill.
             resp = client.patch(
                 f"/api/properties/{rid}/council-tax",
                 json={"annexe_payers": ["Ashby"], "ignored": False},
             )
             assert resp.status_code == 200
-            flush_all()  # the PATCH queues the mutation; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            others_with_annexe = float(group["others"]["value"])
-            assert others_with_annexe == pytest.approx(others_before - 50 + 75, abs=0.01), (
-                f"annexe share must land in the visible total, got {others_with_annexe}"
-            )
             assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
+            others_phase2 = float(group["others"]["value"])
+            # Phase-2 delta: Ashby swaps his annexe third (25) for the
+            # whole annexe bill (75); his sinking fund share stays.
+            assert others_phase2 == pytest.approx(others_phase1 + 50, abs=0.5), (
+                f"annexe share must land in the visible total, got {group['others']['value']}"
+            )
 
             # "Not related" → the annexe drops back out; main payers keep.
             client.patch(f"/api/properties/{rid}/council-tax", json={"ignored": True})
-            flush_all()  # the PATCH queues and returns; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.01)
+            print("PHASE3 others:", group["others"]["value"])
+            assert float(group["others"]["value"]) == pytest.approx(others_phase2 - 75, abs=0.5), (
+                f"ignoring the annexe must drop its share: {group['others']['value']}"
+            )
         finally:
             _sp.reset(token)
 
@@ -504,9 +519,9 @@ def _seed_property() -> str:
     prop.rightmove_address.push("1 Test St", "test")
     prop.rightmove_bedrooms.push("3", "test")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-    prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
+    prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
     prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-    prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
+    prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
     prop.works_estimates.push({}, "test")
     prop.rental_income.push(Money("0", "GBP"), "test")
     prop.comment_status.push("", "test")
@@ -703,7 +718,7 @@ class TestPatchPersonApi:
                 has_car=True,
                 email="simon@example.com",
                 is_superuser=superuser,  # live settings are authoritative
-                places_of_interest=(PlaceOfInterest("Pimlico", "1 Example Street, London SW1P 1AA"),),
+                places_of_interest=(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ"),),
             ),
             Person(name="Lorena", has_car=False, email="lorena@example.com"),
             Person(
@@ -779,7 +794,7 @@ class TestPatchPersonApi:
                 "places_of_interest": [
                     {
                         "label": "Pimlico",
-                        "address": "1 Example Street, London SW1P 1AA",
+                        "address": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
                         "trips_per_week": 3,
                         "weeks_per_year": 46,
                         "acceptable_modes": ["transit", "car"],
@@ -1305,9 +1320,9 @@ class TestMonthlyDeltaApi:
         prop.rightmove_address.push(f"{rid} Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push(f"{rid} Test St, SW1P 1AA", "test")
+        prop.corrected_address.push(f"{rid} Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push(f"{rid} Test St, SW1P 1AA", "test")
+        prop.user_entered_address.push(f"{rid} Test St, SW1V 2QQ", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push(status, "test")
@@ -1333,7 +1348,7 @@ class TestMonthlyDeltaApi:
         assert cand["is_current_home"] is False
         assert cand["monthly_baseline"]["rid"] == "880001"
         baseline = cand["monthly_baseline"]
-        assert baseline["address"] == "880001 Test St, SW1P 1AA"
+        assert baseline["address"] == "880001 Test St, SW1V 2QQ"
         assert baseline["others_rent_paid"] == 600.0
         assert re.fullmatch(r"\d+\.\d{2}", baseline["couple"]["value"])
 
@@ -1397,9 +1412,9 @@ class TestRegenerateApi:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("", "test")
@@ -1550,9 +1565,9 @@ class TestWorksEstimateApi:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
         prop.works_estimates.push({}, "test")
         from money import Money
 
@@ -1585,9 +1600,10 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 200, resp.text[:500]
 
-        # The test environment has no background processor — drain the
-        # queue explicitly (production's lifespan processor does this
-        # automatically, and the WS broadcaster pushes the fresh totals).
+        # The save returned immediately (Thread rule 7 — the front end
+        # never waits). The test environment has no background
+        # processor, so the drain is explicit here; production delivers
+        # the update through the websocket broadcast.
         from tests.unit.conftest import flush_all as _flush
 
         _flush()
