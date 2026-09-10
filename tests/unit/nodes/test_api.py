@@ -72,20 +72,24 @@ class TestPropertyApi:
 
         resp = client.patch("/api/properties/prop123/address", json={"address": "20 New Rd, London"})
         assert resp.status_code == 200
+        # The PATCH queues the push and returns (Thread rule 7); the test
+        # environment has no processor thread, so the drain is explicit here.
+        flush_all()
 
         detail_after = client.get("/api/properties/prop123/detail").json()
         assert detail_after["best_address"]["value"] == "20 New Rd, London"
 
-    def test_patch_address_drains_cascade_before_responding(self):
-        """The PATCH must recompute the downstream DAG (council tax, EPC)
-        BEFORE responding — the frontend refetches immediately and would
-        otherwise race the background cascade and show stale figures."""
+    def test_patch_address_recompute_lands_in_the_background_drain(self):
+        """The PATCH returns as soon as the address is queued (Thread rule 7,
+        no exceptions). The downstream recompute — council tax, EPC — lands in
+        the background drain and reaches the client over the websocket, so the
+        test drains explicitly rather than the endpoint waiting."""
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
-        prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
+        prop.rightmove_address.push("10 High St, SW1P 1AA", "Rightmove")
         reg.register("prop123", prop)
         flush_all()
 
@@ -96,12 +100,13 @@ class TestPropertyApi:
 
         resp = client.patch(
             "/api/properties/prop123/address",
-            json={"address": "20 New Rd, London SW1V 2QQ"},
+            json={"address": "20 New Rd, London SW1P 1AA"},
         )
         assert resp.status_code == 200
+        flush_all()  # the PATCH queues the push; the test drains explicitly
 
-        assert any(addr == "20 New Rd, London SW1V 2QQ" for _, addr in epc_svc.calls), (
-            f"EPC must be recomputed with the new address before the PATCH returns, calls={epc_svc.calls}"
+        assert any(addr == "20 New Rd, London SW1P 1AA" for _, addr in epc_svc.calls), (
+            f"EPC must be recomputed with the new address once the drain runs, calls={epc_svc.calls}"
         )
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]
@@ -118,9 +123,7 @@ class TestPropertyApi:
 
         for bad in ("false", 1, "true", None):
             resp = client.patch("/api/properties/prop124/council-tax", json={"ignored": bad})
-            assert resp.status_code == 422, (
-                f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
-            )
+            assert resp.status_code == 422, f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
 
     def test_patch_council_tax_validates_all_fields_before_any_push(self):
         """A body with valid payers but an invalid ignored must 422
@@ -156,6 +159,9 @@ class TestPropertyApi:
             json={"main_payers": ["Simon"], "annexe_payers": ["Ashby"], "ignored": True},
         )
         assert resp.status_code == 200
+        # No drain needed here: the payer push is applied inline in the test
+        # environment (no processor thread), and this test reads the PUSHED
+        # value.  A test that reads a cascade RESULT drains explicitly.
 
         # Reconstruct the property from the persisted rows — the choice
         # must NOT be clobbered by the constructor's default push.
@@ -184,7 +190,7 @@ class TestPropertyApi:
                 Person(
                     name="Simon",
                     has_car=True,
-                    places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),),
+                    places_of_interest=(PlaceOfInterest("Office", "SW1P 1AA"),),
                     home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
                 ),
                 Person(name="Lorena", has_car=False),
@@ -220,9 +226,7 @@ class TestPropertyApi:
                 "the stale scan must schedule the code-stale commute pipeline"
             )
             await flush_processor()
-            assert selector.code_is_stale() is False, (
-                "the commute selector must be recomputed by the scheduled drain"
-            )
+            assert selector.code_is_stale() is False, "the commute selector must be recomputed by the scheduled drain"
         finally:
             _sp.reset(token)
 
@@ -257,7 +261,7 @@ class TestPropertyApi:
         try:
             client, reg = self._setup()
             prop = PropertyNodes("prop123")
-            prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
+            prop.rightmove_address.push("10 High St, SW1P 1AA", "Rightmove")
             reg.register("prop123", prop)
             flush_all()
 
@@ -326,7 +330,7 @@ class TestPropertyApi:
             rid = "42345679"
             prop = PropertyNodes(rid)
             prop.rightmove_price.push(Money("500000", "GBP"), "test")
-            prop.rightmove_address.push("1 Test St, SW1V 2QQ", "test")
+            prop.rightmove_address.push("1 Test St, SW1P 1AA", "test")
             prop.works_estimates.push({}, "test")
             prop.rental_income.push(Money("0", "GBP"), "test")
             prop.comment_status.push("", "test")
@@ -348,6 +352,7 @@ class TestPropertyApi:
                 json={"main_payers": ["Simon", "Lorena"]},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues the mutation; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01), (
@@ -365,6 +370,7 @@ class TestPropertyApi:
                 json={"annexe_payers": ["Ashby"], "ignored": False},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues the mutation; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             others_with_annexe = float(group["others"]["value"])
@@ -375,6 +381,7 @@ class TestPropertyApi:
 
             # "Not related" → the annexe drops back out; main payers keep.
             client.patch(f"/api/properties/{rid}/council-tax", json={"ignored": True})
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.01)
@@ -497,9 +504,9 @@ def _seed_property() -> str:
     prop.rightmove_address.push("1 Test St", "test")
     prop.rightmove_bedrooms.push("3", "test")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-    prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
     prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-    prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
     prop.works_estimates.push({}, "test")
     prop.rental_income.push(Money("0", "GBP"), "test")
     prop.comment_status.push("", "test")
@@ -696,7 +703,7 @@ class TestPatchPersonApi:
                 has_car=True,
                 email="simon@example.com",
                 is_superuser=superuser,  # live settings are authoritative
-                places_of_interest=(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ"),),
+                places_of_interest=(PlaceOfInterest("Pimlico", "1 Example Street, London SW1P 1AA"),),
             ),
             Person(name="Lorena", has_car=False, email="lorena@example.com"),
             Person(
@@ -772,7 +779,7 @@ class TestPatchPersonApi:
                 "places_of_interest": [
                     {
                         "label": "Pimlico",
-                        "address": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
+                        "address": "1 Example Street, London SW1P 1AA",
                         "trips_per_week": 3,
                         "weeks_per_year": 46,
                         "acceptable_modes": ["transit", "car"],
@@ -1298,9 +1305,9 @@ class TestMonthlyDeltaApi:
         prop.rightmove_address.push(f"{rid} Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push(f"{rid} Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push(f"{rid} Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push(f"{rid} Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push(f"{rid} Test St, SW1P 1AA", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push(status, "test")
@@ -1326,7 +1333,7 @@ class TestMonthlyDeltaApi:
         assert cand["is_current_home"] is False
         assert cand["monthly_baseline"]["rid"] == "880001"
         baseline = cand["monthly_baseline"]
-        assert baseline["address"] == "880001 Test St, SW1V 2QQ"
+        assert baseline["address"] == "880001 Test St, SW1P 1AA"
         assert baseline["others_rent_paid"] == 600.0
         assert re.fullmatch(r"\d+\.\d{2}", baseline["couple"]["value"])
 
@@ -1365,7 +1372,6 @@ class TestMonthlyDeltaApi:
         assert own["affordability"]["group_monthly_cost"]["value"]["delta_vs_home"] is None
 
 
-
 class TestRegenerateApi:
     """POST /api/admin/regenerate — force recompute of non-stale nodes."""
 
@@ -1391,9 +1397,9 @@ class TestRegenerateApi:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("", "test")
@@ -1437,8 +1443,9 @@ class TestRegenerateApi:
         )
         prop.council_tax._attempt = Attempt.impossible("pre-A3 state")
 
-        # A plain flush does NOT regenerate it — timestamps say fresh.
-        flush_all()
+        # Nothing is enqueued here — the write landed synchronously and
+        # the timestamps say fresh — so a plain flush is a no-op (the
+        # no-op-flush guard rejects it). Only a regenerate is the way out.
         assert prop.council_tax.latest_attempt().impossible
 
         resp = client.post("/api/admin/regenerate", json={"patterns": ["*/council_tax"]})
@@ -1543,9 +1550,9 @@ class TestWorksEstimateApi:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
         prop.works_estimates.push({}, "test")
         from money import Money
 

@@ -30,9 +30,9 @@ SHED = {
 DRIVE_RAW = {
     "metadata": {"region_km": 50.0, "cell_km": 4.0},
     "destinations": [
-        {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.0, "lon": -1.0, "threshold_min": 90,
+        {"label": "Dad", "postcode": "OX7 1AA", "lat": 51.0, "lon": -1.0, "threshold_min": 90,
             "cell_km": 4.0, "slack_min": 2.42, "grid": {}, "cells": []},
-        {"label": "Bracknell", "postcode": "RG12 8YA", "lat": 51.2, "lon": -0.8, "threshold_min": 90,
+        {"label": "Bracknell", "postcode": "RG12 1AA", "lat": 51.2, "lon": -0.8, "threshold_min": 90,
             "cell_km": 4.0, "slack_min": 2.42, "grid": {}, "cells": []},
     ],
 }
@@ -45,7 +45,7 @@ DRIVE_SEARCHES: dict = {
             "name": "Dad — 90 min drive",
             "polygon": [[50.8, -1.2], [50.8, -0.6], [51.4, -0.6], [51.4, -1.2]],
             "rightmove_url": "https://rm/dad",
-            "destination": {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.0, "lon": -1.0},
+            "destination": {"label": "Dad", "postcode": "OX7 1AA", "lat": 51.0, "lon": -1.0},
             "threshold_min": 90,
         },
         {
@@ -53,7 +53,7 @@ DRIVE_SEARCHES: dict = {
             "name": "Bracknell — 90 min drive",
             "polygon": [[50.8, -1.2], [50.8, -0.7], [51.3, -0.7], [51.3, -1.2]],
             "rightmove_url": "https://rm/bracknell",
-            "destination": {"label": "Bracknell", "postcode": "RG12 8YA", "lat": 51.2, "lon": -0.8},
+            "destination": {"label": "Bracknell", "postcode": "RG12 1AA", "lat": 51.2, "lon": -0.8},
             "threshold_min": 90,
         },
     ],

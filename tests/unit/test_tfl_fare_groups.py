@@ -57,7 +57,7 @@ _TFL_JOURNEY = {
                     "mode": {"name": "walking"},
                     "duration": "6",
                     "departurePoint": {"commonName": "Pimlico Underground Station"},
-                    "arrivalPoint": {"commonName": "1 Drummond Gate"},
+                    "arrivalPoint": {"commonName": "1 Example Street"},
                     "route": {"name": ""},
                     "instruction": {"summary": "Walk"},
                 },
@@ -69,7 +69,7 @@ _TFL_JOURNEY = {
 
 class TestBuildCostGroupsAppliesFare:
     def _client(self) -> TflClient:
-        return TflClient("51.5012,-0.3686", "1 Drummond Gate, Pimlico, London SW1V 2QQ", "Pimlico")
+        return TflClient("51.5012,-0.3686", "1 Example Street, London SW1P 1AA", "Pimlico")
 
     def test_transit_groups_carry_the_tfl_total_cost(self):
         """The journey's TfL totalCost must be on the transit CostGroups —

@@ -62,7 +62,7 @@ class _CommutePassthroughNode(DerivedNode[Commute]):
             Commute(
                 person=Person(name="Test", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
+                destination=PlaceOfInterest(label="Office", address="SW1P 1AA"),
                 duration=Quantity(45, "minute"),
                 daily_cost=Money("7.20", "GBP"),
                 mode="transit",

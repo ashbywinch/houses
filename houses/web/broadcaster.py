@@ -56,7 +56,7 @@ async def _push_node_update(node) -> None:
     # lucidlint: ignore broad-except serialisation failure silently drops this push; clients refresh on next change
     except Exception:
         return
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     msg = json.dumps({"type": "node_updated", "rid": rid, "node_id": node._id, "data": data})
     dead: list[WebSocket] = []
     for ws in list(_websocket_clients):

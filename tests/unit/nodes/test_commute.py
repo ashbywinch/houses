@@ -97,7 +97,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"))
         transit.push(_make_commute(duration_min=45, cost_gbp=4.50))
         walk.push(_make_commute(duration_min=60, cost_gbp=0))
         drive.push(_make_commute(duration_min=20, cost_gbp=8.00))
@@ -137,7 +137,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"))
         transit.push(_make_commute(duration_min=30, cost_gbp=4.50))
         walk.push(_make_commute(duration_min=60, cost_gbp=0))
         drive.push(_make_commute(duration_min=50, cost_gbp=8.00))
@@ -177,7 +177,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"))
         transit.push(_make_commute(duration_min=25, cost_gbp=4.50))
         walk.push(_make_commute(duration_min=35, cost_gbp=0))
         drive.push(_make_commute(duration_min=20, cost_gbp=8.00))
@@ -216,7 +216,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"))
         transit.push(_make_commute(duration_min=45, cost_gbp=4.50))
         walk.push(_make_commute(duration_min=60, cost_gbp=0))
         drive.push(_make_commute(duration_min=20, cost_gbp=8.00))
@@ -256,7 +256,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"))
         transit.push(_make_commute(duration_min=30, cost_gbp=4.50))
         walk.push(_make_commute(duration_min=60, cost_gbp=0))
 
@@ -291,7 +291,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        office_poi = PlaceOfInterest("Office", "SW1P 1AA")
         poi.push(office_poi)
 
         transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
@@ -330,7 +330,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        office_poi = PlaceOfInterest("Office", "SW1P 1AA")
         poi.push(office_poi)
 
         await flush_processor()
@@ -360,7 +360,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        office_poi = PlaceOfInterest("Office", "SW1P 1AA")
         poi.push(office_poi)
 
         await flush_processor()
@@ -388,7 +388,7 @@ class TestCommuteSelectorNode:
             ),
         )
 
-        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        office_poi = PlaceOfInterest("Office", "SW1P 1AA")
         poi.push(office_poi)
 
         await flush_processor()
@@ -421,7 +421,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        office_poi = PlaceOfInterest("Office", "SW1P 1AA")
         poi.push(office_poi)
         bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
         walk.push(_make_commute(duration_min=60, cost_gbp=0), "test")
@@ -466,7 +466,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
         transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
         bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
         walk.push(_make_commute(duration_min=60, cost_gbp=0), "test")
@@ -508,7 +508,7 @@ class TestCommuteSelectorNode:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("School", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("School", "SW1P 1AA"), "config")
         transit.push(_make_commute(duration_min=10, cost_gbp=0), "walk")
 
         await flush_processor()
@@ -622,7 +622,7 @@ class TestMergeRailFareNode:
             rail_fare_result=rail_fare_src,
         )
 
-        office = PlaceOfInterest("Office", "SW1V 2QQ")
+        office = PlaceOfInterest("Office", "SW1P 1AA")
         person = Person("Simon", True, places_of_interest=(office,))
         train_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"), end_station="London Waterloo")
         park_leg = JourneyLeg(mode=LegMode.PARK, duration=Quantity(0, "minute"))
@@ -756,7 +756,7 @@ class TestWalkLegCheckNode:
 
 def _make_person(bus_walk_penalty: int = 30, name: str = "Simon"):
     """Create a minimal Person-like object with the attributes WalkLegCheckNode reads."""
-    office = PlaceOfInterest("Office", "SW1V 2QQ")
+    office = PlaceOfInterest("Office", "SW1P 1AA")
     return Person(name, True, places_of_interest=(office,), bus_walk_penalty=Quantity(bus_walk_penalty, "minute"))
 
 def _make_commute(duration_min=32, cost_gbp=4.50):
@@ -764,7 +764,7 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
 
     from houses.commute import LegMode
 
-    office = PlaceOfInterest("Office", "SW1V 2QQ")
+    office = PlaceOfInterest("Office", "SW1P 1AA")
     person = Person("Simon", True, places_of_interest=(office,))
     leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(duration_min, "minute"), end_station="London Paddington")
     return Commute(
@@ -779,7 +779,7 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
 
 def _drive_commute(duration_min=16, cost_gbp=5.0) -> Commute:
     """A real driving commute — no transit legs, so NR fares never apply."""
-    office = PlaceOfInterest("Office", "SW1V 2QQ")
+    office = PlaceOfInterest("Office", "SW1P 1AA")
     person = Person("Simon", True, places_of_interest=(office,))
     leg = JourneyLeg(mode=LegMode.DRIVE, duration=Quantity(duration_min, "minute"))
     return Commute(
@@ -1026,7 +1026,7 @@ class TestRailFareNode:
         # Feasible transit with unpriced train legs ending at "Reading" —
         # the registry has no station there, so an actual lookup would
         # fail with "terminal station not found".
-        office = PlaceOfInterest("Office", "SW1V 2QQ")
+        office = PlaceOfInterest("Office", "SW1P 1AA")
         person = Person("Simon", True, places_of_interest=(office,))
         leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(120, "minute"), end_station="Reading")
         transit_commute = Commute(
@@ -1115,7 +1115,7 @@ class TestRailFareNode:
         transit = UserInputNode[Commute]("rf_fare", Commute)
         location = UserInputNode[GeoPoint]("rf_fare_loc", GeoPoint)
 
-        office = PlaceOfInterest("Office", "EC3A 7LP")
+        office = PlaceOfInterest("Office", "EC3A 4NE")
         person = Person("Lorena", True, places_of_interest=(office,))
         commute = Commute(
             person=person,
@@ -1204,7 +1204,7 @@ class TestRailFareNode:
         transit = UserInputNode[Commute]("rf_tube404", Commute)
         location = UserInputNode[GeoPoint]("rf_tube404_loc", GeoPoint)
 
-        office = PlaceOfInterest("Office", "EC3A 7LP")
+        office = PlaceOfInterest("Office", "EC3A 4NE")
         person = Person("Lorena", True, places_of_interest=(office,))
         commute = Commute(
             person=person,
@@ -1298,7 +1298,7 @@ async def test_commute_selector_impossible_without_bus():
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")
-    poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+    poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
     # Don't push transit — it'll be pending, so the selector can't
     # run compute.
     await flush_processor()
@@ -1334,7 +1334,7 @@ async def test_walk_selected_when_fastest():
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")
-    poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+    poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
 
     # Walk: 10 min, £0 — fastest, should win
     walk.push(_make_commute(duration_min=10, cost_gbp=0))
@@ -1408,7 +1408,7 @@ class TestNoRouteCommuteChain:
         return Commute(
             person=Person(name="Simon", has_car=True),
             label=label,
-            destination=PlaceOfInterest(label=label, address="RG12 8YA"),
+            destination=PlaceOfInterest(label=label, address="RG12 1AA"),
             duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
@@ -1514,7 +1514,7 @@ class TestNoRouteCommuteChain:
         origin = UserInputNode[GeoPoint]("chain_origin", GeoPoint)
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi = UserInputNode[str]("chain_poi", str)
-        poi.push("RG12 8YA", "test")
+        poi.push("RG12 1AA", "test")
 
         from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
@@ -1559,7 +1559,7 @@ class TestFareConditionalDependency:
 
     def _transit_commute(self, duration_min: int = 120) -> Commute:
         """A feasible transit commute with unpriced train legs (needs fare)."""
-        office = PlaceOfInterest("Office", "SW1V 2QQ")
+        office = PlaceOfInterest("Office", "SW1P 1AA")
         person = Person("Simon", True, places_of_interest=(office,))
         leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(duration_min, "minute"), end_station="Reading")
         return Commute(
@@ -1600,7 +1600,7 @@ class TestFareConditionalDependency:
         origin = UserInputNode[GeoPoint]("cdd_origin", GeoPoint)
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi = UserInputNode[str]("cdd_poi", str)
-        poi.push("RG12 8YA", "test")
+        poi.push("RG12 1AA", "test")
 
         transit = _Fixed("cdd_transit", Attempt.succeeded(self._transit_commute()))
         walk = _Fixed(
@@ -1704,7 +1704,7 @@ class TestFareConditionalDependency:
         origin = UserInputNode[GeoPoint]("cda_origin", GeoPoint)
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi = UserInputNode[str]("cda_poi", str)
-        poi.push("RG12 8YA", "test")
+        poi.push("RG12 1AA", "test")
 
         transit = _Fixed("cda_transit", Attempt.succeeded(self._transit_commute(90)))
         walk = _Fixed(

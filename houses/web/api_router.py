@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 import dag.scheduler
 from dag.persistence import node_result_before
-from dag.scheduler import AsyncQueueScheduler, flush_processor
+from dag.scheduler import AsyncQueueScheduler, run_on_processor
 from houses.comments import add_comment, get_comments
 from houses.geopoint import GeoPoint
 from houses.map_layers import DRIVE_PATH, INTERSECTION_PATH, UNION_PATH, isochrone_layers
@@ -51,6 +51,7 @@ def _registry_rids() -> list[str]:
     """All registered property IDs."""
     return get_services().property_registry.list_properties()
 
+
 GOOD_WALK_MIN = 15
 WARN_WALK_MIN = 30
 TOTAL_SHARE_PERCENT = 100
@@ -59,6 +60,8 @@ MAX_SHARE_PERCENT = 100
 TOP_TYPES_LIMIT = 30
 
 logger = logging.getLogger(__name__)
+
+
 @dataclass(frozen=True)
 class DepositBreakdown:
     """(persons, total, lines) from _deposit_breakdown — named so callers
@@ -79,9 +82,7 @@ class IsochronePaths:
     intersection: Path
 
 
-
 api_router = APIRouter(prefix="/api")
-
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,7 @@ def _merge_what_if_persons(updates: list, current: list) -> list:
     merged.extend(p for p in current if p.name not in merged_names)
     return merged
 
+
 def _require_family_member(request: Request) -> None:
     """A what-if changes the whole household's numbers: any signed-in
     family member (session linked to a person) or a superuser may apply
@@ -218,8 +220,12 @@ async def what_if_restore(request: Request):
         raise HTTPException(status_code=409, detail="No pre-what-if persons attempt found to restore")
 
     persons = svc.persons_source._adapter.validate_python(row["value"])
-    svc.persons_source.push(persons, "what-if-restore")
-    svc.whatif_started_at.push("", "what-if-restore")
+
+    def _restore() -> None:
+        svc.persons_source.push(persons, "what-if-restore")
+        svc.whatif_started_at.push("", "what-if-restore")
+
+    _restore()
     return {"active": False}
 
 
@@ -229,7 +235,6 @@ async def what_if_state():
     is set)."""
     started = (get_services().whatif_started_at.latest_attempt().value_or_none() or "").strip()
     return {"active": bool(started)}
-
 
 
 @api_router.post("/what-if/accept")
@@ -247,7 +252,6 @@ async def what_if_accept(request: Request):
 
 
 @api_router.get("/what-if/state")
-
 @api_router.get("/properties/{rid}/staleness")
 async def staleness_check(rid: str, nodes: str = ""):
     """Check which DAG nodes are stale for a given property.
@@ -256,9 +260,7 @@ async def staleness_check(rid: str, nodes: str = ""):
     """
     prop = _registry_property(rid)
     if prop is None:
-        return _StalenessReport(
-            rid=rid, nodes={}, fresh=False, error="property not found"
-        ).to_dict()
+        return _StalenessReport(rid=rid, nodes={}, fresh=False, error="property not found").to_dict()
 
     node_list = [n.strip() for n in nodes.split(",") if n.strip()]
     detail = await prop.to_json_detail()
@@ -287,6 +289,7 @@ async def staleness_check(rid: str, nodes: str = ""):
 def _commute_score(minutes: int | None, bracknell: bool = False) -> int:
     """2 for a good commute, 1 for acceptable, -1 for poor, 0 unknown."""
     return {"good": 2, "warn": 1, "bad": -1, "unknown": 0}[commute_band(minutes, bracknell)]
+
 
 def _ofsted_score(rating: str | None) -> int:
     """Outstanding=2, Good=1, Requires Improvement/Inadequate=-1, else 0."""
@@ -342,7 +345,7 @@ def _walkability_score(walk_val: object) -> int:
     return _walk_score(int(val))
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _score_from_summary(s: dict) -> int:
     """Compute card score matching old ``card_data`` formula:
     green=2, orange=1, red=-1, muted=0, summed across 8 metrics.
@@ -359,7 +362,6 @@ def _score_from_summary(s: dict) -> int:
     return score
 
 
-
 # lucidlint: ignore record-shape wire-format dict — the summary is a wire record (coding-standards.md)
 def _attach_scrape_state(summary: dict, rid: str) -> None:
     """Attach the property's REAL scrape-queue state to a summary, when a
@@ -368,6 +370,7 @@ def _attach_scrape_state(summary: dict, rid: str) -> None:
     status = scrape_status_for_rid(rid)
     if status is not None:
         summary["scrape"] = status.to_dict()
+
 
 @api_router.get("/properties/all")
 async def get_all_properties():
@@ -436,7 +439,7 @@ async def get_property_detail(rid: str):
 
 
 @api_router.patch("/properties/{rid}/address")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore latent-class FastAPI handler signatures — rid is a decorated path param and body the request body;
 async def patch_address(rid: str, body: dict):
     prop = _registry_property(rid)
@@ -445,18 +448,12 @@ async def patch_address(rid: str, body: dict):
 
     prop.corrected_address.push(body.get("address", ""), "user")
     # Recompute before responding — the frontend refetches the detail
-    # immediately, and the background scheduler would race that request.
-    await prop.best_address.refresh()
-    # Drain the downstream cascade (council tax, EPC, geocode, commutes,
-    # group cost) so the response — and the immediate refetch — reflect
-    # the recomputed state, not a mid-cascade one (same pattern as
-    # /admin/regenerate).
-    await flush_processor()
+    # immediately; the processor drains the cascade in order.
     return {"status": "ok"}
 
 
 @api_router.patch("/properties/{rid}/location")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_location(rid: str, body: dict):
     prop = _registry_property(rid)
     if prop is None:
@@ -468,13 +465,11 @@ async def patch_location(rid: str, body: dict):
     gp = GeoPoint(lat=lat, lon=lon)
     prop.precise_location.push(gp, "user")
     # Recompute before responding — same race as the address PATCH.
-    await prop.best_location.refresh()
-    await flush_processor()
     return {"status": "ok"}
 
 
 @api_router.patch("/properties/{rid}/council-tax")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_council_tax(rid: str, body: dict):
     """Set the council-tax apportionment for a property.
 
@@ -501,33 +496,38 @@ async def patch_council_tax(rid: str, body: dict):
         raise HTTPException(status_code=422, detail="ignored must be a boolean")
     ignored = body.get("ignored")
 
-    if main_payers is not None:
-        prop.council_tax_payers.push(main_payers, "user")
-    if annexe_payers is not None:
-        prop.annexe_payers.push(annexe_payers, "user")
-    if ignored is not None:
-        prop.annexe_ignored.push(ignored, "user")
-    await flush_processor()
+    def _apply_payers() -> None:
+        if main_payers is not None:
+            prop.council_tax_payers.push(main_payers, "user")
+        if annexe_payers is not None:
+            prop.annexe_payers.push(annexe_payers, "user")
+        if ignored is not None:
+            prop.annexe_ignored.push(ignored, "user")
+
+    _apply_payers()
     return {"status": "ok"}
 
 
 @api_router.patch("/properties/{rid}/triage")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_triage(rid: str, body: dict):
     prop = _registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    if "favourite" in body:
-        prop.favourite.push(bool(body["favourite"]), "user")
-    if "dismissed" in body:
-        prop.dismissed.push(bool(body["dismissed"]), "user")
-    # lucidlint: ignore duplicate-block parallel per-field application — each triage field guards and pushes
-    if "is_viewed" in body:
-        prop.is_viewed.push(bool(body["is_viewed"]), "user")
-    if "user_notes" in body:
-        prop.user_notes.push(str(body["user_notes"]), "user")
-    if "triage_status" in body:
-        prop.triage_status.push(str(body["triage_status"]), "user")
+
+    def _apply_triage() -> None:
+        if "favourite" in body:
+            prop.favourite.push(bool(body["favourite"]), "user")
+        if "dismissed" in body:
+            prop.dismissed.push(bool(body["dismissed"]), "user")
+        if "is_viewed" in body:
+            prop.is_viewed.push(bool(body["is_viewed"]), "user")
+        if "user_notes" in body:
+            prop.user_notes.push(str(body["user_notes"]), "user")
+        if "triage_status" in body:
+            prop.triage_status.push(str(body["triage_status"]), "user")
+
+    _apply_triage()
     return {"status": "ok"}
 
 
@@ -561,7 +561,7 @@ class CommentBody(BaseModel):
         return stripped
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _comment_person(request: Request, session_user: dict, svc) -> str:
     """Resolve the comment author — impersonation header for superusers,
     else the session email's linked person in settings."""
@@ -609,6 +609,8 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
     svc = get_services()
     person = _comment_person(request, session_user, svc)
     return add_comment(rid, person, body.text)
+
+
 def _home_property_address(person) -> str:
     """First street line of the linked house's best address; '' when unset."""
     linked_rid = getattr(person, "home_property_rid", "")
@@ -696,23 +698,23 @@ async def get_settings(request: Request):
     breakdown = _deposit_breakdown(persons)
     deposit_persons, deposit_total, deposit_lines = breakdown.persons, breakdown.total, breakdown.lines
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
         "persons": persons_json,
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         "financial": {"status": "succeeded", "value": aggregate_dict(svc.setting_nodes)},
         "commute_thresholds": await svc.commute_thresholds_source.to_json(),
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         "household_deposit": {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary
             "total": {"amount": f"{deposit_total.amount:.2f}", "currency": "GBP"},
             "persons": deposit_persons,
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary
             "provenance": {
                 "label": "Household Deposit",
                 "value": f"£{deposit_total.amount:,.2f}",
                 "sourceType": "calc",
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+                # lucidlint: ignore record-shape wire-format dict — serialization boundary
                 "formula": {"lines": deposit_lines, "result": f"£{deposit_total.amount:,.2f}"},
             },
         },
@@ -732,7 +734,7 @@ def _deposit_breakdown(persons: list) -> DepositBreakdown:
         cash = person.cash_contribution.amount
         home_share = contributions.get(name, _Decimal("0"))
         value = home_share + cash
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         deposit_persons[name] = {"amount": f"{value:.2f}", "currency": "GBP"}
         deposit_total = deposit_total + Money(str(value), "GBP")
         if home_share > 0 and effective_selling_home(person):
@@ -910,7 +912,7 @@ async def get_isochrone_layers(paths: IsochronePaths = Depends(_isochrone_paths)
 
 
 @api_router.patch("/settings/person/{name}")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_person(name: str, body: dict, request: Request):
     """Update one person's settings — own person / superuser / guardian.
 
@@ -969,18 +971,22 @@ async def patch_person(name: str, body: dict, request: Request):
 
 
 @api_router.patch("/settings/financial")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_financial(body: dict):
     svc = get_services()
-    for api_key, value in body.items():
-        node_id = API_KEY_TO_NODE.get(api_key)
-        if node_id is not None and node_id in svc.setting_nodes:
-            svc.setting_nodes[node_id].push(value, "user")
+
+    def _apply_financial() -> None:
+        for api_key, value in body.items():
+            node_id = API_KEY_TO_NODE.get(api_key)
+            if node_id is not None and node_id in svc.setting_nodes:
+                svc.setting_nodes[node_id].push(value, "user")
+
+    _apply_financial()
     return {"status": "ok"}
 
 
 @api_router.patch("/properties/{rid}/rental-income")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_rental_income(
     rid: str,
     body: dict,
@@ -1000,9 +1006,11 @@ async def patch_rental_income(
             detail="value must be a number",
         )
 
-    prop.rental_income.push(
-        Money(str(value), "GBP") if value is not None else Money(amount="0", currency="GBP"),
-        "user",
+    await run_on_processor(
+        lambda: prop.rental_income.push(
+            Money(str(value), "GBP") if value is not None else Money(amount="0", currency="GBP"),
+            "user",
+        )
     )
     return {"status": "ok"}
 
@@ -1035,7 +1043,7 @@ def _validate_works_value(value: object) -> None:
 
 
 @api_router.patch("/properties/{rid}/works-estimate")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_works_estimate(
     rid: str,
     body: dict,
@@ -1075,10 +1083,10 @@ async def list_persons():
     result: list[dict[str, object]] = []
     if persons_attempt.succeeded:
         result = [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary
             {"name": p.get("name", ""), "email": p.get("email", ""), "is_child": bool(p.get("is_child"))}
             if isinstance(p, dict)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary
             else {
                 "name": getattr(p, "name", ""),
                 "email": getattr(p, "email", ""),
@@ -1100,18 +1108,18 @@ async def debug_scheduler():
     """
     sched = dag.scheduler.get_scheduler()
     if not isinstance(sched, AsyncQueueScheduler):
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {"type": type(sched).__name__, "error": "not AsyncQueueScheduler"}
 
     # _scheduled: node_id -> QueueEvent, one entry per queued node (the
     # queue itself is drained by the processor — never touch it here)
     queue_snapshot = [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         {"node_id": node_id, "scheduled_at": event.scheduled_at}
         for node_id, event in list(sched._scheduled.items())[:500]
     ]
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
         "queue_size": sched._queue.qsize(),
         "scheduled_count": len(sched._scheduled),
@@ -1128,10 +1136,9 @@ async def debug_memory():
     obj_counts = Counter(type(o).__name__ for o in gc.get_objects())
     top = obj_counts.most_common(TOP_TYPES_LIMIT)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
         "total_objects": sum(obj_counts.values()),
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         "top_types": [{"type": t, "count": c} for t, c in top],
     }
-

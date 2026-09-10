@@ -8,7 +8,7 @@ from tools.commute.station_shed import BBox
 from tools.commute.tile import Rect
 from tools.commute.validate import StationControl, ValidationOptions, validate
 
-DESTINATIONS = ["SW1V 2QQ", "EC3A 7LP"]
+DESTINATIONS = ["SW1P 1AA", "EC3A 4NE"]
 NOW = "2026-08-02T09:00:00+00:00"
 BBOX = BBox(lat_min=50.1, lat_max=53.6, lon_min=-4.0, lon_max=2.0)
 

@@ -20,7 +20,7 @@ from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, 
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
 from dag.node import Node, NodeJson
-from dag.scheduler import get_scheduler
+from dag.scheduler import assert_mutation_allowed, get_scheduler
 from dag.signals import Connection, Slot
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,8 @@ def _normalize_compute_source(source: str) -> str:
     except SyntaxError:
         return source
     return ast.unparse(tree)
+
+
 class _HelperRef(NamedTuple):
     """A (name, module) function reference queued for source resolution."""
 
@@ -292,10 +294,7 @@ def _compute_code_version(node: DerivedNode) -> str:
         except (OSError, TypeError):
             continue
     digest = hashlib.sha256(
-        (
-            f"{cls.__module__}.{cls.__qualname__}:{normalized}:{'|'.join(helpers)}:"
-            f"{'|'.join(structure_parts)}"
-        ).encode()
+        (f"{cls.__module__}.{cls.__qualname__}:{normalized}:{'|'.join(helpers)}:{'|'.join(structure_parts)}").encode()
     ).hexdigest()[:16]
     _CODE_VERSION_CACHE[cls] = digest
     # Bump the epoch whenever a NEW fingerprint is computed — the epoch
@@ -319,9 +318,7 @@ def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None
         return
     n = len(dep_attempts)
     positional = [
-        p
-        for p in params
-        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        p for p in params if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     min_args = sum(1 for p in positional if p.default is inspect.Parameter.empty)
     # Upper bound = positionally-fillable params ONLY — keyword-only and
@@ -433,8 +430,7 @@ class DerivedNode(Node[T], Generic[T]):
                 p.name
                 for p in inspect.signature(self.compute).parameters.values()
                 if p.default is inspect.Parameter.empty
-                and p.kind
-                in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
                 and p.name not in kwargs
             ]
             if missing:
@@ -579,7 +575,7 @@ class DerivedNode(Node[T], Generic[T]):
             provenance=await self._build_provenance_dict(),
         )
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _safe_result_dict(self, status: str) -> dict:
         """Serialize for persistence, degrading to an error result on failure.
 
@@ -645,6 +641,7 @@ class DerivedNode(Node[T], Generic[T]):
         ``force=True`` bypasses the staleness check entirely — for
         explicit full recomputes (admin regenerate).
         """
+        assert_mutation_allowed()  # refresh mutates _attempt — processor thread only
         if not force and not self._is_stale():
             return
         active_deps = self._get_active_deps()
@@ -730,7 +727,7 @@ class DerivedNode(Node[T], Generic[T]):
         self.changed.emit()
         get_scheduler().after_refresh(self)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _build_provenance_dict(self) -> dict:
         """Build provenance dict for persistence, with a fallback if build_provenance() fails."""
         try:
@@ -818,14 +815,14 @@ class DerivedNode(Node[T], Generic[T]):
             result["stale"] = self._is_stale()
 
     @override
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def to_json(self) -> dict:
         result = await super().to_json()
         self._enrich_json(result)
         return result
 
     @override
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     # lucidlint: ignore duplicate to_json and to_json_value override two distinct base serialization surfaces (full vs
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()

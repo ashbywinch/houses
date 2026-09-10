@@ -23,7 +23,7 @@ function mockDetail(rid: string): PropertyDetail {
     rightmove_url: { succeeded: true, value: '', error: null, provenance: { label: 'test' } },
     rightmove_price: { succeeded: true, value: {amount: "500000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
-    postcode: { succeeded: true, value: 'SW1V 2QQ', error: null, provenance: { label: 'test' } },
+    postcode: { succeeded: true, value: 'SW1P 1AA', error: null, provenance: { label: 'test' } },
     location: {
       best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
       geocode: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },

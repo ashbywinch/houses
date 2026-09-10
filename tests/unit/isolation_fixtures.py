@@ -14,7 +14,7 @@ import pytest
 
 import dag.persistence as per
 import houses.database as db
-from dag.scheduler import AsyncQueueScheduler, set_scheduler
+from dag.scheduler import AsyncQueueScheduler, current_processor_thread, set_scheduler
 
 
 @pytest.fixture(autouse=True)
@@ -26,29 +26,34 @@ def _inject_test_scheduler():
 
 @pytest.fixture(autouse=True)
 def _sqlite_memory():
-    """Replace the global DB connection with a temp-file database shared
-    across threads (a :memory: database is per-connection and invisible
-    to the background save thread)."""
-    import tempfile
+    """Isolated in-memory database per test; no DAG processor thread.
+
+    Persistence runs inline during the test-driven queue drain (the same
+    pipeline as production, synchronously) — deterministic, no thread,
+    so :memory: is safe (one thread touches the connection).
+    """
 
     saved = per._get_db
     per.testing = True
-    db_path = tempfile.mktemp(suffix=".db")
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     per._get_db = lambda: conn
     per.init_db()
-    db.testing = True
+    # Tests never start the background processor — they drive the queue
+    # synchronously (see teardown assert below).
     from houses.database import init_db as init_app_db
 
+    db.testing = True
     init_app_db()
     yield
     per.testing = False
     db.testing = False
     conn.close()
-    import os
-    os.unlink(db_path)
     per._get_db = saved
+    assert current_processor_thread() is None, (
+        "a DAG processor thread was started during a test — tests must "
+        "drive the queue synchronously (docs/dag-library.md → 'Thread rules')"
+    )
 
 
 from houses.council_tax import _reset as _reset_council_tax  # noqa: E402

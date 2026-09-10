@@ -101,7 +101,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                             "yearly_gbp": str(yearly_person_poi.amount),
                         }
                     )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
             per_person[name] = {
                 "daily_gbp": str(daily_amount.amount) if daily_amount is not None else "0",
                 "yearly_gbp": str(person_yearly.amount),

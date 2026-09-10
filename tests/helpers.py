@@ -108,21 +108,21 @@ class FakeGeocoder(GeocodingService):
 _DEFAULT_SIMON = Commute(
     person=Person(name="Simon", has_car=False),
     label="Simon (London)",
-    destination=PlaceOfInterest(label="Simon (London)", address="SW1V 2QQ"),
+    destination=PlaceOfInterest(label="Simon (London)", address="SW1P 1AA"),
     duration=Quantity(30, "minute"),
     daily_cost=Money("10.0", "GBP"),
 )
 _DEFAULT_LORENA = Commute(
     person=Person(name="Lorena", has_car=False),
     label="Lorena (London)",
-    destination=PlaceOfInterest(label="Lorena (London)", address="EC3A 7LP"),
+    destination=PlaceOfInterest(label="Lorena (London)", address="EC3A 4NE"),
     duration=Quantity(45, "minute"),
     daily_cost=Money("12.0", "GBP"),
 )
 _DEFAULT_PETROL = Commute(
     person=Person(name="Simon", has_car=True),
-    label="Bracknell Office (RG12 8YA)",
-    destination=PlaceOfInterest(label="Bracknell Office (RG12 8YA)", address="RG12 8YA"),
+    label="Bracknell Office (RG12 1AA)",
+    destination=PlaceOfInterest(label="Bracknell Office (RG12 1AA)", address="RG12 1AA"),
     duration=Quantity(90, "minute"),
     daily_cost=Money("12.50", "GBP"),
 )
@@ -338,7 +338,7 @@ _DEFAULT_SCHOOL = School(
     phase="primary",
     gender=SchoolGender.MIXED,
     type_of_establishment="community school",
-    postcode="SW1V 2QQ",
+    postcode="SW1P 1AA",
     website="https://example.com",
     ofsted_rating="Good",
     inspection_year="2022",

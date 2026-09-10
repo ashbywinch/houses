@@ -135,8 +135,60 @@ def test_init_db_creates_latest_row_index():
     from dag.persistence import _get_db, init_db
 
     init_db()
-    rows = _get_db().execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_nr_node'"
-    ).fetchall()
+    rows = _get_db().execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_nr_node'").fetchall()
     assert rows, "idx_nr_node must exist on a fresh database"
 
+
+class TestProcessorPipeline:
+    """Pipeline contract: one node's failure never kills the drain, and
+    later items still process — the regression the pre-processor save
+    worker had (one bad payload killed persistence permanently; see
+    .kilo/plans/dag-save-queue.md).
+    """
+
+    def test_background_loop_survives_node_failure(self, caplog):
+        import asyncio
+        import contextlib
+        import logging
+
+        import dag.scheduler as sched_mod
+
+        sched = sched_mod.AsyncQueueScheduler(respect_time=False)
+        done: list[str] = []
+
+        class _Flaky:
+            _id = "flaky/a"
+            _retry_at = None
+
+            async def refresh(self, force: bool = False) -> None:
+                raise RuntimeError("boom")
+
+        class _Fine:
+            _id = "flaky/b"
+            _retry_at = None
+
+            async def refresh(self, force: bool = False) -> None:
+                done.append(self._id)
+
+        sched.schedule(_Flaky())  # type: ignore[arg-type]
+        sched.schedule(_Fine())  # type: ignore[arg-type]
+
+        async def _run() -> None:
+            task = asyncio.create_task(sched._background_loop())
+            for _ in range(100):
+                if done:
+                    break
+                await asyncio.sleep(0.01)
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        loop = asyncio.new_event_loop()
+        try:
+            with caplog.at_level(logging.ERROR):
+                loop.run_until_complete(_run())
+        finally:
+            loop.close()
+
+        assert done == ["flaky/b"], "processing continues after an error"
+        assert any("flaky/a" in r.getMessage() for r in caplog.records), "failure must be logged"

@@ -19,7 +19,7 @@ from dag.http_error import HttpError
 from houses.api_cache import CachingTransport, get_cached, set_cached
 from houses.tfl_client import TflClient
 
-URL = "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ"
+URL = "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1P 1AA"
 AUTH_PARAMS = {"nationalSearch": "true", "app_key": "test-key"}
 STRIPPED_PARAMS = {"nationalSearch": "true"}
 
@@ -326,7 +326,7 @@ def test_set_cached_scrubs_app_key_from_body(isolated_cache):
 
     set_cached(
         "GET",
-        "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ",
+        "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1P 1AA",
         {"nationalSearch": "true"},
         None,
         {
@@ -336,7 +336,7 @@ def test_set_cached_scrubs_app_key_from_body(isolated_cache):
         },
     )
     cached = get_cached(
-        "GET", "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ", {"nationalSearch": "true"}
+        "GET", "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1P 1AA", {"nationalSearch": "true"}
     )  # noqa: E501
     assert cached is not None
     assert "super-secret-key" not in json.dumps(cached)

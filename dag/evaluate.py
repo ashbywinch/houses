@@ -72,6 +72,8 @@ def _closure(targets: Iterable[Node]) -> list[Node]:
     for target in targets:
         visit(target)
     return order
+
+
 async def _stage_node(node: Node, staging: dict[str, Attempt]) -> None:
     """Stage one node's hypothetical attempt when a dep changed.
 
@@ -109,7 +111,7 @@ def _staged_results(target_nodes: list[Node], staging: dict[str, Attempt]) -> di
     return {target._id: staging.get(target._id) or target.latest_attempt() for target in target_nodes}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def evaluate(targets: Node | Iterable[Node], overrides: dict[str, Any] | None = None) -> dict[str, Attempt]:
     """Evaluate target nodes under input overrides — pure and throwaway.
 

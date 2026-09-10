@@ -74,7 +74,7 @@ def _mock():
     canned = Commute(
         person=Person(name="Test", has_car=False),
         label="Test",
-        destination=PlaceOfInterest(label="Dest", address="SW1V 2QQ"),
+        destination=PlaceOfInterest(label="Dest", address="SW1P 1AA"),
         duration=Quantity(30, "minute"),
         daily_cost=Money("5.0", "GBP"),
         mode="transit",

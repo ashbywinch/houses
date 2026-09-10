@@ -93,8 +93,8 @@ def _data_uri(path: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def build_html(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
     union: dict,
     drive: dict,
@@ -278,7 +278,7 @@ def write_map(html: str, out_path: str | Path) -> None:
     os.replace(tmp, out_path)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _load_intersection(path: Path) -> dict | None:
     """Saved intersection payload, or None when absent/unreadable (map renders without it)."""
     if not path.exists():
@@ -292,7 +292,7 @@ def _load_intersection(path: Path) -> dict | None:
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _load_intersection_layer(path: Path) -> dict | None:
     """The gold 'Where we could live' layer, degraded to None with a warning
     when absent, empty, or malformed (the map renders without it — but never
@@ -356,8 +356,8 @@ def _build_map(union_path: Path, drive_path: Path, vendor: Path, intersection: d
     return _RenderedMap(union=union, drive=drive, html=html)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _warn_empty_layers(drive: dict, union: dict, drive_path: Path, union_path: Path) -> None:
     """A map missing the drive/union layers must not be mistaken for complete."""
     if isinstance(drive, dict) and not drive.get("searches"):

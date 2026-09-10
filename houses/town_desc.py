@@ -43,7 +43,7 @@ async def generate_town_description(
     with_cache_fn = with_cache_fn or with_cache
 
     try:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         body = {
             "model": settings.llm_model,
             "messages": [
@@ -59,12 +59,12 @@ async def generate_town_description(
                         " Do not start by repeating the area name."
                     ),
                 },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
                 {
                     "role": "user",
                     "content": f"{town_name}, {postcode}",
                 },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
                 {
                     "role": "user",
                     "content": f"{town_name}, {postcode}.",

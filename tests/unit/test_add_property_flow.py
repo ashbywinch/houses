@@ -21,6 +21,7 @@ from houses.web.auth import (
     # minting entry point; same pattern as tools/deploy/release.sh
     _make_session_cookie,
 )
+from tests.unit.conftest import flush_all
 
 client = TestClient(app)
 client.cookies.set(
@@ -259,6 +260,9 @@ class TestAddressPatchDerivesPostcode:
             json={"address": "Penwood Lane, Marlow, SL7 2AP"},
         )
         assert resp.status_code == 200, resp.text
+        # The PATCH queues the push and returns (Thread rule 7); the test
+        # environment has no processor thread, so the drain is explicit here.
+        flush_all()
         prop = get_services().property_registry.get(RID)
         a = prop.postcode.latest_attempt()
         assert a.succeeded and a.value_or_none() == "SL7 2AP", (
@@ -285,6 +289,7 @@ class TestAddressPatchDerivesPostcode:
             json={"address": "Penwood Lane, Marlow, SL7 2AP"},
         )
         assert resp.status_code == 200, resp.text
+        flush_all()  # the PATCH queues the push; the test drains explicitly
         prop = get_services().property_registry.get(RID)
         a = prop.postcode.latest_attempt()
         assert a.succeeded and a.value_or_none() == "SL7 2AP", (
@@ -364,9 +369,9 @@ class TestAddFlowWorksEditing:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
         prop.comment_status.push("", "test")
         register_property(rid, prop)
         from dag.scheduler import flush_processor

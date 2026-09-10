@@ -13,7 +13,7 @@ from tools.commute.searches import (
 from tools.commute.station_shed import BBox
 from tools.commute.tile import Rect
 
-DESTINATIONS = ["SW1V 2QQ", "EC3A 7LP"]
+DESTINATIONS = ["SW1P 1AA", "EC3A 4NE"]
 KEPT_STATIONS = [
     {"name": "Reading", "crs": "RDG", "lat": 51.4599, "lon": -0.9705, "kept": True},
     {"name": "Guildford", "crs": "GLD", "lat": 51.2367, "lon": -0.5808, "kept": True},

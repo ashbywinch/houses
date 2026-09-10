@@ -34,7 +34,7 @@ NOW = "2026-08-03T09:00:00+00:00"
 async def _fake_geocode(postcode: str) -> GeoPoint:
     """Fixed coords per postcode — the synthetic raws store these, so the
     offline reuse path matches (DI, not monkeypatching)."""
-    return {"OX7 5GZ": GeoPoint(51.1, -1.88), "RG12 8YA": GeoPoint(51.1, -1.88)}.get(
+    return {"OX7 1AA": GeoPoint(51.1, -1.88), "RG12 1AA": GeoPoint(51.1, -1.88)}.get(
         postcode, GeoPoint(51.1, -1.88)
     )
 
@@ -45,7 +45,7 @@ def _grid(
     return Grid(bbox=Rect(lat0, lat0 + rows * lat_deg, lon0, lon0 + cols * lon_deg), lat_deg=lat_deg, lon_deg=lon_deg)
 
 
-def _dest(label: str = "Dad", postcode: str = "OX7 5GZ", threshold: int = 90) -> DriveDestination:
+def _dest(label: str = "Dad", postcode: str = "OX7 1AA", threshold: int = 90) -> DriveDestination:
     return DriveDestination(label=label, postcode=postcode, threshold_min=threshold * MINUTE)
 
 
@@ -55,14 +55,14 @@ def _dest(label: str = "Dad", postcode: str = "OX7 5GZ", threshold: int = 90) ->
 # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_applies_global_threshold(tmp_path):
     cfg = tmp_path / "destinations.json"
-    cfg.write_text(json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    cfg.write_text(json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 1AA"}]}))
     assert load_config(cfg) == [_dest(threshold=90)]
 
 
 # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_default_threshold_when_omitted(tmp_path):
     cfg = tmp_path / "destinations.json"
-    cfg.write_text(json.dumps({"destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    cfg.write_text(json.dumps({"destinations": [{"label": "Dad", "postcode": "OX7 1AA"}]}))
     assert load_config(cfg) == [_dest(threshold=DEFAULT_THRESHOLD_MIN)]
 
 
@@ -73,14 +73,14 @@ def test_load_config_default_threshold_parameter(tmp_path):
     cfg = tmp_path / "destinations.json"
     body = {
         "destinations": [
-            {"label": "Dad", "postcode": "OX7 5GZ"},
-            {"label": "Bracknell", "postcode": "RG12 8YA", "threshold_min": 75},
+            {"label": "Dad", "postcode": "OX7 1AA"},
+            {"label": "Bracknell", "postcode": "RG12 1AA", "threshold_min": 75},
         ]
     }
     cfg.write_text(json.dumps(body))
     assert load_config(cfg, default_threshold=60) == [
         _dest(threshold=60),
-        _dest(label="Bracknell", postcode="RG12 8YA", threshold=75),
+        _dest(label="Bracknell", postcode="RG12 1AA", threshold=75),
     ]
 
 
@@ -99,8 +99,8 @@ def test_apply_default_threshold_skips_explicit_overrides(tmp_path):
             {
                 "threshold_min": 90,
                 "destinations": [
-                    {"label": "Dad", "postcode": "OX7 5GZ"},
-                    {"label": "Bracknell", "postcode": "RG12 8YA", "threshold_min": 75},
+                    {"label": "Dad", "postcode": "OX7 1AA"},
+                    {"label": "Bracknell", "postcode": "RG12 1AA", "threshold_min": 75},
                 ],
             }
         )
@@ -113,7 +113,7 @@ def test_apply_default_threshold_skips_explicit_overrides(tmp_path):
 # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_per_destination_override_wins(tmp_path):
     cfg = tmp_path / "destinations.json"
-    body = {"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 120}]}
+    body = {"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 120}]}
     cfg.write_text(json.dumps(body))
     assert load_config(cfg) == [_dest(threshold=120)]
 
@@ -127,8 +127,8 @@ def test_load_config_rejects_duplicate_labels(tmp_path):
         json.dumps(
             {
                 "destinations": [
-                    {"label": "Dad", "postcode": "OX7 5GZ"},
-                    {"label": "Dad", "postcode": "RG12 8YA"},
+                    {"label": "Dad", "postcode": "OX7 1AA"},
+                    {"label": "Dad", "postcode": "RG12 1AA"},
                 ]
             }
         )
@@ -140,7 +140,7 @@ def test_load_config_rejects_duplicate_labels(tmp_path):
 # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_rejects_missing_fields(tmp_path):
     cfg = tmp_path / "destinations.json"
-    cfg.write_text(json.dumps({"destinations": [{"postcode": "OX7 5GZ"}]}))
+    cfg.write_text(json.dumps({"destinations": [{"postcode": "OX7 1AA"}]}))
     with pytest.raises(ValueError):
         load_config(cfg)
     cfg.write_text(json.dumps({"destinations": [{"label": "Dad"}]}))
@@ -228,9 +228,9 @@ def test_config_signature_fingerprints_coordinates():
                     "threshold_min": 90,
                     "cell_km": 4.0,
                     "region_km": 153.0,
-                    "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+                    "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 90}],
                 },
-                "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.1, "lon": -1.88, "cells": []}],
+                "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "lat": 51.1, "lon": -1.88, "cells": []}],
             }
         )
     )
@@ -246,7 +246,7 @@ async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
     from tools.commute.drive_isochrone import run as drive_run
 
     cfg = tmp_path / "destinations.json"
-    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 1AA"}]}))
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     raw = {
@@ -257,9 +257,9 @@ async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
             "threshold_min": 90,
             "cell_km": 4.0,
             "region_km": 153.0,
-            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+            "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 90}],
         },
-        "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
+        "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
                           "cell_km": 4.0, "slack_min": 2.42, "grid": {}, "cells": []}],
     }
     (out_dir / "drive_isochrone.json").write_text(_json.dumps(raw))
@@ -285,7 +285,7 @@ async def test_transient_geocode_failure_still_reuses_matching_raw(tmp_path, cap
     from tools.commute.drive_isochrone import run as drive_run
 
     cfg = tmp_path / "destinations.json"
-    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 1AA"}]}))
     grid = {"lat_min": 51.0, "lat_max": 51.2, "lon_min": -2.0, "lon_max": -1.76}
     cells = [
         {"r": r, "c": c, "lat": 51.0 + (r + 0.5) * 0.05, "lon": -2.0 + (c + 0.5) * 0.08, "duration_min": 10.0}
@@ -296,11 +296,11 @@ async def test_transient_geocode_failure_still_reuses_matching_raw(tmp_path, cap
         "metadata": {
             "engine_version": "drive-isochrone-v1", "profile": "driving-car", "speed_model": "free-flow",
             "threshold_min": 90, "cell_km": 4.0, "region_km": 153.0,
-            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+            "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 90}],
             "generated_at": NOW, "count": 1,
         },
         "destinations": [
-            {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.03, "lon": -1.95, "threshold_min": 90,
+            {"label": "Dad", "postcode": "OX7 1AA", "lat": 51.03, "lon": -1.95, "threshold_min": 90,
              "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": cells}
         ],
     }
@@ -327,7 +327,7 @@ async def test_geocode_failure_still_reuses_matching_raw(tmp_path, capsys):
     from tools.commute.drive_isochrone import run as drive_run
 
     cfg = tmp_path / "destinations.json"
-    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 1AA"}]}))
     grid = {"lat_min": 51.0, "lat_max": 51.2, "lon_min": -2.0, "lon_max": -1.76}
     cells = [
         {"r": r, "c": c, "lat": 51.0 + (r + 0.5) * 0.05, "lon": -2.0 + (c + 0.5) * 0.08, "duration_min": 10.0}
@@ -338,11 +338,11 @@ async def test_geocode_failure_still_reuses_matching_raw(tmp_path, capsys):
         "metadata": {
             "engine_version": "drive-isochrone-v1", "profile": "driving-car", "speed_model": "free-flow",
             "threshold_min": 90, "cell_km": 4.0, "region_km": 153.0,
-            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+            "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 90}],
             "generated_at": NOW, "count": 1,
         },
         "destinations": [
-            {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.03, "lon": -1.95, "threshold_min": 90,
+            {"label": "Dad", "postcode": "OX7 1AA", "lat": 51.03, "lon": -1.95, "threshold_min": 90,
              "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": cells}
         ],
     }
@@ -397,13 +397,13 @@ def test_drive_map_html_one_marker_per_destination_label():
         "metadata": {},
         "searches": [
             {
-                "id": "drive-dad-ox75gz-090",
+                "id": "drive-dad-ox71aa-090",
                 "polygon": [[51.0, -1.0], [51.0, -0.9], [51.1, -0.9], [51.1, -1.0]],
                 "rightmove_url": "https://rm/a",
                 "destination": {"label": "Dad", "lat": 51.05, "lon": -0.95},
             },
             {
-                "id": "drive-dad-ox75gz-090-2",
+                "id": "drive-dad-ox71aa-090-2",
                 "polygon": [[52.0, -1.0], [52.0, -0.9], [52.1, -0.9], [52.1, -1.0]],
                 "rightmove_url": "https://rm/b",
                 "destination": {"label": "Dad", "lat": 51.05, "lon": -0.95},
@@ -567,7 +567,7 @@ async def test_run_fails_cleanly_on_malformed_raw_payload(tmp_path):
         json.dumps(
             {
                 "threshold_min": 90,
-                "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}],
+                "destinations": [{"label": "Dad", "postcode": "OX7 1AA"}],
             }
         )
     )
@@ -600,8 +600,8 @@ async def test_run_does_not_write_when_validation_fails(tmp_path):
             {
                 "threshold_min": 90,
                 "destinations": [
-                    {"label": "Dad", "postcode": "OX7 5GZ"},
-                    {"label": "Bracknell", "postcode": "RG12 8YA"},
+                    {"label": "Dad", "postcode": "OX7 1AA"},
+                    {"label": "Bracknell", "postcode": "RG12 1AA"},
                 ],
             }
         )
@@ -621,21 +621,21 @@ async def test_run_does_not_write_when_validation_fails(tmp_path):
             "cell_km": 4.0,
             "region_km": 153.0,
             "destinations": [
-                {"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90},
-                {"label": "Bracknell", "postcode": "RG12 8YA", "threshold_min": 90},
+                {"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 90},
+                {"label": "Bracknell", "postcode": "RG12 1AA", "threshold_min": 90},
             ],
             "generated_at": NOW,
             "count": 2,
         },
         "destinations": [
             {
-                "label": "Dad", "postcode": "OX7 5GZ", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
+                "label": "Dad", "postcode": "OX7 1AA", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
                 "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": cells,
             },
             # Bracknell's shed is EMPTY: raw_to_searches emits no Bracknell
             # search and validate_payload reports the lost destination
             {
-                "label": "Bracknell", "postcode": "RG12 8YA", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
+                "label": "Bracknell", "postcode": "RG12 1AA", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
                 "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": [],
             },
         ],
@@ -697,14 +697,14 @@ def _raw_payload() -> dict:
             "threshold_min": 90,
             "cell_km": 4.0,
             "region_km": 153.0,
-            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+            "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 90}],
             "generated_at": NOW,
             "count": 1,
         },
         "destinations": [
             {
                 "label": "Dad",
-                "postcode": "OX7 5GZ",
+                "postcode": "OX7 1AA",
                 "lat": 51.075,
                 "lon": -1.92,
                 "threshold_min": 90,
@@ -722,11 +722,11 @@ def test_raw_to_searches_schema_mirrors_searches_py():
     assert payload["metadata"]["count"] == len(payload["searches"]) == 1
     s = payload["searches"][0]
     assert set(s) >= {"id", "name", "polygon", "filters", "rightmove_url", "destination", "threshold_min"}
-    assert s["id"] == "drive-dad-ox75gz-090"
+    assert s["id"] == "drive-dad-ox71aa-090"
     assert s["name"] == "Dad — 90 min drive"
     assert s["filters"] == {"min_beds": 2, "property_type": "houses"}
     assert s["threshold_min"] == 90
-    assert s["destination"] == {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.075, "lon": -1.92}
+    assert s["destination"] == {"label": "Dad", "postcode": "OX7 1AA", "lat": 51.075, "lon": -1.92}
 
 
 def test_raw_to_searches_polygon_round_trips_via_url():
@@ -751,7 +751,7 @@ def test_raw_to_searches_ids_unique_across_destinations_and_loops():
     raw["destinations"].append(
         {
             "label": "Bracknell",
-            "postcode": "RG12 8YA",
+            "postcode": "RG12 1AA",
             "lat": 51.42,
             "lon": -0.75,
             "threshold_min": 60,
@@ -763,8 +763,8 @@ def test_raw_to_searches_ids_unique_across_destinations_and_loops():
     )
     payload = raw_to_searches(raw, generated_at=NOW)
     ids = [s["id"] for s in payload["searches"]]
-    assert ids[0] == "drive-dad-ox75gz-090"
-    assert ids[-1] == "drive-bracknell-rg128ya-060"
+    assert ids[0] == "drive-dad-ox71aa-090"
+    assert ids[-1] == "drive-bracknell-rg121aa-060"
     assert len(ids) == len(set(ids))
 
 
@@ -785,7 +785,7 @@ def test_raw_to_searches_keeps_main_shed_below_island_threshold():
     ]
     raw["destinations"][0]["cells"] = kept_two
     searches = raw_to_searches(raw, generated_at=NOW, min_island_cells=4)["searches"]
-    assert [s["id"] for s in searches] == ["drive-dad-ox75gz-090"]
+    assert [s["id"] for s in searches] == ["drive-dad-ox71aa-090"]
 
 
 # ── components / hole & island handling ─────────────────────────────
@@ -835,14 +835,14 @@ def _hole_island_payload() -> dict:
             "threshold_min": 90,
             "cell_km": 4.0,
             "region_km": 153.0,
-            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+            "destinations": [{"label": "Dad", "postcode": "OX7 1AA", "threshold_min": 90}],
             "generated_at": NOW,
             "count": 1,
         },
         "destinations": [
             {
                 "label": "Dad",
-                "postcode": "OX7 5GZ",
+                "postcode": "OX7 1AA",
                 "lat": 51.2,
                 "lon": -1.6,
                 "threshold_min": 90,
@@ -859,7 +859,7 @@ def test_raw_to_searches_absorbs_hole_and_keeps_large_island():
     payload = raw_to_searches(_hole_island_payload(), generated_at=NOW)
     ids = [s["id"] for s in payload["searches"]]
     # main shed (no suffix) + 4-cell island (-2); the hole is NOT a search
-    assert ids == ["drive-dad-ox75gz-090", "drive-dad-ox75gz-090-2"]
+    assert ids == ["drive-dad-ox71aa-090", "drive-dad-ox71aa-090-2"]
     island = payload["searches"][1]
     # island polygon covers ~its 2×2 cells (0.1° × 0.16° ≈ 0.016 deg²)
     area = abs(_signed_area([GeoPoint(lat, lon) for lat, lon in island["polygon"]]))
@@ -868,7 +868,7 @@ def test_raw_to_searches_absorbs_hole_and_keeps_large_island():
 
 def test_raw_to_searches_drops_small_islands_below_threshold():
     payload = raw_to_searches(_hole_island_payload(), generated_at=NOW, min_island_cells=5)
-    assert [s["id"] for s in payload["searches"]] == ["drive-dad-ox75gz-090"]
+    assert [s["id"] for s in payload["searches"]] == ["drive-dad-ox71aa-090"]
 
 
 # ── point-in-polygon ─────────────────────────────────────────────────

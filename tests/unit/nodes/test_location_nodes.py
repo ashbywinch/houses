@@ -211,9 +211,9 @@ class TestBestAddressNode:
             rightmove_address=rightmove2,
         )
 
-        user2.push("User Rd, SW1V 2QQ", "user")
+        user2.push("User Rd, SW1P 1AA", "user")
         await flush_processor()
-        assert (await node2.attempt()).value_or_none() == "User Rd, SW1V 2QQ"
+        assert (await node2.attempt()).value_or_none() == "User Rd, SW1P 1AA"
 
 
 class TestBestLocationNode:

@@ -43,7 +43,7 @@ PROGRESS_SAVE_INTERVAL = 100
 NOMINATIM_DELAY_S = 0.15
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _atomic_write(rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     """Write CSV to a temp file then atomically replace the original."""
     tmp = CSV_PATH.with_suffix(".csv.tmp")
@@ -54,7 +54,7 @@ def _atomic_write(rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     tmp.replace(CSV_PATH)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _build_full_address(row: dict[str, Any]) -> str:
     name = (row.get("EstablishmentName") or "").strip()
     street = (row.get("Street") or "").strip()
@@ -78,14 +78,14 @@ def _existing_coords(row: dict[str, Any]) -> GeoPoint | None:
     return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _clear_coords(row: dict[str, Any]) -> None:
     """Remove corrected coords from a row (mutates in place)."""
     row["CorrectedLatitude"] = ""
     row["CorrectedLongitude"] = ""
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _near_london(row: dict[str, Any]) -> bool:
     coords = _existing_coords(row)
     if coords is None:
@@ -93,7 +93,7 @@ def _near_london(row: dict[str, Any]) -> bool:
     return coords.distance_km_to(LONDON) <= MAX_KM
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _already_done(row: dict[str, Any]) -> bool:
     """True when existing corrected coords are present AND pass the 100km sanity check.
 

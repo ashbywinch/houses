@@ -16,11 +16,11 @@ class TestBootstrapFromRow:
         sources = {
             "rightmove_address": UserInputNode[str]("rightmove_address", str),
         }
-        row = {"Address": "10 High St, London SW1V 2QQ"}
+        row = {"Address": "10 High St, London SW1P 1AA"}
         bootstrap_from_row(row, sources)
         await flush_processor()
         a = await sources["rightmove_address"].attempt()
-        assert a.value_or_none() == "10 High St, London SW1V 2QQ"
+        assert a.value_or_none() == "10 High St, London SW1P 1AA"
 
     @pytest.mark.asyncio
     async def test_pushes_url(self):
@@ -71,7 +71,7 @@ class TestBootstrapFromRow:
         row = {
             "Approx Latitude (est)": "51.5",
             "Approx Longitude (est)": "-0.1",
-            "Postcode": "SW1V 2QQ",
+            "Postcode": "SW1P 1AA",
         }
         bootstrap_from_row(row, sources)
         await flush_processor()
@@ -104,7 +104,7 @@ class TestBootstrapFromRow:
         row = {
             "Actual Latitude": "51.6",
             "Actual Longitude": "-0.2",
-            "Postcode": "SW1V 2QQ",
+            "Postcode": "SW1P 1AA",
         }
         bootstrap_from_row(row, sources)
         await flush_processor()
@@ -122,7 +122,7 @@ class TestBootstrapFromRow:
         }
         row = {
             "Address": "10 High St, London",
-            "Postcode": "SW1V 2QQ",
+            "Postcode": "SW1P 1AA",
         }
         bootstrap_from_row(row, sources)
         await flush_processor()
@@ -131,7 +131,7 @@ class TestBootstrapFromRow:
         # Address gets postcode appended
         value = a.value_or_none()
         assert value is not None
-        assert "SW1V 2QQ" in value
+        assert "SW1P 1AA" in value
 
     @pytest.mark.asyncio
     async def test_pushes_user_entered_address_with_outcode_replace(self):
@@ -163,8 +163,8 @@ class TestBootstrapFromRow:
             "user_entered_address": UserInputNode[str]("user_addr2", str),
         }
         row = {
-            "Address": "10 High St, London SW1V 2QQ",
-            "Postcode": "SW1V 2QQ",
+            "Address": "10 High St, London SW1P 1AA",
+            "Postcode": "SW1P 1AA",
         }
         bootstrap_from_row(row, sources)
         await flush_processor()
@@ -198,7 +198,7 @@ class TestBootstrapFromRow:
 
         row = {
             "Address": "10 High St, London",
-            "Postcode": "SW1V 2QQ",
+            "Postcode": "SW1P 1AA",
             "Actual Latitude": "51.6",
             "Actual Longitude": "-0.2",
             "Approx Latitude (est)": "51.5",
@@ -235,8 +235,8 @@ class TestUpgradeAddress:
     def test_appends_when_no_outcode(self):
         from houses.location import upgrade_address as _upgrade_address
 
-        result = _upgrade_address("10 High St", "SW1V 2QQ")
-        assert result == "10 High St, SW1V 2QQ"
+        result = _upgrade_address("10 High St", "SW1P 1AA")
+        assert result == "10 High St, SW1P 1AA"
 
     def test_empty_postcode_returns_original(self):
         from houses.location import upgrade_address as _upgrade_address
@@ -247,7 +247,7 @@ class TestUpgradeAddress:
     def test_empty_address_returns_empty(self):
         from houses.location import upgrade_address as _upgrade_address
 
-        result = _upgrade_address("", "SW1V 2QQ")
+        result = _upgrade_address("", "SW1P 1AA")
         assert result == ""
 
     def test_case_insensitive_present_postcode_is_not_doubled(self):
@@ -326,9 +326,9 @@ class TestSeedInputDefaults:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
         # comment_status deliberately left unpersisted (production shape)
         from houses.property_registry import register_property
 

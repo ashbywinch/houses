@@ -32,7 +32,7 @@ def _make_commute(
     drive_legs_minutes: list[int] | None = None,
     drive_distances_km: list[float] | None = None,
 ) -> Commute:
-    office = PlaceOfInterest("Office", "SW1V 2QQ")
+    office = PlaceOfInterest("Office", "SW1P 1AA")
     person = Person("Simon", True, places_of_interest=(office,))
     if details is not None:
         pass
@@ -252,7 +252,7 @@ class TestDriveCommuteAlwaysHasCost:
             return Commute(
                 person=Person(name="Simon", has_car=True),
                 label=label,
-                destination=PlaceOfInterest(label=label, address="RG12 8YA"),
+                destination=PlaceOfInterest(label=label, address="RG12 1AA"),
                 duration=Quantity(0, "minute"),
                 daily_cost=Money("0", "GBP"),
                 mode="transit",
@@ -282,7 +282,7 @@ class TestDriveCommuteAlwaysHasCost:
         origin = UserInputNode[GeoPoint]("dcc_origin", GeoPoint)
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi = UserInputNode[str]("dcc_poi", str)
-        poi.push("RG12 8YA", "test")
+        poi.push("RG12 1AA", "test")
 
         transit = _Fixed("dcc_transit", Attempt.succeeded(_infeasible("transit")))
         walk = _Fixed("dcc_walk", Attempt.succeeded(_infeasible("walk")))

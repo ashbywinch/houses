@@ -24,7 +24,7 @@ from houses.nodes.settings_node import API_KEY_TO_NODE, SETTING_DEFAULTS
 from scripts.db import conn as _conn
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _read_persons(conn: sqlite3.Connection) -> list[dict]:
     """Return list of person dicts from the latest succeeded persons row."""
     row = conn.execute(
@@ -37,7 +37,7 @@ def _read_persons(conn: sqlite3.Connection) -> list[dict]:
     return json.loads(row["result_json"])["value"]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _write_persons(conn: sqlite3.Connection, persons: list[dict]) -> int:
     """Write persons data, return new row id."""
     # lucidlint: ignore record-shape wire-format dict — node_results DB row payload, serialization boundary owns the
@@ -67,7 +67,7 @@ def _migrate_persons(conn: sqlite3.Connection) -> bool:
         de = p.pop("deposit_equity", None)
         if de is not None and isinstance(de, dict):
             amount = float(de.get("amount", 0))
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
             p["home_sale_price"] = {"amount": str(amount), "currency": "GBP"}
             p["outstanding_mortgage"] = {"amount": "0", "currency": "GBP"}
             p["cash_contribution"] = {"amount": "0", "currency": "GBP"}

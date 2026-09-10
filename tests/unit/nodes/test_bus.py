@@ -70,7 +70,7 @@ class TestBusRouteNode:
             _google_routes_post=fake_google_routes,
         )
         loc.push(GeoPoint(51.5, -0.1), "test")
-        dest.push("EC3A 7LP", "test")
+        dest.push("EC3A 4NE", "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -283,7 +283,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="L",
-            destination=PlaceOfInterest(label="L", address="EC3A 7LP"),
+            destination=PlaceOfInterest(label="L", address="EC3A 4NE"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
@@ -361,7 +361,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="L",
-            destination=PlaceOfInterest(label="L", address="EC3A 7LP"),
+            destination=PlaceOfInterest(label="L", address="EC3A 4NE"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
@@ -430,7 +430,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="L",
-            destination=PlaceOfInterest(label="L", address="EC3A 7LP"),
+            destination=PlaceOfInterest(label="L", address="EC3A 4NE"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
@@ -759,7 +759,7 @@ class TestBusRouteNodeAgainstRealTransport:
             loc = UserInputNode[GeoPoint]("rt_loc", GeoPoint)
             poi = UserInputNode[str]("rt_poi", str)
             loc.push(GeoPoint(51.5, -0.1), "test")
-            poi.push("SW1V 2QQ", "test")
+            poi.push("SW1P 1AA", "test")
             node = BusRouteNode("bus_rt", best_location=loc, poi=poi, _google_routes_post=seam)
             await flush_processor()
 

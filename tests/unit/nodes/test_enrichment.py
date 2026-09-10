@@ -387,7 +387,7 @@ class TestParkAndRideAugmentNode:
         return Commute(
             person=Person(name="Simon", has_car=True),
             label="Office",
-            destination=PlaceOfInterest("Office", "SW1V 2QQ"),
+            destination=PlaceOfInterest("Office", "SW1P 1AA"),
             duration=Quantity(55 if walk_min <= 55 else 55 + walk_min - 35, "minute"),
             daily_cost=Money(cost, "GBP"),
             mode="transit",
@@ -408,7 +408,7 @@ class TestParkAndRideAugmentNode:
         mw.push(max_walk, "test")
         if pc_node is None:
             pc_node = UserInputNode[str]("pc_dummy", str)
-            pc_node.push("SW1V 2QQ", "test")
+            pc_node.push("SW1P 1AA", "test")
         from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
 
         return ParkAndRideAugmentNode(
@@ -525,7 +525,7 @@ class TestParkAndRideAugmentNode:
             commute = Commute(
                 person=Person(name="", has_car=True, is_child=False),
                 label="Office",
-                destination=PlaceOfInterest("Office", "SW1V 2QQ"),
+                destination=PlaceOfInterest("Office", "SW1P 1AA"),
                 duration=Quantity(94, "minute"),
                 daily_cost=Money("0", "GBP"),
                 mode="transit",
@@ -609,7 +609,7 @@ class TestParkAndRideAugmentNode:
         commute = Commute(
             person=Person(name="Simon", has_car=True),
             label="Office",
-            destination=PlaceOfInterest("Office", "SW1V 2QQ"),
+            destination=PlaceOfInterest("Office", "SW1P 1AA"),
             duration=Quantity(25, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
@@ -731,7 +731,7 @@ class TestTransitCostAttribution:
             c = Commute(
                 person=Person(name="Simon", has_car=True),
                 label="Office",
-                destination=PlaceOfInterest("Office", "SW1V 2QQ"),
+                destination=PlaceOfInterest("Office", "SW1P 1AA"),
                 duration=Quantity(60, "minute"),
                 daily_cost=Money("12.50", "GBP"),
                 mode="transit",
@@ -811,7 +811,7 @@ class TestTransitCostAttribution:
             c = Commute(
                 person=Person(name="Simon", has_car=True),
                 label="Office",
-                destination=PlaceOfInterest("Office", "SW1V 2QQ"),
+                destination=PlaceOfInterest("Office", "SW1P 1AA"),
                 duration=Quantity(60, "minute"),
                 daily_cost=Money("0", "GBP"),  # TfL returns 0 for NR
                 mode="transit",

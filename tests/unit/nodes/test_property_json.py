@@ -59,7 +59,7 @@ def _fake_services():
                 Commute(
                     person=Person(name="Simon", has_car=False),
                     label="Office",
-                    destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
+                    destination=PlaceOfInterest(label="Office", address="SW1P 1AA"),
                     duration=Quantity(32, "minute"),
                     daily_cost=Money("4.50", "GBP"),
                 ),
@@ -79,9 +79,9 @@ def prop():
     p.rightmove_address.push("31 Isambard Rd", "test")
     p.rightmove_bedrooms.push("3", "test")
     p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
-    p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+    p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
     p.precise_location.push(GeoPoint(51.5, -0.37), "test")
-    p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+    p.user_entered_address.push("31 Isambard Rd, SW1P 1AA", "test")
     p.works_estimates.push({"Ashby": Money("0", "GBP")}, "test")
     p.comment_status.push("", "test")
     return p
@@ -339,9 +339,9 @@ class TestSchoolAcceptableFromPersons:
         p.rightmove_address.push("31 Isambard Rd", "test")
         p.rightmove_bedrooms.push("3", "test")
         p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
-        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
         p.precise_location.push(GeoPoint(51.5, -0.37), "test")
-        p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.user_entered_address.push("31 Isambard Rd, SW1P 1AA", "test")
 
         await flush_processor()
 
@@ -370,9 +370,9 @@ class TestSchoolAcceptableFromPersons:
         p.rightmove_price.push(Money("550000", "GBP"), "test")
         p.rightmove_address.push("31 Isambard Rd", "test")
         p.rightmove_bedrooms.push("3", "test")
-        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
         p.precise_location.push(GeoPoint(51.5, -0.37), "test")
-        p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.user_entered_address.push("31 Isambard Rd, SW1P 1AA", "test")
 
         await flush_processor()
 
@@ -393,8 +393,8 @@ class TestReadsAreNonBlocking:
         from houses.nodes.property_nodes import PropertyNodes
 
         p = PropertyNodes("test_nonblocking")
-        p.rightmove_address.push("31 Isambard Rd, SW1V 2QQ", "test")
-        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.rightmove_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
         await flush_processor()
 
         ba = p.best_address
@@ -421,8 +421,8 @@ class TestReadsAreNonBlocking:
         from houses.nodes.property_nodes import PropertyNodes
 
         p = PropertyNodes("test_nonblocking2")
-        p.rightmove_address.push("31 Isambard Rd, SW1V 2QQ", "test")
-        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.rightmove_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
         await flush_processor()
 
         ba = p.best_address
@@ -459,7 +459,7 @@ class TestStartupSchedulesStaleNodes:
             " VALUES (?, ?, NULL, ?, ?)",
             (
                 f"{rid}/best_address",
-                json.dumps({"status": "succeeded", "value": "10 High St, SW1V 2QQ"}),
+                json.dumps({"status": "succeeded", "value": "10 High St, SW1P 1AA"}),
                 "2026-01-01T00:00:00+00:00",
                 "old-code-hash",
             ),

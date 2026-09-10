@@ -86,9 +86,7 @@ class Measurement(Generic[T]):
 
     # ── Binary arithmetic: value via T, error via uncertainties ──
 
-    def _binop(
-        self, other: Any, op: Callable[[Any, Any], Any], err: Callable[[Any, Any], Any]
-    ) -> Measurement:
+    def _binop(self, other: Any, op: Callable[[Any, Any], Any], err: Callable[[Any, Any], Any]) -> Measurement:
         """One binary step: the VALUE combines through ``T``'s own operator
         (``op``) and the ERROR through Gaussian propagation (``err``) — the
         same operator drives both, so expressions stay correct by construction."""
@@ -98,30 +96,30 @@ class Measurement(Generic[T]):
             _combine(err, self.value, m.value, self.stddev, m.stddev),
         )
 
-# lucidlint: ignore middle-man __add__ implements the + protocol — _binop is its one implementation; the dunder cannot
+    # lucidlint: ignore middle-man __add__ implements the + protocol — _binop is its one implementation
     def __add__(self, other: Any) -> Measurement:
         return self._binop(other, _add, _add)
 
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
+    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __radd__(self, other: Any) -> Measurement:
         return self.__add__(other)  # addition is commutative
 
-# lucidlint: ignore middle-man __sub__ implements the - protocol — _binop is its one implementation; the dunder cannot
+    # lucidlint: ignore middle-man __sub__ implements the - protocol — _binop is its one implementation
     def __sub__(self, other: Any) -> Measurement:
         return self._binop(other, _sub, _sub)
 
     def __rsub__(self, other: Any) -> Measurement:
         return Measurement(other) - self
 
-# lucidlint: ignore middle-man __mul__ implements the * protocol — _binop is its one implementation; the dunder cannot
+    # lucidlint: ignore middle-man __mul__ implements the * protocol — _binop is its one implementation
     def __mul__(self, other: Any) -> Measurement:
         return self._binop(other, _mul, _mul)
 
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
+    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __rmul__(self, other: Any) -> Measurement:
         return self.__mul__(other)  # multiplication is commutative
 
-# lucidlint: ignore middle-man __truediv__ implements the / protocol — _binop is its one implementation; the dunder
+    # lucidlint: ignore middle-man __truediv__ implements the / protocol — _binop is its one implementation; the dunder
     def __truediv__(self, other: Any) -> Measurement:
         return self._binop(other, _truediv, _truediv)
 
@@ -133,12 +131,12 @@ class Measurement(Generic[T]):
 
     # ── Provenance / serialization ──────────────────────────────
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> dict:
         """JSON-safe projection: ``{value, uncertainty}``.
 
         ``project_value`` handles the wrapped value's own projection
         (Money → its canonical string form, etc.).
         """
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {"value": project_value(self.value), "uncertainty": self.stddev}

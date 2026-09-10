@@ -59,7 +59,7 @@ def download_fares(token: str) -> bytes:
     return resp.content
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def extract_relevant_fares(zip_data: bytes) -> list[dict]:
     """Unzip the fares file and extract only fares involving DEST_CRS stations."""
     relevant = []

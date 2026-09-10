@@ -26,10 +26,10 @@ def _dataset_cache_path(dataset_id: int, filename: str) -> Path:
     return CACHE_DIR / f"dataset_{dataset_id}_{safe}.xml"
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def get_bods_datasets(noc: str, api_key: str) -> list[dict]:
     url = f"{BODS_BASE}fares/dataset/"
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params: dict[str, Any] = {"noc": noc, "limit": 50, "api_key": api_key}
 
     resp = httpx.get(url, params=params, timeout=30)

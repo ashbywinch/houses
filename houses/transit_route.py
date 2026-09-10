@@ -45,7 +45,7 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
     dest_lat = dest_coords.lat
     dest_lng = dest_coords.lon
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     body = {
         "coordinates": [[origin_coords.lon, origin_coords.lat], [dest_lng, dest_lat]],
         "units": "km",
@@ -76,7 +76,7 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
 
 
 # lucidlint: ignore record-shape TfL journeys wire payload — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def apply_park_and_ride_to_journeys(
     data: dict,
     origin_postcode: str,
@@ -124,7 +124,7 @@ async def apply_park_and_ride_to_journeys(
             drive_minutes,
             station_name,
         )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         legs[0] = {
             "mode": {"name": "driving"},
             "duration": drive_minutes,

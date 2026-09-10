@@ -29,7 +29,7 @@ from houses.property_registry import register_property
 from houses.server import app
 from houses.services_provider import get_services
 from houses.web.auth import get_serializer
-from tests.unit.conftest import flush_all
+from tests.unit.conftest import drain_recompute, flush_all
 
 _TEST_LAT = 51.5
 _TEST_LON = -0.1
@@ -119,9 +119,9 @@ def whatif_world():
     prop.rightmove_address.push("1 Test St", "test")
     prop.rightmove_bedrooms.push("3", "test")
     prop.rightmove_location.push(GeoPoint(_TEST_LAT, _TEST_LON), "test")
-    prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
     prop.precise_location.push(GeoPoint(_TEST_LAT, _TEST_LON), "test")
-    prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
     prop.works_estimates.push({}, "test")
     prop.rental_income.push(Money(amount="0", currency="GBP"), "test")
     prop.comment_status.push("", "test")
@@ -135,7 +135,7 @@ def whatif_world():
 def _pimlico_commute(client, rid: str) -> PimlicoCommute:
     """Simon's Pimlico commute as the DAG currently prices it — the same
     node the commute pills render."""
-    flush_all()
+    drain_recompute()  # make pending computation land — reads never flush persistence
     detail = client.get(f"/api/properties/{rid}/detail").json()
     mcc = detail["affordability"]["monthly_commute_cost"]
     assert mcc["succeeded"], mcc.get("error")
@@ -158,6 +158,8 @@ def test_originals_stay_in_dag_history_after_apply(whatif_world):
     assert original.trips == 1 and original.yearly > 0
 
     assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
+
+    flush_all()  # land the apply cascade's writes before reading history
 
     from dag.persistence import node_result_before
 
@@ -241,8 +243,6 @@ def test_restore_works_from_a_fresh_process(whatif_world):
 def test_restore_without_active_state_is_409(whatif_world):
     client, _ = whatif_world
     assert client.post("/api/what-if/restore").status_code == 409
-
-
 
 
 def test_apply_requires_authentication(whatif_world):

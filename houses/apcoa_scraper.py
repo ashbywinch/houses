@@ -42,7 +42,7 @@ class ApcoaScraper:
     # ── APCOA page parsers (pure functions, testable with fixtures) ───
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _parse_apcoa_location_page(page_text: str, page_title: str) -> dict | None:
         """Extract car park name, address, and price from an APCOA location page.
 
@@ -87,11 +87,11 @@ class ApcoaScraper:
         if not (0 <= price <= 100):
             return None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {"name": name, "address": address, "price": round(price, 2)}
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _parse_apcoa_prebook_listing(page_text: str) -> dict | None:
         """Extract name, address, and price from an APCOA prebook listing page.
 
@@ -121,5 +121,5 @@ class ApcoaScraper:
         if not (0 <= cost <= 100):
             return None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {"name": name, "address": address, "price": round(cost, 2)}

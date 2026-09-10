@@ -95,16 +95,16 @@ def test_effective_acceptable_modes_migration_rule():
     behaviour (no inference for unknown labels)."""
     from houses.model.domain import PlaceOfInterest, effective_acceptable_modes
 
-    assert effective_acceptable_modes(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ")) == (
+    assert effective_acceptable_modes(PlaceOfInterest("Pimlico", "1 Example Street, London SW1P 1AA")) == (
         "transit",
     )
     assert effective_acceptable_modes(
-        PlaceOfInterest("Aldgate", "Eastgate House, 40 Dukes Place, London EC3A 7LP")
+        PlaceOfInterest("Aldgate", "Example House, 10 Example Street, London EC3A 4NE")
     ) == ("transit",)
     assert effective_acceptable_modes(
-        PlaceOfInterest("Bracknell", "Waite House, Doncastle Road, Bracknell RG12 8YA")
+        PlaceOfInterest("Bracknell", "Example House, Test Road, Bracknell RG12 1AA")
     ) == ("car",)
-    assert effective_acceptable_modes(PlaceOfInterest("Dad", "Flat 37, Watson Place, Trinity Road, OX7 5GZ")) == (
+    assert effective_acceptable_modes(PlaceOfInterest("Dad", "Flat 1, Example Place, Test Road, OX7 1AA")) == (
         "car",
     )
     assert effective_acceptable_modes(PlaceOfInterest("Primary School", "")) == ("walk",)
@@ -146,7 +146,7 @@ def test_rejects_stale_test_data_from_db():
                 "places_of_interest": [
                     {
                         "label": "Office",
-                        "postcode": "SW1V 2QQ",
+                        "postcode": "SW1P 1AA",
                         "trips_per_week": 1,
                         "weeks_per_year": 46,
                     }
