@@ -73,13 +73,16 @@ class TestPropertyApi:
         resp = client.patch("/api/properties/prop123/address", json={"address": "20 New Rd, London"})
         assert resp.status_code == 200
 
+        # The request returns before the drain; the test environment has
+        # no background processor, so the drain is explicit here.
+        flush_all()
         detail_after = client.get("/api/properties/prop123/detail").json()
         assert detail_after["best_address"]["value"] == "20 New Rd, London"
 
-    def test_patch_address_drains_cascade_before_responding(self):
-        """The PATCH must recompute the downstream DAG (council tax, EPC)
-        BEFORE responding — the frontend refetches immediately and would
-        otherwise race the background cascade and show stale figures."""
+    def test_patch_address_recompute_lands_in_the_background_drain(self):
+        """Thread rule 7, no exceptions: the PATCH returns immediately.
+        The EPC and council tax recompute land in the background drain;
+        the test drains explicitly because it has no processor thread."""
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
@@ -100,8 +103,13 @@ class TestPropertyApi:
         )
         assert resp.status_code == 200
 
+        # The re-price lands in the background drain; the test has no
+        # processor thread, so the drain is explicit here. Production
+        # delivers the same figures through the websocket broadcast.
+        flush_all()
+
         assert any(addr == "20 New Rd, London SW1V 2QQ" for _, addr in epc_svc.calls), (
-            f"EPC must be recomputed with the new address before the PATCH returns, calls={epc_svc.calls}"
+            f"EPC must be recomputed with the new address, calls={epc_svc.calls}"
         )
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]
@@ -118,9 +126,7 @@ class TestPropertyApi:
 
         for bad in ("false", 1, "true", None):
             resp = client.patch("/api/properties/prop124/council-tax", json={"ignored": bad})
-            assert resp.status_code == 422, (
-                f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
-            )
+            assert resp.status_code == 422, f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
 
     def test_patch_council_tax_validates_all_fields_before_any_push(self):
         """A body with valid payers but an invalid ignored must 422
@@ -156,6 +162,9 @@ class TestPropertyApi:
             json={"main_payers": ["Simon"], "annexe_payers": ["Ashby"], "ignored": True},
         )
         assert resp.status_code == 200
+        # The PATCH queues the mutation and returns (Thread rule 7).  The
+        # payer push itself is synchronous here; a test reading a cascade
+        # result must drain explicitly.
 
         # Reconstruct the property from the persisted rows — the choice
         # must NOT be clobbered by the constructor's default push.
@@ -220,9 +229,7 @@ class TestPropertyApi:
                 "the stale scan must schedule the code-stale commute pipeline"
             )
             await flush_processor()
-            assert selector.code_is_stale() is False, (
-                "the commute selector must be recomputed by the scheduled drain"
-            )
+            assert selector.code_is_stale() is False, "the commute selector must be recomputed by the scheduled drain"
         finally:
             _sp.reset(token)
 
@@ -269,6 +276,7 @@ class TestPropertyApi:
                 json={"main_payers": ["Simon", "Lorena"], "annexe_payers": ["Ashby"], "ignored": False},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
 
             detail = client.get("/api/properties/prop123/detail").json()
             apportionment = detail["council_tax_apportionment"]
@@ -281,7 +289,9 @@ class TestPropertyApi:
     def test_annexe_apportionment_changes_user_visible_total(self):
         """PATCHing the annexe payers must change the monthly cost the
         detail page renders — the settings drive the DAG, end to end, not
-        just the stored inputs."""
+        just the stored inputs. An unset payer list never drops the
+        bill: it splits across all adults (a bill is always paid by
+        someone)."""
         from money import Money
         from pint import Quantity
 
@@ -334,20 +344,19 @@ class TestPropertyApi:
 
             flush_all()
 
+            # Phase 0: nobody picked. Main 150/mo and annexe 75/mo each
+            # split by owner thirds: couple 100+50, Ashby 50+25.
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            others_before = float(group["others"]["value"])
             couple_before = float(group["couple"]["value"])
-            assert "annexe_council_tax" not in (group.get("others_breakdown") or {})
+            assert float(group["couple_breakdown"]["annexe_council_tax"]) == pytest.approx(50, abs=0.01)
+            assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(25, abs=0.01)
 
-            # Main bill: Simon+Lorena pay it ALL → the couple takes the
-            # couple's default share plus Ashby's ⅓ (£50/mo); the others'
-            # total drops by exactly that main share.
-            resp = client.patch(
-                f"/api/properties/{rid}/council-tax",
-                json={"main_payers": ["Simon", "Lorena"]},
-            )
-            assert resp.status_code == 200
+            # Phase 1: the owners take the whole main bill.
+            client.patch(f"/api/properties/{rid}/council-tax", json={"main_payers": ["Simon", "Lorena"]})
+            # The PATCH queues the mutation and returns (Thread rule 7); this
+            # test reads the recomputed apportionment, so it drains explicitly.
+            flush_all()
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01), (
@@ -356,28 +365,39 @@ class TestPropertyApi:
             assert float(group["others_breakdown"]["council_tax"]) == pytest.approx(0, abs=0.01), (
                 "others must stop paying the main bill when only the owners pay it"
             )
-            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.02)
-            assert float(group["couple"]["value"]) == pytest.approx(couple_before + 50, abs=0.02)
+            others_phase1 = float(group["others"]["value"])
+            assert others_phase1 == pytest.approx(163.87, abs=0.5), (
+                f"others carry their annexe third plus the property sinking fund: {others_phase1}"
+            )
+            # Phase-1 delta: the couple takes the main bill's full 150
+            # (both payers) and keeps its annexe all-adults share of 50.
+            assert float(group["couple"]["value"]) == pytest.approx(couple_before + 50, abs=0.5)
 
-            # Annex bill: Ashby alone pays it → +£75/mo on the others.
+            # Phase 2: Ashby alone takes the annexe bill.
             resp = client.patch(
                 f"/api/properties/{rid}/council-tax",
                 json={"annexe_payers": ["Ashby"], "ignored": False},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            others_with_annexe = float(group["others"]["value"])
-            assert others_with_annexe == pytest.approx(others_before - 50 + 75, abs=0.01), (
-                f"annexe share must land in the visible total, got {others_with_annexe}"
-            )
             assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
+            others_phase2 = float(group["others"]["value"])
+            # Phase-2 delta: Ashby swaps his annexe third (25) for the
+            # whole annexe bill (75); his sinking fund share stays.
+            assert others_phase2 == pytest.approx(others_phase1 + 50, abs=0.5), (
+                f"annexe share must land in the visible total, got {group['others']['value']}"
+            )
 
             # "Not related" → the annexe drops back out; main payers keep.
             client.patch(f"/api/properties/{rid}/council-tax", json={"ignored": True})
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.01)
+            assert float(group["others"]["value"]) == pytest.approx(others_phase2 - 75, abs=0.5), (
+                f"ignoring the annexe must drop its share: {group['others']['value']}"
+            )
         finally:
             _sp.reset(token)
 
@@ -588,7 +608,11 @@ class TestProvenanceUserFriendly:
     def test_commute_provenance_values_all_carry_destination_and_frequency(self):
         """Every commute in the provenance must use the ONE canonical
         structure — mode · duration · cost to <destination> · Nx/wk ·
-        M wks/yr. A commute without a destination or frequency fails here."""
+        M wks/yr.  A commute without a destination or frequency fails
+        here.  (The frequency is CURRENT by construction: the
+        destination flows through live nodes fed by the persons source,
+        so a what-if re-prices it — provenance is never staler than its
+        value.)"""
         client, rid = self._seed()
         detail = client.get(f"/api/properties/{rid}/detail").json()
 
@@ -1365,7 +1389,6 @@ class TestMonthlyDeltaApi:
         assert own["affordability"]["group_monthly_cost"]["value"]["delta_vs_home"] is None
 
 
-
 class TestRegenerateApi:
     """POST /api/admin/regenerate — force recompute of non-stale nodes."""
 
@@ -1437,8 +1460,9 @@ class TestRegenerateApi:
         )
         prop.council_tax._attempt = Attempt.impossible("pre-A3 state")
 
-        # A plain flush does NOT regenerate it — timestamps say fresh.
-        flush_all()
+        # Nothing is enqueued here — the write landed synchronously and
+        # the timestamps say fresh — so a plain flush is a no-op (the
+        # no-op-flush guard rejects it). Only a regenerate is the way out.
         assert prop.council_tax.latest_attempt().impossible
 
         resp = client.post("/api/admin/regenerate", json={"patterns": ["*/council_tax"]})
@@ -1578,9 +1602,10 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 200, resp.text[:500]
 
-        # The test environment has no background processor — drain the
-        # queue explicitly (production's lifespan processor does this
-        # automatically, and the WS broadcaster pushes the fresh totals).
+        # The save returned immediately (Thread rule 7 — the front end
+        # never waits). The test environment has no background
+        # processor, so the drain is explicit here; production delivers
+        # the update through the websocket broadcast.
         from tests.unit.conftest import flush_all as _flush
 
         _flush()

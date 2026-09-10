@@ -276,6 +276,34 @@ describe('PropertyCard summary commute breakdown (monthly)', () => {
     expect(wrapper.text()).not.toContain('Simon → Pimlico')
   })
 
+  it('drops the commute row entirely when the destination has no weeks', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, label: 'Pimlico', person: { name: 'Simon' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+      monthly_commute_cost: {
+        succeeded: true,
+        value: {
+          persons: {
+            Simon: {
+              daily_gbp: '0.00', yearly_gbp: '0.00',
+              commutes: [{ label: 'Pimlico', trips_per_week: 1, weeks_per_year: 0, yearly_gbp: '0.00' }],
+            },
+          },
+          yearly_total_gbp: 0,
+        },
+        error: null, provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).not.toContain('Simon → Pimlico')
+  })
+
   it('shows the monthly share with a trips tooltip when the destination has trips', () => {
     const summary = makeSummary({
       commutes: {
@@ -655,5 +683,138 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     // applied the what-if through the DAG, nothing is overlaid client-side
     expect(wrapper.text()).toContain('£2,100/mo')
     expect(wrapper.text()).toContain('£400/mo')
+  })
+})
+
+describe('school commutes', () => {
+  const schoolEntry = (label: string, minutes: number): { commute: unknown } => ({
+    commute: {
+      status: 'succeeded',
+      succeeded: true,
+      stale: false,
+      pending: false,
+      impossible: false,
+      value: {
+        label,
+        is_child: true,
+        mode: 'walk',
+        person: { name: '', has_car: false, is_child: true },
+        destination: { label, address: '', trips_per_week: 5, weeks_per_year: 39, acceptable_modes: ['walk'] },
+        duration: { value: minutes, unit: 'minute' },
+        daily_cost: { amount: '0.00', currency: 'GBP' },
+      },
+    },
+  })
+
+  const schoolCommutes = {
+    'George/Primary School': schoolEntry('Primary School', 11),
+    'George/Secondary School': schoolEntry('Secondary School', 25),
+  } as unknown as PropertySummary['commutes']
+
+  const schoolsData = {
+    primary: {
+      school: {
+        succeeded: true,
+        value: { name: 'Fir Tree Primary School', ofsted: 'Good', walk: null, url: '', postcode: 'RG14 2RA' },
+        error: null,
+        provenance: { label: 'test' },
+      },
+    },
+    secondary: {
+      school: {
+        succeeded: true,
+        value: { name: 'Trinity School', ofsted: 'Outstanding', walk: null, url: '', postcode: 'RG14 2AA' },
+        error: null,
+        provenance: { label: 'test' },
+      },
+    },
+  } as unknown as PropertySummary['schools']
+
+  it('renders each school once — in the school section, never as an adult commute row', () => {
+    const wrapper = mountCard({
+      rid: '123',
+      data: makeSummary({ commutes: schoolCommutes, schools: schoolsData }),
+    })
+
+    const adultText = wrapper.findAll('.card__commute-row').map((r) => r.text())
+    expect(
+      adultText.filter((t) => t.includes('Primary School')),
+      `the primary school commute leaked into the adult commute rows: ${JSON.stringify(adultText)}`,
+    ).toEqual([])
+    expect(adultText.filter((t) => t.includes('Secondary School'))).toEqual([])
+    expect(wrapper.findAll('.card__school-row')).toHaveLength(2)
+  })
+
+  it('colours the school walk pill by the walk bands, never grey', () => {
+    const wrapper = mountCard({
+      rid: '123',
+      data: makeSummary({ commutes: schoolCommutes, schools: schoolsData }),
+    })
+
+    const pills = wrapper
+      .findAll('.card__school-row .pill')
+      .filter((p) => p.text().includes('min'))
+    expect(pills).toHaveLength(2)
+    expect(pills[0].classes()).toContain('pill--good') // 11 min ≤ 15
+    expect(pills[1].classes()).toContain('pill--warn') // 25 min ≤ 30
+    for (const p of pills) {
+      expect(p.classes(), `school walk pill rendered grey: ${p.html()}`).not.toContain('pill--slate')
+    }
+  })
+})
+
+describe('a commute that could not be computed', () => {
+  const failedEntry = {
+    commute: {
+      status: 'impossible',
+      succeeded: false,
+      stale: false,
+      pending: false,
+      impossible: true,
+      value: null,
+      is_child: false,
+      error: 'The walking planner is unreachable',
+      error_detail: { user_message: 'The walking planner is unreachable' },
+    },
+  } as unknown as PropertySummary['commutes']
+
+  it('shows the reason on the row instead of a blank pill', () => {
+    const wrapper = mountCard({
+      rid: '123',
+      data: makeSummary({
+        commutes: { 'Simon/Pimlico': failedEntry } as unknown as PropertySummary['commutes'],
+        group_monthly_cost: {
+          succeeded: false,
+          value: null,
+          error: 'The walking planner is unreachable',
+          error_detail: { user_message: 'The walking planner is unreachable' },
+          provenance: { label: 'test' },
+        } as unknown as PropertySummary['group_monthly_cost'],
+      }),
+    })
+
+    const row = wrapper.find('.card__commute-row')
+    expect(row.exists(), 'the failed commute must keep its row — hiding it is the bug').toBe(true)
+    expect(row.text()).not.toContain('?')
+    expect(row.text()).toContain('The walking planner is unreachable')
+  })
+
+  it('shows the real reason the total is unknown, not a generic excuse', () => {
+    const wrapper = mountCard({
+      rid: '123',
+      data: makeSummary({
+        commutes: { 'Simon/Pimlico': failedEntry } as unknown as PropertySummary['commutes'],
+        group_monthly_cost: {
+          succeeded: false,
+          value: null,
+          error: 'The walking planner is unreachable',
+          error_detail: { user_message: 'The walking planner is unreachable' },
+          provenance: { label: 'test' },
+        } as unknown as PropertySummary['group_monthly_cost'],
+      }),
+    })
+
+    expect(wrapper.text()).toContain('The walking planner is unreachable')
+    expect(wrapper.text()).not.toContain('often Council Tax')
   })
 })

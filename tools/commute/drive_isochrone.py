@@ -462,7 +462,7 @@ async def build_raw(
     )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape wire-format dict — config-signature projection of the serialized raw payload
 def config_signature(raw: dict) -> dict:
     """The config identity a raw payload was built under.
@@ -476,7 +476,7 @@ def config_signature(raw: dict) -> dict:
         for rec in raw.get("destinations", [])
         if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
     }
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
         "engine_version": meta["engine_version"],
         "profile": meta["profile"],
@@ -753,7 +753,7 @@ def raw_to_searches(
                     "threshold_min": dest["threshold_min"],
                 }
             )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     return {
         # lucidlint: ignore record-shape wire-format dict — searches payload metadata, serialization boundary owns the
         "metadata": {
@@ -820,7 +820,7 @@ def _point_segment_distance(point: GeoPoint, a: GeoPoint, b: GeoPoint) -> float:
     return math.hypot(point.lat - (a.lat + t * dx), point.lon - (a.lon + t * dy))
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _search_geometry_issues(s: dict, max_vertices: int) -> list[str]:
     """Polygon shape, GB-bbox, and URL round-trip issues for one search."""
     issues: list[str] = []
@@ -853,14 +853,14 @@ def _search_geometry_issues(s: dict, max_vertices: int) -> list[str]:
     return issues
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _destination_label(s: dict) -> str | None:
     """The search's destination label (None when the destination is malformed)."""
     dest = s.get("destination")
     return dest.get("label") if isinstance(dest, dict) else None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _containment_issues(searches: list[dict]) -> list[str]:
     """Every destination's centre must sit inside one of its own shed's loops."""
     issues: list[str] = []
@@ -888,7 +888,7 @@ def _containment_issues(searches: list[dict]) -> list[str]:
     return issues
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:
     """Return issues with the drive searches payload; empty means it passes.
 
@@ -936,7 +936,7 @@ def _atomic_write(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _load_searches_payload(out_dir: Path) -> dict | None:
     """Current searches payload, or None when absent/unreadable (will rewrite)."""
     searches_path = out_dir / SEARCHES_FILENAME
@@ -950,7 +950,7 @@ def _load_searches_payload(out_dir: Path) -> dict | None:
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape wire-format dict — serialized drive artifacts written here, serialization boundary
 def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> None:
     """Write raw (when regenerated) + searches.json/.txt/.html without churn.
@@ -979,12 +979,12 @@ def _write_if_changed(path: Path, content: str) -> None:
         path.write_text(content)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _urls_text(payload: dict) -> str:
     return "\n".join(s["rightmove_url"] for s in payload["searches"]) + "\n"
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _map_html(searches: dict) -> str:
     """Leaflet map (Leaflet + CSS from CDN): destination markers + shed
     outlines. The combined map (combined_map.py) is the self-contained one;
@@ -1053,7 +1053,7 @@ async def _geocode(postcode: str) -> GeoPoint:
     return GeoPoint(point.lat, point.lon)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _load_raw(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text())
@@ -1138,7 +1138,7 @@ def _load_destinations(
     return DestinationConfig(destinations, threshold_min, region_km)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _expected_signature(
     destinations: list[DriveDestination], coords_by_label: dict[str, GeoPoint], *, threshold_min, region_km, cell_km
 ) -> dict:
@@ -1295,7 +1295,7 @@ async def _fetch_raw(
     return RawPayloadResult(raw, None)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _warn_sheds_touching_region_edge(raw: dict) -> None:
     """Kept cells on the region border mean the frontier may exceed --region-km."""
     for record in raw["destinations"]:
@@ -1320,7 +1320,7 @@ def _warn_sheds_touching_region_edge(raw: dict) -> None:
             )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape wire-format dict — returns the drive_searches.json payload or an exit code,
 def _build_searches_orfail(
     raw: dict,

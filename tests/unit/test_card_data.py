@@ -207,6 +207,40 @@ class TestOfstedColour:
         assert _score_from_summary(self._summary_with_ofsted("")) == 0
 
 
+class TestScoringSurvivesAnUnpricedCommute:
+    """A commute entry that has not priced is a NORMAL live state: the
+    tolerant wrapper serves a ``succeeded`` envelope with a null value for
+    a destination whose route failed (so a broken route cannot blank the
+    household figures).  The list endpoint scores every card on load and
+    must survive it — it crashed with AttributeError on the live database
+    (2026-09-10), taking the whole index page down."""
+
+    @staticmethod
+    def _summary_with_a_null_commute() -> dict:
+        return {
+            "commutes": {
+                "Simon/Pimlico": {"commute": {"status": "succeeded", "value": None}},
+            },
+            "schools": {},
+            "walkability": {"value": None},
+        }
+
+    def test_null_commute_value_scores_without_crashing(self):
+        assert _score_from_summary(self._summary_with_a_null_commute()) == 0
+
+    def test_missing_commute_envelope_scores_without_crashing(self):
+        s = self._summary_with_a_null_commute()
+        s["commutes"]["Simon/Dad"] = {"commute": None}
+        assert _score_from_summary(s) == 0
+
+    def test_null_duration_scores_without_crashing(self):
+        s = self._summary_with_a_null_commute()
+        s["commutes"]["Simon/Bracknell"] = {
+            "commute": {"status": "succeeded", "value": {"duration": None}},
+        }
+        assert _score_from_summary(s) == 0
+
+
 class TestWalkColour:
     """_walk_score() from the scoring routine replicates the old walk_colour() mapping.
 

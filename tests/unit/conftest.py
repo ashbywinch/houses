@@ -24,10 +24,11 @@ from tests.unit.isolation_fixtures import (  # noqa: F401, F811
 BusRouteNode._default_google_routes_post = None
 
 
-def flush_all() -> None:
-    """Synchronously drain the stale queue — call this after seeding data
-    to compute derived nodes before reading results."""
-
+def drain_recompute() -> int:
+    """Drain the DAG work queue (event-loop dance included). Each item
+    runs compute AND its persistence step — exactly what the processor
+    would do — synchronously on the test thread. Returns the number of
+    items processed."""
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -35,7 +36,27 @@ def flush_all() -> None:
         asyncio.set_event_loop(loop)
     # ONE drain: a node's refresh queues its dependents inside the same
     # drain loop, so a second call could only mask a queue bug.
-    loop.run_until_complete(flush_processor())
+    return loop.run_until_complete(flush_processor())
+
+
+def flush_all() -> None:
+    """Drain the DAG work queue ONCE, after the operation under test,
+    before assertions — compute and persistence land together in
+    scheduled order. In production reads never wait on the queue at all
+    (docs/dag-library.md → 'Thread rules')."""
+    import dag.scheduler as _dag_sched
+
+    sched = _dag_sched.get_scheduler()
+    assert isinstance(sched, _dag_sched.AsyncQueueScheduler)
+    enqueued_before = sched.enqueued_since_flush
+    drained = drain_recompute()
+    if drained == 0 and enqueued_before == 0:
+        raise RuntimeError(
+            "flush_all() drained nothing and nothing was enqueued since the "
+            "last flush. flush_all() is a once-per-operation drain — work "
+            "runs on the processor by design and reads never wait on the "
+            "queue. See docs/dag-library.md → 'Thread rules'."
+        )
 
 
 def _make_mock_services():
@@ -72,7 +93,6 @@ def _isolate_api_cache():
         yield
         files = list(Path(tmp).iterdir())
         assert not files, f"Unit test created {len(files)} cache file(s): {[f.name for f in files]}"
-
 
 
 @pytest.fixture(autouse=True)

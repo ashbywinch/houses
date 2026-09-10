@@ -314,7 +314,7 @@ def main():
     )
 
     all_operator_data: dict[str, Any] = {}
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     all_operator_data["_meta"] = {
         "national_max_single_gbp": NATIONAL_MAX_SINGLE_GBP,
         "national_max_single_notes": "UK Gov Bus Fare Cap Scheme — applies to all participating operators in England",

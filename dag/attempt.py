@@ -101,9 +101,9 @@ class AttemptError:
             return self.causes[0].display_message
         return self.message
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_dict(self) -> dict:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {
             "code": self.code,
             "message": self.message,
@@ -143,6 +143,7 @@ class AttemptError:
             exc=exc,
             traceback=tb,
         )
+
     @classmethod
     def from_dict(cls, d: dict) -> AttemptError:
         """Reconstruct an AttemptError from its JSON-safe projection.
@@ -175,6 +176,7 @@ class ExceptionClassification:
 
     code: str
     retryable: bool
+
 
 def classify_exception(exc: BaseException | None) -> ExceptionClassification:
     """Map an exception to (code, retryable) without importing HTTP libs.
@@ -253,6 +255,7 @@ class _AttemptMeta(type):
     @property
     def impossible(cls):
         return lambda error="", error_info=None: cls(_Status.IMPOSSIBLE, error=error, error_info=error_info)
+
     @impossible.setter
     @staticmethod
     def impossible(cls, value):
@@ -286,7 +289,7 @@ class Attempt[T](metaclass=_AttemptMeta):
 
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def __init__(
         self,
         status: _Status,
@@ -433,7 +436,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         return self._created_at
 
     @property
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def metadata(self) -> dict:
         """Arbitrary metadata attached at construction (JSON-safe).
 
@@ -531,7 +534,7 @@ class Provenance:
     error: str = ""
     sources: dict[str, Provenance] = field(default_factory=dict)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_dict(self) -> dict:
         """Serialise to a JSON-safe dict."""
         result: dict = {"label": self.label}
@@ -569,9 +572,9 @@ class Provenance:
         if self.freshness is not None:
             result["freshness"] = self.freshness.isoformat()
         if self.formula is not None:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary
             result["formula"] = {
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+                # lucidlint: ignore record-shape wire-format dict — serialization boundary
                 "lines": [{"label": line.label, "value": line.value} for line in self.formula.lines],
                 "result": self.formula.result,
             }

@@ -99,4 +99,6 @@ async def test_impossible_not_re_queued_on_register():
     node2 = _IntNode("nrq_node", deps=(src2,))
 
     assert (await node2.attempt()).impossible
-    assert fresh_sched._queue.empty(), "must not queue an impossible-loaded node"
+    assert fresh_sched._queue is None or fresh_sched._queue.empty(), (
+            "must not queue an impossible-loaded node"
+        )

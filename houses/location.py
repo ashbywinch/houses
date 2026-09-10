@@ -220,7 +220,7 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
     since_last = now - get_geo_state(services=services).nominatim_last_call
     if since_last < 1.0:
         await asyncio.sleep(1.0 - since_last)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params = {"q": f"{clean}, UK", "format": "json", "limit": 1}
     cached = get_cached("GET", NOMINATIM_URL, params, None)
     if cached is not None:
@@ -273,7 +273,7 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
         logger.debug("Skipping Google Maps — API quota exhausted")
         return None
     googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params = {"address": f"{address}, UK", "key": settings.google_maps_api_key}
     cache_params = {"address": f"{address}, UK"}
     cached = get_cached("GET", googlegeocode_url, cache_params, None)
@@ -328,7 +328,7 @@ async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = N
     """Geocode *address* via ORS Pelias; ``None`` means "try the next provider"."""
     if get_geo_state(services=services).ors_geo_exhausted:
         return None
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params = {"text": f"{address}, UK", "size": 1}
     cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
     if cached is not None:
@@ -473,7 +473,7 @@ async def find_nearest_town_name(
     """
     options = options or ReverseGeocodeOptions()
     rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params = {"point.lat": lat, "point.lon": lon, "size": 1, "boundary.country": "GBR"}
     headers = {}
     api_key = options.api_key
@@ -527,6 +527,25 @@ _ADDR_OUTCODE_RE = re.compile(
     r"\b[A-Z]{1,2}[0-9][A-Z0-9]?\b",
     re.IGNORECASE,
 )
+
+
+async def reverse_geocode_postcode(lat: float, lon: float, *, services: Any | None = None) -> str:
+    """Nearest postcode to a coordinate via the postcodes.io reverse
+    lookup.  Returns "" when nothing resolves (caller decides whether
+    that is an error)."""
+    url = f"{POSTCODES_IO_URL}?lat={lat}&lon={lon}"
+    try:
+        async with cached_async_client(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("result") or []
+            if not results:
+                return ""
+            return results[0].get("postcode", "")
+    except Exception:
+        logger.exception("Reverse postcode lookup failed at %s,%s", lat, lon)
+        return ""
 
 
 def is_outcode(s: str) -> bool:

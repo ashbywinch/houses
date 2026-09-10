@@ -32,6 +32,7 @@ _connection_cache = threading.local()
 
 class DagJSONEncoder(json.JSONEncoder):
     """Handles enums, Decimal, Money, Quantity, and other non-serializable types in DAG node results."""
+
     @override
     def default(self, o):
         if isinstance(o, Enum):
@@ -39,11 +40,11 @@ class DagJSONEncoder(json.JSONEncoder):
         if isinstance(o, _Decimal):
             return float(o)
         if isinstance(o, _Money):
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary
             return {"amount": str(o.amount), "currency": o.currency}
         if isinstance(o, cast(type, Quantity)):
             m = float(o.magnitude)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            # lucidlint: ignore record-shape wire-format dict — serialization boundary
             return {"value": int(m) if m == int(m) else m, "unit": str(o.units)}
         return super().default(o)
 
@@ -190,14 +191,12 @@ def init_db(db_path: str | None = None) -> None:
     # Latest-row lookups (latest_node_result, property_created_at) are the
     # hot path — the index was dropped in the code_version rewrite and a
     # fresh database must still get it.
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);")
     conn.commit()
     _ensure_code_version_column()
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def save_node_result(
     node_id: str,
     result_dict: dict[str, Any],
@@ -214,7 +213,14 @@ def save_node_result(
     round-trip consistency).  *code_version* fingerprints the compute code
     that produced the value — a persisted row whose version no longer matches
     the current compute is stale-in-code and must recompute.
+
+    Single-writer enforcement: persistence runs on the DAG processor
+    thread (or a single-threaded context — startup, tests, scripts);
+    see docs/dag-library.md → 'Thread rules'.
     """
+    from dag.scheduler import assert_mutation_allowed
+
+    assert_mutation_allowed()
     if not _table_exists("node_results"):
         init_db()
     _ensure_code_version_column()
@@ -236,9 +242,15 @@ def save_node_result(
     return rowid if rowid is not None else 0
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def latest_node_result(node_id: str) -> dict[str, Any] | None:
-    """Return the most recent to_json() dict for a node, or None."""
+    """Return the most recent to_json() dict for a node, or None.
+
+    Reads never block on writes and never need to flush: this reads
+    committed DB state as-is (WAL snapshot; timestamp predicates exclude
+    unwritten rows by construction — docs/dag-library.md → 'Thread
+    rules').
+    """
     if not _table_exists("node_results"):
         init_db()
         return None
@@ -265,6 +277,7 @@ def node_result_before(node_id: str, before: str) -> dict[str, Any] | None:
     node_results is append-only history ("each call appends a new row"),
     so this is a reference into the DAG's own past — e.g. the what-if
     restore reads the persons attempt from before the scenario started.
+    Reads never block on writes — see latest_node_result.
     """
     if not _table_exists("node_results"):
         init_db()
@@ -283,6 +296,7 @@ def node_result_before(node_id: str, before: str) -> dict[str, Any] | None:
     result["_persisted_at"] = row["created_at"]
     result["_code_version"] = row["code_version"]
     return result
+
 
 def _table_exists(name: str) -> bool:
     conn = _get_db()
@@ -323,12 +337,24 @@ def delete_node_results_for_rid(rid: str) -> None:
     conn.commit()
 
 
+#: Node-id namespaces that are not properties.  The global settings nodes
+#: live under ``settings/<name>``; the slash-less sources (``persons``,
+#: ``financial``, …) never reach this query.
+NON_PROPERTY_NAMESPACES = frozenset({"settings"})
+
+
 def property_rids() -> list[str]:
-    """Return distinct property RIDs from the node_results table."""
+    """Every node-id prefix that could be a property RID.
+
+    The global settings namespace is excluded; nothing else is.  Filtering
+    for numeric prefixes here made the startup loader's pollution guard
+    unreachable — a row under a test-data id was silently ignored instead of
+    failing loudly, which is the opposite of what that guard exists for.
+    """
     if not _table_exists("node_results"):
         return []
     conn = _get_db()
     rows = conn.execute(
         "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
-    return sorted(set(r[0] for r in rows if r[0] and r[0].isdigit()))
+    return sorted(rid for rid in {r[0] for r in rows} if rid and rid not in NON_PROPERTY_NAMESPACES)

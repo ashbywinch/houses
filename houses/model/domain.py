@@ -46,11 +46,13 @@ class PlaceOfInterest:
     # derived by ``effective_acceptable_modes`` and is what routing uses.
     acceptable_modes: tuple[str, ...] = ()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    def to_provenance_value(self) -> dict:
-        """JSON-safe projection for provenance display."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        return {"label": self.label, "address": self.address, "acceptable_modes": list(self.acceptable_modes)}
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    def to_provenance_value(self) -> str:
+        """User-friendly projection for provenance display: where the
+        destination is, not a raw field dump."""
+        if self.address:
+            return f"{self.label} — {self.address}"
+        return self.label
 
 
 @dataclass(frozen=True)
@@ -96,14 +98,14 @@ class Person:
     # False means no current home: the deposit is cash only.
     selling_home: bool | None = None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display.
 
         Keeps the identity-relevant fields; money fields render through
         their canonical string form via the generic projector.
         """
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         return {
             "name": self.name,
             "has_car": self.has_car,
@@ -205,22 +207,37 @@ class Commute:
 
     def to_provenance_value(self) -> str:
         """Human summary for provenance display — ONE canonical structure
-        for every commute: mode · duration · cost to destination ·
+        for every commute: mode · duration · £/day to destination ·
         frequency.  Every DAG node that builds a Commute patches the full
         destination PlaceOfInterest (label + trips/weeks) so the tree
         always shows where and how often (guarded by
-        test_commute_provenance_values_all_carry_destination_and_frequency).
-        Full leg-by-leg details live in the formula, not here.
+        test_commute_provenance_values_all_carry_destination).
+        The frequency is CURRENT by construction: the destination flows
+        through a live node fed by the persons source, so a what-if or
+        settings change re-prices it — provenance is never staler than
+        its value.  Full leg-by-leg details live in the formula, not
+        here.
+
+        An unknown fare is omitted rather than shown as £0.00/day: the
+        transit step has not seen the fare yet (the rail step adds it
+        downstream), and a reader cannot tell "we don't know yet" from
+        "free".  Walking is the one mode where zero is the truth.
         """
         if self.infeasible:
             return self.no_route_reason or "Infeasible route"
         mode_label = _MODE_LABELS.get(self.mode, self.mode.title())
-        cost = f"£{self.daily_cost.amount:,.2f}/day"
         poi = self.destination
-        if poi.label:
-            cost += f" to {poi.label}"
+        fare_unknown = not self.daily_cost.amount and self.mode != "walk"
+        if fare_unknown:
+            cost = f"to {poi.label}" if poi.label else ""
+        else:
+            cost = f"£{self.daily_cost.amount:,.2f}/day"
+            if poi.label:
+                cost += f" to {poi.label}"
         duration = self.duration.to("minute")
-        parts = [mode_label, f"{duration.magnitude:g} min", cost]
+        parts = [mode_label, f"{duration.magnitude:g} min"]
+        if cost:
+            parts.append(cost)
         if poi.trips_per_week and poi.weeks_per_year:
             parts.append(f"{poi.trips_per_week}x/wk · {poi.weeks_per_year} wks/yr")
         return " · ".join(parts)

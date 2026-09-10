@@ -125,7 +125,7 @@ def _apcoa_urls(station_name: str) -> list[str]:
     return urls
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def load_stations() -> list[dict]:
     stations: list[dict] = []
     with STATIONS_CSV.open(newline="") as f:
@@ -159,7 +159,7 @@ def load_existing_rates() -> dict[str, float | None]:
     return rates
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def write_rates(all_stations: list[dict], rates: dict[str, float | None]) -> None:
     PARKING_CSV.parent.mkdir(parents=True, exist_ok=True)
     with PARKING_CSV.open("w", newline="") as f:

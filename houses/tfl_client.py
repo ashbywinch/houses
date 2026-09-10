@@ -422,7 +422,7 @@ class TflClient:
         return JourneySummary(duration, cost, route_summary)
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape homogeneous (leg, mode-name) parse pairs — a keyed collection, not a field-wise record
     def _parse_tfl_legs(tfl_legs: list[dict]) -> list[tuple[JourneyLeg, str]]:
         """Parse TfL API legs into (JourneyLeg, mode_name) pairs.
@@ -461,7 +461,7 @@ class TflClient:
     # ── Internal fetch / process ─────────────────────────────────────
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_with_retry(
         url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
@@ -516,7 +516,7 @@ class TflClient:
         return False
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_api_call(
         url: str, params: dict, *, _client_factory: Callable | None = None
@@ -710,8 +710,8 @@ class TflClient:
             )
         )
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _geocode_fallback(self, params: dict) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""
         pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", self._origin)

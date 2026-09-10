@@ -15,6 +15,7 @@ from dag.node import Node
 from houses.commute import LegMode
 from houses.commute_router import CommuteRouter as _CommuteRouter
 from houses.geopoint import GeoPoint
+from houses.location import extract_postcode
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.services_provider import get_services
 from houses.tfl_client import TflRouteOptions
@@ -22,12 +23,14 @@ from houses.tfl_client import TflRouteOptions
 
 def _with_destination(
     result: Attempt[Commute],
-    poi: PlaceOfInterest | None,
+    poi: PlaceOfInterest | str | None,
 ) -> Attempt[Commute]:
     """Patch the full destination POI (label + trips/weeks) onto a route
     result — the route planners only know the address, so without this
-    the provenance would lose the destination entirely."""
-    if poi is None or not result.succeeded:
+    the provenance would lose the destination entirely.  A bare str poi
+    (the address the route was planned against) is NOT patched: a string
+    has no place in the destination field."""
+    if poi is None or not result.succeeded or isinstance(poi, str):
         return result
     val = result.value_or_none()
 # lucidlint: ignore special-case sentinel handling is the contract here
@@ -104,9 +107,11 @@ class RouteOptions:
     """
 
     best_location: Node
+    # The destination's CURRENT PlaceOfInterest (a DestinationPlaceNode):
+    # routes re-plan and the congestion-charge gate re-evaluates when it
+    # changes — no rebuild, no rewiring.
     poi: Node
     route_fn: Callable | None = None
-    poi_info: PlaceOfInterest | None = None
     max_walk: int = 30
     has_car: bool = False
 
@@ -123,7 +128,6 @@ class TransitOptions:
     best_location: Node
     poi: Node
     has_car: bool = False
-    poi_info: PlaceOfInterest | None = None
     allow_bus: bool = False
     client_factory: Callable[..., Any] | None = None
     best_address: Node | None = None
@@ -201,7 +205,6 @@ class WalkNode(DerivedNode[Commute]):
         # The full destination POI (label + trips/weeks) — the route
         # planner only knows the address, so the provenance would lose
         # the destination without this patch.
-        self._poi_info: PlaceOfInterest | None = options.poi_info
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -217,7 +220,35 @@ class WalkNode(DerivedNode[Commute]):
         else:
 
             result = await get_services().route_planner.walk_route(loc, dest, self._max_walk)
-        return _with_destination(result, self._poi_info)
+        return _with_destination(result, poi_val)
+
+
+class DestinationPlaceNode(DerivedNode[PlaceOfInterest]):
+    """The destination's CURRENT PlaceOfInterest, read live from the
+    persons source.
+
+    One per person/POI key.  Routing decisions that depend on the
+    destination (routes, the congestion-charge gate) take this node as a
+    dependency, so address or trips changes re-plan and re-price through
+    normal DAG staleness — no rebuild, no rewiring, nothing frozen.  If
+    the destination is removed from persons, the node is impossible."""
+
+    def __init__(self, node_id: str, *, persons_source: Node, person_name: str, label: str):
+        super().__init__(node_id, PlaceOfInterest, (persons_source,))
+        self._persons_source = persons_source
+        self._person_name = person_name
+        self._label = label
+
+    @override
+    def compute(self, *dep_attempts: Attempt) -> Attempt[PlaceOfInterest]:
+        persons = self._persons_source.latest_attempt().value_or_none() or []
+        for p in persons:
+            if getattr(p, "name", None) != self._person_name:
+                continue
+            for q in getattr(p, "places_of_interest", None) or ():
+                if q.label == self._label:
+                    return Attempt.succeeded(q)
+        return Attempt.impossible(f"{self._person_name}/{self._label} is not a current destination")
 
 
 class DriveNode(DerivedNode[Commute]):
@@ -233,7 +264,6 @@ class DriveNode(DerivedNode[Commute]):
         self.display_name: str = "Drive"
         self._has_car: bool = options.has_car
         self._route_fn: Callable | None = options.route_fn
-        self._poi_info: PlaceOfInterest | None = options.poi_info
 
     @override
     # lucidlint: ignore duplicate the difference is the route source (fn vs TfL client) (review-log)
@@ -247,12 +277,43 @@ class DriveNode(DerivedNode[Commute]):
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
+        # Congestion-charge gate (DAG-owned): resolve the destination's
+        # outcode — from the address when it carries a postcode, else by
+        # geocoding and reverse-looking-up the nearest postcode — and
+        # refuse to price a drive into the congestion charge zone.  An
+        # address that cannot be resolved is an ERROR result, never
+        # silently out-of-zone.
+        postcode = extract_postcode(dest)
+        outcode = _CommuteRouter._extract_outcode(postcode) if postcode else None
+        if outcode is None:
+            geo = await get_services().geocoder.geocode_address(dest)
+            gp = geo.value_or_none() if geo.succeeded else None
+            if gp is None:
+                return Attempt.impossible(
+                    f"destination address {dest!r} does not geocode — cannot "
+                    "verify the congestion-charge rule"
+                )
+            resolved_attempt = await get_services().geocoder.reverse_geocode_postcode(gp.lat, gp.lon)
+            resolved = resolved_attempt.value_or_none() if resolved_attempt.succeeded else ""
+            outcode = _CommuteRouter._extract_outcode(resolved) if resolved else None
+            if outcode is None:
+                return Attempt.impossible(
+                    f"no postcode resolves for {dest!r} — cannot verify the "
+                    "congestion-charge rule"
+                )
+        if outcode in _CommuteRouter._CONGESTION_OUTCODES:
+            return _infeasible_commute(
+                label="congestion charge zone",
+                reason="destination is inside the congestion charge zone — never drive",
+            )
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest)
         else:
 
             result = await get_services().route_planner.drive_route(loc, dest)
-        return _with_destination(result, self._poi_info)
+        # The destination is read from the LIVE poi dep, so the label and
+        # frequency in provenance follow the current destination.
+        return _with_destination(result, poi_val)
 
 
 class TflTransitNode(DerivedNode[Commute]):
@@ -271,10 +332,14 @@ class TflTransitNode(DerivedNode[Commute]):
         super().__init__(node_id, Commute, (options.best_location, options.poi))
         self._has_car: bool = options.has_car
         self._allow_bus: bool = options.allow_bus
-        self._poi_info: PlaceOfInterest | None = options.poi_info
         self._client_factory: Callable[..., Any] | None = options.client_factory
         self._last_no_route_detail: str = ""
-        self.display_name: str = "TfL"
+        # Two of these nodes plan every destination — one avoiding buses, one
+        # allowing them — and the comparison node keeps the bus plan only when
+        # it saves the person's bus-walk penalty.  Both appear in the
+        # provenance, so each must say which plan it is: two rows both called
+        # "TfL" told the reader nothing (live 2026-09-10).
+        self.display_name: str = "TfL (with bus)" if options.allow_bus else "TfL (no bus)"
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -309,7 +374,7 @@ class TflTransitNode(DerivedNode[Commute]):
         else:
             result = await client.plan()
         self._last_no_route_detail = client._no_route_detail
-        return _with_destination(result, self._poi_info)
+        return _with_destination(result, poi_val)
 
     @override
     async def build_provenance(self) -> Provenance:
@@ -351,7 +416,6 @@ class TransitNode(DerivedNode[Commute]):
         self.display_name: str = "TfL API"
         self._has_car: bool = options.has_car
         self._best_address: Node | None = options.best_address
-        self._poi_info: PlaceOfInterest | None = options.poi_info
         self._transit_route_fn: Callable[[GeoPoint, PlaceOfInterest], Awaitable[Commute | None]] | None = (
             options.transit_route_fn
         )
@@ -372,6 +436,7 @@ class TransitNode(DerivedNode[Commute]):
         self._last_fallback_detail = None
         no_bus_val = no_bus.value_or_none()
         with_bus_val = with_bus.value_or_none()
+        poi_val = poi.value_or_none() if isinstance(poi.value_or_none(), PlaceOfInterest) else None
         if self._has_car and no_bus_val is not None and not no_bus_val.infeasible:
             best_val = no_bus_val
         elif no_bus_val is None and with_bus_val is None:
@@ -418,7 +483,7 @@ class TransitNode(DerivedNode[Commute]):
                 parts = self._id.split("/")
                 label = parts[2] if len(parts) >= 3 else (fallback.destination.label or "")
                 fallback = replace(fallback, label=label)
-                fallback = _with_poi_destination(fallback, self._poi_info)
+                fallback = _with_poi_destination(fallback, poi_val)
                 return Attempt.succeeded(fallback)
             return Attempt.succeeded(val)
 
@@ -439,8 +504,9 @@ class TransitNode(DerivedNode[Commute]):
             mode=mode,
             _details=val.details,
         )
-        result = _with_poi_destination(result, self._poi_info)
+        result = _with_poi_destination(result, poi_val)
         return Attempt.succeeded(result)
+
     async def _nr_fallback(
         self,
         location: Attempt[GeoPoint],

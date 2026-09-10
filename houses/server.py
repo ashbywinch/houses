@@ -22,8 +22,14 @@ import houses.town_desc as _town_desc
 import houses.web.broadcaster as _broadcaster_mod
 from dag.persistence import delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
-from dag.scheduler import flush_processor, get_scheduler, set_after_refresh
-from dag.scheduler import start_processor as _start_processor
+from dag.scheduler import (
+    flush_processor,
+    get_scheduler,
+    run_on_processor,
+    set_after_refresh,
+    start_processor,
+    stop_processor,
+)
 from houses.admin_router import admin_router
 from houses.database import close_db as close_app_db
 from houses.database import init_db as init_app_db
@@ -43,9 +49,34 @@ from houses.web.json_utils import asdict_serializable
 logger = logging.getLogger(__name__)
 
 
+_main_loop: asyncio.AbstractEventLoop | None = None
+"""The uvicorn loop, captured at lifespan startup — the processor thread
+hands broadcaster pushes to it (see _on_node_refreshed)."""
+
+
 def _on_node_refreshed(node):
-    """Broadcast per-node update after a genuine value change."""
-    asyncio.create_task(_broadcaster_mod._push_node_update(node))
+    """The DAG→frontend seam, routed by what refreshed.
+
+    Runs on the DAG processor thread — hand pushes to the main loop,
+    where the broadcaster task lives.
+
+    - A property node: queue that property's summary broadcast
+      (coalesced) — the phone renders cards from summaries.
+    - A settings node: push the settings payload once — the phone
+      re-renders settings, thresholds, and the what-if flag from it.
+
+    Internal node payloads are never broadcast: nothing renders a raw
+    DAG node."""
+    if _main_loop is None:
+        return
+    node_id = getattr(node, "_id", "") or ""
+    rid = node_id.split("/", 1)[0]
+    if rid.isdigit() and len(rid) >= 6:
+        asyncio.run_coroutine_threadsafe(
+            _broadcaster_mod.notify_node_refreshed_async(node), _main_loop
+        )
+        return
+    asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
 
 
 def _deploy_hash() -> str:
@@ -57,7 +88,6 @@ def _deploy_hash() -> str:
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return ""
-
 
 
 def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
@@ -136,18 +166,26 @@ async def lifespan(_app: FastAPI):
     _town_desc._reset()
 
     load_property_nodes_from_db()
-    # Start the background stale-node processor and the WebSocket broadcaster.
-    # The processor eagerly recomputes nodes whose dependencies have changed;
-    # the broadcaster pushes fresh property summaries to connected clients.
+    # THE DAG PROCESSOR: one thread, one queue. It owns recompute AND
+    # persistence; the event loop never runs cascade work (see
+    # .kilo/plans/dag-save-queue.md). The broadcaster stays on THIS loop;
+    # the processor hands pushes to it via run_coroutine_threadsafe.
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
     set_after_refresh(_on_node_refreshed)
-    _proc_task = _start_processor()
+    start_processor()
     _bc_task = asyncio.create_task(_broadcaster_mod._broadcaster())
 
     logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))
     yield
-    _proc_task.cancel()
     _bc_task.cancel()
     logger.info("Houses server shutting down")
+    # Drain remaining work THROUGH the processor (order holds to the
+    # last row), then stop its loop; bounded — a wedged drain must not
+    # hang systemctl stop.
+    abandoned = stop_processor()
+    if abandoned:
+        logger.error("shutdown abandoned %d future-scheduled items", abandoned)
 
     close_app_db()
     await stop_chrome()
@@ -373,7 +411,8 @@ async def upsert_property(
     enriched = _build_enriched(SeedFacts(payload=payload, scraped=scraped), address, postcode)
     rid2 = rid or enriched.rid
     if rid2:
-        _seed_dag(rid2, enriched)
+        # Mutations run on the processor thread — never on the event loop.
+        await run_on_processor(lambda: _seed_dag(rid2, enriched))
 
     dump = asdict_serializable(enriched)
     # The postcode is no longer an EnrichedProperty field (the address
@@ -387,6 +426,8 @@ async def upsert_property(
     if scrape_pending:
         extra["scrape_pending"] = True
     return JSONResponse(content={"status": "ok", "rid": rid2, "data": dump, **extra}, status_code=200)
+
+
 def _require_superuser(request: Request) -> None:
     """403 unless the request carries a signed-in superuser session."""
     user = effective_session_user(request)
@@ -397,6 +438,8 @@ def _require_superuser(request: Request) -> None:
 def _job_wire(job):
     """Serialization boundary: a claimed job as the worker sees it."""
     return None if job is None else job.to_dict()
+
+
 # lucidlint: ignore record-shape wire-format dict — the worker's report body is a wire record (coding-standards.md)
 async def _apply_scraped_report(rid: str, data: dict) -> bool:
     """Push a worker's scraped listing into the property's DAG — the same
@@ -419,11 +462,12 @@ async def _apply_scraped_report(rid: str, data: dict) -> bool:
         approx_longitude=data.get("longitude"),
     )
 
-    seeded = _seed_dag(rid, enriched)
+    seeded = await run_on_processor(lambda: _seed_dag(rid, enriched))
     # Drain the downstream cascade so the client's immediate refetch
     # reflects the completed enrichment (same pattern as patch_address).
-    await flush_processor()
+    await run_on_processor(flush_processor)
     return seeded
+
 
 @app.post("/api/scrapes/claim", response_model=None)
 async def claim_scrape(request: Request) -> JSONResponse:
@@ -523,7 +567,8 @@ async def patch_property_details(rid: str, body: dict) -> JSONResponse:
     # address-only form must leave the job to fill price/bedrooms.
     if body.get("price") is not None and body.get("bedrooms") is not None:
         _scrape_queue.cancel_scrape_for_rid(rid)
-    await flush_processor()
+    # No inline drain: the endpoint returns as soon as the seeding is queued
+    # (docs/dag-library.md → Thread rules, 7).
     return JSONResponse(content={"status": "ok"})
 
 
@@ -549,9 +594,13 @@ async def remove_property(rid: str) -> JSONResponse:
     """Remove a property (the wireframe's Remove): the scrape job, the
     DAG rows, and the registry entry all go away."""
     _scrape_queue.cancel_scrape_for_rid(rid)
-    _disconnect_property_nodes(rid)
-    delete_node_results_for_rid(rid)
-    _sp.get_services().property_registry.remove(rid)
+
+    def _remove() -> None:
+        _disconnect_property_nodes(rid)
+        delete_node_results_for_rid(rid)
+        _sp.get_services().property_registry.remove(rid)
+
+    await run_on_processor(_remove)
     return JSONResponse(content={"status": "ok"})
 
 

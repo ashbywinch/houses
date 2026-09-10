@@ -174,9 +174,11 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         *,
         config: HousingCostConfig,
     ):
+        self._config = config
         self._annexe_payers_node: Node | None = config.annexe_payers_node
         self._annexe_ignored_node: Node | None = config.annexe_ignored_node
         self._council_tax_payers_node: Node | None = config.council_tax_payers_node
+        self._council_tax_node: Node | None = config.council_tax_node
         persons_source = config.persons_source
         if persons_source is None:
             # compute() binds the "persons" attempt by name — without the
@@ -262,6 +264,50 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                         prov.description = annexe_note
                     else:
                         prov.description = f"{prov.description} — {annexe_note}"
+            # THE APPORTIONMENT, stated for the reader: which bills, and
+            # who pays them (P2 — explainable one step away).
+            council_node = self._council_tax_node
+            council_att = council_node.latest_attempt() if council_node is not None else None
+            council_val = council_att.value_or_none() if council_att is not None else None
+            persons_source = self._config.persons_source
+            persons_att = persons_source.latest_attempt() if persons_source is not None else None
+            persons_value = persons_att.value_or_none() if persons_att is not None else []
+            adults = [
+                p.name for p in (persons_value or [])
+                if not getattr(p, "is_child", False)
+            ]
+            def _stored_names(node):
+                att = node.latest_attempt() if node is not None else None
+                return set(att.value_or_none() or []) if att is not None else set()
+
+            stored_main = _stored_names(self._config.council_tax_payers_node)
+            main_payers = sorted((stored_main & set(adults)) or adults)
+            stored_annexe = _stored_names(self._annexe_payers_node)
+            annexe_payers = sorted((stored_annexe & set(adults)) or adults)
+            ignored = bool(
+                self._annexe_ignored_node.latest_attempt().value_or_none()
+            ) if self._annexe_ignored_node is not None else False
+            if council_val is not None:
+                parts = []
+                if council_val.yearly_cost is not None:
+                    who = ", ".join(main_payers) or "all adults"
+                    amount = council_val.yearly_cost.value.amount
+                    parts.append(
+                        f"main band {council_val.band or '?'}: £{amount}/yr, split across: {who}"
+                    )
+                annexe = council_val.annexe
+                if annexe is not None and annexe.yearly_cost is not None:
+                    if ignored:
+                        parts.append("annexe excluded as unrelated")
+                    else:
+                        who = ", ".join(annexe_payers) or "all adults"
+                        amount = annexe.yearly_cost.value.amount
+                        parts.append(
+                            f"annexe band {annexe.band or '?'}: £{amount}/yr, split across: {who}"
+                        )
+                if parts:
+                    line = "Council tax — " + "; ".join(parts)
+                    prov.description = f"{prov.description} — {line}" if prov.description else line
         return prov
 
 
@@ -337,17 +383,17 @@ class _GroupCostCalculator:
         annexe = council.annexe if council is not None else None
         if annexe is None or annexe.yearly_cost is None or ignored:
             return _AnnexeAllocation(Decimal(0), 0.0, frozenset())
+        # The bill is always paid by someone: named payers split it by
+        # count; empty or stale names fall back to ALL adults (mirrors
+        # the main-bill path). An unset payer list must never make the
+        # annexe bill silently vanish.
         payers: set[str] = set()
         if self.inputs.annexe_payers is not None and self.inputs.annexe_payers.succeeded:
             stored_payers = set(self.inputs.annexe_payers.value_or_none() or [])
             if stored_payers:
                 payers = stored_payers & adult_names
-                if not payers:
-                    # All stored names are stale — the annexe bill must
-                    # not silently vanish; mirror the main-bill path.
-                    payers = adult_names
         if not payers:
-            return _AnnexeAllocation(Decimal(0), 0.0, frozenset())
+            payers = adult_names
         monthly = Decimal(str(annexe.yearly_cost.value.amount)) / Decimal(MONTHS_PER_YEAR)
         stddev = float(annexe.yearly_cost.stddev) if annexe.yearly_cost.stddev else 0.0
         return _AnnexeAllocation(monthly, stddev, frozenset(payers))
@@ -384,7 +430,7 @@ class _GroupCostCalculator:
             stddev = (main_payer_count / split.main_payer_total) * float(ctx.council_stddev) / float(MONTHS_PER_YEAR)
         if split.payers:
             stddev += (payer_count / len(split.payers)) * split.annexe_stddev / float(MONTHS_PER_YEAR)
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         breakdown = {
             "commutes": round(float(commutes), 2),
             "insurance": round(float(insurance), 2),
@@ -509,7 +555,7 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
     others_fig = _group_figure_result(calc, ctx, others, others_share, others_rent_paid)
     others_val, others_std, others_breakdown = others_fig.value, others_fig.stddev, others_fig.breakdown
     return Attempt.succeeded(
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary
         {
             # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
             "couple": {"value": f"{couple_val:.2f}", "stddev": couple_std},

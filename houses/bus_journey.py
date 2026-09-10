@@ -44,7 +44,7 @@ class FareProductType(Enum):
 
 
 # Maps JSON product keys to FareProductType
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore global-state static lookup table (JSON product key → FareProductType); never mutated
 _KEY_TO_TYPE: dict[str, FareProductType] = {
     "adult_single": FareProductType.SINGLE,
@@ -152,7 +152,7 @@ class BusJourneyRegistry:
         self._loaded = True
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _assert_no_duplicate_products(data: dict[str, Any]) -> None:
         """Fail fast if any zone pair has multiple products of the same type.
 
@@ -347,7 +347,7 @@ class BusJourneyRegistry:
         return {}
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _nearest_zone(
         lat: float,
         lon: float,

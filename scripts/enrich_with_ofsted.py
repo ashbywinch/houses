@@ -89,7 +89,7 @@ def _extract_year(date_str: str) -> str:
     return ""
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _best_inspection_year(row: dict) -> str:
     """Find the most relevant inspection year from available date fields."""
     # Priority: OEIF graded inspection > old full inspection > ungraded
@@ -187,7 +187,7 @@ def _s5_rating_and_worst(s5_data: dict[str, str]) -> _EffectiveRating:
     return _EffectiveRating(rating, f"{worst} {s5_data[worst]}")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _generate_ofsted_cell(row: dict) -> str:
     """Build a single-column Ofsted rating that's scannable and jargon-free.
 

@@ -99,7 +99,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         return Attempt.impossible("address has no building identifier")
 
     pc = postcode.strip().upper()
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params = {"postcode": pc, "page_size": 50}
 
     cached = get_cached("GET", EPC_SEARCH_URL, params)
@@ -143,7 +143,7 @@ def _extract_building_id(first_token: str) -> str:
     return first
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _should_lookup_epc(address: str) -> tuple[bool, str]:
     """Decide whether to call the EPC API for this address.
 
@@ -256,7 +256,7 @@ def _newest_band(candidates) -> Attempt[str]:
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attempt[str]:
     """Find the most recent certificate, optionally matching the building identifier.
 

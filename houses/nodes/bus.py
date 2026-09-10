@@ -17,7 +17,7 @@ from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.commute_router import CommuteRouter, GoogleRoutesOptions
 from houses.geopoint import GeoPoint
-from houses.model.domain import Commute
+from houses.model.domain import Commute, PlaceOfInterest
 from houses.settings import settings
 
 
@@ -42,10 +42,20 @@ class BusRouteNode(DerivedNode[dict]):
         if grp is None:
             return Attempt.impossible("Google Routes posting function not configured")
 
-        dest_str = dest_val if isinstance(dest_val, str) else f"{dest_val.lat},{dest_val.lon}"
+        # The pipeline feeds this node the destination as the household
+        # settings define it — a PlaceOfInterest — as well as a bare
+        # address or a point, depending on the caller.
+        if isinstance(dest_val, PlaceOfInterest):
+            dest_str = dest_val.address
+        elif isinstance(dest_val, str):
+            dest_str = dest_val
+        else:
+            dest_str = f"{dest_val.lat},{dest_val.lon}"
+        if not dest_str:
+            return Attempt.impossible("no destination address for this journey")
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         body = {
             "origin": CommuteRouter._address_waypoint(origin_str).to_dict(),
             "destination": CommuteRouter._address_waypoint(dest_str).to_dict(),
@@ -138,7 +148,7 @@ class BodsFareNode(DerivedNode[dict]):
             fares = reader.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
             cheapest = cheapest_round_trip(fares, reader.national_max_single)
             if cheapest is not None:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
                 stop_fares[dep_name] = {
                     "amount": str(cheapest.amount),
                     "currency": "GBP",

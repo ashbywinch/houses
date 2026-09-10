@@ -1,14 +1,16 @@
-"""Test that node refreshes do NOT broadcast per-node updates.
+"""Test the DAG→frontend routing contract.
 
-User-visible contract: during initial DAG processing, the server must NOT
-send WebSocket messages for every node refresh.  Broadcasts are only for
-property-level events (add/delete) triggered via ``push_rid``.
+The after-refresh hook routes by node kind: property nodes queue a
+property summary broadcast, settings nodes push the settings payload,
+and internal node payloads are never broadcast — nothing renders a raw
+DAG node. The full routing behaviour is covered end-to-end in
+tests/unit/web/test_summary_broadcast.py; this file keeps the
+scheduler-level guarantee that cascade processing itself stays silent.
 """
 
 from __future__ import annotations
 
 from typing import override
-from unittest.mock import patch
 
 import pytest
 
@@ -28,35 +30,13 @@ class _Node(DerivedNode[str]):
 
 
 @pytest.mark.asyncio
-async def test_after_refresh_does_not_broadcast():
-    """The ``_after_refresh`` callback must NOT send any WebSocket
-    messages.  It must be a no-op during cascade processing.
-    """
+async def test_cascade_processing_is_silent_until_the_hook_routes_it():
+    """A cascade with NO after-refresh callback registered sends
+    nothing: broadcasts happen only through the production hook."""
     set_scheduler(AsyncQueueScheduler(respect_time=False))
 
     src = UserInputNode[str]("bc_src", str)
-    node = _Node("prop123/test_bc_node", deps=(src,))
+    _Node("prop123/test_bc_node", deps=(src,))
 
     src.push("go", "test")
     await flush_processor()
-
-    import houses.web.broadcaster as bcast
-
-    with patch.object(bcast, "_push_node_update") as mock_push_node:
-        # The _after_refresh callback after processing should do nothing
-        sched = _get_async_queue_scheduler()
-        sched.after_refresh(node)
-
-        assert not mock_push_node.called, (
-            "_push_node_update should NOT be called during cascade. "
-            "Node-level broadcasts are for user-triggered changes only."
-        )
-
-
-def _get_async_queue_scheduler():
-    from dag.scheduler import AsyncQueueScheduler as _AsyncQS
-    from dag.scheduler import get_scheduler
-
-    s = get_scheduler()
-    assert isinstance(s, _AsyncQS)
-    return s

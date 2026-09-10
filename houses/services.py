@@ -32,8 +32,8 @@ from houses.epc import lookup_epc
 from houses.geopoint import GeoPoint
 from houses.location import find_nearest_town_name, geocode, geocode_address
 from houses.model.domain import Commute, Person
+from houses.nodes.settings import PersonsSourceNode, make_default_persons, make_default_thresholds
 from houses.nodes.settings import SettingsNode as SettingsInputNode
-from houses.nodes.settings import make_default_persons, make_default_thresholds
 from houses.nodes.settings_node import SETTING_DEFAULTS, SettingsNode
 from houses.property_registry import DEFAULT_REGISTRY, PropertyRegistry
 from houses.school import School
@@ -51,14 +51,13 @@ class GeocodingService(Protocol):
     """Resolve a postcode or address to geographic coordinates,
     and reverse-geocode coordinates to the nearest town name."""
 
-    @staticmethod
-    async def geocode_postcode(postcode: str) -> Attempt[GeoPoint]: ...
+    async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]: ...
 
-    @staticmethod
-    async def geocode_address(address: str) -> Attempt[GeoPoint]: ...
+    async def geocode_address(self, address: str) -> Attempt[GeoPoint]: ...
 
-    @staticmethod
-    async def reverse_geocode_town(lat: float, lon: float) -> Attempt[str]: ...
+    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]: ...
+
+    async def reverse_geocode_postcode(self, lat: float, lon: float) -> Attempt[str]: ...
 
 
 class RoutePlanner(Protocol):
@@ -352,7 +351,11 @@ def _make_settings_source(
 ):
     if node_id in SETTINGS_SOURCE_CACHE:
         return SETTINGS_SOURCE_CACHE[node_id]
-    node = SettingsInputNode(node_id, value_type)
+    node = (
+        PersonsSourceNode(node_id, value_type)
+        if node_id == "persons"
+        else SettingsInputNode(node_id, value_type)
+    )
     if latest_node_result_fn is None:
         latest_node_result_fn = latest_node_result
     persisted = latest_node_result_fn(node_id)
@@ -395,9 +398,16 @@ class _DefaultGeocoder:
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         return await geocode_address(address, services=self._services)
 
-    @staticmethod
-    async def reverse_geocode_town(lat: float, lon: float) -> Attempt[str]:
+    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]:
         return await find_nearest_town_name(lat, lon)
+
+    async def reverse_geocode_postcode(self, lat: float, lon: float) -> Attempt[str]:
+        from houses.location import reverse_geocode_postcode as _reverse
+
+        postcode = await _reverse(lat, lon, services=self._services)
+        if postcode:
+            return Attempt.succeeded(postcode)
+        return Attempt.impossible("no postcode found for coordinates")
 
 
 class _DefaultRoutePlanner:

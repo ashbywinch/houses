@@ -47,7 +47,7 @@ class NearestSchoolNode(DerivedNode[dict]):
         school = attempt.value_or_none()
         if school is None:
             return Attempt.impossible(f"no {self.stage} school found within search radius")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         result: dict[str, Any] = {
             "name": school.name,
             "ofsted": school.ofsted_rating,

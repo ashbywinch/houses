@@ -57,12 +57,12 @@ def _pyrefly_binary() -> str:
 PYREFLY_BASE_ARGS = [_pyrefly_binary(), "check", "--output-format", "json"]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def error_key(e: dict) -> tuple:
     return (e.get("path"), e.get("line"), e.get("column"), e.get("name"))
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def current_errors(extra_args: list[str]) -> list[dict]:
     """Run pyrefly (no baseline) and return the full error list."""
     proc = subprocess.run(
@@ -83,7 +83,7 @@ def current_errors(extra_args: list[str]) -> list[dict]:
     return data.get("errors", [])
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def load_baseline(path: Path) -> list[dict]:
     if not path.is_file():
         return []

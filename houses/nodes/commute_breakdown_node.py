@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
-from typing import Any, override
+from typing import override
 
 from money import Money
 
@@ -14,11 +15,24 @@ class CommuteBreakdownNode(DerivedNode[dict]):
     """Aggregates commute costs across all persons and POIs."""
 
     # lucidlint: ignore record-shape keyed selector→node map (variable keys), not a fixed record shape
-    def __init__(self, node_id: str, *, commute_selectors: dict[str, Any], persons_source):
-        self._commute_selectors: dict[str, Any] = commute_selectors
-        # persons_source is always the last dep
-        super().__init__(node_id, dict, tuple(commute_selectors.values()) + (persons_source,))
-        self._persons_source: Node = persons_source
+    def __init__(self, node_id: str, *, commute_selectors: Mapping[str, Node], persons_source: Node):
+        # Live selectors dict — also captured by the deps closure below;
+        # compute reads the attribute, the provider re-reads the dict on
+        # every staleness/refresh check.  Mapping (read-only view) so
+        # concrete node-typed dicts pass the type check.
+        self._commute_selectors: Mapping[str, Node] = commute_selectors
+        # Composition: the dep policy is a closure over the CONSTRUCTOR
+        # ARGUMENTS — never over `self` state — so the base class can
+        # evaluate it at any point in the node's life without touching
+        # derived state. The dict is held by reference and mutated in
+        # place by _on_persons_changed, so the dep set tracks the live
+        # destination set (added/removed in Settings) with no rebuild
+        # and no rewiring.
+        super().__init__(
+            node_id,
+            dict,
+            deps=lambda: (*commute_selectors.values(), persons_source),
+        )
 
     @override
     @property
@@ -31,10 +45,6 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         for name, pv in (v.get("persons") or {}).items():
             for c in pv.get("commutes") or ():
                 yearly = Decimal(str(c.get("yearly_gbp") or 0))
-                if yearly <= 0:
-                    # Zero-cost commutes contribute nothing to the total —
-                    # "how the total is calculated" skips them.
-                    continue
                 trips = c.get("trips_per_week", 0)
                 weeks = c.get("weeks_per_year", 0)
                 freq = f"{trips}x/wk · {weeks} wks/yr"
@@ -82,10 +92,15 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                     commute_attempts[idx] if idx >= 0 and idx < len(commute_attempts) else commute_node.latest_attempt()
                 )
                 if not attempt.succeeded:
-                    continue
+                    # A commute that cannot be computed propagates and this
+                    # node never runs.  Reaching here means the selector map
+                    # and the dependency set disagree — a defect.  Name it
+                    # loudly: skipping the entry would publish a total that is
+                    # quietly missing a person's cost (2026-09-10).
+                    return Attempt.impossible(f"commute {key} has no computable result")
                 val = attempt.value_or_none()
-                if not val:
-                    continue
+                if val is None:
+                    return Attempt.impossible(f"commute {key} produced no value")
                 daily = getattr(val, "daily_cost", None)
                 if daily is not None:
                     daily_amount = daily
@@ -101,7 +116,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                             "yearly_gbp": str(yearly_person_poi.amount),
                         }
                     )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
             per_person[name] = {
                 "daily_gbp": str(daily_amount.amount) if daily_amount is not None else "0",
                 "yearly_gbp": str(person_yearly.amount),

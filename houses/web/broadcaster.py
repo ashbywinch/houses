@@ -1,9 +1,11 @@
 # lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """Broadcaster — pushes fresh property summaries to WebSocket clients.
 
-When a DAG node finishes recomputing (via _processor), _push_node_update
-sends its value to all WebSocket clients. The _broadcaster coroutine pops
-RID-level events from _broadcast_queue and pushes full-property summaries.
+When DAG state changes (via _processor), _on_node_refreshed routes
+the event: property nodes queue a summary broadcast (one per property,
+coalesced), settings nodes push one settings payload. The _broadcaster
+coroutine pops RID-level events from _broadcast_queue and pushes
+full-property summaries.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _broadcast_queue: asyncio.Queue[str] = asyncio.Queue()
 _websocket_clients: set[WebSocket] = set()
+
 
 def _reset():
     """Reset broadcast state for test isolation."""
@@ -44,30 +47,6 @@ async def register_client(ws: WebSocket) -> None:
             except Exception:
                 break
     finally:
-        _websocket_clients.discard(ws)
-
-
-async def _push_node_update(node) -> None:
-    """Push a node's latest value to all WebSocket clients."""
-
-    rid = node._id.split("/")[0]
-    try:
-        data = await node.to_json()
-    # lucidlint: ignore broad-except serialisation failure silently drops this push; clients refresh on next change
-    except Exception:
-        return
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    msg = json.dumps({"type": "node_updated", "rid": rid, "node_id": node._id, "data": data})
-    dead: list[WebSocket] = []
-    for ws in list(_websocket_clients):
-        try:
-            await ws.send_text(msg)
-        # lucidlint: ignore broad-except connection boundary — any send failure discards the dead client
-        except Exception as e:
-            logger.debug("client websocket send failed (discarding client): %s", e)
-            dead.append(ws)
-            continue
-    for ws in dead:
         _websocket_clients.discard(ws)
 
 
@@ -131,7 +110,7 @@ _notify_debounce_task: asyncio.Task | None = None
 _NOTIFY_DEBOUNCE_SECONDS = 0.4
 
 
-def notify_node_refreshed(node) -> None:
+async def notify_node_refreshed_async(node) -> None:
     """THE DAG→frontend seam: a property node refreshed, so the property's
     summary is queued for broadcast (coalesced — a cascade touching many
     nodes of one property pushes that property once).
@@ -139,6 +118,10 @@ def notify_node_refreshed(node) -> None:
     Any recompute path lands here automatically: settings edits, what-if
     applies, scrape applies. Callers never remember to notify — the DAG
     refresh is the notification.
+
+    Runs on the MAIN loop (the broadcaster's loop): the processor hands
+    it over via run_coroutine_threadsafe, keeping every asyncio object
+    here owned by one loop.
     """
     global _notify_debounce_task
     node_id = getattr(node, "_id", "") or ""
@@ -150,10 +133,34 @@ def notify_node_refreshed(node) -> None:
         _notify_debounce_task = asyncio.create_task(_flush_notifies())
 
 
+async def push_settings_updated() -> None:
+    """THE DAG→frontend seam for settings: a settings node refreshed, so
+    the settings payload (persons, thresholds, what-if flag) is pushed
+    to connected clients. Coalesced per debounce window upstream. Runs
+    on the MAIN loop — the processor hands it over via
+    run_coroutine_threadsafe, keeping every asyncio object here owned
+    by one loop.
+    """
+    from houses.web.api_router import settings_payload
+
+    payload = await settings_payload()
+    msg = json.dumps({"type": "settings_updated", "data": payload})
+    dead: list[WebSocket] = []
+    for ws in list(_websocket_clients):
+        try:
+            await ws.send_text(msg)
+        # lucidlint: ignore broad-except connection boundary — any send failure discards the dead client
+        except Exception as e:
+            logger.debug("client websocket send failed (discarding client): %s", e)
+            dead.append(ws)
+            continue
+    for ws in dead:
+        _websocket_clients.discard(ws)
+
+
 async def _flush_notifies() -> None:
     await asyncio.sleep(_NOTIFY_DEBOUNCE_SECONDS)
     rids = list(_pending_notify_rids)
     _pending_notify_rids.clear()
     for rid in rids:
         await _broadcast_queue.put(rid)
-

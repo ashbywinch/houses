@@ -8,8 +8,8 @@ import MapView, { type MapMarker } from '../components/MapView.vue'
 import AnnexeSection from '../components/AnnexeSection.vue'
 import CommuteSection from '../components/CommuteSection.vue'
 import CostsSection from '../components/CostsSection.vue'
-import SchoolsSection from '../components/SchoolsSection.vue'
 import NotesSection from '../components/NotesSection.vue'
+import GroupMonthlyLine from '../components/GroupMonthlyLine.vue'
 import * as api from '../services/api'
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +25,13 @@ const triage = computed(() => store.triage[rid.value])
 watch(() => route.params.rid, (newRid) => {
   if (newRid) store.loadDetail(newRid as string)
 }, { immediate: true })
+
+// Freshness is push-delivered (dag-library Thread rule 5): when the
+// websocket applies a new summary for this property, re-read the
+// detail so the open page follows without a reload.
+watch(() => store.summaries[rid.value], () => {
+  if (rid.value) void store.loadDetail(rid.value, true)
+})
 
 // ── Section nav state ────────────────────────────────
 const activeSection = ref('summary')
@@ -58,20 +65,80 @@ const price = computed(() => detail.value?.rightmove_price?.succeeded
 
 const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
+type MonthlyGroups =
+  | {
+      isDelta: true
+      coupleLabel: string
+      othersLabel: string
+      coupleDelta: { value: string; approx: boolean }
+      othersDelta: { value: string; approx: boolean } | null
+      approx: boolean
+    }
+  | {
+      isDelta: false
+      coupleLabel: string
+      othersLabel: string
+      couple: number
+      others: number | null
+      approx: boolean
+    }
 
-const monthlyGroups = computed(() => {
+interface GroupLine {
+  label: string
+  delta: { value: string; approx: boolean } | null
+  absolute: number | null
+  approx: boolean
+}
+
+const monthlyGroups = computed<MonthlyGroups | null>(() => {
   const g = detail.value?.affordability?.group_monthly_cost
   if (!g?.succeeded || !g.value?.couple) return null
-  const couple = Number(g.value.couple.value)
-  const others = g.value.others ? Number(g.value.others.value) : null
   const approx = (g.value.couple.stddev ?? 0) > 0
+  const coupleLabel = g.value.couple_label || store.groupLabels.coupleLabel
+  const othersLabel = g.value.others_label || store.groupLabels.othersLabel
+  // The monthly INCREMENT vs the current home, signed — the same
+  // figure the index cards render (delta_vs_home is attached
+  // server-side; it is null for the current home itself, which keeps
+  // its absolute totals).
+  const delta = g.value.delta_vs_home ?? null
+  if (delta) {
+    return {
+      isDelta: true,
+      coupleLabel,
+      othersLabel,
+      coupleDelta: { value: delta.couple?.value ?? '0', approx: delta.couple?.approx ?? false },
+      othersDelta: delta.others ? { value: delta.others.value, approx: delta.others.approx } : null,
+      approx,
+    }
+  }
   return {
-    coupleLabel: g.value.couple_label || 'S+L',
-    couple,
-    othersLabel: g.value.others_label || 'A',
-    others,
+    isDelta: false,
+    coupleLabel,
+    othersLabel,
+    couple: Number(g.value.couple.value),
+    others: g.value.others ? Number(g.value.others.value) : null,
     approx,
   }
+})
+
+const coupleLine = computed((): GroupLine | null => {
+  const m = monthlyGroups.value
+  if (!m) return null
+  if (m.isDelta) return { label: m.coupleLabel, delta: m.coupleDelta, absolute: null, approx: m.approx }
+  return { label: m.coupleLabel, delta: null, absolute: m.couple, approx: m.approx }
+})
+
+const othersLine = computed((): GroupLine | null => {
+  const m = monthlyGroups.value
+  if (!m) return null
+  if (m.isDelta) {
+    // Delta mode: others may be uncomputable (null delta) — no line.
+    if (m.othersDelta === null) return null
+    return { label: m.othersLabel, delta: m.othersDelta, absolute: null, approx: false }
+  }
+  // Absolute mode: no others figure — no line.
+  if (m.others === null) return null
+  return { label: m.othersLabel, delta: null, absolute: m.others, approx: m.approx }
 })
 
 // ── Surface existing data ────────────────────────────
@@ -255,20 +322,16 @@ async function saveAddress() {
             <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
           </div>
           <div class="summary-facts__right">
-            <span
-              v-if="monthlyGroups"
-              class="summary-monthly"
-              :title="monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined"
-            >
-              {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
-            </span>
-            <span
-              v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined"
-              class="summary-monthly"
-              :title="monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined"
-            >
-              {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
-            </span>
+            <GroupMonthlyLine
+              v-if="coupleLine"
+              :label="coupleLine.label"
+              :delta="coupleLine.delta"
+              :absolute="coupleLine.absolute"
+              :approx="coupleLine.approx"
+              line-class="summary-monthly"
+              title="Council tax estimated — total is approximate"
+            />
+            <GroupMonthlyLine v-if="othersLine" v-bind="othersLine" line-class="summary-monthly" />
           </div>
         </div>
       </div>

@@ -43,9 +43,26 @@ const active = computed(() => store.whatIfActive)
 // While a what-if is active the panel is pinned open — the exits live
 // in its footer, so it stays up until the mode is resolved (toggle,
 // reload, it doesn't matter: Back or Keep are the only ways out).
+// When the mode ENDS (restore here, or another device restoring), the
+// panel re-reads the real numbers: it edits LIVE data and its local
+// copy holds the discarded scenario values.
+let sawActive = false
 watch(active, v => {
-  if (v) collapsed.value = false
+  if (v) {
+    collapsed.value = false
+    sawActive = true
+  } else if (sawActive) {
+    sawActive = false
+    void load()
+  }
 }, { immediate: true })
+
+// Unfurling always re-reads the server state: the panel is an editor of
+// LIVE family data, so a stale local copy (page open across changes made
+// elsewhere) must never be what a "Try" pushes.
+watch(collapsed, v => {
+  if (!v) void load()
+})
 
 async function toggleCollapsed() {
   // Furling an applied what-if cancels it — the real numbers come back
@@ -217,7 +234,7 @@ async function accept() {
         >Commutes</button>
       </nav>
 
-      <fieldset class="whatif__fieldset" :disabled="active">
+      <fieldset class="whatif__fieldset" :disabled="busy">
       <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
         <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
           <div class="card-heading">{{ p.name }}</div>
@@ -261,6 +278,7 @@ async function accept() {
 
       <div v-else class="settings-panel" role="tabpanel">
         <div v-for="p in persons" :key="p.name" class="settings-card dest-card whatif-person">
+          <div class="card-heading">{{ p.name }}</div>
           <label class="toggle-row">
             <span class="toggle-row__label">Has a car</span>
             <ToggleSwitch v-model="p.has_car" />
@@ -318,7 +336,7 @@ async function accept() {
   border: 1.5px solid var(--border);
   border-radius: var(--radius);
   background: var(--card-bg);
-  padding: var(--sp-3);
+  padding: 0 var(--sp-3);
 }
 .whatif__header {
   display: flex;
@@ -330,8 +348,7 @@ async function accept() {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: 44px;
-  padding: 0;
+  padding: var(--sp-2) 0;
   border: none;
   background: none;
   cursor: pointer;
@@ -357,7 +374,7 @@ async function accept() {
 .whatif__fieldset {
   border: none;
   padding: 0;
-  margin: var(--sp-3) 0 0;
+  margin: var(--sp-2) 0 0;
   min-width: 0;
 }
 .whatif__footer {
@@ -365,7 +382,7 @@ async function accept() {
   flex-direction: column;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3) 0;
+  padding: var(--sp-2) 0;
 }
 .whatif__footer-buttons {
   display: flex;
@@ -389,25 +406,25 @@ async function accept() {
 .whatif-person__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
+  gap: var(--sp-2) var(--sp-4);
   align-items: center;
-  margin-bottom: 0.4rem;
+  margin-bottom: var(--sp-1);
 }
 .whatif-person__toggle {
   font-size: 0.85rem;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--sp-1);
 }
 .whatif-person__fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem 1rem;
+  gap: var(--sp-2) var(--sp-4);
 }
 .whatif-person__field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--sp-1);
   margin-bottom: var(--sp-2);
   color: var(--text-secondary);
   font-size: var(--fs-sm);
@@ -426,7 +443,7 @@ async function accept() {
 }
 .whatif-person__field .band-helper { font-size: var(--fs-2xs); }
 .whatif-person__field input {
-  padding: 4px 10px;
+  padding: var(--sp-1) var(--sp-3);
   border: none;
   background: var(--pill-bg);
   border-radius: var(--radius-sm);
@@ -440,23 +457,18 @@ async function accept() {
 .whatif__status {
   color: var(--text-muted);
   font-size: 0.85rem;
-  margin: 0.4rem 0 0;
+  margin: var(--sp-1) 0 0;
 }
 .whatif__error {
   color: var(--red);
   font-size: 0.85rem;
-  margin: 0.4rem 0 0;
-}
-.whatif__footer {
-  display: flex;
-  gap: 8px;
-  margin-top: 14px;
+  margin: var(--sp-1) 0 0;
 }
 .whatif__btn {
   flex: 1;
   border: none;
   border-radius: var(--radius-sm);
-  padding: 10px;
+  padding: var(--sp-2) var(--sp-3);
   font-size: 0.8125rem;
   font-weight: var(--fw-semibold);
   cursor: pointer;
@@ -476,7 +488,7 @@ async function accept() {
 }
 
 .whatif__cards-note {
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
   font-size: 0.8125rem;
   color: var(--text-muted);
   text-align: left;
