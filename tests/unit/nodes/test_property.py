@@ -70,9 +70,9 @@ class TestProperty:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
 
         await flush_processor()
 

@@ -335,7 +335,7 @@ class TestValueProjection:
         commute = Commute(
             person=Person(name="", has_car=True),
             label="Pimlico",
-            destination=PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="Pimlico", address="SW1P 1AA"),
             duration=Quantity(68, "minute"),  # type: ignore[arg-type]  # pint's stub types Quantity(68, "minute") as PlainQuantity, not assignable to Commute.duration's bare Quantity[Unknown] (invariant generic); PlainQuantity is a pint Quantity at runtime
             daily_cost=Money("27", "GBP"),
         )
@@ -399,7 +399,7 @@ class TestValueProjection:
         commute = Commute(
             person=Person(name="", has_car=True),
             label="Pimlico",
-            destination=PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="Pimlico", address="SW1P 1AA"),
             duration=Quantity(68, "minute"),  # type: ignore[arg-type]  # pint's stub types Quantity(68, "minute") as PlainQuantity, not assignable to Commute.duration's bare Quantity[Unknown] (invariant generic); PlainQuantity is a pint Quantity at runtime
             daily_cost=Money("27", "GBP"),
         )

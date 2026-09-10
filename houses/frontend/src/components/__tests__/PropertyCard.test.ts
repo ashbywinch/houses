@@ -234,7 +234,7 @@ describe('PropertyCard commute attribution (P2)', () => {
               duration: { value: 32, unit: 'minute' },
               label: 'Pimlico',
               person: { name: 'Simon' },
-              destination: { label: 'Pimlico', address: '1 Drummond Gate, Pimlico, London SW1V 2QQ' },
+              destination: { label: 'Pimlico', address: '1 Example Street, London SW1P 1AA' },
             },
             error: null, provenance: { label: 'test' }, is_child: false,
           },
@@ -243,7 +243,7 @@ describe('PropertyCard commute attribution (P2)', () => {
     })
     const wrapper = mountCard({ rid: '123', data: summary })
     const href = wrapper.find('a.pill-link').attributes('href') ?? ''
-    expect(href).toContain(encodeURIComponent('1 Drummond Gate, Pimlico, London SW1V 2QQ'))
+    expect(href).toContain(encodeURIComponent('1 Example Street, London SW1P 1AA'))
   })
 })
 

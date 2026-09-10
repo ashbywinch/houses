@@ -292,7 +292,7 @@ class CommuteRouter:
         """Extract the UK postcode outcode from a postcode or address string.
 
         Uses ``uk-postcodes-parsing`` to reliably find postcodes embedded
-        in full addresses (e.g. ``"1 Drummond Gate, London SW1V 2QQ"``).
+        in full addresses (e.g. ``"1 Example Street, London SW1P 1AA"``).
         Returns ``None`` for coordinate strings (``"51.5,-0.1"``).
         """
         postcodes = _ukp.parse_from_corpus(text.strip().upper(), attempt_fix=False)

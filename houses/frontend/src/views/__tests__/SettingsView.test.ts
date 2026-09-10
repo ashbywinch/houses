@@ -53,14 +53,14 @@ function makeSettings() {
           places_of_interest: [
             {
               label: 'Pimlico',
-              address: '1 Drummond Gate, Pimlico, London SW1V 2QQ',
+              address: '1 Example Street, London SW1P 1AA',
               trips_per_week: 1,
               weeks_per_year: 46,
               acceptable_modes: ['transit'],
             },
             {
               label: 'Bracknell',
-              address: 'Waite House, Doncastle Road, Bracknell, Berkshire RG12 8YA',
+              address: 'Example House, Test Road, Bracknell, Berkshire RG12 1AA',
               trips_per_week: 1,
               weeks_per_year: 46,
               acceptable_modes: ['car'],
@@ -78,7 +78,7 @@ function makeSettings() {
           places_of_interest: [
             {
               label: 'Aldgate',
-              address: 'Eastgate House, 40 Dukes Place, London EC3A 7LP',
+              address: 'Example House, 10 Example Street, London EC3A 4NE',
               trips_per_week: 2,
               weeks_per_year: 46,
               acceptable_modes: ['transit'],

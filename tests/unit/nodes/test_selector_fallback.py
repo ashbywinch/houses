@@ -48,7 +48,7 @@ def _commute(duration_min: int, cost_gbp: float, *, infeasible: bool = False) ->
     return Commute(
         person=Person(name="Simon", has_car=True),
         label="x",
-        destination=PlaceOfInterest(label="x", address="SW1V 2QQ"),
+        destination=PlaceOfInterest(label="x", address="SW1P 1AA"),
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
         mode="transit",
@@ -59,7 +59,7 @@ def _selector(node_id: str, transit: Attempt, walk: Attempt | None, drive: Attem
     origin = UserInputNode[GeoPoint](f"{node_id}_origin", GeoPoint)
     origin.push(GeoPoint(51.5, -0.1), "test")
     poi = UserInputNode[str](f"{node_id}_poi", str)
-    poi.push("RG12 8YA", "test")
+    poi.push("RG12 1AA", "test")
     return CommuteSelectorNode(
         f"{node_id}/commute",
         options=CommuteSelectorOptions(

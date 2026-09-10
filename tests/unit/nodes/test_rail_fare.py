@@ -18,7 +18,7 @@ def _make_commute(
     mode: str = "transit",
     details: tuple[CostGroup, ...] | None = None,
 ) -> Commute:
-    office = PlaceOfInterest("Office", "SW1V 2QQ")
+    office = PlaceOfInterest("Office", "SW1P 1AA")
     person = Person("Simon", True, places_of_interest=(office,))
     if details is not None:
         pass

@@ -33,7 +33,7 @@ async def test_returns_peak_single_fare(tmp_path):
 
     result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
-        "SW1V 2QQ",
+        "SW1P 1AA",
         _data=_tfl_fare_response(340),  # £3.40 peak single
     )
     assert result == Money("3.40", "GBP")
@@ -46,7 +46,7 @@ async def test_returns_none_when_no_journey():
 
     result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
-        "SW1V 2QQ",
+        "SW1P 1AA",
         _data={"journeys": []},
     )
     assert result is None
@@ -59,7 +59,7 @@ async def test_returns_none_when_no_fare(tmp_path):
 
     result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
-        "SW1V 2QQ",
+        "SW1P 1AA",
         _data={
             "journeys": [
                 {
@@ -79,7 +79,7 @@ async def test_uses_peak_time_params():
 
     result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
-        "SW1V 2QQ",
+        "SW1P 1AA",
         _data=_tfl_fare_response(340),
     )
     # Just verify no exception — the function exists and runs
@@ -133,8 +133,8 @@ class TestFormatRouteSummary:
                 "mode": {"name": "walking"},
                 "duration": 7,
                 "departurePoint": {"commonName": "Pimlico Underground Station"},
-                "arrivalPoint": {"commonName": "SW1V 2QQ"},
-                "instruction": {"summary": "Walk to SW1V 2QQ"},
+                "arrivalPoint": {"commonName": "SW1P 1AA"},
+                "instruction": {"summary": "Walk to SW1P 1AA"},
             },
         ]
     }
@@ -257,8 +257,8 @@ class TestFormatRouteSummary:
                 {
                     "mode": {"name": "walking"},
                     "duration": 7,
-                    "arrivalPoint": {"commonName": "SW1V 2QQ"},
-                    "instruction": {"summary": "Walk to SW1V 2QQ"},
+                    "arrivalPoint": {"commonName": "SW1P 1AA"},
+                    "instruction": {"summary": "Walk to SW1P 1AA"},
                 },
             ]
         }
@@ -278,7 +278,7 @@ class TestTfLRouteSummary:
         """JourneyLeg descriptions should contain station names and transit route info."""
         from houses.tfl_client import TflClient
 
-        route = TflClient("SL6", "SW1V 2QQ", "test")
+        route = TflClient("SL6", "SW1P 1AA", "test")
         tfl_data = {
             "journeys": [
                 {
@@ -340,7 +340,7 @@ class TestTfLRouteSummary:
         """_build_cost_groups must handle bus legs (regression: _shorten_station scope)."""
         from houses.tfl_client import TflClient
 
-        route = TflClient("SL6", "SW1V 2QQ", "test")
+        route = TflClient("SL6", "SW1P 1AA", "test")
         tfl_data = {
             "journeys": [
                 {
@@ -375,7 +375,7 @@ class TestTfLRouteSummary:
         """Tube leg with no route.name extracts line from instruction text."""
         from houses.tfl_client import TflClient
 
-        route = TflClient("SL6", "SW1V 2QQ", "test")
+        route = TflClient("SL6", "SW1P 1AA", "test")
         tfl_data = {
             "journeys": [
                 {
@@ -596,7 +596,7 @@ class TestGoogleTransitFallback:
         router = CommuteRouter(routes_client=_FakeRoutesClient(self._route_payload()))
         commute = await router.transit_route(
             GeoPoint(51.415344, -1.511056),
-            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+            PlaceOfInterest(label="Pimlico", address="1 Example Street, London SW1P 1AA"),
         )
         assert commute is not None and not commute.infeasible
         assert commute.duration.magnitude == 99  # 5952s ≈ 99 min
@@ -621,7 +621,7 @@ class TestGoogleTransitFallback:
         router = CommuteRouter(routes_client=_FakeRoutesClient(self._route_payload()))
         commute = await router.transit_route(
             GeoPoint(51.415344, -1.511056),
-            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+            PlaceOfInterest(label="Pimlico", address="1 Example Street, London SW1P 1AA"),
         )
         assert commute is not None
         train_legs = [leg for cg in commute.details for leg in cg.legs if leg.mode.name == "TRAIN"]
@@ -642,7 +642,7 @@ class TestGoogleTransitFallback:
         router = CommuteRouter(routes_client=_FakeRoutesClient({"routes": []}))
         result = await router.transit_route(
             GeoPoint(51.415344, -1.511056),
-            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+            PlaceOfInterest(label="Pimlico", address="1 Example Street, London SW1P 1AA"),
         )
         assert result is None
 
@@ -655,6 +655,6 @@ class TestGoogleTransitFallback:
         router = CommuteRouter(routes_client=_RaisingRoutesClient())
         result = await router.transit_route(
             GeoPoint(51.415344, -1.511056),
-            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+            PlaceOfInterest(label="Pimlico", address="1 Example Street, London SW1P 1AA"),
         )
         assert result is None

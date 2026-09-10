@@ -7,7 +7,7 @@ import pytest
 from tools.commute.station_shed import Station
 
 PBO = Station("Peterborough", "PBO", 52.5648, -0.2370)
-DEST = "SW1V 2QQ"
+DEST = "SW1P 1AA"
 COORDS = "52.5648,-0.237"
 NAME = "Peterborough Rail Station"
 
@@ -166,7 +166,7 @@ async def test_route_duration_builds_national_search_request():
     fetch = _FakeCachedFetch([{"journeys": [{"duration": 79}]}])
     await TflClient.route_duration(COORDS, DEST, fetch=fetch)
     url, params = fetch.called[0]
-    assert url == "https://api.tfl.gov.uk/Journey/JourneyResults/52.5648,-0.237/to/SW1V 2QQ"
+    assert url == "https://api.tfl.gov.uk/Journey/JourneyResults/52.5648,-0.237/to/SW1P 1AA"
     assert params["nationalSearch"] == "true"
     assert params["timeIs"] == "arriving"
     assert "bus" in params["mode"]

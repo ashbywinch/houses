@@ -44,7 +44,7 @@ class TestExtractTown:
         assert extract_town("Leatherhead Road, Chessington, Surrey. KT9 2HN") == "Chessington"
 
     def test_returns_empty_for_address_with_only_postcode(self) -> None:
-        assert extract_town("SW1V 2QQ") == ""
+        assert extract_town("SW1P 1AA") == ""
 
     def test_returns_empty_for_empty_address(self) -> None:
         assert extract_town("") == ""
@@ -71,7 +71,7 @@ class TestExtractTown:
         result = await enrich_walkability(
             51.5,
             -0.1,
-            "Some Street, SW1V 2QQ",
+            "Some Street, SW1P 1AA",
             fns=WalkabilityFns(
                 extract_town_centre=mock_centre_fails,
                 walk_duration=mock_dur,

@@ -35,7 +35,7 @@ class _FloatCostNode(DerivedNode[Commute]):
             Commute(
                 person=Person(name="Test", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
+                destination=PlaceOfInterest(label="Office", address="SW1P 1AA"),
                 duration=DURATION,
                 daily_cost=7.2,  # type: ignore[arg-type]  # why: deliberately-wrong type is the fixture — this test asserts a raw float daily_cost raises at to_json() instead of persisting silently
                 mode="transit",
@@ -71,7 +71,7 @@ class _ProperNode(DerivedNode[Commute]):
             Commute(
                 person=Person(name="Test", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
+                destination=PlaceOfInterest(label="Office", address="SW1P 1AA"),
                 duration=DURATION,
                 daily_cost=Money("7.20", "GBP"),
                 mode="transit",

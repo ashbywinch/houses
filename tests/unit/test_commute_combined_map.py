@@ -24,7 +24,7 @@ DRIVE: dict = {
             "name": "Dad — 90 min drive",
             "polygon": [[51.9, -1.6], [51.9, -1.5], [52.0, -1.5], [52.0, -1.6]],
             "rightmove_url": "https://rm/dad",
-            "destination": {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.94, "lon": -1.55},
+            "destination": {"label": "Dad", "postcode": "OX7 1AA", "lat": 51.94, "lon": -1.55},
             "threshold_min": 90,
         },
         {
@@ -32,7 +32,7 @@ DRIVE: dict = {
             "name": "Bracknell — 90 min drive",
             "polygon": [[51.4, -0.8], [51.4, -0.7], [51.5, -0.7], [51.5, -0.8]],
             "rightmove_url": "https://rm/bracknell",
-            "destination": {"label": "Bracknell", "postcode": "RG12 8YA", "lat": 51.41, "lon": -0.77},
+            "destination": {"label": "Bracknell", "postcode": "RG12 1AA", "lat": 51.41, "lon": -0.77},
             "threshold_min": 90,
         },
     ],

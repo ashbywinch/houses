@@ -15,9 +15,9 @@ from tools.commute.station_shed import (
     load_stations,
 )
 
-PIMLICO = GeoPoint(51.4904, -0.1378)  # SW1V 2QQ approx
-ALDGATE = GeoPoint(51.5145, -0.0762)  # EC3A 7LP approx
-OFFICES = [Office("SW1V 2QQ", PIMLICO), Office("EC3A 7LP", ALDGATE)]
+PIMLICO = GeoPoint(51.4904, -0.1378)  # SW1P 1AA approx
+ALDGATE = GeoPoint(51.5145, -0.0762)  # EC3A 4NE approx
+OFFICES = [Office("SW1P 1AA", PIMLICO), Office("EC3A 4NE", ALDGATE)]
 THRESHOLD = 132
 
 BBOX = BBox(lat_min=50.0, lat_max=54.0, lon_min=-4.0, lon_max=2.0)
@@ -96,8 +96,8 @@ class _CountingRouter:
         return self.durations.get((station.crs, dest))
 
 
-DEST_P = "SW1V 2QQ"
-DEST_A = "EC3A 7LP"
+DEST_P = "SW1P 1AA"
+DEST_A = "EC3A 4NE"
 
 
 def _routing_ctx(router) -> RoutingContext:

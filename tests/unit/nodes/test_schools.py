@@ -39,7 +39,7 @@ async def test_primary_school_impossible_without_location():
 
     loc = UserInputNode[GeoPoint]("loc_ps", GeoPoint)
     addr = UserInputNode[str]("addr_ps", str)
-    addr.push("10 High St, SW1V 2QQ", "test")
+    addr.push("10 High St, SW1P 1AA", "test")
     await flush_processor()
     node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
     await flush_processor()
@@ -53,7 +53,7 @@ async def test_secondary_school_impossible_without_location():
 
     loc = UserInputNode[GeoPoint]("loc_ss", GeoPoint)
     addr = UserInputNode[str]("addr_ss", str)
-    addr.push("10 High St, SW1V 2QQ", "test")
+    addr.push("10 High St, SW1P 1AA", "test")
     await flush_processor()
     node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
     await flush_processor()
@@ -153,7 +153,7 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
         addr = UserInputNode[str]("addr_ss3", str)
         node = SecondarySchoolNode("ss3", best_location=loc, best_address=addr)
         loc.push(GeoPoint(51.5, -0.1), "test")
-        addr.push("10 High St, London, SW1V 2QQ", "test")
+        addr.push("10 High St, London, SW1P 1AA", "test")
         await flush_processor()
         a = await node.attempt()
         assert not a.succeeded
@@ -175,7 +175,7 @@ async def test_primary_school_returns_impossible_when_no_school_found():
         addr = UserInputNode[str]("addr_ps3", str)
         node = PrimarySchoolNode("ps3", best_location=loc, best_address=addr)
         loc.push(GeoPoint(51.5, -0.1), "test")
-        addr.push("10 High St, London, SW1V 2QQ", "test")
+        addr.push("10 High St, London, SW1P 1AA", "test")
         await flush_processor()
         a = await node.attempt()
         assert not a.succeeded
@@ -198,7 +198,7 @@ class TestSchoolGenderFiltering:
             phase="primary",
             gender=SchoolGender(gender),
             type_of_establishment="community school",
-            postcode="SW1V 2QQ",
+            postcode="SW1P 1AA",
             website="",
             ofsted_rating="Good",
             inspection_year="2022",
@@ -1041,7 +1041,7 @@ class TestSchoolErrorPropagation:
             addr = UserInputNode[str]("addr_pe1", str)
             node = PrimarySchoolNode("pe1", best_location=loc, best_address=addr)
             loc.push(GeoPoint(51.5, -0.1), "test")
-            addr.push("10 High St, London, SW1V 2QQ", "test")
+            addr.push("10 High St, London, SW1P 1AA", "test")
             await flush_processor()
             a = await node.attempt()
             assert not a.succeeded
@@ -1062,7 +1062,7 @@ class TestSchoolErrorPropagation:
             addr = UserInputNode[str]("addr_pe2", str)
             node = PrimarySchoolNode("pe2", best_location=loc, best_address=addr)
             loc.push(GeoPoint(51.5, -0.1), "test")
-            addr.push("10 High St, London, SW1V 2QQ", "test")
+            addr.push("10 High St, London, SW1P 1AA", "test")
             await flush_processor()
             a = await node.attempt()
             assert not a.succeeded

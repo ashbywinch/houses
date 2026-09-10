@@ -11,7 +11,7 @@ from tools.commute.station_shed import (
     resume_allowed,
 )
 
-_OFFICES = [Office("SW1V 2QQ", GeoPoint(51.4904, -0.1378)), Office("EC3A 7LP", GeoPoint(51.5145, -0.0762))]
+_OFFICES = [Office("SW1P 1AA", GeoPoint(51.4904, -0.1378)), Office("EC3A 4NE", GeoPoint(51.5145, -0.0762))]
 SIG = config_signature(_OFFICES).to_dict()
 
 
@@ -72,7 +72,7 @@ def test_resume_allowed_rejects_engine_version_mismatch():
 def test_resume_allowed_rejects_destination_change():
     # Changing an office postcode without a version bump must refuse a resume
     # (records routed to the old destination would mix with new metadata).
-    assert resume_allowed(dict(SIG, destinations=["SW1V 2QQ", "EC2A 4BX"]), SIG) is False
+    assert resume_allowed(dict(SIG, destinations=["SW1P 1AA", "EC2A 4BX"]), SIG) is False
 
 
 def test_resume_allowed_rejects_threshold_change():
@@ -84,10 +84,10 @@ def test_resume_allowed_rejects_missing_config():
 
 
 def test_build_metadata_uses_current_constants_and_keeps_timestamp():
-    offices = [Office("SW1V 2QQ", GeoPoint(51.4904, -0.1378)), Office("EC3A 7LP", GeoPoint(51.5145, -0.0762))]
+    offices = [Office("SW1P 1AA", GeoPoint(51.4904, -0.1378)), Office("EC3A 4NE", GeoPoint(51.5145, -0.0762))]
     meta = build_metadata(offices, 1819, "2026-08-02T09:00:00+00:00").to_dict()
     assert meta["generated_at"] == "2026-08-02T09:00:00+00:00"  # preserved across resumes
     assert meta["threshold_min"] == 132  # current constants, never stale
-    assert meta["destinations"] == ["SW1V 2QQ", "EC3A 7LP"]
+    assert meta["destinations"] == ["SW1P 1AA", "EC3A 4NE"]
     assert meta["expected_stations"] == 1819
     assert meta["engine_version"] == "station-shed-v1"

@@ -61,7 +61,7 @@ class TestWalkCommuteFailsFast:
 
         from houses.tfl_client import TflClient
 
-        route = TflClient("51.3,-0.58", "EC3A 7LP", "Aldgate")
+        route = TflClient("51.3,-0.58", "EC3A 4NE", "Aldgate")
 
         # Empty TfL response — no journeys, no fare data.
         # raw_cost will be None → daily_cost_gbp would be None
@@ -97,7 +97,7 @@ async def test_find_nearest_handles_coordinate_string():
         phase="Primary",
         gender=SchoolGender.MIXED,
         type_of_establishment="community school",
-        postcode="SW1V 2QQ",
+        postcode="SW1P 1AA",
         website="",
         ofsted_rating="Good",
         inspection_year="2022",
@@ -141,12 +141,12 @@ class TestCongestionZone:
     @pytest.mark.parametrize(
         "postcode,expected",
         [
-            ("SW1V 2QQ", True),  # Simon — Pimlico
-            ("EC3A 7LP", True),  # Lorena — Aldgate
+            ("SW1P 1AA", True),  # Simon — Pimlico
+            ("EC3A 4NE", True),  # Lorena — Aldgate
             ("N1 9GU", False),  # Islington — outside zone (only Angel is inside)
             ("SE1 7PB", False),  # Southwark — large parts outside zone
             ("E1 6AN", False),  # Whitechapel — outside zone
-            ("RG12 8YA", False),  # Bracknell
+            ("RG12 1AA", False),  # Bracknell
             ("SW19 5AE", False),  # Wimbledon (outer London — NOT in zone)
             ("KT13 8XG", False),  # Weybridge
             ("NW1 4SA", False),  # Camden Town (not in zone)
@@ -208,9 +208,9 @@ _SLOWER_HAS_COST = Attempt.succeeded(
 )
 
 
-_PIMLICO = "1 Drummond Gate, Pimlico, London SW1V 2QQ"
-_BRACKNELL = "Waite House, Doncastle Road, Bracknell, Berkshire RG12 8YA"
-_ALDGATE = "Eastgate House, 40 Dukes Place, Aldgate, London EC3A 7LP"
+_PIMLICO = "1 Example Street, London SW1P 1AA"
+_BRACKNELL = "Example House, Test Road, Bracknell, Berkshire RG12 1AA"
+_ALDGATE = "Example House, 10 Example Street, London EC3A 4NE"
 
 
 class TestGetCommuteChoice:
@@ -392,14 +392,14 @@ class TestTflNoBusWhenHasCar:
         no_bus = Commute(
             person=Person(name="", has_car=True),
             label="",
-            destination=PlaceOfInterest(label="", address="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="", address="SW1P 1AA"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("20.0", "GBP"),
         )
         with_bus = Commute(
             person=Person(name="", has_car=True),
             label="",
-            destination=PlaceOfInterest(label="", address="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="", address="SW1P 1AA"),
             duration=Quantity(70, "minute"),
             daily_cost=Money("15.0", "GBP"),
         )
@@ -427,7 +427,7 @@ class TestTflNoBusWhenHasCar:
         token = _sp.set(svc)
         try:
             router = CommuteRouter()
-            result = await router._tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
+            result = await router._tfl_transit_commute("GU21 2NA", "EC3A 4NE", has_car=True)
         finally:
             _sp.reset(token)
         assert result.succeeded, f"_tfl_transit_commute should succeed, got {result}"
@@ -450,7 +450,7 @@ class TestTflNoBusWhenHasCar:
         with_bus = Commute(
             person=Person(name="", has_car=True),
             label="",
-            destination=PlaceOfInterest(label="", address="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="", address="SW1P 1AA"),
             duration=Quantity(70, "minute"),
             daily_cost=Money("15.0", "GBP"),
         )
@@ -478,7 +478,7 @@ class TestTflNoBusWhenHasCar:
         token = _sp.set(svc)
         try:
             router = CommuteRouter()
-            result = await router._tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
+            result = await router._tfl_transit_commute("GU21 2NA", "EC3A 4NE", has_car=True)
         finally:
             _sp.reset(token)
         commute = result.value_or_none()
@@ -509,7 +509,7 @@ class TestParkAndRideCostGroup:
             station_map={"fleet rail station": "Fleet"},
         )
 
-        route = TflClient("SL6", "SW1V 2QQ", "test", options=TflRouteOptions(park_and_ride=True))
+        route = TflClient("SL6", "SW1P 1AA", "test", options=TflRouteOptions(park_and_ride=True))
         data = {
             "journeys": [
                 {
@@ -598,8 +598,8 @@ class TestAddressWaypoint:
     def test_postcode_returns_address_waypoint(self):
         from houses.commute_router import CommuteRouter
 
-        result = CommuteRouter._address_waypoint("SW1V 2QQ")
-        assert result.to_dict() == {"address": "SW1V 2QQ"}
+        result = CommuteRouter._address_waypoint("SW1P 1AA")
+        assert result.to_dict() == {"address": "SW1P 1AA"}
 
     def test_geopoint_returns_location_waypoint(self):
         from houses.commute_router import CommuteRouter
@@ -756,14 +756,14 @@ class TestGoogleRouteCommuteLegDestination:
 
         router = CommuteRouter(routes_client=_StubClient())
         result = await router._google_route_commute(
-            "51.5,-0.1", "Waite House, Doncastle Road, Bracknell RG12 8YA", "DRIVE"
+            "51.5,-0.1", "Example House, Test Road, Bracknell RG12 1AA", "DRIVE"
         )
         assert result.succeeded
         commute = result.value_or_none()
         assert commute is not None
         leg = commute.details[0].legs[0]
         assert leg.mode == LegMode.DRIVE
-        assert leg.end_station == "Waite House, Doncastle Road, Bracknell RG12 8YA"
+        assert leg.end_station == "Example House, Test Road, Bracknell RG12 1AA"
 
 
 class TestGoogleRoutesPostSeam:

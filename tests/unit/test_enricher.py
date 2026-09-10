@@ -43,7 +43,7 @@ def _make_commute(duration_min: int = 32, cost_gbp: str | float = "10.0") -> Com
     from houses.commute import CostGroup
     from houses.model.domain import Commute as CommuteDomain
 
-    office = PlaceOfInterest("Office", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46)
+    office = PlaceOfInterest("Office", "SW1P 1AA", trips_per_week=1, weeks_per_year=46)
     person = Person("Simon", True, places_of_interest=(office,))
     return CommuteDomain(
         person=person,
@@ -143,7 +143,7 @@ class TestTransitCommute:
         poi = UserInputNode[PlaceOfInterest]("tr_poi3", PlaceOfInterest)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
-        office = PlaceOfInterest("Office", "SW1V 2QQ")
+        office = PlaceOfInterest("Office", "SW1P 1AA")
         poi.push(office)
 
         commute = _make_commute(duration_min=45, cost_gbp="12.50")
@@ -195,7 +195,7 @@ class TestTransitCommute:
         poi = UserInputNode[PlaceOfInterest]("tr_poi4", PlaceOfInterest)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
 
         class _FakeClient:
             def __init__(self, *args, **kwargs):
@@ -270,7 +270,7 @@ class TestTransitCommute:
         poi = UserInputNode[PlaceOfInterest]("tr_poi6", PlaceOfInterest)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
 
         captured = {}
 
@@ -408,7 +408,7 @@ class TestCommuteSelectorPipeline:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
 
         transit_commute = _make_commute(duration_min=30, cost_gbp="10.0")
         bus_commute = _make_commute(duration_min=55, cost_gbp="5.0")
@@ -445,7 +445,7 @@ class TestCommuteSelectorPipeline:
             ),
         )
         origin.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
 
         await flush_processor()
 
@@ -472,7 +472,7 @@ class TestCommuteSelectorPipeline:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
         transit._commute = None
         transit._attempt = Attempt.impossible("no route")
         transit.changed.emit()
@@ -503,7 +503,7 @@ class TestCommuteSelectorPipeline:
             ),
         )
 
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
         transit.push(_make_commute(duration_min=35, cost_gbp="8.50"))
 
         await flush_processor()
@@ -535,7 +535,7 @@ class TestCommuteSelectorPipeline:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
         transit.push(_make_commute(duration_min=32, cost_gbp="4.50"), "TfL")
         bus.push(_make_commute(duration_min=55, cost_gbp="2.00"), "Bus")
 
@@ -575,7 +575,7 @@ class TestCommuteSelectorPipeline:
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        poi.push(PlaceOfInterest("Office", "SW1P 1AA"), "config")
 
         transit_commute = _make_commute(duration_min=35, cost_gbp="8.50")
         bus.push(_make_commute(duration_min=55, cost_gbp="2.00"), "Bus")
@@ -627,14 +627,14 @@ class TestCommuteBreakdown:
                     "Simon",
                     True,
                     places_of_interest=(
-                        PlaceOfInterest("Pimlico", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
-                        PlaceOfInterest("Bracknell", "RG12 8YA", trips_per_week=1, weeks_per_year=46),
+                        PlaceOfInterest("Pimlico", "SW1P 1AA", trips_per_week=1, weeks_per_year=46),
+                        PlaceOfInterest("Bracknell", "RG12 1AA", trips_per_week=1, weeks_per_year=46),
                     ),
                 ),
                 Person(
                     "Lorena",
                     False,
-                    places_of_interest=(PlaceOfInterest("Aldgate", "EC3A 7LP", trips_per_week=2, weeks_per_year=46),),
+                    places_of_interest=(PlaceOfInterest("Aldgate", "EC3A 4NE", trips_per_week=2, weeks_per_year=46),),
                 ),
             ],
             "test",
@@ -692,14 +692,14 @@ class TestCommuteBreakdown:
                     "Simon",
                     True,
                     places_of_interest=(
-                        PlaceOfInterest("Pimlico", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
-                        PlaceOfInterest("Bracknell", "RG12 8YA", trips_per_week=1, weeks_per_year=46),
+                        PlaceOfInterest("Pimlico", "SW1P 1AA", trips_per_week=1, weeks_per_year=46),
+                        PlaceOfInterest("Bracknell", "RG12 1AA", trips_per_week=1, weeks_per_year=46),
                     ),
                 ),
                 Person(
                     "Lorena",
                     False,
-                    places_of_interest=(PlaceOfInterest("Aldgate", "EC3A 7LP", trips_per_week=2, weeks_per_year=46),),
+                    places_of_interest=(PlaceOfInterest("Aldgate", "EC3A 4NE", trips_per_week=2, weeks_per_year=46),),
                 ),
             ],
             "test",
@@ -819,8 +819,8 @@ class TestParkAndRide:
                     {
                         "mode": {"name": "walking"},
                         "duration": 7,
-                        "arrivalPoint": {"commonName": "SW1V 2QQ"},
-                        "instruction": {"summary": "Walk to SW1V 2QQ"},
+                        "arrivalPoint": {"commonName": "SW1P 1AA"},
+                        "instruction": {"summary": "Walk to SW1P 1AA"},
                     },
                 ],
             }

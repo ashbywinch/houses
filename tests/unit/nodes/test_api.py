@@ -85,7 +85,7 @@ class TestPropertyApi:
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
-        prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
+        prop.rightmove_address.push("10 High St, SW1P 1AA", "Rightmove")
         reg.register("prop123", prop)
         flush_all()
 
@@ -96,11 +96,11 @@ class TestPropertyApi:
 
         resp = client.patch(
             "/api/properties/prop123/address",
-            json={"address": "20 New Rd, London SW1V 2QQ"},
+            json={"address": "20 New Rd, London SW1P 1AA"},
         )
         assert resp.status_code == 200
 
-        assert any(addr == "20 New Rd, London SW1V 2QQ" for _, addr in epc_svc.calls), (
+        assert any(addr == "20 New Rd, London SW1P 1AA" for _, addr in epc_svc.calls), (
             f"EPC must be recomputed with the new address before the PATCH returns, calls={epc_svc.calls}"
         )
         detail = client.get("/api/properties/prop123/detail").json()
@@ -184,7 +184,7 @@ class TestPropertyApi:
                 Person(
                     name="Simon",
                     has_car=True,
-                    places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),),
+                    places_of_interest=(PlaceOfInterest("Office", "SW1P 1AA"),),
                     home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
                 ),
                 Person(name="Lorena", has_car=False),
@@ -255,7 +255,7 @@ class TestPropertyApi:
         try:
             client, reg = self._setup()
             prop = PropertyNodes("prop123")
-            prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
+            prop.rightmove_address.push("10 High St, SW1P 1AA", "Rightmove")
             reg.register("prop123", prop)
             flush_all()
 
@@ -324,7 +324,7 @@ class TestPropertyApi:
             rid = "42345679"
             prop = PropertyNodes(rid)
             prop.rightmove_price.push(Money("500000", "GBP"), "test")
-            prop.rightmove_address.push("1 Test St, SW1V 2QQ", "test")
+            prop.rightmove_address.push("1 Test St, SW1P 1AA", "test")
             prop.works_estimates.push({}, "test")
             prop.rental_income.push(Money("0", "GBP"), "test")
             prop.comment_status.push("", "test")
@@ -495,9 +495,9 @@ def _seed_property() -> str:
     prop.rightmove_address.push("1 Test St", "test")
     prop.rightmove_bedrooms.push("3", "test")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-    prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
     prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-    prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
     prop.works_estimates.push({}, "test")
     prop.rental_income.push(Money("0", "GBP"), "test")
     prop.comment_status.push("", "test")
@@ -694,7 +694,7 @@ class TestPatchPersonApi:
                 has_car=True,
                 email="simon@example.com",
                 is_superuser=superuser,  # live settings are authoritative
-                places_of_interest=(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ"),),
+                places_of_interest=(PlaceOfInterest("Pimlico", "1 Example Street, London SW1P 1AA"),),
             ),
             Person(name="Lorena", has_car=False, email="lorena@example.com"),
             Person(
@@ -770,7 +770,7 @@ class TestPatchPersonApi:
                 "places_of_interest": [
                     {
                         "label": "Pimlico",
-                        "address": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
+                        "address": "1 Example Street, London SW1P 1AA",
                         "trips_per_week": 3,
                         "weeks_per_year": 46,
                         "acceptable_modes": ["transit", "car"],
@@ -1296,9 +1296,9 @@ class TestMonthlyDeltaApi:
         prop.rightmove_address.push(f"{rid} Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push(f"{rid} Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push(f"{rid} Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push(f"{rid} Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push(f"{rid} Test St, SW1P 1AA", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push(status, "test")
@@ -1324,7 +1324,7 @@ class TestMonthlyDeltaApi:
         assert cand["is_current_home"] is False
         assert cand["monthly_baseline"]["rid"] == "880001"
         baseline = cand["monthly_baseline"]
-        assert baseline["address"] == "880001 Test St, SW1V 2QQ"
+        assert baseline["address"] == "880001 Test St, SW1P 1AA"
         assert baseline["others_rent_paid"] == 600.0
         assert re.fullmatch(r"\d+\.\d{2}", baseline["couple"]["value"])
 
@@ -1388,9 +1388,9 @@ class TestRegenerateApi:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("", "test")
@@ -1541,9 +1541,9 @@ class TestWorksEstimateApi:
         prop.rightmove_address.push("1 Test St", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.corrected_address.push("1 Test St, SW1P 1AA", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1P 1AA", "test")
         prop.works_estimates.push({}, "test")
         from money import Money
 

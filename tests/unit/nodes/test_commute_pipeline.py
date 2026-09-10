@@ -44,14 +44,14 @@ def _person(name: str, has_car: bool) -> Person:
     return Person(
         name=name,
         has_car=has_car,
-        places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),),
+        places_of_interest=(PlaceOfInterest("Office", "SW1P 1AA"),),
         bus_walk_penalty=Quantity(30, "minute"),
     )
 
 def _pimlico_commute() -> Commute:
     """Simon/Pimlico: train Clapham Junction → Wandsworth Town.
     TfL returns £0 (NR route) — RailFareNode will add the fare."""
-    office = PlaceOfInterest("Office", "SW1V 2QQ")
+    office = PlaceOfInterest("Office", "SW1P 1AA")
     return Commute(
         person=_person("Simon", has_car=False),
         label="Office",
@@ -75,7 +75,7 @@ def _maidenhead_commute() -> Commute:
     """Simon/Dad: train Maidenhead → Paddington.
     TfL returns £0 (NR route).  Park-and-ride adds parking.
     RailFareNode will add the NR fare."""
-    office = PlaceOfInterest("Dad's", "RG12 8YA")
+    office = PlaceOfInterest("Dad's", "RG12 1AA")
     return Commute(
         person=_person("Simon", has_car=True),
         label="Dad's",
@@ -228,7 +228,7 @@ class TestFullCommutePipeline:
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         loc.push(GeoPoint(51.464, -0.170), "test")
         poi_src = UserInputNode[str]("poi", str)
-        poi_src.push("SW1V 2QQ", "persons_source")
+        poi_src.push("SW1P 1AA", "persons_source")
 
         from dag.attempt import Attempt
 
@@ -305,7 +305,7 @@ class TestFullCommutePipeline:
             rail_fare_result=rail_fare_if,
         )
 
-        _services.routes["SW1V 2QQ"] = _pimlico_commute()
+        _services.routes["SW1P 1AA"] = _pimlico_commute()
 
         await flush_processor()
 
@@ -344,11 +344,11 @@ class TestFullCommutePipeline:
         svc = get_services()
         svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
         poi_src = UserInputNode[str]("poi_mh", str)
-        poi_src.push("RG12 8YA", "persons_source")
+        poi_src.push("RG12 1AA", "persons_source")
         loc = UserInputNode[GeoPoint]("loc_mh", GeoPoint)
         loc.push(GeoPoint(51.518, -0.722), "test")
         postcode = UserInputNode[str]("pc_mh", str)
-        postcode.push("RG12 8YA", "test")
+        postcode.push("RG12 1AA", "test")
 
         class _FakeClient:
             def __init__(self, *args, **kwargs):
@@ -446,7 +446,7 @@ class TestFullCommutePipeline:
             rail_fare_result=rail_fare_if,
         )
 
-        _services.routes["RG12 8YA"] = _maidenhead_commute()
+        _services.routes["RG12 1AA"] = _maidenhead_commute()
 
         await flush_processor()
 
@@ -492,16 +492,16 @@ class TestFullCommutePipeline:
         loc = UserInputNode[GeoPoint]("loc_dr", GeoPoint)
         loc.push(GeoPoint(51.518, -0.722), "test")
         poi_src = UserInputNode[str]("poi_dr", str)
-        poi_src.push("RG12 8YA", "persons_source")
+        poi_src.push("RG12 1AA", "persons_source")
         pc_src = UserInputNode[str]("pc_dr", str)
-        pc_src.push("RG12 8YA", "test")
+        pc_src.push("RG12 1AA", "test")
 
         svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
 
         drive = Commute(
             person=Person(name="Simon", has_car=True),
             label="Office",
-            destination=PlaceOfInterest("Office", "RG12 8YA"),
+            destination=PlaceOfInterest("Office", "RG12 1AA"),
             duration=Quantity(40, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="drive",

@@ -9,7 +9,7 @@ from tools.commute.station_shed import BBox, Office, RoutingContext, Station, bu
 
 PIMLICO = GeoPoint(51.4904, -0.1378)
 ALDGATE = GeoPoint(51.5145, -0.0762)
-OFFICES = [Office("SW1V 2QQ", PIMLICO), Office("EC3A 7LP", ALDGATE)]
+OFFICES = [Office("SW1P 1AA", PIMLICO), Office("EC3A 4NE", ALDGATE)]
 BBOX = BBox(lat_min=50.0, lat_max=54.0, lon_min=-4.0, lon_max=2.0)
 THRESHOLD = 132
 
@@ -33,10 +33,10 @@ STATIONS = [
 ]
 
 DURATIONS = {
-    ("RDG", "SW1V 2QQ"): 55, ("RDG", "EC3A 7LP"): 60,
-    ("GLD", "SW1V 2QQ"): 70, ("GLD", "EC3A 7LP"): 75,
-    ("WOK", "SW1V 2QQ"): 60, ("WOK", "EC3A 7LP"): 65,
-    ("EXD", "SW1V 2QQ"): 150, ("EXD", "EC3A 7LP"): 155,
+    ("RDG", "SW1P 1AA"): 55, ("RDG", "EC3A 4NE"): 60,
+    ("GLD", "SW1P 1AA"): 70, ("GLD", "EC3A 4NE"): 75,
+    ("WOK", "SW1P 1AA"): 60, ("WOK", "EC3A 4NE"): 65,
+    ("EXD", "SW1P 1AA"): 150, ("EXD", "EC3A 4NE"): 155,
 }
 
 
@@ -75,7 +75,7 @@ async def test_resume_routes_only_remaining_stations():
     router2 = _CountingRouter()
     resumed = await build_shed(STATIONS, _ctx(router2), existing_records=checkpoint)
     # Only Exeter (EXD × 2 destinations) is routed; EAL is inner-zone (kept, no calls).
-    assert sorted(router2.calls) == [("EXD", "EC3A 7LP"), ("EXD", "SW1V 2QQ")]
+    assert sorted(router2.calls) == [("EXD", "EC3A 4NE"), ("EXD", "SW1P 1AA")]
     assert resumed == full
 
 
@@ -101,8 +101,8 @@ async def test_implausible_durations_rejected():
     far = [Station("Worcestershire Parkway", "WOP", 52.14, -2.18), *STATIONS[1:]]
     router = _CountingRouter(
         {
-            ("WOP", "SW1V 2QQ"): 35,
-            ("WOP", "EC3A 7LP"): 60,
+            ("WOP", "SW1P 1AA"): 35,
+            ("WOP", "EC3A 4NE"): 60,
             **{k: v for k, v in DURATIONS.items() if k[0] != "WOP"},
         }
     )
@@ -135,8 +135,8 @@ async def test_resume_reroutes_failed_stations():
     # Resume: every non-failed record is done; EXD is re-routed.
     router2 = _CountingRouter()
     resumed = await build_shed(STATIONS, _ctx(router2), existing_records=first)
-    assert ("EXD", "SW1V 2QQ") in router2.calls
-    assert ("EXD", "EC3A 7LP") in router2.calls
+    assert ("EXD", "SW1P 1AA") in router2.calls
+    assert ("EXD", "EC3A 4NE") in router2.calls
     # All other stations were not re-routed.
     assert all(c[0] == "EXD" for c in router2.calls)
     exd2 = next(r for r in resumed if r["crs"] == "EXD")
@@ -171,5 +171,5 @@ async def test_resume_reroutes_station_with_changed_coords():
     resumed = await build_shed(moved, _ctx(router2), existing_records=full)
     rdg = next(r for r in resumed if r["crs"] == "RDG")
     assert rdg["lat"] == 51.45 and rdg["lon"] == -0.96  # fresh record, new coords
-    assert ("RDG", "SW1V 2QQ") in router2.calls  # was re-routed, not skipped
+    assert ("RDG", "SW1P 1AA") in router2.calls  # was re-routed, not skipped
     assert len(router2.calls) == 2  # only RDG × 2 destinations
