@@ -78,6 +78,31 @@ def test_x_...():
 
 A docstring that only describes the scenario without the symptom is an ordinary behaviour test, and the reviewer cannot tell it pins a real bug.
 
+## A derived value is tested by moving its input
+
+A value copied at build time is not a dependency, so no lint, type check or
+review can see that it stopped changing: only a second write can. That makes
+the two-write test the one check that catches it.
+
+Every derived value fed by settings, persons or another node gets a
+**two-write test**:
+
+```python
+def test_the_commute_re_prices_when_the_destination_moves(...):
+    """Regression: after changing a destination, the estimate kept the old
+    place and the old days-per-week — contract: the value AND its provenance
+    follow the settings"""
+    ...assert the value and the provenance for the first input
+    ...push the changed input
+    ...assert BOTH moved
+```
+
+- Assert the value **and** the provenance: a stale provenance with a live
+  value (or the reverse) is the symptom this test exists for
+  (`docs/dag-library.md` → Wiring rules).
+- Two writes in one test, never two tests: the point is that the second
+  write moves the first result.
+
 ## Deterministic fixtures
 
 Integration tests needing a real SQLite DB use in-memory, shared between the app and DAG connection paths — see `tests/unit/isolation_fixtures.py`.

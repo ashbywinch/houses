@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 import dag.scheduler
 from dag.regenerate import force_regenerate, nodes_matching
+from dag.scheduler import run_on_processor
 from houses.web.auth import effective_session_user
 
 admin_router = APIRouter(prefix="/api")
@@ -61,7 +62,7 @@ async def regenerate_nodes(body: dict, request: Request):
 
     registry = dag.scheduler.get_scheduler().registered_nodes()
     matched = nodes_matching(patterns, registry.values())
-    regenerated, skipped = await force_regenerate(matched)
+    regenerated, skipped = await run_on_processor(lambda: force_regenerate(matched))
     return _RegenerateReport(
         matched=len(matched), regenerated=regenerated, skipped=skipped
     ).to_dict()

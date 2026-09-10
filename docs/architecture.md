@@ -2,6 +2,15 @@
 
 **Property Listing Scraper & Enrichment Engine**
 
+> **HARD REQUIREMENT (prime directive): every value the product shows or
+> reasons about is computed IN THE DAG.** The only exception is 100%
+> presentation-only formatting (string layout, localised date text). No
+> build-time decisions, no route-handler arithmetic, no front-end
+> recomputation of figures — a calculation that lives outside the DAG
+> cannot re-price, cannot appear in provenance, and cannot be audited.
+> Every new calculation starts as a node (or a pure predicate consumed by
+> a node), with its inputs as node dependencies.
+
 ## System Overview
 
 Rightmove listings → Firefox Page Assist (BYOK LLM) extracts structured data → FastAPI `POST /api/properties` (:8765) → enrichment nodes compute and persist every value in the DAG (SQLite, `data/houses.db`).

@@ -110,7 +110,7 @@ class TestWalkLegCheckNode:
         commute = Commute(
             person=Person("Simon", has_car=True),
             label="Office",
-            destination=PlaceOfInterest("Office", "SW1P 1AA"),
+            destination=PlaceOfInterest("Office", "SW1V 2QQ"),
             duration=Quantity(30, "minute"),
             daily_cost=Money("0", "GBP"),
             _details=(CostGroup(legs=(), operator="", cost=None),),  # no legs → no walk
@@ -199,7 +199,7 @@ class TestTransitNodeNoRoute:
         return Commute(
             person=Person(name="", has_car=False),
             label=label,
-            destination=PlaceOfInterest(label=label, address="RG12 1AA"),
+            destination=PlaceOfInterest(label=label, address="RG12 8YA"),
             duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
@@ -211,7 +211,7 @@ class TestTransitNodeNoRoute:
         return Commute(
             person=Person(name="", has_car=False),
             label="Route",
-            destination=PlaceOfInterest(label="Route", address="SW1P 1AA"),
+            destination=PlaceOfInterest(label="Route", address="SW1V 2QQ"),
             duration=Quantity(minutes, "minute"),
             daily_cost=Money("5", "GBP"),
             mode="transit",
@@ -240,7 +240,7 @@ class TestTransitNodeNoRoute:
         )
         return await node.compute(
             Attempt.succeeded(GeoPoint(51.5, -0.1)),
-            Attempt.succeeded(PlaceOfInterest(label="X", address="SW1P 1AA")),
+            Attempt.succeeded(PlaceOfInterest(label="X", address="SW1V 2QQ")),
             no_bus,
             with_bus,
         )
@@ -257,7 +257,7 @@ class TestTransitNodeNoRoute:
         node = DriveNode("nc", options=RouteOptions(best_location=loc, poi=poi, has_car=False))
         a = await node.compute(
             Attempt.succeeded(GeoPoint(51.5, -0.1)),
-            Attempt.succeeded(PlaceOfInterest(label="X", address="SW1P 1AA")),
+            Attempt.succeeded(PlaceOfInterest(label="X", address="SW1V 2QQ")),
         )
         assert a.succeeded
         v = a.value_or_none()
@@ -329,7 +329,7 @@ class TestTflClientNoRoute:
     async def test_process_data_without_journey_is_infeasible_not_impossible(self):
         from houses.tfl_client import TflClient, TflRouteOptions
 
-        client = TflClient("SW1P 1AA", "RG12 1AA", "Bracknell", options=TflRouteOptions(park_and_ride=True))
+        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", options=TflRouteOptions(park_and_ride=True))
         a = await client._process_data({})
         assert a.succeeded, f"no-journey answer must be succeeded, got: {a.status}: {a.error}"
         _v = a.value_or_none()
@@ -354,7 +354,7 @@ class TestTflClientNoRoute:
 
         client = TflClient(
             "51.5788804,-0.7648387",
-            "RG12 1AA",
+            "RG12 8YA",
             "Bracknell",
             options=TflRouteOptions(park_and_ride=True, cached_call=raise_404),
         )
@@ -383,7 +383,7 @@ class TestTflClientNoRoute:
         async def raise_409(url, params):
             raise HttpError(409, message="route planner unavailable", body="{}")
 
-        client = TflClient("SW1P 1AA", "RG12 1AA", "Bracknell", options=TflRouteOptions(cached_call=raise_409))
+        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", options=TflRouteOptions(cached_call=raise_409))
         with pytest.raises(HttpError) as excinfo:
             await client._fetch_data()
         assert excinfo.value.status == 409
@@ -401,7 +401,7 @@ class TestTflClientNoRoute:
             return Commute(
                 person=Person(name="", has_car=True),
                 label="no route",
-                destination=PlaceOfInterest(label="Bracknell", address="RG12 1AA"),
+                destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
                 duration=Quantity(0, "minute"),
                 daily_cost=Money("0", "GBP"),
                 mode="transit",
@@ -414,7 +414,7 @@ class TestTflClientNoRoute:
             return Commute(
                 person=Person(name="", has_car=True),
                 label="Bracknell",
-                destination=PlaceOfInterest(label="Bracknell", address="RG12 1AA"),
+                destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
                 duration=Quantity(minutes, "minute"),
                 daily_cost=Money("5", "GBP"),
                 mode="transit",
@@ -429,7 +429,7 @@ class TestTflClientNoRoute:
         loc = UserInputNode[GeoPoint]("t404_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("t404_poi", PlaceOfInterest)
         loc.push(GeoPoint(51.5, -0.1), "test")
-        poi.push(PlaceOfInterest(label="Bracknell", address="RG12 1AA"), "test")
+        poi.push(PlaceOfInterest(label="Bracknell", address="RG12 8YA"), "test")
 
         def make_client(origin, dest, label, options=None):
             opts = options or TflRouteOptions()
@@ -499,7 +499,7 @@ class TestNationalRailFallback:
         return Commute(
             person=Person(name="", has_car=False),
             label="Pimlico",
-            destination=PlaceOfInterest(label="Pimlico", address="1 Example Street, London SW1P 1AA"),
+            destination=PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
             duration=Quantity(minutes, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
@@ -535,7 +535,7 @@ class TestNationalRailFallback:
         node = TransitNode("nrf", options=options)
         return await node.compute(
             Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
-            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1P 1AA")),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
             no_bus or Attempt.succeeded(self._infeasible_commute()),
             with_bus or Attempt.succeeded(self._infeasible_commute()),
         )
@@ -614,12 +614,12 @@ class TestNationalRailFallback:
             ),
         )
         loc.push(GeoPoint(51.415344, -1.511056), "geocode")
-        poi.push(PlaceOfInterest(label="Pimlico", address="SW1P 1AA"), "persons_source")
+        poi.push(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"), "persons_source")
         # Drive the node directly through compute (same seam as _run) then
         # assert the provenance description narrates the fallback.
         await node.compute(
             Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
-            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1P 1AA")),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
             Attempt.succeeded(self._infeasible_commute()),
             Attempt.succeeded(self._infeasible_commute()),
         )
@@ -657,7 +657,7 @@ class TestNationalRailFallback:
         )
         a = await node.compute(
             Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
-            Attempt.succeeded("1 Example Street, London SW1P 1AA"),
+            Attempt.succeeded("1 Drummond Gate, Pimlico, London SW1V 2QQ"),
             Attempt.succeeded(self._infeasible_commute()),
             Attempt.succeeded(self._infeasible_commute()),
         )
@@ -665,7 +665,7 @@ class TestNationalRailFallback:
         _v = a.value_or_none()
         assert _v is not None and not _v.infeasible
         assert isinstance(received["dest"], PlaceOfInterest)
-        assert received["dest"].address == "1 Example Street, London SW1P 1AA"
+        assert received["dest"].address == "1 Drummond Gate, Pimlico, London SW1V 2QQ"
 
     @pytest.mark.asyncio
     async def test_plain_tfl_success_clears_fallback_narration(self):
@@ -692,7 +692,7 @@ class TestNationalRailFallback:
         # 1) TfL infeasible → fallback used; provenance narrates it.
         a = await node.compute(
             Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
-            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1P 1AA")),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
             Attempt.succeeded(self._infeasible_commute()),
             Attempt.succeeded(self._infeasible_commute()),
         )
@@ -705,7 +705,7 @@ class TestNationalRailFallback:
         # 2) TfL succeeds this time → the fallback narration must be gone.
         a2 = await node.compute(
             Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
-            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1P 1AA")),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
             Attempt.succeeded(self._commute()),
             Attempt.succeeded(self._commute()),
         )
@@ -726,7 +726,7 @@ class TestNationalRailFallback:
 
         poi_info = PlaceOfInterest(
             label="Pimlico",
-            address="1 Example Street, London SW1P 1AA",
+            address="1 Drummond Gate, Pimlico, London SW1V 2QQ",
             trips_per_week=5,
         )
 
@@ -737,6 +737,7 @@ class TestNationalRailFallback:
 
         loc = UserInputNode[GeoPoint]("nrfp3_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("nrfp3_poi", PlaceOfInterest)
+        poi.push(poi_info, "test")
         node = TransitNode(
             "90691101/Simon/Pimlico/computed_transit",
             options=TransitOptions(
@@ -744,13 +745,19 @@ class TestNationalRailFallback:
                 poi=poi,
                 no_bus_node=UserInputNode[Commute]("nrfp3_nb", Commute),
                 with_bus_node=UserInputNode[Commute]("nrfp3_wb", Commute),
-                poi_info=poi_info,
                 transit_route_fn=fake_route,
             ),
         )
         a = await node.compute(
             Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
-            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="1 Example Street, London SW1P 1AA")),
+            Attempt.succeeded(
+                PlaceOfInterest(
+                    label="Pimlico",
+                    address="1 Drummond Gate, Pimlico, London SW1V 2QQ",
+                    trips_per_week=5,
+                    weeks_per_year=46,
+                )
+            ),
             Attempt.succeeded(self._infeasible_commute()),
             Attempt.succeeded(self._infeasible_commute()),
         )
@@ -760,3 +767,32 @@ class TestNationalRailFallback:
         assert v.label == "Pimlico", "the fallback label must come from the node id"
         assert v.destination.label == "Pimlico"
         assert v.destination.trips_per_week == 5
+
+
+class TestTheTwoTfLPlanNodesSayWhichPlanTheyAre:
+    """Every destination is planned twice — bus avoided, and bus allowed —
+    and the comparison node keeps the bus plan only when it saves the
+    person's bus-walk penalty.  Both live in the provenance, and both were
+    named "TfL": two identically-labelled rows doing different things, so a
+    reader could not tell which plan they were looking at (live 2026-09-10).
+    """
+
+    @staticmethod
+    def _node(node_id: str, *, allow_bus: bool) -> TflTransitNode:
+        loc = UserInputNode(f"{node_id}_loc", GeoPoint)
+        poi = UserInputNode(f"{node_id}_poi", PlaceOfInterest)
+        return TflTransitNode(
+            node_id,
+            options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=allow_bus),
+        )
+
+    def test_the_names_distinguish_the_two_plans(self):
+        no_bus = self._node("name_nb", allow_bus=False)
+        with_bus = self._node("name_wb", allow_bus=True)
+
+        assert no_bus.display_name != with_bus.display_name, (
+            "both plan nodes are called "
+            f"{no_bus.display_name!r}: the reader cannot tell which plan they are looking at"
+        )
+        assert "bus" in no_bus.display_name.lower()
+        assert "bus" in with_bus.display_name.lower()

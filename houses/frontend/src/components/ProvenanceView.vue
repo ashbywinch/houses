@@ -34,14 +34,22 @@ function setLevel(level: 'summary' | 'story' | 'detail') {
 // ── Helpers ──
 
 type FlatNode = {
+  /** DOM anchor for THIS occurrence (jump target). */
+  rowId: string
+  /** The DAG node id — the identity a shared node shares. */
+  nodeId: string
   label: string
   desc: string
   sourceType: string
   freshness: string
   url: string
   indent: number
-  isRef: boolean
-  refId: string
+  /** A later occurrence: rendered as a link to the full copy. */
+  isRepeat: boolean
+  /** The row holding the full copy (every occurrence). */
+  canonicalRowId: string
+  /** How many places this node appears in (every occurrence). */
+  usedIn: number
   value: string
   status: string
   error: string
@@ -138,51 +146,104 @@ function filterNodesByType(p: Provenance, type: string): Record<string, Provenan
   return result
 }
 
-// ── Deduplication ──
+/** Horizontal offset for a nesting level.  A table of per-depth classes
+ *  stops at whatever depth someone got round to writing — the commute total
+ *  reaches 8, and every row past the table rendered flush left, reading as a
+ *  top-level entry.  Capped so a deep tree cannot walk off the edge. */
+const INDENT_STEP_PX = 20
+const INDENT_MAX_LEVELS = 12
 
-function findSharedRefs(p: Provenance): Map<string, Provenance> {
-  const seen = new Map<string, { count: number; node: Provenance }>()
-  function walk(n: Provenance, path: string) {
-    const key = `${n.label}::${n.sourceType ?? ''}`
-    if (seen.has(key)) {
-      seen.get(key)!.count++
-    } else {
-      seen.set(key, { count: 1, node: n })
-    }
-    if (n.sources) Object.values(n.sources).forEach(s => walk(s, path + '/' + n.label))
-  }
-  walk(p, '')
-  const shared = new Map<string, Provenance>()
-  for (const [key, val] of seen) {
-    if (val.count > 1) shared.set(key, val.node)
-  }
-  return shared
+function indentPx(indent: number): number {
+  return Math.min(indent, INDENT_MAX_LEVELS) * INDENT_STEP_PX
 }
 
-function buildFlattenedTree(p: Provenance, refs: Map<string, Provenance>): FlatNode[] {
+// ── Shared nodes ──
+
+/** A DOM-safe anchor for one occurrence of a node. */
+function anchorId(nodeId: string, seq: number): string {
+  return `prov-${nodeId.replace(/[^a-zA-Z0-9_-]+/g, '-')}-${seq}`
+}
+
+/** The flat "full detail" list.
+ *
+ *  A node that appears in several places is rendered IN FULL at its first
+ *  occurrence and as a LINK at every later one: the subtree stays reachable
+ *  and is never repeated (the trees are large — one commute provenance
+ *  repeated its TfL subtree six times).  Identity is the DAG node id, not
+ *  the label: two nodes can share a label (the with-bus and no-bus TfL
+ *  nodes) and must never be merged.
+ *
+ *  Live 2026-09-10: every occurrence was cut short with an inert "Shared"
+ *  badge, so a shared node's children were rendered NOWHERE.
+ */
+const ROOT_NODE_ID = '__root__'
+
+/** Every child seen for a node id, across all of its occurrences.
+ *
+ *  A payload is built in one pass, so an id normally carries the same
+ *  children everywhere.  When it does not (a stale or partly-written tree),
+ *  the full copy renders the UNION of them: a child that only a later
+ *  occurrence carries must never vanish from the view.
+ */
+function collectChildren(root: Provenance): Map<string, Map<string, Provenance>> {
+  const childrenById = new Map<string, Map<string, Provenance>>()
+  const walkedEdges = new Set<string>()
+  function walk(n: Provenance, nodeId: string) {
+    const children = childrenById.get(nodeId) ?? new Map<string, Provenance>()
+    childrenById.set(nodeId, children)
+    for (const [childId, child] of Object.entries(n.sources ?? {})) {
+      if (!children.has(childId)) children.set(childId, child)
+      const edge = `${nodeId}/${childId}`
+      if (walkedEdges.has(edge)) continue
+      walkedEdges.add(edge)
+      walk(child, childId)
+    }
+  }
+  walk(root, ROOT_NODE_ID)
+  return childrenById
+}
+
+function buildFlattenedTree(root: Provenance): FlatNode[] {
+  const occurrences = new Map<string, string[]>()
+  const childrenById = collectChildren(root)
   const result: FlatNode[] = []
-  function walk(n: Provenance, indent: number) {
-    const key = `${n.label}::${n.sourceType ?? ''}`
-    const isRef = refs.has(key)
+  let seq = 0
+
+  function walk(n: Provenance, nodeId: string, indent: number) {
+    const rows = occurrences.get(nodeId) ?? []
+    occurrences.set(nodeId, rows)
+    const rowId = anchorId(nodeId, seq++)
+    const isRepeat = rows.length > 0
+    rows.push(rowId)
     result.push({
+      rowId,
+      nodeId,
       label: n.label,
       desc: n.description ?? '',
       sourceType: n.sourceType ?? 'unknown',
       freshness: n.freshness ?? '',
       url: n.url ?? '',
       indent,
-      isRef,
-      refId: key,
+      isRepeat,
+      canonicalRowId: rows[0],
+      usedIn: 0,
       value: formatValue(n.value),
       status: n.status ?? '',
       error: n.error ?? '',
       expressionType: n.expressionType ?? '',
     })
-    if (n.sources && !(isRef && indent > 0)) {
-      Object.values(n.sources).forEach(s => walk(s, indent + 1))
+    if (!isRepeat) {
+      for (const [childId, child] of childrenById.get(nodeId) ?? []) {
+        walk(child, childId, indent + 1)
+      }
     }
   }
-  walk(p, 0)
+
+  walk(root, ROOT_NODE_ID, 0)
+
+  for (const node of result) {
+    node.usedIn = (occurrences.get(node.nodeId) ?? []).length
+  }
   return result
 }
 
@@ -288,8 +349,7 @@ const EXPRESSION_LABELS: Record<string, string> = {
 
 // ── Computed ──
 
-const sharedRefs = computed(() => findSharedRefs(props.provenance))
-const flatTree = computed(() => buildFlattenedTree(props.provenance, sharedRefs.value))
+const flatTree = computed(() => buildFlattenedTree(props.provenance))
 const trust = computed(() => trustLevel(props.provenance))
 const totalSources = computed(() => totalSourceCount(props.provenance))
 const totalCalcs = computed(() => calcCount(props.provenance))
@@ -318,18 +378,18 @@ const legendItems = computed(() => {
   }))
 })
 
-const sharedRefsList = computed(() => {
-  const list: Array<{ id: string; label: string; freshness: string; color: string }> = []
-  for (const [key, node] of sharedRefs.value) {
-    list.push({
-      id: key,
+/** The index of shared inputs: each entry links to its full copy. */
+const sharedRefsList = computed(() =>
+  flatTree.value
+    .filter((node) => !node.isRepeat && node.usedIn > 1)
+    .map((node) => ({
+      rowId: node.rowId,
       label: humanLabel(node.label),
-      freshness: node.freshness ?? '',
-      color: SOURCE_COLORS[node.sourceType ?? ''] ?? 'var(--slate-300)',
-    })
-  }
-  return list
-})
+      freshness: node.freshness,
+      usedIn: node.usedIn,
+      color: SOURCE_COLORS[node.sourceType] ?? 'var(--slate-300)',
+    })),
+)
 </script>
 
 <template>
@@ -632,11 +692,13 @@ const sharedRefsList = computed(() => {
       <!-- Flattened tree -->
       <div class="detail-tree" role="tree" :aria-label="`${title} provenance detail`">
         <div
-          v-for="(node, i) in flatTree"
-          :key="i"
+          v-for="node in flatTree"
+          :key="node.rowId"
+          :id="node.rowId"
           class="detail-node"
-          :class="`detail-node--indent-${node.indent}`"
+          :style="{ paddingLeft: `calc(var(--sp-3) + ${indentPx(node.indent)}px)` }"
           role="treeitem"
+          :aria-level="node.indent + 1"
         >
           <span class="detail-node__dot" :style="{ background: SOURCE_COLORS[node.sourceType] ?? 'var(--slate-300)' }"></span>
           <span class="detail-node__label">{{ humanLabel(node.label) }}</span>
@@ -644,7 +706,12 @@ const sharedRefsList = computed(() => {
           <span v-if="node.status === 'impossible'" class="detail-node__err" role="alert">⚠ {{ node.error || 'Unavailable' }}</span>
           <span v-else-if="node.value" class="detail-node__value">{{ node.value }}</span>
           <span v-if="node.desc" class="detail-node__desc">— {{ node.desc }}</span>
-          <span v-if="node.isRef && node.indent > 0" class="detail-node__ref">📍 Shared</span>
+          <a
+            v-if="node.isRepeat"
+            class="detail-node__ref-link"
+            :href="'#' + node.canonicalRowId"
+            :title="`Used in ${node.usedIn} places — go to the full copy`"
+          >↗ full copy</a>
           <a
             v-if="node.url"
             :href="node.url"
@@ -663,17 +730,17 @@ const sharedRefsList = computed(() => {
       <div v-if="sharedRefsList.length > 0" class="shared-refs">
         <div class="shared-refs__title">Data sources used in multiple places</div>
         <div class="shared-refs__grid">
-          <div
+          <a
             v-for="ref in sharedRefsList"
-            :key="ref.id"
+            :key="ref.rowId"
             class="shared-ref"
-            tabindex="0"
-            role="button"
+            :href="'#' + ref.rowId"
+            :title="`Used in ${ref.usedIn} places — go to the full copy`"
           >
             <span class="shared-ref__icon" :style="{ background: ref.color }"></span>
             <span class="shared-ref__label">{{ ref.label }}</span>
             <span v-if="ref.freshness" class="shared-ref__freshness">{{ freshnessLabel(daysSince(ref.freshness)).text }}</span>
-          </div>
+          </a>
         </div>
       </div>
     </div>
@@ -1065,10 +1132,6 @@ const sharedRefsList = computed(() => {
   transition: background var(--transition);
 }
 .detail-node:hover { background: var(--slate-50); }
-.detail-node--indent-1 { padding-left: calc(var(--sp-3) + 20px); }
-.detail-node--indent-2 { padding-left: calc(var(--sp-3) + 40px); }
-.detail-node--indent-3 { padding-left: calc(var(--sp-3) + 60px); }
-.detail-node--indent-4 { padding-left: calc(var(--sp-3) + 80px); }
 .detail-node__dot {
   width: 8px;
   height: 8px;
@@ -1084,14 +1147,20 @@ const sharedRefsList = computed(() => {
   color: var(--text-muted);
   font-size: var(--fs-xs);
 }
-.detail-node__ref {
-  font-size: var(--fs-xs);
+/* Shared nodes: the full copy links out, every other occurrence links
+   back to it — never a dead-end badge. */
+.detail-node__ref-link {
   color: var(--blue);
-  background: var(--blue-bg);
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  margin-left: var(--sp-2);
+  font-size: var(--fs-xs);
+  text-decoration: none;
   white-space: nowrap;
+}
+.detail-node__ref-link:hover { text-decoration: underline; }
+/* The jump target announces itself — native :target, no script. */
+.detail-node:target {
+  background: var(--blue-bg);
+  outline: 2px solid var(--blue);
+  border-radius: var(--radius-sm);
 }
 .detail-node__freshness {
   margin-left: auto;

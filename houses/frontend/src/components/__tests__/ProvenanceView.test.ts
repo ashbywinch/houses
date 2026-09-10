@@ -308,9 +308,16 @@ describe('ProvenanceView — cross-cutting', () => {
     expect(w.find('.story-flow').isVisible()).toBe(true)
   })
 
-  it('deduplicates shared sources in the reference library', () => {
+  it('lists each shared source once, linking to its full copy', () => {
     const w = mountView(totalMonthlyCost, { detailLevel: 'detail' })
-    expect(w.text()).toContain('used in multiple places')
+    const index = w.findAll('a.shared-ref')
+    expect(index.length, 'a shared source must appear in the index').toBeGreaterThan(0)
+    const targets = index.map((a) => a.attributes('href') ?? '')
+    expect(new Set(targets).size, 'the same source must not be listed twice').toBe(targets.length)
+    for (const a of index) {
+      const target = a.attributes('href')?.replace('#', '')
+      expect(target && w.find(`[id="${target}"]`).exists(), `${a.text()} must link to a row in this view`).toBe(true)
+    }
   })
 })
 
@@ -480,5 +487,177 @@ describe('ProvenanceView — value formatting', () => {
     expect(w.html()).not.toContain('[object Object]')
     expect(w.text()).toContain('Simon')
     expect(w.text()).toContain('12.5')
+  })
+})
+
+describe('ProvenanceView — shared nodes', () => {
+  // The same node (same DAG id, `place`) feeds two consumers. Live symptom:
+  // its children appeared NOWHERE — every occurrence was rendered as an
+  // inert "📍 Shared" badge, so the subtree was unreachable.
+  const sharedPlace: Provenance = {
+    label: 'Place',
+    sourceType: 'user',
+    sources: { household: { label: 'Household members', sourceType: 'user' } },
+  } as unknown as Provenance
+
+  const tree = {
+    label: 'Entry',
+    sourceType: 'calc',
+    sources: {
+      walk: { label: 'Walk', sourceType: 'calc', sources: { place: sharedPlace } },
+      drive: { label: 'Drive', sourceType: 'calc', sources: { place: sharedPlace } },
+    },
+  } as unknown as Provenance
+
+  it('renders a shared node’s children at least once', () => {
+    const w = mountView(tree, { detailLevel: 'detail' })
+    expect(w.text()).toContain('Household members')
+  })
+
+  it('renders every later occurrence as a link to the full copy', () => {
+    const w = mountView(tree, { detailLevel: 'detail' })
+    const links = w.findAll('a.detail-node__ref-link')
+    expect(links).toHaveLength(1)
+    const target = links[0].attributes('href')?.replace('#', '')
+    expect(target, 'the link must point at a row in this view').toBeTruthy()
+    expect(w.find(`[id="${target}"]`).exists(), 'the target row must exist').toBe(true)
+  })
+
+  it('does not list the other uses on the full copy', () => {
+    // The list read as a run-on of internal names ("used in 30 places: TfL
+    // API TfL TfL Park & Ride Rail Fare…") and told the reader nothing they
+    // act on.  The jump link is the affordance; this is the noise it lost.
+    const w = mountView(tree, { detailLevel: 'detail' })
+    const canonicalRow = w.findAll('.detail-node').find((row) => row.text().includes('Place'))
+    expect(canonicalRow?.text()).not.toContain('used in')
+    expect(w.findAll('.detail-node__uses')).toHaveLength(0)
+  })
+
+  it('links the index entry for a shared source to its full copy', () => {
+    const w = mountView(tree, { detailLevel: 'detail' })
+    const index = w.findAll('a.shared-ref')
+    expect(index).toHaveLength(1)
+    const target = index[0].attributes('href')?.replace('#', '')
+    expect(target && w.find(`[id="${target}"]`).exists()).toBe(true)
+  })
+
+  it('points every one of a shared node’s other occurrences at the full copy', () => {
+    const threePlaces = {
+      label: 'Entry',
+      sourceType: 'calc',
+      sources: {
+        walk: { label: 'Walk', sourceType: 'calc', sources: { place: sharedPlace } },
+        drive: { label: 'Drive', sourceType: 'calc', sources: { place: sharedPlace } },
+        transit: { label: 'Transit', sourceType: 'calc', sources: { place: sharedPlace } },
+      },
+    } as unknown as Provenance
+
+    const w = mountView(threePlaces, { detailLevel: 'detail' })
+
+    const links = w.findAll('a.detail-node__ref-link')
+    expect(links, 'two of the three occurrences are references').toHaveLength(2)
+    const targets = new Set(links.map((a) => a.attributes('href')))
+    expect(targets.size, 'every reference points at the same full copy').toBe(1)
+    const canonical = [...targets][0]?.replace('#', '')
+    expect(canonical && w.find(`[id="${canonical}"]`).exists()).toBe(true)
+    for (const link of links) {
+      expect(link.attributes('title'), 'how widely it is shared belongs in the tooltip').toContain('3 places')
+    }
+  })
+
+  it('renders a child that only a later occurrence carries', () => {
+    // Same node id, two payload occurrences, different children (a stale or
+    // partly-written tree).  Nothing may vanish: the full copy renders the
+    // union of the children, once each.
+    const withoutCoords = {
+      label: 'Place',
+      sourceType: 'user',
+      sources: { household: { label: 'Household members', sourceType: 'user' } },
+    } as unknown as Provenance
+    const withCoords = {
+      label: 'Place',
+      sourceType: 'user',
+      sources: {
+        household: { label: 'Household members', sourceType: 'user' },
+        coords: { label: 'Coordinates', sourceType: 'geocode' },
+      },
+    } as unknown as Provenance
+    const splitTree = {
+      label: 'Entry',
+      sourceType: 'calc',
+      sources: {
+        walk: { label: 'Walk', sourceType: 'calc', sources: { place: withoutCoords } },
+        drive: { label: 'Drive', sourceType: 'calc', sources: { place: withCoords } },
+      },
+    } as unknown as Provenance
+
+    const w = mountView(splitTree, { detailLevel: 'detail' })
+
+    const labels = w.findAll('.detail-node__label').map((el) => el.text())
+    expect(labels, 'the child only the later occurrence carries must not vanish').toContain('Coordinates')
+    expect(labels.filter((l) => l === 'Coordinates'), 'rendered once, at the full copy').toHaveLength(1)
+    expect(labels.filter((l) => l === 'Household members')).toHaveLength(1)
+  })
+
+  it('keeps two different nodes that share a label apart', () => {
+    // Identity is the node id, not the label: the with-bus and no-bus TfL
+    // nodes are distinct calculations with the same name.
+    const twoTfl = {
+      label: 'Entry',
+      sourceType: 'calc',
+      sources: {
+        tfl_no_bus: {
+          label: 'TfL', sourceType: 'api',
+          sources: { x: { label: 'No-bus detail', sourceType: 'api' } },
+        },
+        tfl_with_bus: {
+          label: 'TfL', sourceType: 'api',
+          sources: { y: { label: 'With-bus detail', sourceType: 'api' } },
+        },
+      },
+    } as unknown as Provenance
+
+    const w = mountView(twoTfl, { detailLevel: 'detail' })
+    expect(w.text()).toContain('No-bus detail')
+    expect(w.text()).toContain('With-bus detail')
+    expect(w.findAll('a.detail-node__ref-link')).toHaveLength(0)
+  })
+})
+
+describe('ProvenanceView — depth is visible however deep the tree goes', () => {
+  // The indent classes stopped at 4, so every row deeper than that rendered
+  // flush left and read as a top-level entry.  Live symptom (2026-09-10): the
+  // commute total looked like "a ton of things at the top level" — 168 rows of
+  // which the reader could only see four levels of hierarchy.
+  function chain(depth: number): Provenance {
+    let node = { label: `Leaf ${depth}`, sourceType: 'calc' } as unknown as Provenance
+    for (let i = depth - 1; i >= 0; i--) {
+      node = { label: `Level ${i}`, sourceType: 'calc', sources: { [`child_${i}`]: node } } as unknown as Provenance
+    }
+    return node
+  }
+
+  function indentPx(el: Element): number {
+    const m = (el as HTMLElement).style.paddingLeft.match(/(\d+)px/)
+    return m ? Number(m[1]) : 0
+  }
+
+  it('moves each level further in than the one above it', () => {
+    const deep = chain(8)
+    const w = mountView(deep, { detailLevel: 'detail' })
+
+    const rows = w.findAll('.detail-node')
+    expect(rows, 'eight levels of nesting plus the root').toHaveLength(9)
+
+    const indents = rows.map((r) => indentPx(r.element))
+    for (let i = 1; i < indents.length; i++) {
+      expect(indents[i], `row ${i} sits no further in than row ${i - 1}`).toBeGreaterThan(indents[i - 1])
+    }
+  })
+
+  it('says how deep each row is, for readers that cannot see the indent', () => {
+    const w = mountView(chain(5), { detailLevel: 'detail' })
+    const levels = w.findAll('.detail-node').map((r) => r.attributes('aria-level'))
+    expect(levels).toEqual(['1', '2', '3', '4', '5', '6'])
   })
 })

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import override
 
 import pytest
@@ -1976,48 +1975,11 @@ async def test_max_walk_what_if_rescores_without_replanning():
 
 
 class TestZeroTripsNotCommuted:
-    """Zero days a week = not commuted: the destination vanishes from the
-    breakdown and the pills — it must never be recorded as a £0/free
-    commute (it hasn't become free; it doesn't happen)."""
-
-    @pytest.mark.asyncio
-    async def test_zero_trip_destination_is_excluded_from_breakdown(self):
-        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
-
-        persons_src = UserInputNode("zt0_persons", list)
-        persons_src.push(
-            [
-                {
-                    "name": "Simon",
-                    "places_of_interest": [
-                        PlaceOfInterest(label="Pimlico", address="", trips_per_week=0, weeks_per_year=46),
-                        PlaceOfInterest(label="Bracknell", address="", trips_per_week=1, weeks_per_year=46),
-                    ],
-                }
-            ],
-            "test",
-        )
-        pimlico_src = UserInputNode[Commute]("zt0_pimlico", Commute)
-        bracknell_src = UserInputNode[Commute]("zt0_bracknell", Commute)
-        pimlico_src.push(_drive_commute(duration_min=16, cost_gbp=5.0), "test")
-        bracknell_src.push(_drive_commute(duration_min=90, cost_gbp=10.0), "test")
-        node = CommuteBreakdownNode(
-            "zt0_breakdown",
-            commute_selectors={"Simon/Pimlico": pimlico_src, "Simon/Bracknell": bracknell_src},
-            persons_source=persons_src,
-        )
-        await flush_processor()
-        a = await node.attempt()
-        assert a.succeeded
-        val = a.value_or_none()
-        assert val is not None
-        simon = val["persons"]["Simon"]
-        assert [c["label"] for c in simon["commutes"]] == ["Bracknell"], (
-            "a 0-trip destination is not commuted and must not be recorded"
-        )
-        assert all(Decimal(c["yearly_gbp"]) > 0 for c in simon["commutes"]), (
-            "no zero-price commute records"
-        )
+    """Requirement (index card): a destination that is not commuted —
+    zero days a week, or zero weeks a year — takes no commute pill: the
+    summary that feeds the card must not carry it. The COST calculation
+    itself just multiplies cost x trips x weeks; a zero factor is £0 and
+    needs no special rule (see test_untouched_destinations_under_scenario)."""
 
     def test_commuted_destinations_excludes_zero_trips(self):
         from houses.nodes.property_nodes import PropertyNodes
@@ -2044,3 +2006,149 @@ class TestZeroTripsNotCommuted:
         assert "Simon/Bracknell" in prop.commute_selectors
         # …but the pill is omitted for a 0-trip destination
         assert prop._commuted_destinations() == {"Simon/Pimlico"}
+
+    def test_commuted_destinations_excludes_zero_weeks(self):
+        from houses.nodes.property_nodes import PropertyNodes
+        from houses.property_registry import register_property
+        from houses.services_provider import get_services
+
+        svc = get_services()
+        svc.persons_source.push(
+            [
+                {
+                    "name": "Simon",
+                    "has_car": True,
+                    "places_of_interest": [
+                        {"label": "Pimlico", "address": "", "trips_per_week": 1, "weeks_per_year": 0},
+                        {"label": "Bracknell", "address": "", "trips_per_week": 1, "weeks_per_year": 46},
+                    ],
+                }
+            ],
+            "user",
+        )
+        prop = PropertyNodes("42424248")
+        register_property("42424248", prop)
+        assert "Simon/Bracknell" in prop.commute_selectors
+        # zero weeks a year is not commuted either: no pill for Pimlico
+        assert prop._commuted_destinations() == {"Simon/Bracknell"}
+
+
+
+class TestCongestionZoneAndProvenanceFrequency:
+    """Two requirements pinned together by the Pimlico live incident:
+
+    1. Never drive into the congestion charge zone: the gate reads the
+       destination's outcode; an address without a parseable postcode is
+       an error result — never silently "out of zone".
+    2. A commute's provenance shows the frequency with the CURRENT
+       trips, and never goes stale when trips change."""
+
+    @pytest.mark.asyncio
+    async def test_zone_destination_never_selects_driving(self):
+        from houses.nodes.transit import DriveNode, RouteOptions
+
+        poi = UserInputNode("cz2_poi", PlaceOfInterest)
+        poi.push(
+            PlaceOfInterest(
+                label="Pimlico",
+                address="1 Drummond Gate, Pimlico, London SW1V 2QQ",
+                trips_per_week=1,
+                weeks_per_year=46,
+            ),
+            "test",
+        )
+        location = UserInputNode("cz2_loc", GeoPoint)
+        location.push(GeoPoint(51.45, -0.99), "test")
+        drive = DriveNode(
+            "cz2_drive",
+            options=RouteOptions(
+                best_location=location,
+                poi=poi,
+                has_car=True,
+                max_walk=30,
+            ),
+        )
+        await flush_processor()
+        a = await drive.attempt()
+        v = a.value_or_none()
+        assert a.impossible or (v is not None and v.infeasible), (
+            f"a congestion-zone destination must never price a drive: {v!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_commute_provenance_shows_current_trips(self):
+        from houses.nodes.transit import DriveNode, RouteOptions
+
+        poi = UserInputNode("czf_poi", PlaceOfInterest)
+        poi.push(
+            PlaceOfInterest(label="Bracknell", address="RG12 8YA", trips_per_week=1, weeks_per_year=46),
+            "test",
+        )
+        location = UserInputNode("czf_loc", GeoPoint)
+        location.push(GeoPoint(51.45, -0.99), "test")
+        drive = DriveNode(
+            "czf_drive",
+            options=RouteOptions(
+                best_location=location,
+                poi=poi,
+                has_car=True,
+                max_walk=30,
+            ),
+        )
+        await flush_processor()
+        commute = drive.latest_attempt().value_or_none()
+        assert commute is not None, drive.latest_attempt().error
+        assert "1x/wk" in commute.to_provenance_value(), (
+            f"provenance must show the frequency: {commute.to_provenance_value()!r}"
+        )
+
+        poi.push(
+            PlaceOfInterest(label="Bracknell", address="RG12 8YA", trips_per_week=3, weeks_per_year=46),
+            "test",
+        )
+        await flush_processor()
+        commute = drive.latest_attempt().value_or_none()
+        assert commute is not None
+        assert "3x/wk" in commute.to_provenance_value(), (
+            f"provenance frequency must follow the current trips: {commute.to_provenance_value()!r}"
+        )
+
+
+class TestAFareNobodyKnowsIsNotShownAsFree:
+    """A node that has not seen the fare must not claim one.
+
+    Live 2026-09-10: the TfL step returned a 125-minute transit journey with an
+    empty fare, so its provenance read "Transit · 125 min · £0.00/day to
+    Pimlico" — a reader has no way to tell that from a free journey, and
+    transport costs money.  The rail step fills the fare in later, so the final
+    figure was right while the intermediate line lied.  Walking is the one mode
+    where zero is the truth.
+    """
+
+    @staticmethod
+    def _commute(*, mode: str, amount: str) -> Commute:
+        return Commute(
+            person=Person(name="Simon", has_car=False),
+            label="Pimlico",
+            destination=PlaceOfInterest(
+                label="Pimlico", address="SW1V 2QQ", trips_per_week=1, weeks_per_year=46
+            ),
+            duration=Quantity(125, "minute"),
+            daily_cost=Money(amount=amount, currency="GBP"),
+            mode=mode,
+        )
+
+    def test_an_unknown_transit_fare_is_not_displayed_as_free(self):
+        text = self._commute(mode="transit", amount="0").to_provenance_value()
+        assert "125 min" in text
+        assert "Pimlico" in text, f"the destination must still be readable: {text!r}"
+        assert "1x/wk" in text, f"the frequency factor must stay: {text!r}"
+        assert "£0.00/day" not in text, f"an unknown fare is not a free journey: {text!r}"
+
+    def test_a_walking_commute_still_shows_its_zero_cost(self):
+        text = self._commute(mode="walk", amount="0").to_provenance_value()
+        assert "£0.00/day" in text, f"walking really is free: {text!r}"
+
+    def test_a_known_fare_is_still_shown(self):
+        text = self._commute(mode="transit", amount="88.20").to_provenance_value()
+        assert "£88.20/day" in text, text

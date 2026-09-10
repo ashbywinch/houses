@@ -76,6 +76,70 @@ class TestBusRouteNode:
         assert a.succeeded
 
 
+class TestBusRouteAcceptsAPlaceDestination:
+    """The commute pipeline feeds the bus planner a live PlaceOfInterest
+    (the destination as the persons settings define it), not a bare
+    address string.  The node must plan by that destination's address —
+    it crashed with `'PlaceOfInterest' object has no attribute 'lat'`,
+    which propagated up the chain and left the whole commute unpriced
+    (live 2026-09-10, Lorena's Aldgate commute)."""
+
+    @pytest.mark.asyncio
+    async def test_plans_by_the_place_address(self):
+        from houses.model.domain import PlaceOfInterest
+        from houses.nodes.bus import BusRouteNode
+
+        loc = UserInputNode[GeoPoint]("loc_brp", GeoPoint)
+        dest = UserInputNode[PlaceOfInterest]("dest_brp", PlaceOfInterest)
+
+        seen: dict = {}
+
+        async def fake_google_routes(body, field_mask, **kw):
+            seen["body"] = body
+            return {"routes": [{"duration": "600s", "legs": [{"steps": []}]}]}
+
+        node = BusRouteNode(
+            "brp",
+            best_location=loc,
+            poi=dest,
+            _google_routes_post=fake_google_routes,
+        )
+        loc.push(GeoPoint(51.5, -0.1), "test")
+        dest.push(
+            PlaceOfInterest(label="Aldgate", address="Eastgate House, 40 Dukes Place, London EC3A 7LP"),
+            "test",
+        )
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, f"bus planning failed for a PlaceOfInterest destination: {a.error}"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_place_address_is_an_error_not_a_crash(self):
+        from houses.model.domain import PlaceOfInterest
+        from houses.nodes.bus import BusRouteNode
+
+        loc = UserInputNode[GeoPoint]("loc_brp2", GeoPoint)
+        dest = UserInputNode[PlaceOfInterest]("dest_brp2", PlaceOfInterest)
+
+        async def fake_google_routes(body, field_mask, **kw):
+            raise AssertionError("no request should be made without a destination address")
+
+        node = BusRouteNode(
+            "brp2",
+            best_location=loc,
+            poi=dest,
+            _google_routes_post=fake_google_routes,
+        )
+        loc.push(GeoPoint(51.5, -0.1), "test")
+        dest.push(PlaceOfInterest(label="School", address=""), "test")
+        await flush_processor()
+
+        a = await node.attempt()
+        assert not a.succeeded, "an empty destination address must be an error result"
+        assert "has no attribute" not in (a.error or ""), f"crash, not an error result: {a.error}"
+
+
 class _StubFareReader(BusJourneyRegistry):
     """A BusJourneyRegistry that returns known fares without loading real data."""
 

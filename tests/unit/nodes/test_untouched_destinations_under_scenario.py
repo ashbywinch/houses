@@ -15,6 +15,8 @@ survives untouched, and the figures re-price in the same drain.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
 from money import Money
 
@@ -114,6 +116,16 @@ def test_apply_changes_only_the_named_trip_count():
         "impersonating": None,
     }
     client.cookies.set("session", get_serializer().dumps(claims))
+    # Baseline sanity — the fixture prices by the multiplication (£5.50
+    # x 3 x 46 across Pimlico/Bracknell/Dad) and the formula carries the
+    # 1x/wk frequency strings this test reasons about.
+    base = client.get(f"/api/properties/{rid}/detail").json()
+    base_mcc = base["affordability"]["monthly_commute_cost"]
+    assert base_mcc["succeeded"], f"baseline breakdown stuck: {base_mcc.get('status')} {base_mcc.get('error')}"
+    assert Decimal(base_mcc["value"]["persons"]["Simon"]["yearly_gbp"]) == Decimal("5.50") * 3 * 46
+    base_pimlico = [fl for fl in base_mcc["provenance"]["formula"]["lines"] if "Pimlico" in fl["label"]]
+    assert base_pimlico, "fixture must carry a Pimlico formula line for the stale-claim check to mean anything"
+    assert all("1x/wk" in fl["label"] for fl in base_pimlico)
 
     # THE SCENARIO: only Pimlico named, at 0 days. The payload carries NO
     # Bracknell entry and NO Dad entry — nothing else may change.
@@ -154,12 +166,37 @@ def test_apply_changes_only_the_named_trip_count():
     pimlico = simon.places_of_interest[0]
     assert pimlico.trips_per_week == 0
 
-    # (c) The breakdown must not stay stuck: Pimlico (0 days) is excluded,
-    # Bracknell and Dad stay priced — the figures the cards render.
+    # (c) The figures the cards render price by the plain multiplication
+    # cost x trips x weeks: Pimlico's zero factor multiplies out and the
+    # untouched destinations keep their real prices.
     detail = client.get(f"/api/properties/{rid}/detail").json()
     mcc = detail["affordability"]["monthly_commute_cost"]
     assert mcc["succeeded"], f"breakdown stuck: {mcc.get('status')} {mcc.get('error')}"
+    assert Decimal(mcc["value"]["persons"]["Simon"]["yearly_gbp"]) == Decimal("5.50") * 2 * 46
     simon_commutes = {c["label"]: c["yearly_gbp"] for c in mcc["value"]["persons"]["Simon"]["commutes"]}
-    assert "Pimlico" not in simon_commutes, "0 days = not commuted"
     assert "Bracknell" in simon_commutes, f"Bracknell commute vanished: {simon_commutes}"
     assert "Dad" in simon_commutes, f"Dad commute vanished: {simon_commutes}"
+
+    # (d) The provenance the detail page shows for the couple Commutes
+    # row must present the multiplication — Pimlico at 0x/wk = £0.00/yr —
+    # and nowhere claim Pimlico is still commuted at its pre-scenario
+    # 1x/wk (the stale tree the ⓘ rendered on 90970053).
+    pimlico_lines = [fl for fl in mcc["provenance"]["formula"]["lines"] if "Pimlico" in fl["label"]]
+    assert pimlico_lines, "the zero-trip destination must appear in the how-calculated lines"
+    assert all("0x/wk" in fl["label"] for fl in pimlico_lines), (
+        f"expected 0x/wk on the Pimlico lines: {[fl['label'] for fl in pimlico_lines]}"
+    )
+    assert all(fl["value"] == "£0.00/yr" for fl in pimlico_lines)
+
+    def _claims(node: dict) -> list[str]:
+        parts = [str(node.get("label") or ""), str(node.get("value") or "")]
+        formula = node.get("formula")
+        if formula:
+            parts.append(formula.get("result") or "")
+            parts.extend(f"{fl['label']} {fl['value']}" for fl in formula.get("lines") or ())
+        for child in (node.get("sources") or {}).values():
+            parts.extend(_claims(child))
+        return [p for p in parts if p]
+
+    stale = [s for s in _claims(mcc["provenance"]) if "Pimlico" in s and "1x/wk" in s]
+    assert not stale, f"provenance still claims Pimlico at 1x/wk: {stale}"
