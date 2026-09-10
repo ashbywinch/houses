@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 import dag.scheduler
 from dag.persistence import node_result_before
-from dag.scheduler import AsyncQueueScheduler, flush_processor, run_on_processor
+from dag.scheduler import AsyncQueueScheduler, run_on_processor
 from houses.comments import add_comment, get_comments
 from houses.geopoint import GeoPoint
 from houses.map_layers import DRIVE_PATH, INTERSECTION_PATH, UNION_PATH, isochrone_layers
@@ -196,11 +196,11 @@ async def what_if_apply(body: dict, request: Request):
         # Mark the boundary BEFORE the scenario push: the persons attempt
         # latest before this instant is the restore reference.
         started = datetime.now(UTC).isoformat()
-        await run_on_processor(lambda: svc.whatif_started_at.push(started, "what-if"))
+        svc.whatif_started_at.push(started, "what-if")
 
     current = list(svc.persons_source.latest_attempt().value_or_none() or [])
     merged = _merge_what_if_persons(updates, current)
-    await run_on_processor(lambda: svc.persons_source.push(merged, "what-if"))
+    svc.persons_source.push(merged, "what-if")
     return {"active": True}
 
 
@@ -225,7 +225,7 @@ async def what_if_restore(request: Request):
         svc.persons_source.push(persons, "what-if-restore")
         svc.whatif_started_at.push("", "what-if-restore")
 
-    await run_on_processor(_restore)
+    _restore()
     return {"active": False}
 
 
@@ -247,7 +247,7 @@ async def what_if_accept(request: Request):
     started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
     if not started:
         raise HTTPException(status_code=409, detail="No what-if is active")
-    await run_on_processor(lambda: svc.whatif_started_at.push("", "what-if-accept"))
+    svc.whatif_started_at.push("", "what-if-accept")
     return {"active": False}
 
 
@@ -446,11 +446,9 @@ async def patch_address(rid: str, body: dict):
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
 
-    await run_on_processor(lambda: prop.corrected_address.push(body.get("address", ""), "user"))
+    prop.corrected_address.push(body.get("address", ""), "user")
     # Recompute before responding — the frontend refetches the detail
     # immediately; the processor drains the cascade in order.
-    await run_on_processor(prop.best_address.refresh)
-    await run_on_processor(flush_processor)
     return {"status": "ok"}
 
 
@@ -465,10 +463,8 @@ async def patch_location(rid: str, body: dict):
     if lat is None or lon is None:
         raise HTTPException(status_code=422, detail="lat and lon are required")
     gp = GeoPoint(lat=lat, lon=lon)
-    await run_on_processor(lambda: prop.precise_location.push(gp, "user"))
+    prop.precise_location.push(gp, "user")
     # Recompute before responding — same race as the address PATCH.
-    await run_on_processor(prop.best_location.refresh)
-    await run_on_processor(flush_processor)
     return {"status": "ok"}
 
 
@@ -508,8 +504,7 @@ async def patch_council_tax(rid: str, body: dict):
         if ignored is not None:
             prop.annexe_ignored.push(ignored, "user")
 
-    await run_on_processor(_apply_payers)
-    await run_on_processor(flush_processor)
+    _apply_payers()
     return {"status": "ok"}
 
 
@@ -532,7 +527,7 @@ async def patch_triage(rid: str, body: dict):
         if "triage_status" in body:
             prop.triage_status.push(str(body["triage_status"]), "user")
 
-    await run_on_processor(_apply_triage)
+    _apply_triage()
     return {"status": "ok"}
 
 
@@ -961,7 +956,7 @@ async def patch_person(name: str, body: dict, request: Request):
 
     try:
         updated = [_person_from_dict(body, target) if p is target else p for p in persons]
-        await run_on_processor(lambda: svc.persons_source.push(updated, "user"))
+        svc.persons_source.push(updated, "user")
     except (ValueError, TypeError) as e:
         # malformed client input is a CLIENT error (400), never a 500
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -970,7 +965,7 @@ async def patch_person(name: str, body: dict, request: Request):
     if isinstance(thresholds, dict):
         current = dict(svc.commute_thresholds_source.latest_attempt().value_or_none() or {})
         current[name] = thresholds
-        await run_on_processor(lambda: svc.commute_thresholds_source.push(current, "user"))
+        svc.commute_thresholds_source.push(current, "user")
 
     return {"status": "ok"}
 
@@ -986,7 +981,7 @@ async def patch_financial(body: dict):
             if node_id is not None and node_id in svc.setting_nodes:
                 svc.setting_nodes[node_id].push(value, "user")
 
-    await run_on_processor(_apply_financial)
+    _apply_financial()
     return {"status": "ok"}
 
 

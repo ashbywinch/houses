@@ -72,14 +72,18 @@ class TestPropertyApi:
 
         resp = client.patch("/api/properties/prop123/address", json={"address": "20 New Rd, London"})
         assert resp.status_code == 200
+        # The PATCH queues the push and returns (Thread rule 7); the test
+        # environment has no processor thread, so the drain is explicit here.
+        flush_all()
 
         detail_after = client.get("/api/properties/prop123/detail").json()
         assert detail_after["best_address"]["value"] == "20 New Rd, London"
 
-    def test_patch_address_drains_cascade_before_responding(self):
-        """The PATCH must recompute the downstream DAG (council tax, EPC)
-        BEFORE responding — the frontend refetches immediately and would
-        otherwise race the background cascade and show stale figures."""
+    def test_patch_address_recompute_lands_in_the_background_drain(self):
+        """The PATCH returns as soon as the address is queued (Thread rule 7,
+        no exceptions). The downstream recompute — council tax, EPC — lands in
+        the background drain and reaches the client over the websocket, so the
+        test drains explicitly rather than the endpoint waiting."""
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
@@ -99,9 +103,10 @@ class TestPropertyApi:
             json={"address": "20 New Rd, London SW1P 1AA"},
         )
         assert resp.status_code == 200
+        flush_all()  # the PATCH queues the push; the test drains explicitly
 
         assert any(addr == "20 New Rd, London SW1P 1AA" for _, addr in epc_svc.calls), (
-            f"EPC must be recomputed with the new address before the PATCH returns, calls={epc_svc.calls}"
+            f"EPC must be recomputed with the new address once the drain runs, calls={epc_svc.calls}"
         )
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]
@@ -346,6 +351,7 @@ class TestPropertyApi:
                 json={"main_payers": ["Simon", "Lorena"]},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues the mutation; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01), (
@@ -363,6 +369,7 @@ class TestPropertyApi:
                 json={"annexe_payers": ["Ashby"], "ignored": False},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues the mutation; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             others_with_annexe = float(group["others"]["value"])
@@ -373,6 +380,7 @@ class TestPropertyApi:
 
             # "Not related" → the annexe drops back out; main payers keep.
             client.patch(f"/api/properties/{rid}/council-tax", json={"ignored": True})
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.01)

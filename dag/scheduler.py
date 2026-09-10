@@ -342,8 +342,13 @@ def stop_processor(timeout: float = 10.0) -> int:
     async def _drain() -> int:
         while True:
             await sched.process_pending()
-            if sched._queue.empty():
+            with _submissions_lock:
+                in_flight = _pending_submissions
+            if sched._queue.empty() and in_flight == 0:
                 break
+            # A submission applies its write and enqueues its cascade; yield so
+            # it can run before we decide the processor is idle.
+            await asyncio.sleep(0)
         return len(sched._scheduled)
 
     abandoned = 0
@@ -360,6 +365,69 @@ def stop_processor(timeout: float = 10.0) -> int:
     _processor_sched = None
     _processor_task = None
     return abandoned
+
+
+#: Queued submissions not yet applied.  ``stop_processor`` drains the
+#: scheduler queue AND this count: a submission in flight (or one whose
+#: cascade has not been enqueued yet) must land before the process exits,
+#: or a write the user already saw confirmed would vanish.
+_pending_submissions: int = 0
+_submissions_lock = threading.Lock()
+
+
+def submit_to_processor(fn: Callable[[], Any]) -> None:
+    """Hand ``fn()`` to the processor thread and RETURN — the caller does not wait.
+
+    This is how work gets onto the queue: a producer states what happened
+    ("this node now holds this value"), the processor applies it (persist,
+    notify, cascade).  A synchronous caller cannot await a coroutine on
+    another thread's loop, so the handover has to look like this — but it is
+    a handover, not a rendezvous: nothing is executed in the caller's turn.
+
+    Single-threaded contexts (tests, startup, scripts, the processor itself)
+    have no processor thread, so the work runs inline — the same convention
+    ``run_on_processor`` uses, which is what keeps the suite synchronous.
+
+    A failure inside ``fn`` is logged loudly: the producer is long gone by
+    then, and a silent failure would mean the write never landed.
+    """
+    if _processor_loop is None or threading.current_thread() is _processor_thread:
+        _run_and_log(fn)
+        return
+    global _pending_submissions
+    with _submissions_lock:
+        _pending_submissions += 1
+    future = asyncio.run_coroutine_threadsafe(_run_maybe_async(fn), _processor_loop)
+    future.add_done_callback(_submission_finished)
+
+
+def _run_and_log(fn: Callable[[], Any]) -> None:
+    try:
+        result = fn()
+        if inspect.iscoroutine(result):
+            # A single-threaded context has no loop to run it on: queued work
+            # must be synchronous here (the processor path awaits coroutines).
+            result.close()
+            raise RuntimeError("queued work must be synchronous without a processor thread")
+    # lucidlint: ignore broad-except — the producer has already returned; the failure must be visible
+    except Exception:
+        logger.exception("processor work failed (production of a queued write)")
+
+
+def _submission_finished(future: concurrent.futures.Future) -> None:
+    """The submitted work is applied (or failed): stop counting it."""
+    global _pending_submissions
+    with _submissions_lock:
+        _pending_submissions -= 1
+    _log_processor_failure(future)
+
+
+def _log_processor_failure(future: concurrent.futures.Future) -> None:
+    # lucidlint: ignore broad-except — surfaced from another thread's loop
+    try:
+        future.result()
+    except Exception:
+        logger.exception("queued processor work failed after the producer returned")
 
 
 async def run_on_processor(fn: Callable[[], Any]) -> Any:

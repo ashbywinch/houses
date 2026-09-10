@@ -16,7 +16,7 @@ from dag.attempt import Attempt, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
 from dag.node import Node
 from dag.persistence import latest_node_result
-from dag.scheduler import assert_mutation_allowed
+from dag.scheduler import assert_mutation_allowed, submit_to_processor
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,14 @@ class UserInputNode(Node[T], Generic[T]):
         return ""
 
     def push(self, value: T, source_label: str = "") -> None:
-        """Set a new value and persist.
+        """Set a new value, then hand the work to the queue.
+
+        The value is replaced here — one assignment of a frozen value, so a
+        reader sees the old or the new one and never a half-written state —
+        and everything that follows goes on the processor queue: persisting
+        the row, notifying dependents, running the cascade.  Nothing heavy
+        happens in the caller's turn; that is what the queue is for, and the
+        caller never waits for the processor to get round to it.
 
         Args:
             value: The value to store. Validated through the type adapter
@@ -204,10 +211,7 @@ class UserInputNode(Node[T], Generic[T]):
             source_label: Human-readable source identifier
                 (e.g. ``"Rightmove"``, ``"User correction"``, ``"TfL API"``).
         """
-        assert_mutation_allowed()  # push mutates _value — processor thread only
-        self._value = self._adapter.validate_python(value)
-        self._push_timestamp = datetime.now(UTC)
-        self._source_label = source_label
+        validated = self._adapter.validate_python(value)
 
         # Reject source labels that indicate test data leaking into the
         # production DB.  Test fixtures set persistence.testing=True so
@@ -224,12 +228,25 @@ class UserInputNode(Node[T], Generic[T]):
                 f"is bypassed).\n"
             )
 
+        self._value = validated
+        self._push_timestamp = datetime.now(UTC)
+        self._source_label = source_label
+
         # lucidlint: ignore record-shape wire-format dict — serialization boundary
         result_dict: dict[str, Any] = {
             "status": "succeeded",
-            "value": self._adapter.dump_python(self._value),
+            "value": self._adapter.dump_python(validated),
             "source_label": source_label,
         }
+        submit_to_processor(lambda: self._apply_push(result_dict))
+
+    def _apply_push(self, result_dict: dict[str, Any]) -> None:
+        """The queued half of a push — persist the row and notify dependents.
+
+        Runs on the processor thread: the guard is an invariant check here,
+        never something a caller has to satisfy.
+        """
+        assert_mutation_allowed()
         self._persist(result_dict)
         self.changed.emit()
 
