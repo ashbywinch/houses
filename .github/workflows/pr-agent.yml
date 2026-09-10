@@ -82,25 +82,38 @@ jobs:
             echo "::error::comments API failed after 3 attempts: $(tail -c 500 /tmp/gh_api_err)"
             exit 1
           fi
-          # Scope every branch to comments from THIS run: a comment references
-          # the head commit by full OR short sha, token-bounded so an unrelated
-          # hex string (e.g. a hash containing the short sha as a substring)
-          # cannot false-positive. Stale comments from older commits — and the
-          # coverage bot's comments, which carry no sha — are excluded, so the
-          # failure and no-comments branches diagnose the CURRENT run correctly.
-          THIS=$(echo "$CMTS" | jq -c --arg full "$SHA" --arg short "$SHORT_SHA" \
-            '[.[] | select(.body | test("(^|[^0-9a-f])(" + $full + "|" + $short + ")([^0-9a-f]|$)"; "i"))]')
-          if echo "$THIS" | jq -e '[.[] | select(.body | test("PR Reviewer Guide|PR Code Suggestions"))] | length > 0' >/dev/null 2>&1; then
+          # Scope every branch to comments posted during THIS run. Matching on
+          # the head sha instead failed a review that found nothing to say: a
+          # clean review posts "No code suggestions found for the PR" and, when
+          # it cannot update the persistent review, a "Standalone PR Review" —
+          # neither body mentions the commit, so the gate called a completed
+          # review "skipped or failed silently" (observed 2026-09-10 on PR #95).
+          # Other bots comment during the run too (coverage), hence the
+          # review-artifact patterns below rather than "any bot comment".
+          RUN_STARTED=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --jq '.run_started_at' 2>/dev/null || echo "")
+          if [ -n "$RUN_STARTED" ]; then
+            THIS=$(echo "$CMTS" | jq -c --arg since "$RUN_STARTED" '[.[] | select(.created_at >= $since)]')
+          else
+            # No run start time (API hiccup): fall back to the sha-matched set
+            # so the step still decides on this commit's comments.
+            THIS=$(echo "$CMTS" | jq -c --arg full "$SHA" --arg short "$SHORT_SHA" \
+              '[.[] | select(.body | test("(^|[^0-9a-f])(" + $full + "|" + $short + ")([^0-9a-f]|$)"; "i"))]')
+          fi
+          # A review artifact of this run: the reviewer guide, the suggestions
+          # table, or a clean review's "no suggestions" / standalone variant.
+          REVIEWS='PR Reviewer Guide|PR Code Suggestions|No code suggestions found|Standalone PR Review'
+          if echo "$THIS" | jq -e --arg p "$REVIEWS" '[.[] | select(.body | test($p))] | length > 0' >/dev/null 2>&1; then
             echo "Review check passed"
           elif echo "$THIS" | jq -e '[.[] | select(.body | test("failed"; "i"))] | length > 0' >/dev/null 2>&1; then
             echo "::error::PR-Agent reported a failure:"
             echo "$THIS" | jq -r '.[].body'
             exit 1
           elif [ "$(echo "$THIS" | jq 'length' 2>/dev/null || echo 0)" = "0" ]; then
-            echo "::error::PR-Agent posted no comments for commit $SHA — review was skipped or failed silently"
+            echo "::error::PR-Agent posted no review comments for this run — review was skipped or failed silently"
             exit 1
           else
-            echo "::error::PR-Agent comment found for this commit but matched no known pattern"
+            echo "::error::PR-Agent comment found for this run but matched no known pattern"
             echo "$THIS" | jq -r '.[].body'
             exit 1
           fi
