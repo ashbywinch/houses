@@ -9,13 +9,18 @@ new commute computes and the removed one disappears from every card.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from money import Money
+from pint import Quantity
 
 from dag.scheduler import get_scheduler
+from houses.geopoint import GeoPoint
 from houses.model.domain import HomeCoOwner, Person, PlaceOfInterest
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
 from houses.services_provider import get_services
+from tests.unit.conftest import flush_all
 
 
 def _poi(label: str) -> PlaceOfInterest:
@@ -127,4 +132,144 @@ def test_unchanged_destination_set_is_a_noop():
 
     assert {k: id(v) for k, v in prop.commute_selectors.items()} == before, (
         "a trips-only edit must not rebuild pipeline objects"
+    )
+
+
+def _prime_location(prop) -> None:
+    """Give the property a location so pipelines can actually price."""
+
+    prop.rightmove_price.push(Money(amount="500000", currency="GBP"), "test")
+    prop.rightmove_address.push("1 Test St", "test")
+    prop.rightmove_bedrooms.push("3", "test")
+    prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+    prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+    prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.works_estimates.push({}, "test")
+    prop.rental_income.push(Money(amount="0", currency="GBP"), "test")
+    prop.comment_status.push("", "test")
+    flush_all()
+
+
+def _simon_yearly(prop) -> dict:
+    val = prop.commute_breakdown.latest_attempt().value_or_none() or {}
+    simon = val.get("persons", {}).get("Simon", {})
+    return {c["label"]: Decimal(c["yearly_gbp"]) for c in simon.get("commutes", [])}
+
+
+def test_removed_destination_group_slice_tracks_surviving_breakdown():
+    """REMOVE: the group total's commute slice must equal the SURVIVING
+    breakdown's monthly figure — not the orphaned breakdown it was
+    wired to at construction (live 0.0-commutes regression)."""
+
+    rid = "42424251"
+    _push(_persons("Pimlico", "Bracknell"))
+    prop = PropertyNodes(rid)
+    _prime_location(prop)
+    register_property(rid, prop)
+
+    _push(_persons("Pimlico"))
+    flush_all()
+
+    yearly = _simon_yearly(prop)
+    assert set(yearly) == {"Pimlico"}, f"only Pimlico survives: {yearly}"
+    assert yearly["Pimlico"] == Decimal("5.50") * 46
+    ga = prop.group_monthly_cost.latest_attempt()
+    cb = (ga.value_or_none() or {}).get("couple_breakdown", {})
+    expected = (yearly["Pimlico"] / Decimal(12)).quantize(Decimal("0.01"))
+    assert Decimal(str(cb.get("commutes", -1))) == expected, (
+        f"the group slice must track the surviving breakdown: {cb}"
+    )
+
+
+def test_readded_destination_prices_fresh():
+    """REMOVE then RE-ADD the same label: no zombie pricing — the
+    re-added pipeline prices from scratch and the group slice follows."""
+
+    rid = "42424252"
+    _push(_persons("Pimlico", "Bracknell"))
+    prop = PropertyNodes(rid)
+    _prime_location(prop)
+    register_property(rid, prop)
+
+    _push(_persons("Pimlico"))
+    flush_all()
+    _push(_persons("Pimlico", "Bracknell"))
+    flush_all()
+
+    yearly = _simon_yearly(prop)
+    assert yearly == {"Pimlico": Decimal("5.50") * 46, "Bracknell": Decimal("5.50") * 46}
+    ga = prop.group_monthly_cost.latest_attempt()
+    cb = (ga.value_or_none() or {}).get("couple_breakdown", {})
+    expected = (Decimal("5.50") * 2 * 46 / Decimal(12)).quantize(Decimal("0.01"))
+    assert Decimal(str(cb.get("commutes", -1))) == expected
+
+
+def test_renamed_destination_moves_the_pipeline():
+    """RENAME (label change = remove + add): the old key disappears, the
+    new one prices, and the group slice tracks the surviving breakdown."""
+
+    rid = "42424253"
+    _push(_persons("Pimlico"))
+    prop = PropertyNodes(rid)
+    _prime_location(prop)
+    register_property(rid, prop)
+
+    _push(_persons("Pimlico Office"))
+    flush_all()
+
+    assert "Simon/Pimlico" not in prop.commute_selectors
+    assert "Simon/Pimlico Office" in prop.commute_selectors
+    yearly = _simon_yearly(prop)
+    assert yearly == {"Pimlico Office": Decimal("5.50") * 46}
+    ga = prop.group_monthly_cost.latest_attempt()
+    cb = (ga.value_or_none() or {}).get("couple_breakdown", {})
+    expected = (yearly["Pimlico Office"] / Decimal(12)).quantize(Decimal("0.01"))
+    assert Decimal(str(cb.get("commutes", -1))) == expected
+
+
+def test_moved_destination_replans_route_and_respects_the_zone():
+    """A destination that MOVES (same key, new address) must re-plan:
+    the pipeline re-materializes with the current address, so routes
+    and the congestion-zone decision follow the destination's real
+    location. Never a driving commute into the charge zone — the live
+    'Driving to Pimlico' regression."""
+
+    def _simon(address: str) -> list[Person]:
+        return [
+            Person(
+                name="Simon",
+                has_car=True,
+                email="simon@example.com",
+                is_superuser=True,
+                bus_walk_penalty=Quantity(10, "minute"),
+                places_of_interest=(
+                    PlaceOfInterest(
+                        label="Pimlico",
+                        address=address,
+                        trips_per_week=1,
+                        weeks_per_year=46,
+                        acceptable_modes=("car",),
+                    ),
+                ),
+            ),
+            Person(name="Lorena", has_car=False, email="l@x.c"),
+        ]
+
+    rid = "42424254"
+    _push(_simon("Reading RG1 1AA"))
+    prop = PropertyNodes(rid)
+    _prime_location(prop)
+    register_property(rid, prop)
+
+    _push(_simon("1 Drummond Gate, Pimlico, London SW1V 2QQ"))
+    flush_all()
+
+    # The zone rule holds: no driving commute is selected for a
+    # congestion-charge destination (10-min walk tolerance leaves the
+    # 30-min fake walk unacceptable and transit has no unit-test plan,
+    # so a surviving drive would prove the address went stale).
+    val = prop.commute_selectors["Simon/Pimlico"].latest_attempt().value_or_none()
+    assert val is None or val.mode != "drive", (
+        f"driving into the congestion zone must never be selected: {val}"
     )

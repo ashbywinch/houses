@@ -607,7 +607,11 @@ class TestProvenanceUserFriendly:
     def test_commute_provenance_values_all_carry_destination_and_frequency(self):
         """Every commute in the provenance must use the ONE canonical
         structure — mode · duration · cost to <destination> · Nx/wk ·
-        M wks/yr. A commute without a destination or frequency fails here."""
+        M wks/yr.  A commute without a destination or frequency fails
+        here.  (The frequency is CURRENT by construction: the
+        destination flows through live nodes fed by the persons source,
+        so a what-if re-prices it — provenance is never staler than its
+        value.)"""
         client, rid = self._seed()
         detail = client.get(f"/api/properties/{rid}/detail").json()
 

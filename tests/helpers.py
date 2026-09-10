@@ -76,9 +76,15 @@ class FakeGeocoder(GeocodingService):
     """Returns a fixed GeoPoint for any geocode request, and a fixed
     town name for reverse-geocode town lookups."""
 
-    def __init__(self, result: GeoPoint | None = _DEFAULT_POINT, reverse_town: str | None = "Test Town"):
+    def __init__(
+        self,
+        result: GeoPoint | None = _DEFAULT_POINT,
+        reverse_town: str | None = "Test Town",
+        reverse_postcode: str = "RG1 1AA",
+    ):
         self.result = result
         self.reverse_town = reverse_town
+        self.reverse_postcode = reverse_postcode
         self.postcode_calls: list[str] = []
         self.address_calls: list[str] = []
         self.reverse_calls: list[tuple[float, float]] = []
@@ -103,6 +109,13 @@ class FakeGeocoder(GeocodingService):
         if self.reverse_town:
             return Attempt.succeeded(self.reverse_town)
         return Attempt.impossible("no town found for coordinates")
+
+    @override
+    async def reverse_geocode_postcode(self, lat: float, lon: float) -> Attempt[str]:
+        self.reverse_calls.append((lat, lon))
+        if self.reverse_postcode:
+            return Attempt.succeeded(self.reverse_postcode)
+        return Attempt.impossible("no postcode for coordinates")
 
 
 _DEFAULT_SIMON = Commute(

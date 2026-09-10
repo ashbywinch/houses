@@ -737,6 +737,7 @@ class TestNationalRailFallback:
 
         loc = UserInputNode[GeoPoint]("nrfp3_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("nrfp3_poi", PlaceOfInterest)
+        poi.push(poi_info, "test")
         node = TransitNode(
             "90691101/Simon/Pimlico/computed_transit",
             options=TransitOptions(
@@ -744,13 +745,19 @@ class TestNationalRailFallback:
                 poi=poi,
                 no_bus_node=UserInputNode[Commute]("nrfp3_nb", Commute),
                 with_bus_node=UserInputNode[Commute]("nrfp3_wb", Commute),
-                poi_info=poi_info,
                 transit_route_fn=fake_route,
             ),
         )
         a = await node.compute(
             Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
-            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ")),
+            Attempt.succeeded(
+                PlaceOfInterest(
+                    label="Pimlico",
+                    address="1 Drummond Gate, Pimlico, London SW1V 2QQ",
+                    trips_per_week=5,
+                    weeks_per_year=46,
+                )
+            ),
             Attempt.succeeded(self._infeasible_commute()),
             Attempt.succeeded(self._infeasible_commute()),
         )
@@ -760,3 +767,32 @@ class TestNationalRailFallback:
         assert v.label == "Pimlico", "the fallback label must come from the node id"
         assert v.destination.label == "Pimlico"
         assert v.destination.trips_per_week == 5
+
+
+class TestTheTwoTfLPlanNodesSayWhichPlanTheyAre:
+    """Every destination is planned twice — bus avoided, and bus allowed —
+    and the comparison node keeps the bus plan only when it saves the
+    person's bus-walk penalty.  Both live in the provenance, and both were
+    named "TfL": two identically-labelled rows doing different things, so a
+    reader could not tell which plan they were looking at (live 2026-09-10).
+    """
+
+    @staticmethod
+    def _node(node_id: str, *, allow_bus: bool) -> TflTransitNode:
+        loc = UserInputNode(f"{node_id}_loc", GeoPoint)
+        poi = UserInputNode(f"{node_id}_poi", PlaceOfInterest)
+        return TflTransitNode(
+            node_id,
+            options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=allow_bus),
+        )
+
+    def test_the_names_distinguish_the_two_plans(self):
+        no_bus = self._node("name_nb", allow_bus=False)
+        with_bus = self._node("name_wb", allow_bus=True)
+
+        assert no_bus.display_name != with_bus.display_name, (
+            "both plan nodes are called "
+            f"{no_bus.display_name!r}: the reader cannot tell which plan they are looking at"
+        )
+        assert "bus" in no_bus.display_name.lower()
+        assert "bus" in with_bus.display_name.lower()

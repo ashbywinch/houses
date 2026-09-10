@@ -83,7 +83,7 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(45),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
-        )
+            is_child=False,)
         commute_in.push(
             _make_commute(
                 duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30], drive_distances_km=[24.0]
@@ -111,7 +111,7 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(),
             petrol_cost_per_litre_node=_petrol_cost_node(),
-        )
+            is_child=False,)
         commute_in.push(_make_commute(duration_min=32, mode="transit"), "test")
         await flush_processor()
         a = await node.attempt()
@@ -130,7 +130,7 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(45),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
-        )
+            is_child=False,)
         commute_in.push(
             _make_commute(duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30]),
             "test",
@@ -152,7 +152,7 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(45),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
-        )
+            is_child=False,)
         commute_in.push(
             _make_commute(
                 duration_min=50,
@@ -180,7 +180,7 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(),
             petrol_cost_per_litre_node=_petrol_cost_node(),
-        )
+            is_child=False,)
         # Don't push a value — commute remains pending
         await flush_processor()
         a = await node.attempt()
@@ -196,7 +196,7 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(30),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.60")),
-        )
+            is_child=False,)
         commute_in.push(
             _make_commute(
                 duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30], drive_distances_km=[24.0]
@@ -310,8 +310,8 @@ class TestDriveCommuteAlwaysHasCost:
         litre = UserInputNode("dcc_litre", float)
         litre.push(1.45, "test")
         petrol = PetrolCostAugmentNode(
-            "dcc/final_fuel", commute_node=merge, petrol_mpg_node=mpg, petrol_cost_per_litre_node=litre
-        )
+            "dcc/final_fuel", commute_node=merge, petrol_mpg_node=mpg, petrol_cost_per_litre_node=litre,
+            is_child=False,)
 
         await flush_processor()
 
@@ -339,7 +339,8 @@ class TestPetrolProvenanceFormula:
         mpg = _petrol_mpg_node(45)
         cost = UserInputNode("pf_cost", float)
         cost.push(1.45, "test")
-        node = PetrolCostAugmentNode("pf_node", commute_node=src, petrol_mpg_node=mpg, petrol_cost_per_litre_node=cost)
+        node = PetrolCostAugmentNode("pf_node", commute_node=src, petrol_mpg_node=mpg, petrol_cost_per_litre_node=cost,
+            is_child=False,)
         await flush_processor()
 
         prov = await node.build_provenance()

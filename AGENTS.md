@@ -22,6 +22,21 @@ The watcher runs as a persistent background process (`crg-watch`). No manual
 
 **Property Listing Scraper & Enrichment Engine.**
 
+> **CRITICAL REQUIREMENT — provenance is the calculation, made visible.**
+> Every computed value's provenance must show the complete calculation:
+> every input, every multiplier, every rule that shaped it — with the
+> CURRENT values, never stale ones. If a user cannot reconstruct the
+> number from reading the provenance, or a developer cannot debug it
+> from the provenance alone, it is not good enough. Corollaries:
+> (1) anything we calculate lives in the DAG; the only exception is
+> 100% presentation-only formatting; (2) inputs used by a calculation
+> must be DAG inputs too, so a settings change re-prices everything
+> that reads them — provenance is never staler than its value;
+> (3) never omit a factor from provenance to dodge a staleness bug —
+> fix the staleness instead; (4) a calculation reads the node that owns each
+> input, never a copy of that value taken when the pipeline was built — see
+> `docs/dag-library.md` → Wiring rules.
+
 ## Quick Start
 
 ```bash

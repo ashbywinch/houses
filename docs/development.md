@@ -109,7 +109,33 @@ Apply it:
 
 ## Fixing Bugs That Produced Wrong Persisted Data
 
-A code fix changes what a node computes, but existing `node_results` rows still hold buggy output. **The DAG only recomputes when a dep's timestamp changes — it doesn't detect code changes.** So after a fix you must force the affected nodes to recompute.
+A code fix changes what a node computes, but the `node_results` rows already
+on disk still hold the buggy output. Every persisted result carries a code
+fingerprint, and the start-up sweep (`PropertyNodes.schedule_code_stale_nodes()`)
+re-queues any node whose row was written by different code — so a fix lands
+on the next deploy by itself. Regenerate when you do not want to wait for
+that sweep, or when a row is wrong although no input changed under it (the
+inputs moved without a dependency signal).
+
+
+### Before you regenerate: find out why the value is stuck
+
+A wrong or empty value is evidence that a change never reached it. Read the
+chain before you touch it:
+
+1. **Read the value's provenance** (`GET /api/properties/{rid}/detail`). It
+   names the input that failed and why. If it does not, that is the bug —
+   fix the provenance (`docs/dag-library.md` → Provenance is the debugging
+   surface).
+2. **Read the node, not the symptom**: its status, its deps' statuses, and
+   whether it is stale in code. The `node_results` rows under
+   `{rid}/{person}/{destination}/...` are the same values the UI reads.
+3. **Only then repair** — and repair the cause, not the symptom.
+
+✗ Forcing a recompute, clearing rows, or restarting to make a symptom go
+away: it destroys the evidence, and the cause produces the same symptom
+again.
+✗ Reaching for regenerate as the first step of a diagnosis.
 
 ### The mechanism — `POST /api/admin/regenerate`
 

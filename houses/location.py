@@ -529,6 +529,25 @@ _ADDR_OUTCODE_RE = re.compile(
 )
 
 
+async def reverse_geocode_postcode(lat: float, lon: float, *, services: Any | None = None) -> str:
+    """Nearest postcode to a coordinate via the postcodes.io reverse
+    lookup.  Returns "" when nothing resolves (caller decides whether
+    that is an error)."""
+    url = f"{POSTCODES_IO_URL}?lat={lat}&lon={lon}"
+    try:
+        async with cached_async_client(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("result") or []
+            if not results:
+                return ""
+            return results[0].get("postcode", "")
+    except Exception:
+        logger.exception("Reverse postcode lookup failed at %s,%s", lat, lon)
+        return ""
+
+
 def is_outcode(s: str) -> bool:
     """True if the string is a partial postcode (outcode) like 'SL6' or 'SW1E'."""
     return bool(re.match(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$", s))
