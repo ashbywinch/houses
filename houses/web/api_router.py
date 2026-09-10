@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 import dag.scheduler
 from dag.persistence import node_result_before
-from dag.scheduler import AsyncQueueScheduler, flush_processor, run_on_processor
+from dag.scheduler import AsyncQueueScheduler, run_on_processor
 from houses.comments import add_comment, get_comments
 from houses.geopoint import GeoPoint
 from houses.map_layers import DRIVE_PATH, INTERSECTION_PATH, UNION_PATH, isochrone_layers
@@ -512,7 +512,9 @@ async def patch_council_tax(rid: str, body: dict):
             prop.annexe_ignored.push(ignored, "user")
 
     await run_on_processor(_apply_payers)
-    await run_on_processor(flush_processor)
+    # No inline drain: the endpoint returns as soon as the mutation is
+    # queued (docs/dag-library.md → Thread rules, 7).  The recomputed
+    # figures reach every client over the websocket.
     return {"status": "ok"}
 
 

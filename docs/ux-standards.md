@@ -147,9 +147,10 @@ affected figures update on the surface as the recompute lands (element
 patching over the live channel), on this device and every other
 connected one. Two failure modes are findings: a save whose request
 hangs until the whole recompute finishes, and a save that returns while
-the numbers on screen stay stale. What the user should see: the edited
-element and its dependants change in place, while nothing else on the
-page moves.
+the numbers on screen stay stale. What the user should see: if the edited
+value has no dependants, only the edited element updates; otherwise the
+edited element and its dependants change in place, while nothing else on
+the page moves.
 
 **P20 — People are named, never assumed; explanations come from
 provenance.** Refer to people by their names from server data. Never

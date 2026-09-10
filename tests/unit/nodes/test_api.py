@@ -162,8 +162,9 @@ class TestPropertyApi:
             json={"main_payers": ["Simon"], "annexe_payers": ["Ashby"], "ignored": True},
         )
         assert resp.status_code == 200
-        # No flush needed: the PATCH endpoint drains the cascade inline
-        # before responding (the no-op-flush guard enforces this).
+        # The PATCH queues the mutation and returns (Thread rule 7).  The
+        # payer push itself is synchronous here; a test reading a cascade
+        # result must drain explicitly.
 
         # Reconstruct the property from the persisted rows — the choice
         # must NOT be clobbered by the constructor's default push.
@@ -275,6 +276,7 @@ class TestPropertyApi:
                 json={"main_payers": ["Simon", "Lorena"], "annexe_payers": ["Ashby"], "ignored": False},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
 
             detail = client.get("/api/properties/prop123/detail").json()
             apportionment = detail["council_tax_apportionment"]
@@ -352,6 +354,9 @@ class TestPropertyApi:
 
             # Phase 1: the owners take the whole main bill.
             client.patch(f"/api/properties/{rid}/council-tax", json={"main_payers": ["Simon", "Lorena"]})
+            # The PATCH queues the mutation and returns (Thread rule 7); this
+            # test reads the recomputed apportionment, so it drains explicitly.
+            flush_all()
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01), (
@@ -360,11 +365,6 @@ class TestPropertyApi:
             assert float(group["others_breakdown"]["council_tax"]) == pytest.approx(0, abs=0.01), (
                 "others must stop paying the main bill when only the owners pay it"
             )
-            import asyncio as _aio
-
-            prov_obj = _aio.get_event_loop().run_until_complete(prop.group_monthly_cost.build_provenance())
-            print("PROVENANCE value:", prov_obj.value)
-            print("PROVENANCE desc:", prov_obj.description)
             others_phase1 = float(group["others"]["value"])
             assert others_phase1 == pytest.approx(163.87, abs=0.5), (
                 f"others carry their annexe third plus the property sinking fund: {others_phase1}"
@@ -379,6 +379,7 @@ class TestPropertyApi:
                 json={"annexe_payers": ["Ashby"], "ignored": False},
             )
             assert resp.status_code == 200
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
@@ -391,9 +392,9 @@ class TestPropertyApi:
 
             # "Not related" → the annexe drops back out; main payers keep.
             client.patch(f"/api/properties/{rid}/council-tax", json={"ignored": True})
+            flush_all()  # the PATCH queues and returns; the test drains explicitly
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            print("PHASE3 others:", group["others"]["value"])
             assert float(group["others"]["value"]) == pytest.approx(others_phase2 - 75, abs=0.5), (
                 f"ignoring the annexe must drop its share: {group['others']['value']}"
             )

@@ -118,17 +118,24 @@ def _poi_labels(person: Any) -> set[str]:
     return labels
 
 
+#: Persons writes that carry the user's own intent.  A removal here is the
+#: user editing Settings, so it is announced (INFO) and pages nobody.
+USER_INTENT_PERSONS_SOURCES = frozenset({"user"})
+
+
 def alarm_household_shrink(previous: Any, incoming: Any, source_label: str) -> None:
-    """CRITICAL-alarm any loss of persons or destinations between two
-    household docs.
+    """Announce any loss of persons or destinations between two household docs.
 
     A persons push that silently drops people or destinations is how the
     2026-09-09 data incident presented — the household shrank to a single
     destination and nobody noticed until the figures looked wrong. Every
-    persons write therefore passes through here: a shrink does not block
-    the write (removing a destination in Settings is legitimate), but it
-    is announced at CRITICAL with the write path and the exact losses so
-    the responsible code path is found the same day.
+    persons write therefore passes through here.
+
+    Severity follows intent: a write from the user's own Settings save
+    (``USER_INTENT_PERSONS_SOURCES``) is a deliberate edit and logs at INFO;
+    any other write that loses people or destinations logs at CRITICAL with
+    the write path and the exact losses, so the responsible code path is
+    found the same day.  Neither blocks the write.
     """
 
     def _doc(persons: Any) -> dict[str, set[str]]:
@@ -147,6 +154,14 @@ def alarm_household_shrink(previous: Any, incoming: Any, source_label: str) -> N
         if name in new_doc and old_doc[name] - new_doc.get(name, set())
     }
     if not lost_persons and not lost_destinations:
+        return
+    if source_label in USER_INTENT_PERSONS_SOURCES:
+        logger.info(
+            "Household edited (source=%s): removed persons=%s; removed destinations=%s.",
+            source_label,
+            lost_persons,
+            lost_destinations,
+        )
         return
     logger.critical(
         "HOUSEHOLD SHRUNK (source=%s): lost persons=%s; lost destinations=%s. "

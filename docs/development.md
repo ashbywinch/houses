@@ -118,7 +118,7 @@ that sweep, or when a row is wrong although no input changed under it (the
 inputs moved without a dependency signal).
 
 
-### Before you regenerate: find out why the value is stuck
+### Before you regenerate: diagnose why the value is wrong or empty
 
 A wrong or empty value is evidence that a change never reached it. Read the
 chain before you touch it:
