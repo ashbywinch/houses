@@ -82,7 +82,7 @@ A docstring that only describes the scenario without the symptom is an ordinary 
 
 A value copied at build time is not a dependency, so no lint, type check or
 review can see that it stopped changing: only a second write can. That makes
-the two-write test the one check that catches it.
+the two-write test the check that proves the wire is live.
 
 Every derived value fed by settings, persons or another node gets a
 **two-write test**:
