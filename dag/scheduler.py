@@ -132,7 +132,17 @@ class AsyncQueueScheduler(RefreshScheduler):
 
     @override
     def _enqueue(self, node: DerivedNode, scheduled_at: float) -> None:
-        """Queue the node unless already queued, then wake the processor."""
+        """Queue the node unless already queued, then wake the processor.
+
+        The queue and its wakeup event are asyncio primitives — they belong to
+        the processor's loop and must only be touched there.  A caller on
+        another thread (a request handler scheduling directly) hands the
+        enqueue over instead: the primitive stays single-threaded by
+        construction, rather than by every caller remembering.
+        """
+        if _processor_loop is not None and threading.current_thread() is not _processor_thread:
+            _processor_loop.call_soon_threadsafe(self._enqueue, node, scheduled_at)
+            return
         if node._id in self._scheduled:
             return
         event = QueueEvent(scheduled_at=scheduled_at, node_id=node._id, node=node)
@@ -346,9 +356,10 @@ def stop_processor(timeout: float = 10.0) -> int:
                 in_flight = _pending_submissions
             if sched._queue.empty() and in_flight == 0:
                 break
-            # A submission applies its write and enqueues its cascade; yield so
-            # it can run before we decide the processor is idle.
-            await asyncio.sleep(0)
+            # A submission applies its write and enqueues its cascade; give it
+            # a slice before deciding the processor is idle.  Not sleep(0):
+            # that spins the loop at full tilt while a submission runs.
+            await asyncio.sleep(0.01)
         return len(sched._scheduled)
 
     abandoned = 0

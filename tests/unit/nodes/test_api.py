@@ -159,8 +159,9 @@ class TestPropertyApi:
             json={"main_payers": ["Simon"], "annexe_payers": ["Ashby"], "ignored": True},
         )
         assert resp.status_code == 200
-        # No flush needed: the PATCH endpoint drains the cascade inline
-        # before responding (the no-op-flush guard enforces this).
+        # No drain needed here: the payer push is applied inline in the test
+        # environment (no processor thread), and this test reads the PUSHED
+        # value.  A test that reads a cascade RESULT drains explicitly.
 
         # Reconstruct the property from the persisted rows — the choice
         # must NOT be clobbered by the constructor's default push.

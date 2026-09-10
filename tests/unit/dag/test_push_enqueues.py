@@ -9,11 +9,14 @@ the caller's turn does not wait for it.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
+from typing import override
 
 import dag.persistence as per
 import dag.scheduler as sched
+from dag.attempt import Attempt
 from dag.scheduler import start_processor, stop_processor, submit_to_processor
 
 
@@ -94,3 +97,54 @@ def test_shutdown_waits_for_a_submitted_write_to_land():
         assert row.get("value") == 5
     finally:
         per.testing = testing_before
+
+
+def test_scheduling_from_another_thread_hands_over_instead_of_touching_the_queue():
+    """The queue and its wakeup are asyncio primitives — they belong to the
+    processor's loop.  A caller on another thread must hand the enqueue over,
+    not touch them (that is the race the review flagged)."""
+    from dag.derived_node import DerivedNode
+
+    class _Work(DerivedNode[int]):
+        def __init__(self) -> None:
+            super().__init__("12345678/handover", int, ())
+
+        @staticmethod
+        @override
+        def compute(*_dep_attempts: Attempt) -> Attempt[int]:
+            return Attempt.succeeded(1)
+
+    def body() -> None:
+        node = _Work()
+        scheduler = sched.get_scheduler()
+        assert isinstance(scheduler, sched.AsyncQueueScheduler)
+        loop = sched._processor_loop
+        assert loop is not None, "a live processor must run on its own loop"
+
+        # Occupy the processor's loop, so a handed-over enqueue cannot run yet:
+        # if schedule() touched the queue directly, the node would appear in
+        # _scheduled immediately.
+        blocker = threading.Thread(
+            target=lambda: asyncio.run_coroutine_threadsafe(_sleep_quarter(), loop).result(10),
+            daemon=True,
+        )
+        blocker.start()
+        time.sleep(0.05)
+
+        scheduler.schedule(node)
+        assert node._id not in scheduler._scheduled, (
+            "schedule() from another thread touched the asyncio queue directly"
+        )
+
+        blocker.join(5)
+        for _ in range(500):
+            if node.latest_attempt().succeeded:
+                break
+            time.sleep(0.01)
+        assert node.latest_attempt().succeeded, "the handed-over enqueue never ran"
+
+    _with_processor(body)
+
+
+async def _sleep_quarter() -> None:
+    await asyncio.sleep(0.25)
