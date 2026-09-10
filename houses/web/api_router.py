@@ -8,7 +8,6 @@ import typing
 from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from decimal import Decimal as _Decimal
 from pathlib import Path
 from typing import Any
 
@@ -28,18 +27,15 @@ from houses.model.domain import (
     HomeCoOwner,
     Person,
     PlaceOfInterest,
-    effective_acceptable_modes,
-    effective_editable_by,
-    effective_selling_home,
-    home_equity_contributions,
 )
 from houses.nodes.commute import commute_band
-from houses.nodes.settings_node import API_KEY_TO_NODE, aggregate_dict
+from houses.nodes.settings_node import API_KEY_TO_NODE
 from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
 from houses.web.auth import SESSION_MAX_AGE, effective_session_user, get_serializer
 from houses.web.broadcaster import register_client
 from houses.web.monthly_delta import attach as attach_monthly_delta
+from houses.web.settings_payload import SessionPersons, settings_payload
 
 
 def _registry_property(rid: str):
@@ -60,16 +56,6 @@ MAX_SHARE_PERCENT = 100
 TOP_TYPES_LIMIT = 30
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class DepositBreakdown:
-    """(persons, total, lines) from _deposit_breakdown — named so callers
-    read the fields by meaning, not position."""
-
-    persons: dict
-    total: Money
-    lines: list[dict]
 
 
 @dataclass(frozen=True)
@@ -611,173 +597,12 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
     return add_comment(rid, person, body.text)
 
 
-def _home_property_address(person) -> str:
-    """First street line of the linked house's best address; '' when unset."""
-    linked_rid = getattr(person, "home_property_rid", "")
-    if not linked_rid:
-        return ""
-    prop = _registry_property(linked_rid)
-    if prop is None:
-        return ""
-    att = prop.best_address.latest_attempt()
-    if not (att.succeeded and att.value_or_none()):
-        return ""
-    return str(att.value_or_none()).split("\n")[0].split(",")[0]
-
-
-@dataclass(frozen=True)
-class SessionPersons:
-    """The person list plus the requesting session's user — the pair the
-    settings endpoints share for session-aware ownership decisions."""
-
-    persons: list
-    session_user: dict | None
-
-    def session_name(self) -> str:
-        """The session user's Person name (email match), or "" when unlinked."""
-        if not self.session_user:
-            return ""
-        folded = self.session_user.get("email", "").casefold()
-        for p in self.persons:
-            email = getattr(p, "email", "")
-            if email and email.casefold() == folded:
-                return getattr(p, "name", "")
-        return ""
-
-    def can_edit(self, session_name: str, person) -> bool:
-        """Server-side ownership check — the UI never decides this."""
-        if not self.session_user:
-            return False
-        if self.session_user.get("is_superuser"):
-            return True
-        if not session_name:
-            return False
-        return session_name == person.name or session_name in effective_editable_by(person, self.persons)
-
-
-def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> None:
-    """Enrich serialized persons with the EFFECTIVE per-POI modes, the
-    effective guardian list, the session-aware editable_by_me flag, and
-    the linked-house address.  The server decides ownership; the UI only
-    renders it.  Entries are matched to Person models BY NAME — a legacy
-    non-Person entry in the source must not crash the enrichment."""
-    if not isinstance(dumped, list):
-        return
-    by_name = {p.name: p for p in view.persons}
-    for item in dumped:
-        if not isinstance(item, dict):
-            continue
-        person = by_name.get(item.get("name") or "")
-        if person is None:
-            continue
-        editable_by = effective_editable_by(person, view.persons)
-        item["editable_by"] = list(editable_by)
-        item["editable_by_me"] = view.can_edit(session_name, person)
-        item["selling_home"] = effective_selling_home(person)
-        for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=False):
-            if isinstance(poi_item, dict):
-                poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
-        addr = _home_property_address(person)
-        if addr:
-            item["home_property_address"] = addr
-
-
 @api_router.get("/settings")
 async def get_settings(request: Request):
     return await settings_payload(effective_session_user(request))
 
 
-async def settings_payload(session_user: dict | None = None) -> dict:
-    """The settings document: persons, financial aggregates, commute
-    thresholds, the household deposit, and the what-if flag. Shared by
-    the GET endpoint and the settings_updated websocket push, so both
-    surfaces always speak the same shape."""
-    svc = get_services()
-    persons_json = await svc.persons_source.to_json()
-    attempt = svc.persons_source.latest_attempt()
-    persons = [p for p in (attempt.value_or_none() or []) if isinstance(p, Person)]
-    view = SessionPersons(persons=persons, session_user=session_user)
-    session_name = view.session_name()
-    _enrich_persons(persons_json.get("value"), view, session_name)
 
-    # The family deposit as ONE number (P4): per person, sale proceeds −
-    # remaining mortgage + extra money, plus the household total —
-    # computed server-side, never derived from parts by the client.
-    breakdown = _deposit_breakdown(persons)
-    deposit_persons, deposit_total, deposit_lines = breakdown.persons, breakdown.total, breakdown.lines
-    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
-
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        "persons": persons_json,
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        "financial": {"status": "succeeded", "value": aggregate_dict(svc.setting_nodes)},
-        "commute_thresholds": await svc.commute_thresholds_source.to_json(),
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        "household_deposit": {
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary
-            "total": {"amount": f"{deposit_total.amount:.2f}", "currency": "GBP"},
-            "persons": deposit_persons,
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary
-            "provenance": {
-                "label": "Household Deposit",
-                "value": f"£{deposit_total.amount:,.2f}",
-                "sourceType": "calc",
-                # lucidlint: ignore record-shape wire-format dict — serialization boundary
-                "formula": {"lines": deposit_lines, "result": f"£{deposit_total.amount:,.2f}"},
-            },
-        },
-        "what_if_active": bool(started),
-    }
-
-
-def _deposit_breakdown(persons: list) -> DepositBreakdown:
-    """Per-person deposit (distributed home equity + cash) and the
-    household total. Home equity splits by co-owner shares; children
-    never contribute. Pure — unit-testable without the request (P4)."""
-    contributions = home_equity_contributions(persons)
-    by_name = {p.name: p for p in persons if not p.is_child}
-    deposit_persons: dict[str, dict] = {}
-    deposit_total = Money(amount="0", currency="GBP")
-    deposit_lines: list[dict] = []
-    for name, person in by_name.items():
-        cash = person.cash_contribution.amount
-        home_share = contributions.get(name, _Decimal("0"))
-        value = home_share + cash
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        deposit_persons[name] = {"amount": f"{value:.2f}", "currency": "GBP"}
-        deposit_total = deposit_total + Money(str(value), "GBP")
-        if home_share > 0 and effective_selling_home(person):
-            gross = max(_Decimal("0"), person.home_sale_price.amount - person.outstanding_mortgage.amount)
-            co_sum = sum(co.share for co in person.home_co_owners)
-            if co_sum == 0:
-                line = (
-                    f"£{person.home_sale_price.amount:,.2f} sale − "
-                    f"£{person.outstanding_mortgage.amount:,.2f} mortgage + "
-                    f"£{cash:,.2f} cash = £{value:,.2f}"
-                )
-            else:
-                holder_part = f"£{gross:,.2f} home ({TOTAL_SHARE_PERCENT - co_sum}% yours) + "
-                line = f"{holder_part}£{home_share:,.2f} home share + £{cash:,.2f} cash = £{value:,.2f}"
-        elif home_share > 0:
-            # this person's share came from co-owning someone else's home
-            source = ""
-            for other in by_name.values():
-                if other.name == name:
-                    continue
-                for co in other.home_co_owners:
-                    if co.name == name:
-                        gross_other = max(
-                            _Decimal("0"),
-                            other.home_sale_price.amount - other.outstanding_mortgage.amount,
-                        )
-                        source = f"{co.share}% of {other.name}'s home (£{gross_other:,.2f}) "
-            line = f"{source}+ £{cash:,.2f} cash = £{value:,.2f}"
-        else:
-            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
-        # lucidlint: ignore record-shape wire-format dict — provenance line in the API response, serialization boundary
-        deposit_lines.append({"label": name, "value": line})
-    return DepositBreakdown(deposit_persons, deposit_total, deposit_lines)
 
 
 _PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}

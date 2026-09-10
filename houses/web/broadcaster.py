@@ -18,6 +18,7 @@ from fastapi import WebSocket
 
 from houses.services_provider import get_services
 from houses.web.monthly_delta import attach as attach_monthly_delta
+from houses.web.settings_payload import settings_payload
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +142,6 @@ async def push_settings_updated() -> None:
     run_coroutine_threadsafe, keeping every asyncio object here owned
     by one loop.
     """
-    from houses.web.api_router import settings_payload
-
     payload = await settings_payload()
     msg = json.dumps({"type": "settings_updated", "data": payload})
     dead: list[WebSocket] = []
