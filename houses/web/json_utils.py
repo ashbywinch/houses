@@ -6,13 +6,25 @@ Functions moved here from ``enrichment_runner.py`` before its deletion.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from money import Money
 
 _GBP_SCALE = Decimal("0.01")
+
+
+_T = TypeVar("_T")
+
+
+def optional_parse(raw: dict, key: str, parser: Callable[[Any], _T]) -> _T | None:
+    """Parse the nested record under *key* only when present — the
+    wire-parse idiom (an absent optional field is None, never a parse
+    of a missing dict), one copy instead of one per record."""
+    value = raw.get(key)
+    return parser(value) if value else None
 
 
 class WirePayload(Protocol):
