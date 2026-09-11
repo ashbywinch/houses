@@ -140,6 +140,13 @@ async def push_settings_updated() -> None:
     on the MAIN loop — the processor hands it over via
     run_coroutine_threadsafe, keeping every asyncio object here owned
     by one loop.
+
+    The payload is SESSION-NEUTRAL by construction (settings_payload()
+    with no session_user): its per-session fields — ``editable_by_me`` —
+    are false for everyone, because one broadcast cannot carry per-client
+    ownership. Consumers that need ownership read it from the
+    session-scoped endpoint (GET /api/settings); the push is for
+    thresholds, ceilings, labels, and the what-if flag.
     """
     payload = await settings_payload()
     msg = json.dumps({"type": "settings_updated", "data": payload})

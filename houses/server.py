@@ -86,7 +86,11 @@ def _on_node_refreshed(node):
     # An unknown or undeclared kind is dropped on purpose — but loudly:
     # a new node kind that was not given a role would otherwise vanish
     # silently, which is exactly how the id-shape bug stayed hidden.
-    logger.debug("refresh of node with no declared role — no broadcast: %s", kind)
+    logger.debug(
+        "refresh of a node with no declared role — no broadcast: node=%s kind=%s",
+        getattr(node, "_id", "?"),
+        kind,
+    )
 
 
 def _deploy_hash() -> str:
