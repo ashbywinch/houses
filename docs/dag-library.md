@@ -184,11 +184,22 @@ the loop stops (bounded join — `systemctl stop` must not hang).
 
 The pipeline is real in tests, driven synchronously: no processor thread
 (`start_processor` no-ops under `testing`; a fixture asserts none was
-started). `flush_all()` drains the queue once after the operation under
-test — compute and persistence land together. `drain_recompute()` is for
-read-helpers that need pending computation only. A no-op `flush_all()`
-raises: it means you are flushing to make a read see writes, which is
-never needed — reads are snapshot-safe by design.
+started). **Threading is never tested.** It is correct by construction:
+`submit_to_processor` has no branch that needs a thread — with no
+processor loop (tests, startup, scripts) it applies the work inline, and
+on a live processor it is a `run_coroutine_threadsafe` handover counted
+until its callback lands. `stop_processor` drains the queue AND that
+count before joining. A test that starts a real processor thread asserts
+scheduling, not a contract — and it brings a second thread to the
+isolation fixture's one-thread connection, which is sqlite misuse by
+definition. Such a suite is a flake generator, not a test suite. Pin
+what is deterministic instead: value replacement in the caller's turn,
+persistence through the seam, drain order. `flush_all()` drains the
+queue once after the operation under test — compute and persistence land
+together. `drain_recompute()` is for read-helpers that need pending
+computation only. A no-op `flush_all()` raises: it means you are flushing
+to make a read see writes, which is never needed — reads are
+snapshot-safe by design.
 
 
 ## Debugging
