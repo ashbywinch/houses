@@ -201,6 +201,19 @@ class PersistedNodeMixin(Generic[T]):
 class Node(ABC, PersistedNodeMixin[T], Generic[T]):
     """Base class for all DAG nodes."""
 
+    #: Optional app-layer role for refresh routing. The library never
+    #: interprets it — a host application sets it at construction (e.g.
+    #: "property", "settings") and its refresh hook dispatches on it,
+    #: so routing never has to parse node ids. ``None`` = no role.
+    refresh_kind: str | None = None
+
+    #: Which property this node belongs to, when it is a property view.
+    #: Set with ``refresh_kind`` at construction; consumers that key work
+    #: by property (e.g. coalescing a broadcast) read this instead of
+    #: parsing the node id. ``None`` = not a property view.
+    property_rid: str | None = None
+
+
     def __init__(self, node_id: str, value_type: type[T], source_url: str = "") -> None:
         self._id: str = node_id
         self._value_type: type[T] = value_type

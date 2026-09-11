@@ -38,7 +38,6 @@ from houses.nodes.bootstrap import load_property_nodes_from_db
 from houses.nodes.cutover import push_enriched_property
 from houses.nodes.property_nodes import PropertyNodes
 from houses.nodes.settings import set_app_mode
-from houses.nodes.settings_node import SETTING_DEFAULTS
 from houses.property import EnrichedProperty, Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.services import Services
@@ -55,13 +54,6 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 hands broadcaster pushes to it (see _on_node_refreshed)."""
 
 
-#: Every settings-family node id, explicitly: the three service sources
-#: (persons, thresholds, what-if flag) plus the per-key ``settings/*``
-#: nodes.  ``_on_node_refreshed`` routes against this set — a refresh of
-#: anything else is neither a property nor a settings node and is dropped.
-_SETTINGS_NODE_IDS: frozenset[str] = frozenset(
-    ("persons", "commute_thresholds", "whatif_started_at")
-) | frozenset(SETTING_DEFAULTS)
 
 
 def _on_node_refreshed(node):
@@ -70,25 +62,25 @@ def _on_node_refreshed(node):
     Runs on the DAG processor thread — hand pushes to the main loop,
     where the broadcaster task lives.
 
-    - A property node (numeric RID prefix): queue that property's
-      summary broadcast (coalesced) — the phone renders cards from
-      summaries.
-    - A settings node: push the settings payload once — the phone
-      re-renders settings, thresholds, and the what-if flag from it.
+    Routes on the node's DECLARED role — ``refresh_kind``, set at
+    construction (property views by PropertyNodes, settings nodes by
+    their classes) — never on the shape of its id:
 
-    Anything else — an internal or unknown node — is dropped: routing is
-    explicit, never a catch-all (a new node kind must be ADDED to one of
-    the two branches, not silently broadcast as settings)."""
+    - ``"property"``: queue that property's summary broadcast
+      (coalesced) — the phone renders cards from summaries.
+    - ``"settings"``: push the settings payload once — the phone
+      re-renders settings, thresholds, and the what-if flag from it.
+    - anything else: dropped. A node with no role is not broadcast; a
+      new role must be declared at construction, then routed here."""
     if _main_loop is None:
         return
-    node_id = getattr(node, "_id", "") or ""
-    rid = node_id.split("/", 1)[0]
-    if rid.isdigit() and len(rid) >= 6:
+    kind = getattr(node, "refresh_kind", None)
+    if kind == "property":
         asyncio.run_coroutine_threadsafe(
             _broadcaster_mod.notify_node_refreshed_async(node), _main_loop
         )
         return
-    if node_id in _SETTINGS_NODE_IDS:
+    if kind == "settings":
         asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
 
 

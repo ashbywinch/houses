@@ -107,6 +107,9 @@ class SettingsNode(DerivedNode[dict]):
     aggregate.
     """
 
+    # Same declared role as houses/nodes/settings.SettingsNode.
+    refresh_kind: str | None = "settings"
+
     def __init__(self, node_id: str, *, setting_nodes: dict[str, UserInputNode]):
         self._setting_nodes: dict[str, UserInputNode] = setting_nodes
         deps = tuple(setting_nodes.values())

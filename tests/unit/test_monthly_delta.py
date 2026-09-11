@@ -431,9 +431,14 @@ class TestBroadcasterBaselineFreshness:
         task = asyncio.create_task(bcast._broadcaster())
 
         # Two property nodes refresh (e.g. a what-if apply touched the
-        # persons input): both rids are notified.
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="880002/group_monthly_cost"))
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="880001/works_estimates"))
+        # persons input): both rids are notified. The declared owner is
+        # what coalescing reads — never the id shape.
+        await bcast.notify_node_refreshed_async(
+            SimpleNamespace(_id="880002/group_monthly_cost", property_rid="880002")
+        )
+        await bcast.notify_node_refreshed_async(
+            SimpleNamespace(_id="880001/works_estimates", property_rid="880001")
+        )
         try:
             await _until(
                 lambda: {m["rid"] for m in ws.messages} >= {"880001", "880002"},
@@ -462,8 +467,12 @@ class TestBroadcasterBaselineFreshness:
 
         ws = _FakeWS()
         bcast._websocket_clients.add(cast(WebSocket, ws))
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="persons"))
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="settings/mortgage_rate"))
+        # Non-property nodes (even ones whose ids COULD be mistaken for a
+        # property prefix) carry no declared owner: nothing is broadcast.
+        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="persons", property_rid=None))
+        await bcast.notify_node_refreshed_async(
+            SimpleNamespace(_id="settings/mortgage_rate", property_rid=None)
+        )
         await asyncio.sleep(0.05)
 
         assert ws.messages == [], "non-property nodes must not trigger property broadcasts"

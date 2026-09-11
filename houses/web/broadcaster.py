@@ -125,10 +125,9 @@ async def notify_node_refreshed_async(node) -> None:
     here owned by one loop.
     """
     global _notify_debounce_task
-    node_id = getattr(node, "_id", "") or ""
-    rid = node_id.split("/", 1)[0]
-    if not rid.isdigit() or len(rid) < 6:
-        return  # settings aggregates etc. — not a property node
+    rid = getattr(node, "property_rid", None)
+    if rid is None:
+        return  # not a property view — nothing to coalesce against
     _pending_notify_rids.add(rid)
     if _notify_debounce_task is None or _notify_debounce_task.done():
         _notify_debounce_task = asyncio.create_task(_flush_notifies())

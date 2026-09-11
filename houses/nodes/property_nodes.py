@@ -491,6 +491,12 @@ class PropertyNodes:
         for attr in dir(self):
             node = getattr(self, attr, None)
             if isinstance(node, Node):
+                # Every node this container builds is a property-view
+                # node: declare the role and the owning property at
+                # construction, so the DAG→frontend seam routes and
+                # coalesces without parsing node ids.
+                node.refresh_kind = "property"
+                node.property_rid = self.rid
                 slot = Slot(self._on_node_changed)
                 self._slots.append(slot)
                 node.changed.connect(slot)

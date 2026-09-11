@@ -205,32 +205,37 @@ async def test_settings_node_refresh_pushes_the_settings_payload():
         await _stop_broadcasts(fake, task)
 
 @pytest.mark.asyncio
-async def test_refresh_routing_is_explicit_never_a_settings_catchall():
-    """The DAG→frontend seam routes by membership, not by exclusion: the
-    what-if flag node must still push settings (its flag lives in the
-    payload), and an unknown non-property node must push NOTHING — a new
-    node kind has to be added to a branch, not silently broadcast."""
+async def test_refresh_routing_uses_the_declared_role_not_the_node_id():
+    """The seam routes on the node's declared ``refresh_kind``: a real
+    settings node (the what-if marker) pushes the payload — its flag
+    lives there — and a node with NO role pushes NOTHING. Routing must
+    never parse ids: an id that merely LOOKS like a property or a
+    settings node is irrelevant next to the declared role."""
     import houses.server as server_mod
+    from houses.services_provider import get_services as _get_services
 
     loop = asyncio.get_running_loop()
     server_mod._main_loop = loop
     fake, task = await _wire_broadcasts()
     try:
-        # The what-if start/stop marker is a settings-family node: its
-        # refresh must re-push the payload so what_if_active flips.
-        server_mod._on_node_refreshed(SimpleNamespace(_id="whatif_started_at"))
+        # A real settings-family node: its refresh re-pushes the payload
+        # so what_if_active flips on the phone.
+        svc = _get_services()
+        assert getattr(svc.whatif_started_at, "refresh_kind", None) == "settings"
+        server_mod._on_node_refreshed(svc.whatif_started_at)
         for _ in range(20):
             await asyncio.sleep(0.1)
             if _messages(fake, "settings_updated"):
                 break
         assert len(_messages(fake, "settings_updated")) == 1
 
-        # An internal node that is neither property- nor settings-shaped
-        # must be dropped — no settings push, no summary, nothing.
+        # An untagged node is dropped — no settings push, no summary.
+        # (An id that looks like a property/settings id must not matter:
+        #  the role is declared, never inferred.)
         fake.sent.clear()
-        server_mod._on_node_refreshed(SimpleNamespace(_id="scheduler/internal"))
+        server_mod._on_node_refreshed(SimpleNamespace(_id="12345678/price"))
         await asyncio.sleep(0.3)
-        assert _messages(fake) == [], "an unknown node must not broadcast anything"
+        assert _messages(fake) == [], "an untagged node must not broadcast anything"
     finally:
         server_mod._main_loop = None
         await _stop_broadcasts(fake, task)
