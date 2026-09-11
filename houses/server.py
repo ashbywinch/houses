@@ -54,14 +54,43 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 hands broadcaster pushes to it (see _on_node_refreshed)."""
 
 
-def _on_node_refreshed(node):
-    """Broadcast per-node update after a genuine value change.
 
-    Runs on the DAG processor thread — hand the push to the main loop,
-    where the broadcaster task lives."""
+
+def _on_node_refreshed(node):
+    """The DAG→frontend seam, routed by what refreshed.
+
+    Runs on the DAG processor thread — hand pushes to the main loop,
+    where the broadcaster task lives.
+
+    Routes on the node's DECLARED role — ``refresh_kind``, set at
+    construction (property views by PropertyNodes, settings nodes by
+    their classes) — never on the shape of its id:
+
+    - ``"property"``: queue that property's summary broadcast
+      (coalesced) — the phone renders cards from summaries.
+    - ``"settings"``: push the settings payload once — the phone
+      re-renders settings, thresholds, and the what-if flag from it.
+    - anything else: dropped. A node with no role is not broadcast; a
+      new role must be declared at construction, then routed here."""
     if _main_loop is None:
         return
-    asyncio.run_coroutine_threadsafe(_broadcaster_mod._push_node_update(node), _main_loop)
+    kind = getattr(node, "refresh_kind", None)
+    if kind == "property":
+        asyncio.run_coroutine_threadsafe(
+            _broadcaster_mod.notify_node_refreshed_async(node), _main_loop
+        )
+        return
+    if kind == "settings":
+        asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
+        return
+    # An unknown or undeclared kind is dropped on purpose — but loudly:
+    # a new node kind that was not given a role would otherwise vanish
+    # silently, which is exactly how the id-shape bug stayed hidden.
+    logger.debug(
+        "refresh of a node with no declared role — no broadcast: node=%s kind=%s",
+        getattr(node, "_id", "?"),
+        kind,
+    )
 
 
 def _deploy_hash() -> str:

@@ -1123,7 +1123,7 @@ class TestSettingsPropagationApi:
         from money import Money
 
         from houses.model.domain import HomeCoOwner, Person
-        from houses.web.api_router import _deposit_breakdown
+        from houses.web.settings_payload import _deposit_breakdown
 
         persons = [
             Person(
@@ -1164,7 +1164,7 @@ class TestSettingsPropagationApi:
         from money import Money
 
         from houses.model.domain import Person
-        from houses.web.api_router import _deposit_breakdown
+        from houses.web.settings_payload import _deposit_breakdown
 
         persons = [
             Person(

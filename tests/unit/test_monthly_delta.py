@@ -31,6 +31,7 @@ from houses.services_provider import get_services
 
 # ── helpers ──────────────────────────────────────────────────────────
 
+
 def _push_persons(*persons) -> None:
     """Seed the persons settings node (same seam the route tests use)."""
     get_services().persons_source.push(list(persons), "test")
@@ -101,9 +102,7 @@ async def _until(condition, timeout: float = 2.0, message: str = "") -> None:
 def _baseline(group_value: dict):
     from houses.web.monthly_delta import MonthlyBaseline
 
-    return MonthlyBaseline(
-        rid="880001", address="31 Isambard Road", group_value=group_value, others_rent_paid=600.0
-    )
+    return MonthlyBaseline(rid="880001", address="31 Isambard Road", group_value=group_value, others_rent_paid=600.0)
 
 
 class TestGroupDelta:
@@ -179,9 +178,7 @@ class TestMonthlyBaselineWire:
         }
 
     def test_wire_others_null_when_uncomputable(self):
-        baseline = _baseline(
-            {"couple": {"value": "1783.61", "stddev": 0.0}, "others": None}
-        )
+        baseline = _baseline({"couple": {"value": "1783.61", "stddev": 0.0}, "others": None})
         wire = baseline.to_wire()
         assert wire["couple"] == {"value": "1783.61", "approx": False}
         assert wire["others"] is None
@@ -293,9 +290,7 @@ class TestAttach:
         delta = value["delta_vs_home"]
         assert re.fullmatch(r"[+-]\d+\.\d{2}", delta["couple"]["value"]), delta["couple"]
         assert re.fullmatch(r"[+-]\d+\.\d{2}", delta["others"]["value"]), delta["others"]
-        expected_couple = Decimal(value["couple"]["value"]) - Decimal(
-            summary["monthly_baseline"]["couple"]["value"]
-        )
+        expected_couple = Decimal(value["couple"]["value"]) - Decimal(summary["monthly_baseline"]["couple"]["value"])
         assert Decimal(delta["couple"]["value"]) == expected_couple
         assert delta["couple"]["approx"] is (
             value["couple"]["stddev"] > 0 or summary["monthly_baseline"]["couple"]["approx"]
@@ -436,9 +431,14 @@ class TestBroadcasterBaselineFreshness:
         task = asyncio.create_task(bcast._broadcaster())
 
         # Two property nodes refresh (e.g. a what-if apply touched the
-        # persons input): both rids are notified.
-        bcast.notify_node_refreshed(SimpleNamespace(_id="880002/group_monthly_cost"))
-        bcast.notify_node_refreshed(SimpleNamespace(_id="880001/works_estimates"))
+        # persons input): both rids are notified. The declared owner is
+        # what coalescing reads — never the id shape.
+        await bcast.notify_node_refreshed_async(
+            SimpleNamespace(_id="880002/group_monthly_cost", property_rid="880002")
+        )
+        await bcast.notify_node_refreshed_async(
+            SimpleNamespace(_id="880001/works_estimates", property_rid="880001")
+        )
         try:
             await _until(
                 lambda: {m["rid"] for m in ws.messages} >= {"880001", "880002"},
@@ -467,8 +467,12 @@ class TestBroadcasterBaselineFreshness:
 
         ws = _FakeWS()
         bcast._websocket_clients.add(cast(WebSocket, ws))
-        bcast.notify_node_refreshed(SimpleNamespace(_id="persons"))
-        bcast.notify_node_refreshed(SimpleNamespace(_id="settings/mortgage_rate"))
+        # Non-property nodes (even ones whose ids COULD be mistaken for a
+        # property prefix) carry no declared owner: nothing is broadcast.
+        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="persons", property_rid=None))
+        await bcast.notify_node_refreshed_async(
+            SimpleNamespace(_id="settings/mortgage_rate", property_rid=None)
+        )
         await asyncio.sleep(0.05)
 
         assert ws.messages == [], "non-property nodes must not trigger property broadcasts"

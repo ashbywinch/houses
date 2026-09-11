@@ -83,6 +83,11 @@ class SettingsNode(UserInputNode):
     """A settings input node whose writes are guarded — only the app,
     pytest, or an explicitly opted-in script may change family data."""
 
+    # The DAG→frontend role, declared at the class: a refresh of a
+    # settings node pushes the settings payload. The refresh hook routes
+    # on this attribute — it never parses node ids.
+    refresh_kind: str | None = "settings"
+
     @override
     def push(
         self,

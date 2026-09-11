@@ -90,12 +90,25 @@ jobs:
           # failure and no-comments branches diagnose the CURRENT run correctly.
           THIS=$(echo "$CMTS" | jq -c --arg full "$SHA" --arg short "$SHORT_SHA" \
             '[.[] | select(.body | test("(^|[^0-9a-f])(" + $full + "|" + $short + ")([^0-9a-f]|$)"; "i"))]')
+          # The latest bot comment for the PR: a run's outcomes can arrive
+          # WITHOUT a sha marker — the standalone review (posted when
+          # pr-agent cannot update the persistent review in place) and the
+          # "no code suggestions" post (a review that ran and found
+          # nothing). Both are legitimate pass states; the check must not
+          # classify them as "no review posted". Sorted by created_at, the
+          # latest comment is THIS run's (the check runs right after
+          # pr-agent), so the fallback cannot match a stale comment unless
+          # the run posted nothing at all — which the branches below still
+          # catch.
+          LAST=$(echo "$CMTS" | jq -c 'sort_by(.created_at) | last')
           if echo "$THIS" | jq -e '[.[] | select(.body | test("PR Reviewer Guide|PR Code Suggestions"))] | length > 0' >/dev/null 2>&1; then
             echo "Review check passed"
           elif echo "$THIS" | jq -e '[.[] | select(.body | test("failed"; "i"))] | length > 0' >/dev/null 2>&1; then
             echo "::error::PR-Agent reported a failure:"
             echo "$THIS" | jq -r '.[].body'
             exit 1
+          elif echo "$LAST" | jq -e '.body | test("PR Reviewer Guide|PR Code Suggestions|pr-agent:improve:no-suggestions")' >/dev/null 2>&1; then
+            echo "Review check passed (latest comment: standalone review or no-suggestions)"
           elif [ "$(echo "$THIS" | jq 'length' 2>/dev/null || echo 0)" = "0" ]; then
             echo "::error::PR-Agent posted no comments for commit $SHA — review was skipped or failed silently"
             exit 1

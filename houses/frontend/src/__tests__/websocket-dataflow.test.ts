@@ -9,8 +9,7 @@ vi.mock('../services/api', () => ({
   fetchAllSummaries: vi.fn().mockResolvedValue({}),
   fetchPropertyDetail: vi.fn().mockResolvedValue(null),
   fetchSettings: vi.fn().mockResolvedValue({}),
-  fetchWhatIfState: vi.fn<() => Promise<boolean>>(),
-  patchTriage: vi.fn(),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
 }))
 
 /**
@@ -192,7 +191,13 @@ describe('WebSocket settings broadcast', () => {
       }
       setTimeout(() => {
         ws.onmessage?.({
-          data: JSON.stringify({ type: 'node_updated', node_id: 'commute_thresholds', data: {} }),
+          data: JSON.stringify({
+            type: 'settings_updated',
+            data: {
+              persons: { value: [] },
+              commute_thresholds: { value: { Simon: { good_max_minutes: 35, fine_max_minutes: 50 } } },
+            },
+          }),
         })
       }, 0)
       return ws as any
@@ -262,7 +267,12 @@ describe('WebSocket settings broadcast', () => {
     // a what-if applied on another device writes through the settings
     // nodes — the broadcast must flip this device's mode flag
     vi.mocked(fetchWhatIfState).mockResolvedValue(true)
-    deliver!({ data: JSON.stringify({ type: 'node_updated', node_id: 'settings/financial', data: {} }) })
+    deliver!({
+      data: JSON.stringify({ type: 'settings_updated', data: { persons: { value: [] }, what_if_active: true } }),
+    })
+    // The burst buffer applies updates on the next macrotask; wait it
+    // out, then let the fetch promise's microtasks land.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     await flushPromises()
 
     expect(store.whatIfActive).toBe(true)
