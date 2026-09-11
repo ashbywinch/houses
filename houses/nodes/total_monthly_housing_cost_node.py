@@ -517,14 +517,16 @@ class _GroupBreakdownJson:
             council_tax=self.council_tax,
             sinking_fund=self.sinking_fund,
         )
-        if self.annexe_council_tax is not None:
-            d["annexe_council_tax"] = self.annexe_council_tax
-        if self.rent_paid is not None:
-            d["rent_paid"] = self.rent_paid
-        if self.mortgage is not None:
-            d["mortgage"] = self.mortgage
-        if self.rental_income is not None:
-            d["rental_income"] = self.rental_income
+        # The optional keys are emitted only when set — the omission is
+        # the wire contract. One data-driven loop, not four copies.
+        for _key, _val in (
+            ("annexe_council_tax", self.annexe_council_tax),
+            ("rent_paid", self.rent_paid),
+            ("mortgage", self.mortgage),
+            ("rental_income", self.rental_income),
+        ):
+            if _val is not None:
+                d[_key] = _val
         return d
 
 
