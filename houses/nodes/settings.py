@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, override
 
 from money import Money
@@ -296,9 +297,22 @@ def make_default_persons() -> list[Person]:
     ]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+@dataclass(frozen=True)
+class _ThresholdJson:
+    """Wire shape of one person's commute colour-band thresholds."""
+
+    good_max_minutes: int
+    fine_max_minutes: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(good_max_minutes=self.good_max_minutes, fine_max_minutes=self.fine_max_minutes)
+
+
+# lucidlint: ignore record-shape person-keyed defaults map — keyed collection, not a fixed record shape (review-log)
 def make_default_thresholds() -> dict[str, dict[str, int]]:
     return {
-        "Simon": {"good_max_minutes": 30, "fine_max_minutes": 45},
-        "Lorena": {"good_max_minutes": 40, "fine_max_minutes": 60},
+        "Simon": _ThresholdJson(good_max_minutes=30, fine_max_minutes=45).to_dict(),
+        "Lorena": _ThresholdJson(good_max_minutes=40, fine_max_minutes=60).to_dict(),
     }

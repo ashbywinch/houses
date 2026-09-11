@@ -71,6 +71,19 @@ class _Waypoint:
             return {"location": {"latLng": self.location.to_dict()}}
         return {"address": self.address}
 
+@dataclass(frozen=True)
+class _RoutesBody:
+    """A Google Routes directions POST body (request wire shape)."""
+
+    origin: dict
+    destination: dict
+    travel_mode: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(origin=self.origin, destination=self.destination, travelMode=self.travel_mode)
+
 
 @runtime_checkable
 class RoutesPostClient(Protocol):
@@ -399,12 +412,11 @@ class CommuteRouter:
                         f"straight-line distance {dist_km:.1f} km exceeds {max_walk_km:.1f} km"
                     )
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        body = {
-            "origin": self._address_waypoint(origin).to_dict(),
-            "destination": self._address_waypoint(dest).to_dict(),
-            "travelMode": mode,
-        }
+        body = _RoutesBody(
+            origin=self._address_waypoint(origin).to_dict(),
+            destination=self._address_waypoint(dest).to_dict(),
+            travel_mode=mode,
+        ).to_dict()
         mask = "routes.duration,routes.distanceMeters,routes.legs"
         try:
             data = await self._google_routes_client.post(
@@ -500,12 +512,11 @@ class CommuteRouter:
         """
         if isinstance(dest, str):
             dest = PlaceOfInterest(label="", address=dest)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        body = {
-            "origin": self._address_waypoint(origin).to_dict(),
-            "destination": self._address_waypoint(dest.address).to_dict(),
-            "travelMode": "TRANSIT",
-        }
+        body = _RoutesBody(
+            origin=self._address_waypoint(origin).to_dict(),
+            destination=self._address_waypoint(dest.address).to_dict(),
+            travel_mode="TRANSIT",
+        ).to_dict()
         mask = (
             "routes.duration,routes.legs.steps.travelMode,"
             "routes.legs.steps.staticDuration,routes.legs.steps.transitDetails"

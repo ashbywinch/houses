@@ -298,6 +298,18 @@ async def list_properties(
     return _PropertyListing(tab=tab, properties=props).to_dict()
 
 
+@dataclass(frozen=True)
+class _DuplicateError:
+    """The 400 response body when a property already exists."""
+
+    status: str
+    error: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(status=self.status, error=self.error)
+
+
 def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
     """A 400 response when the property already exists; None to proceed.
 
@@ -308,11 +320,10 @@ def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
         return None
     if rid in property_rids():
         return JSONResponse(
-            # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the
-            content={
-                "status": "error",
-                "error": f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
-            },
+            content=_DuplicateError(
+                status="error",
+                error=f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
+            ).to_dict(),
             status_code=400,
         )
     return None
@@ -528,14 +539,26 @@ async def report_scrape(request: Request, body: dict) -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
 
 
+@dataclass(frozen=True)
+class _ScrapeStatus:
+    """Queue depth by status as serialized to the /api/scrapes/status response."""
+
+    pending: int
+    in_progress: int
+    failed: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(scrapes=dict(pending=self.pending, in_progress=self.in_progress, failed=self.failed))
+
+
 @app.get("/api/scrapes/status", response_model=None)
 async def scrape_status(request: Request) -> JSONResponse:
     """Queue depth by status for the operator (superuser)."""
     _require_superuser(request)
     st = _scrape_queue.scrape_queue_status()
     return JSONResponse(
-        # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the shape
-        content={"scrapes": {"pending": st.pending, "in_progress": st.in_progress, "failed": st.failed}}
+        content=_ScrapeStatus(pending=st.pending, in_progress=st.in_progress, failed=st.failed).to_dict()
     )
 
 

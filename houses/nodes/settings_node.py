@@ -47,7 +47,7 @@ SETTING_DEFAULTS: dict[str, tuple[type, Callable[[], Decimal | int | Money]]] = 
 
 # Mapping from API dict key (the old financial_source keys) to setting node ID
 # lucidlint: ignore global-state static API-key → node-id mapping table; never mutated
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape keyed lookup table — API key → node ID, never a wire record (review-log)
 API_KEY_TO_NODE: dict[str, str] = {
     "mortgage_rate": MORTGAGE_RATE,
     "mortgage_term_years": MORTGAGE_TERM,
@@ -75,7 +75,7 @@ def _serialize_for_api(val):
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape keyed collection — API-key → value map (variable keys), not a fixed record shape
 def aggregate_dict(setting_nodes: dict[str, UserInputNode]) -> dict:
     """Build the API-key financial dict from the individual setting
     nodes — a synchronous read for API serialization (no scheduler
@@ -126,7 +126,7 @@ class SettingsNode(DerivedNode[dict]):
                     result[api_key] = _serialize_for_api(val)
         return Attempt.succeeded(result)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape parsing boundary — API-key → value dict (variable keys), routed per entry
     def push(self, value: dict, source_label: str = ""):
         """Push a dict of API-key → value pairs to individual setting nodes.
 

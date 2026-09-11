@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 
 from fastapi import WebSocket
 
@@ -51,6 +52,19 @@ async def register_client(ws: WebSocket) -> None:
         _websocket_clients.discard(ws)
 
 
+@dataclass(frozen=True)
+class _PropertyUpdatedEnvelope:
+    """The property_updated websocket message envelope (wire shape)."""
+
+    rid: str
+    data: dict
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(type="property_updated", rid=self.rid, data=self.data)
+
+
 async def _push_summary(rid: str) -> dict | None:
     """Build, delta-attach, and push one property's summary to all clients.
 
@@ -61,8 +75,7 @@ async def _push_summary(rid: str) -> dict | None:
         return None
     summary = await prop.to_json_summary()
     await attach_monthly_delta(summary, rid, get_services().property_registry)
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
-    msg = json.dumps({"type": "property_updated", "rid": rid, "data": summary})
+    msg = json.dumps(_PropertyUpdatedEnvelope(rid=rid, data=summary).to_dict())
     dead: list[WebSocket] = []
     for ws in list(_websocket_clients):
         try:

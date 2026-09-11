@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,54 @@ DRIVE_PATH = Path("data/commute/drive_searches.json")
 INTERSECTION_PATH = Path("data/commute/intersection.json")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+@dataclass(frozen=True)
+class _PolygonJson:
+    """A Leaflet polygon entry — the {coords, name, url} map shape."""
+
+    coords: Any
+    name: str
+    url: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the Leaflet polygon shape (coding-standards.md)
+        return dict(coords=self.coords, name=self.name, url=self.url)
+
+
+@dataclass(frozen=True)
+class _LayerJson:
+    """A Leaflet layer config — the wire shape served to the map page JS.
+
+    The intersection layer also sets fillOpacity/weight/visibleByDefault;
+    the transit and drive layers omit them entirely (None fields are
+    omitted from to_dict, so the emitted key set matches each site).
+    """
+
+    name: str
+    color: str
+    polygons: list[_PolygonJson]
+    fill_opacity: float | None = None
+    weight: int | None = None
+    visible_by_default: bool | None = None
+    fill_opacity: float | None = None
+    weight: int | None = None
+    visible_by_default: bool | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the Leaflet layer wire shape (coding-standards.md)
+        d: dict[str, object] = dict(name=self.name, color=self.color)
+        if self.fill_opacity is not None:
+            d["fillOpacity"] = self.fill_opacity
+        if self.weight is not None:
+            d["weight"] = self.weight
+        if self.visible_by_default is not None:
+            d["visibleByDefault"] = self.visible_by_default
+        d["polygons"] = [p.to_dict() for p in self.polygons]
+        return d
+
+
+# lucidlint: ignore record-shape consumes the committed commute artifacts — toolchain wire payload (coding-standards.md)
 def _load(path: Path) -> dict | None:
     if not path.is_file():
         return None
@@ -42,28 +91,26 @@ def _load(path: Path) -> dict | None:
         return None
 
 
-def _union_layer(union_path: Path):
+def _union_layer(union_path: Path) -> list[_LayerJson]:
     """The transit shed layer from the union artifact, or [] when absent."""
     union = _load(union_path)
     layers = []
     if union and union.get("components"):
         layers.append(
-                # lucidlint: ignore record-shape wire-format dict — Leaflet layer config serialized to the map page JS
-            {
-                "name": "Train: Pimlico & Aldgate",
-                "color": _COLORS[0],
-                "polygons": [
-                # lucidlint: ignore record-shape wire-format dict — Leaflet polygon entry serialized to the map page JS
-                    {"coords": c["outline"], "name": "", "url": ""}
+            _LayerJson(
+                name="Train: Pimlico & Aldgate",
+                color=_COLORS[0],
+                polygons=[
+                    _PolygonJson(coords=c["outline"], name="", url="")
                     for c in union["components"]
                     if c.get("outline")
                 ],
-            }
+            )
         )
     return layers
 
 
-def _drive_layers(drive_path: Path):
+def _drive_layers(drive_path: Path) -> list[_LayerJson]:
     """One layer per driving destination from the drive searches artifact."""
     drive = _load(drive_path)
     layers = []
@@ -75,48 +122,48 @@ def _drive_layers(drive_path: Path):
         if label:
             drive_by_label.setdefault(label, []).append(s)
     layers.extend(
-        # lucidlint: ignore record-shape wire-format dict — Leaflet layer config serialized to the map page JS
-        {
-            "name": f"Drive to {label}",
-            "color": _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)],
-            "polygons": [
-                # lucidlint: ignore record-shape wire-format dict — Leaflet polygon entry serialized to the map page JS
-                {"coords": s["polygon"], "name": s.get("name", ""), "url": s.get("rightmove_url", "")}
+        _LayerJson(
+            name=f"Drive to {label}",
+            color=_DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)],
+            polygons=[
+                _PolygonJson(
+                    coords=s["polygon"], name=s.get("name", ""), url=s.get("rightmove_url", "")
+                )
                 for s in searches
             ],
-        }
+        )
         for i, (label, searches) in enumerate(drive_by_label.items(), 1)
     )
     return layers
 
 
-def _intersection_layer(intersection_path: Path):
+def _intersection_layer(intersection_path: Path) -> list[_LayerJson]:
     """The all-commutes intersection layer, or [] when the artifact is absent."""
     intersection = _load(intersection_path)
     layers = []
     if intersection and intersection.get("searches"):
         layers.append(
-            # lucidlint: ignore record-shape wire-format dict — Leaflet layer config serialized to the map page JS
-            {
-                "name": "Where we could live",
-                "color": "#c90",
-                "fillOpacity": 0.25,
-                "weight": 4,
+            _LayerJson(
+                name="Where we could live",
+                color="#c90",
+                fill_opacity=0.25,
+                weight=4,
                 # The headline layer — shown by default; the three
                 # isochrone layers start hidden behind the key.
-                "visibleByDefault": True,
-                "polygons": [
-                    # lucidlint: ignore record-shape wire-format dict — Leaflet polygon entry serialized to the map
-                    {"coords": s["polygon"], "name": s.get("name", ""), "url": s.get("rightmove_url", "")}
+                visible_by_default=True,
+                polygons=[
+                    _PolygonJson(
+                        coords=s["polygon"], name=s.get("name", ""), url=s.get("rightmove_url", "")
+                    )
                     for s in intersection["searches"]
                 ],
-            }
+            )
         )
     return layers
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape layers list is the module's wire output — assembled from the records' to_dicts
 def isochrone_layers(
     *,
     union_path: Path | None = None,
@@ -129,10 +176,8 @@ def isochrone_layers(
     defaulting to the committed artifact paths, so tests never
     monkeypatch the module constants.
     """
-    layers: list[dict] = []
+    layers: list[_LayerJson] = []
     layers.extend(_union_layer(union_path or UNION_PATH))
     layers.extend(_drive_layers(drive_path or DRIVE_PATH))
     layers.extend(_intersection_layer(intersection_path or INTERSECTION_PATH))
-    return layers
-
-
+    return [layer.to_dict() for layer in layers]

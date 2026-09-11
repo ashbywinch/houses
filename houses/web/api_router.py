@@ -930,6 +930,19 @@ async def patch_works_estimate(
     return {"status": "ok"}
 
 
+@dataclass(frozen=True)
+class _PersonSummary:
+    """One person as serialized to the /persons response."""
+
+    name: str
+    email: str
+    is_child: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(name=self.name, email=self.email, is_child=self.is_child)
+
+
 @api_router.get("/persons")
 async def list_persons():
     """Return ALL persons (name, email when present, is_child).
@@ -944,18 +957,65 @@ async def list_persons():
     result: list[dict[str, object]] = []
     if persons_attempt.succeeded:
         result = [
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary
-            {"name": p.get("name", ""), "email": p.get("email", ""), "is_child": bool(p.get("is_child"))}
-            if isinstance(p, dict)
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary
-            else {
-                "name": getattr(p, "name", ""),
-                "email": getattr(p, "email", ""),
-                "is_child": bool(getattr(p, "is_child", False)),
-            }
+            (
+                _PersonSummary(
+                    name=p.get("name", ""),
+                    email=p.get("email", ""),
+                    is_child=bool(p.get("is_child")),
+                )
+                if isinstance(p, dict)
+                else _PersonSummary(
+                    name=getattr(p, "name", ""),
+                    email=getattr(p, "email", ""),
+                    is_child=bool(getattr(p, "is_child", False)),
+                )
+            ).to_dict()
             for p in persons_attempt.value_or_none() or []
         ]
     return {"persons": result}
+
+
+@dataclass(frozen=True)
+class _SchedulerError:
+    """The non-AsyncQueueScheduler branch of /debug/scheduler."""
+
+    type: str
+    error: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(type=self.type, error=self.error)
+
+
+@dataclass(frozen=True)
+class _QueueEntry:
+    """One queued node as serialized to the /debug/scheduler response."""
+
+    node_id: str
+    scheduled_at: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(node_id=self.node_id, scheduled_at=self.scheduled_at)
+
+
+@dataclass(frozen=True)
+class _SchedulerSnapshot:
+    """The scheduler's pending work as serialized to the response."""
+
+    queue_size: int
+    scheduled_count: int
+    wakeup_set: bool
+    queue: list[_QueueEntry]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            queue_size=self.queue_size,
+            scheduled_count=self.scheduled_count,
+            wakeup_set=self.wakeup_set,
+            queue=[entry.to_dict() for entry in self.queue],
+        )
 
 
 @api_router.get("/debug/scheduler")
@@ -969,24 +1029,48 @@ async def debug_scheduler():
     """
     sched = dag.scheduler.get_scheduler()
     if not isinstance(sched, AsyncQueueScheduler):
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"type": type(sched).__name__, "error": "not AsyncQueueScheduler"}
+        return _SchedulerError(type=type(sched).__name__, error="not AsyncQueueScheduler").to_dict()
 
     # _scheduled: node_id -> QueueEvent, one entry per queued node (the
     # queue itself is drained by the processor — never touch it here)
     queue_snapshot = [
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        {"node_id": node_id, "scheduled_at": event.scheduled_at}
+        _QueueEntry(node_id=node_id, scheduled_at=event.scheduled_at)
         for node_id, event in list(sched._scheduled.items())[:500]
     ]
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        "queue_size": sched._queue.qsize(),
-        "scheduled_count": len(sched._scheduled),
-        "wakeup_set": sched._wakeup.is_set(),
-        "queue": queue_snapshot,
-    }
+    return _SchedulerSnapshot(
+        queue_size=sched._queue.qsize(),
+        scheduled_count=len(sched._scheduled),
+        wakeup_set=sched._wakeup.is_set(),
+        queue=queue_snapshot,
+    ).to_dict()
+
+
+@dataclass(frozen=True)
+class _TypeCount:
+    """One object-type bucket in the /debug/memory response."""
+
+    type: str
+    count: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(type=self.type, count=self.count)
+
+
+@dataclass(frozen=True)
+class _MemorySnapshot:
+    """Object counts by type as serialized to the /debug/memory response."""
+
+    total_objects: int
+    top_types: list[_TypeCount]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            total_objects=self.total_objects,
+            top_types=[t.to_dict() for t in self.top_types],
+        )
 
 
 @api_router.get("/debug/memory")
@@ -997,9 +1081,7 @@ async def debug_memory():
     obj_counts = Counter(type(o).__name__ for o in gc.get_objects())
     top = obj_counts.most_common(TOP_TYPES_LIMIT)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        "total_objects": sum(obj_counts.values()),
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        "top_types": [{"type": t, "count": c} for t, c in top],
-    }
+    return _MemorySnapshot(
+        total_objects=sum(obj_counts.values()),
+        top_types=[_TypeCount(type=t, count=c) for t, c in top],
+    ).to_dict()

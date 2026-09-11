@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """Scrape property details from Rightmove pages.
 
 Two modes:
@@ -19,7 +18,7 @@ import logging
 import random
 import re
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -111,18 +110,43 @@ def _clean_price(raw: Any) -> float | None:
         return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _parse_json_ld(html: str) -> dict[str, Any]:
+@dataclass(frozen=True)
+class _PropertyExtractJson:
+    """The property fields pulled from a Rightmove page's data sources.
+
+    Only the fields a source actually yields are set; to_dict omits the
+    rest, so the merged extraction keeps each source's key set (the
+    _MERGE_KEYS wire shape).
+    """
+
+    address: str | None = None
+    postcode: str | None = None
+    bedrooms: int | None = None
+    price: float | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        d = {}
+        for k in ("address", "postcode", "bedrooms", "price", "latitude", "longitude"):
+            v = getattr(self, k)
+            if v is not None:
+                d[k] = v
+        return d
+
+
+def _parse_json_ld(html: str) -> _PropertyExtractJson:
     """Extract property data from JSON-LD structured data."""
     m = _LD_JSON_RE.search(html)
     if not m:
-        return {}
+        return _PropertyExtractJson()
     try:
         data = json.loads(m.group(1))
     except json.JSONDecodeError:
-        return {}
+        return _PropertyExtractJson()
 
-    result: dict[str, Any] = {}
+    extracted = _PropertyExtractJson()
 
     addr = data.get("address") or {}
     street = addr.get("streetAddress", "")
@@ -130,27 +154,25 @@ def _parse_json_ld(html: str) -> dict[str, Any]:
     postcode = addr.get("postalCode", "")
     parts = [p for p in [street, locality, postcode] if p]
     if parts:
-        result["address"] = ", ".join(parts)
+        extracted = replace(extracted, address=", ".join(parts))
     if postcode:
-        result["postcode"] = postcode
+        extracted = replace(extracted, postcode=postcode)
 
     offers = data.get("offers") or {}
     price = _clean_price(offers.get("price"))
     if price is not None:
-        result["price"] = price
+        extracted = replace(extracted, price=price)
 
     geo = data.get("geo") or {}
     lat = geo.get("latitude")
     lng = geo.get("longitude")
     if lat is not None and lng is not None:
-        result["latitude"] = float(lat)
-        result["longitude"] = float(lng)
+        extracted = replace(extracted, latitude=float(lat), longitude=float(lng))
 
-    return result
+    return extracted
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _parse_preloaded_state(html: str) -> dict[str, Any]:
+def _parse_preloaded_state(html: str) -> _PropertyExtractJson:
     """Extract from window.__PRELOADED_STATE__ (Rightmove React app)."""
     for pattern in [_PRELOADED_RE, _INITIAL_STATE_RE]:
         m = pattern.search(html)
@@ -161,40 +183,36 @@ def _parse_preloaded_state(html: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
 
-        result: dict[str, Any] = {}
+        extracted = _PropertyExtractJson()
 
         pd = state.get("propertyData") or state.get("property") or {}
         if pd.get("address"):
-            result["address"] = pd["address"]
+            extracted = replace(extracted, address=pd["address"])
         if pd.get("bedrooms") is not None:
-            result["bedrooms"] = int(pd["bedrooms"])
+            extracted = replace(extracted, bedrooms=int(pd["bedrooms"]))
         price = _clean_price(pd.get("price"))
         if price is not None:
-            result["price"] = price
+            extracted = replace(extracted, price=price)
         loc = pd.get("location") or {}
         lat = loc.get("latitude")
         lng = loc.get("longitude")
         if lat is not None and lng is not None:
-            result["latitude"] = float(lat)
-            result["longitude"] = float(lng)
+            extracted = replace(extracted, latitude=float(lat), longitude=float(lng))
 
-        return result
+        return extracted
 
-    return {}
+    return _PropertyExtractJson()
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _parse_map_coords(html: str) -> dict[str, Any]:
+def _parse_map_coords(html: str) -> _PropertyExtractJson:
     """Fallback: extract lat/lng from inline map data in script tags."""
     m = _MAP_COORDS_RE.search(html)
     if m:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"latitude": float(m.group(1)), "longitude": float(m.group(2))}
-    return {}
+        return _PropertyExtractJson(latitude=float(m.group(1)), longitude=float(m.group(2)))
+    return _PropertyExtractJson()
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _parse_page_model(html: str) -> dict[str, Any]:
+def _parse_page_model(html: str) -> _PropertyExtractJson:
     """Extract property data from window.__PAGE_MODEL (Rightmove's primary data format).
 
     The model is a JSON object where ``data`` is a string containing a JSON array.
@@ -204,42 +222,42 @@ def _parse_page_model(html: str) -> dict[str, Any]:
     """
     m = _PAGE_MODEL_RE.search(html)
     if not m:
-        return {}
+        return _PropertyExtractJson()
     try:
         pm = json.loads(m.group(1))
         data = json.loads(pm["data"])
     except (json.JSONDecodeError, KeyError, TypeError):
-        return {}
+        return _PropertyExtractJson()
 
     try:
         prop = data[data[0]["propertyData"]]
     except (IndexError, KeyError, TypeError):
-        return {}
+        return _PropertyExtractJson()
 
-    result: dict[str, Any] = {}
+    extracted = _PropertyExtractJson()
 
     # Address
     address = _page_model_address(data, prop)
     if address is not None:
-        result["address"], result["postcode"] = address
+        extracted = replace(extracted, address=address[0], postcode=address[1])
 
     # Price
     price = _page_model_price(data, prop)
     if price is not None:
-        result["price"] = price
+        extracted = replace(extracted, price=price)
 
         # lucidlint: ignore duplicate-block field-merge accordion — each 3-line block merges a different page-model
         # Bedrooms
     bedrooms = _page_model_bedrooms(data, prop)
     if bedrooms is not None:
-        result["bedrooms"] = bedrooms
+        extracted = replace(extracted, bedrooms=bedrooms)
 
     # Location (lat/lng)
     location = _page_model_location(data, prop)
     if location is not None:
-        result["latitude"], result["longitude"] = location
+        extracted = replace(extracted, latitude=location[0], longitude=location[1])
 
-    return result
+    return extracted
 
 
 _PageModelAddress = tuple[str, str]  # (address, postcode)
@@ -328,19 +346,17 @@ def _parse_html(html: str, url: str) -> RightmoveProperty | None:
     result: dict[str, Any] = {}
 
     # 1. __PAGE_MODEL (most reliable for modern Rightmove)
-    pm = _parse_page_model(html)
-    result.update(pm)
+    result.update(_parse_page_model(html).to_dict())
 
     # 2. JSON-LD (fills gaps)
-    _merge_missing(result, _parse_json_ld(html))
+    _merge_missing(result, _parse_json_ld(html).to_dict())
 
     # 3. Preloaded state (fills bedrooms, lat/lon that JSON-LD may lack)
-    _merge_missing(result, _parse_preloaded_state(html))
+    _merge_missing(result, _parse_preloaded_state(html).to_dict())
 
     # 4. Map coords fallback
     if "latitude" not in result:
-        coords = _parse_map_coords(html)
-        result.update(coords)
+        result.update(_parse_map_coords(html).to_dict())
 
     # 5. DOM extraction fallback
     if "address" not in result:

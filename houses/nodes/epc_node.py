@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import override
 
 from money import Money
@@ -15,6 +15,19 @@ from houses.services_provider import get_services
 # spread, so the total can show "≈" instead of a bare "?" (Part A).
 _FALLBACK_YEARLY_COST = Money(amount="1200", currency="GBP")
 _FALLBACK_STDDEV = 50.0
+
+
+@dataclass(frozen=True)
+class _EpcJson:
+    """Wire shape of the EpcNode value — the band served verbatim to the frontend."""
+
+    band: str
+    potential: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(band=self.band, potential=self.potential)
 
 
 class EpcNode(DerivedNode[dict]):
@@ -32,8 +45,7 @@ class EpcNode(DerivedNode[dict]):
         if result.succeeded:
             band = result.value_or_none()
             if band:
-                # lucidlint: ignore record-shape wire-format dict — node value serialized verbatim to the frontend
-                return Attempt.succeeded({"band": band, "potential": band})
+                return Attempt.succeeded(_EpcJson(band=band, potential=band).to_dict())
             return Attempt.impossible("no EPC data")
         # Propagate the real reason (e.g. ambiguous address) so the frontend
         # can show it — not a generic "no EPC data".

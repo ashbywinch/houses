@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import override
 
 from money import Money
@@ -19,6 +19,90 @@ from houses.commute_router import CommuteRouter, GoogleRoutesOptions
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, PlaceOfInterest
 from houses.settings import settings
+
+
+@dataclass(frozen=True)
+class _TransitPreferencesJson:
+    """The Google Routes transitPreferences block (request wire shape)."""
+
+    routing_preference: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(routingPreference=self.routing_preference)
+
+
+@dataclass(frozen=True)
+class _RoutesBodyJson:
+    """A Google Routes TRANSIT directions POST body (request wire shape)."""
+
+    origin: dict
+    destination: dict
+    travel_mode: str
+    transit_preferences: _TransitPreferencesJson
+    compute_alternative_routes: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(
+            origin=self.origin,
+            destination=self.destination,
+            travelMode=self.travel_mode,
+            transitPreferences=self.transit_preferences.to_dict(),
+            computeAlternativeRoutes=self.compute_alternative_routes,
+        )
+
+
+@dataclass(frozen=True)
+class _BusStopJson:
+    """Wire shape of one bus-stop entry in the serialized node value."""
+
+    departure_name: str
+    arrival_name: str
+    departure_lat: float | None
+    departure_lon: float | None
+    arrival_lat: float | None
+    arrival_lon: float | None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(
+            departure_name=self.departure_name,
+            arrival_name=self.arrival_name,
+            departure_lat=self.departure_lat,
+            departure_lon=self.departure_lon,
+            arrival_lat=self.arrival_lat,
+            arrival_lon=self.arrival_lon,
+        )
+
+
+@dataclass(frozen=True)
+class _BusRouteValueJson:
+    """Wire shape of the BusRouteNode value persisted to the DAG store."""
+
+    bus_stops: list[dict]
+    duration_minutes: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(bus_stops=self.bus_stops, duration_minutes=self.duration_minutes)
+
+
+@dataclass(frozen=True)
+class _StopFareJson:
+    """Wire shape of one stop-fare entry in the serialized node value."""
+
+    amount: str
+    currency: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(amount=self.amount, currency=self.currency)
 
 
 class BusRouteNode(DerivedNode[dict]):
@@ -55,14 +139,13 @@ class BusRouteNode(DerivedNode[dict]):
             return Attempt.impossible("no destination address for this journey")
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        body = {
-            "origin": CommuteRouter._address_waypoint(origin_str).to_dict(),
-            "destination": CommuteRouter._address_waypoint(dest_str).to_dict(),
-            "travelMode": "TRANSIT",
-            "transitPreferences": {"routingPreference": "less_walking"},
-            "computeAlternativeRoutes": False,
-        }
+        body = _RoutesBodyJson(
+            origin=CommuteRouter._address_waypoint(origin_str).to_dict(),
+            destination=CommuteRouter._address_waypoint(dest_str).to_dict(),
+            travel_mode="TRANSIT",
+            transit_preferences=_TransitPreferencesJson(routing_preference="less_walking"),
+            compute_alternative_routes=False,
+        ).to_dict()
         data = await grp(
             body,
             "routes.duration,routes.legs",
@@ -89,15 +172,14 @@ class BusRouteNode(DerivedNode[dict]):
             dep = td.get("stopDetails", {}).get("departureStop", {})
             arr = td.get("stopDetails", {}).get("arrivalStop", {})
             bus_stops.append(
-                # lucidlint: ignore record-shape wire-format dict — bus-stop entries persist inside the serialized node
-                {
-                    "departure_name": dep.get("name", ""),
-                    "arrival_name": arr.get("name", ""),
-                    "departure_lat": dep.get("location", {}).get("latLng", {}).get("latitude"),
-                    "departure_lon": dep.get("location", {}).get("latLng", {}).get("longitude"),
-                    "arrival_lat": arr.get("location", {}).get("latLng", {}).get("latitude"),
-                    "arrival_lon": arr.get("location", {}).get("latLng", {}).get("longitude"),
-                }
+                _BusStopJson(
+                    departure_name=dep.get("name", ""),
+                    arrival_name=arr.get("name", ""),
+                    departure_lat=dep.get("location", {}).get("latLng", {}).get("latitude"),
+                    departure_lon=dep.get("location", {}).get("latLng", {}).get("longitude"),
+                    arrival_lat=arr.get("location", {}).get("latLng", {}).get("latitude"),
+                    arrival_lon=arr.get("location", {}).get("latLng", {}).get("longitude"),
+                ).to_dict()
             )
 
         if not bus_stops:
@@ -105,11 +187,10 @@ class BusRouteNode(DerivedNode[dict]):
 
         duration_sec = int(routes[0].get("duration", "0s").removesuffix("s"))
         return Attempt.succeeded(
-            # lucidlint: ignore record-shape wire-format dict — BusRouteNode result persists to the DAG store as JSON
-            {
-                "bus_stops": bus_stops,
-                "duration_minutes": round(duration_sec / 60),
-            }
+            _BusRouteValueJson(
+                bus_stops=bus_stops,
+                duration_minutes=round(duration_sec / 60),
+            ).to_dict()
         )
 
 
@@ -148,11 +229,10 @@ class BodsFareNode(DerivedNode[dict]):
             fares = reader.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
             cheapest = cheapest_round_trip(fares, reader.national_max_single)
             if cheapest is not None:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-                stop_fares[dep_name] = {
-                    "amount": str(cheapest.amount),
-                    "currency": "GBP",
-                }
+                stop_fares[dep_name] = _StopFareJson(
+                    amount=str(cheapest.amount),
+                    currency="GBP",
+                ).to_dict()
 
         return Attempt.succeeded({"stop_fares": stop_fares})
 

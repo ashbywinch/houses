@@ -89,6 +89,20 @@ class _StopPoint:
     lon: float
 
 
+@dataclass(frozen=True)
+class _StopCoord:
+    """A BODS stop-coordinate row from ``data/bus_fares.json``."""
+
+    lat: float
+    lon: float
+    zone: str | None
+
+    # lucidlint: ignore record-shape from_dict parses the stop-coordinate wire row (coding-standards.md)
+    @classmethod
+    def from_dict(cls, sc: dict) -> _StopCoord:
+        return cls(lat=sc["lat"], lon=sc["lon"], zone=sc.get("zone"))
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -328,9 +342,10 @@ class BusJourneyRegistry:
         for op_key in self._data:
             if op_key == "_meta":
                 continue
-            stop_coords: list[dict] = self._data[op_key].get("stop_coords", [])
-            if not stop_coords:
+            raw_coords = self._data[op_key].get("stop_coords", [])
+            if not raw_coords:
                 continue
+            stop_coords = [_StopCoord.from_dict(sc) for sc in raw_coords]
             dep_zone = self._nearest_zone(dep.lat, dep.lon, stop_coords, radius_km=self._COORD_RADIUS_KM)
             arr_zone = self._nearest_zone(arr.lat, arr.lon, stop_coords, radius_km=self._COORD_RADIUS_KM)
             if dep_zone and arr_zone:
@@ -347,11 +362,10 @@ class BusJourneyRegistry:
         return {}
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _nearest_zone(
         lat: float,
         lon: float,
-        stop_coords: list[dict],
+        stop_coords: list[_StopCoord],
         radius_km: float = 0.1,
     ) -> str | None:
         """Find the zone of the nearest BODS stop within ``radius_km``."""
@@ -359,11 +373,11 @@ class BusJourneyRegistry:
         best_dist = float("inf")
         best_zone: str | None = None
         for sc in stop_coords:
-            pt = GeoPoint(sc["lat"], sc["lon"])
+            pt = GeoPoint(sc.lat, sc.lon)
             d = origin.distance_km_to(pt)
             if d < best_dist:
                 best_dist = d
-                best_zone = sc.get("zone")
+                best_zone = sc.zone
         if best_dist <= radius_km and best_zone:
             return best_zone
         return None

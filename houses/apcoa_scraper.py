@@ -3,8 +3,22 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from scripts.sync_parking_rates import city_slugs, extract_daily_rate_from_tariff, make_slug
+
+
+@dataclass(frozen=True)
+class _ApcoaPageRecord:
+    """Wire shape of a parsed APCOA page: name, address, and price."""
+
+    name: str | None
+    address: str | None
+    price: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {"name": self.name, "address": self.address, "price": self.price}
 
 
 class ApcoaScraper:
@@ -87,8 +101,11 @@ class ApcoaScraper:
         if not (0 <= price <= 100):
             return None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"name": name, "address": address, "price": round(price, 2)}
+        return _ApcoaPageRecord(
+            name=name,
+            address=address,
+            price=round(price, 2),
+        ).to_dict()
 
     @staticmethod
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -121,5 +138,8 @@ class ApcoaScraper:
         if not (0 <= cost <= 100):
             return None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"name": name, "address": address, "price": round(cost, 2)}
+        return _ApcoaPageRecord(
+            name=name,
+            address=address,
+            price=round(cost, 2),
+        ).to_dict()

@@ -15,6 +15,19 @@ from money import Money
 _GBP_SCALE = Decimal("0.01")
 
 
+@dataclasses.dataclass(frozen=True)
+class MoneyJson:
+    """The serialized money wire shape: a canonical 2-dp amount plus currency."""
+
+    amount: str
+    currency: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the money wire shape (coding-standards.md)
+        return dict(amount=self.amount, currency=self.currency)
+
+
 def _money_amount_str(m: Money) -> str:
     """Normalise a Money amount to a canonical 2-dp string."""
     return str(m.amount.quantize(_GBP_SCALE))
@@ -27,8 +40,7 @@ def asdict_serializable(obj: Any) -> Any:
     their values.
     """
     if isinstance(obj, Money):
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"amount": _money_amount_str(obj), "currency": obj.currency}
+        return MoneyJson(amount=_money_amount_str(obj), currency=obj.currency).to_dict()
     if isinstance(obj, Enum):
         return obj.value
     if dataclasses.is_dataclass(obj):

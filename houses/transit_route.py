@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.location import geocode, geocode_address
@@ -18,6 +20,39 @@ ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 SECONDS_PER_MINUTE = 60
+
+
+@dataclass(frozen=True)
+class _DirectionsBodyJson:
+    """The ORS directions request body — POSTed to openrouteservice."""
+
+    coordinates: list[list[float]]
+    units: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the ORS request body shape (coding-standards.md)
+        return dict(coordinates=self.coordinates, units=self.units)
+
+
+@dataclass(frozen=True)
+class _DrivingLegJson:
+    """The park-and-ride driving leg written into the TfL journeys payload."""
+
+    mode: dict
+    duration: int
+    instruction: dict
+    arrival_point: Any
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the TfL journeys leg shape (coding-standards.md)
+        return dict(
+            mode=self.mode,
+            duration=self.duration,
+            instruction=self.instruction,
+            arrivalPoint=self.arrival_point,
+        )
 
 
 async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | None:
@@ -45,11 +80,10 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
     dest_lat = dest_coords.lat
     dest_lng = dest_coords.lon
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    body = {
-        "coordinates": [[origin_coords.lon, origin_coords.lat], [dest_lng, dest_lat]],
-        "units": "km",
-    }
+    body = _DirectionsBodyJson(
+        coordinates=[[origin_coords.lon, origin_coords.lat], [dest_lng, dest_lat]],
+        units="km",
+    ).to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
             cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
@@ -75,8 +109,8 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
         return None
 
 
-# lucidlint: ignore record-shape TfL journeys wire payload — serialization boundary owns the shape (coding-standards.md)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape consumes the TfL journeys provider payload — provider wire shape (coding-standards.md)
+# lucidlint: ignore record-shape returns the mutated TfL journeys payload — provider wire shape (coding-standards.md)
 async def apply_park_and_ride_to_journeys(
     data: dict,
     origin_postcode: str,
@@ -124,13 +158,12 @@ async def apply_park_and_ride_to_journeys(
             drive_minutes,
             station_name,
         )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        legs[0] = {
-            "mode": {"name": "driving"},
-            "duration": drive_minutes,
-            "instruction": {"summary": f"Drive to {station_name}"},
-            "arrivalPoint": first.get("arrivalPoint"),
-        }
+        legs[0] = _DrivingLegJson(
+            mode={"name": "driving"},
+            duration=drive_minutes,
+            instruction={"summary": f"Drive to {station_name}"},
+            arrival_point=first.get("arrivalPoint"),
+        ).to_dict()
         old_duration = journey.get("duration", 0)
         journey["duration"] = old_duration - walk_duration + drive_minutes
     return data

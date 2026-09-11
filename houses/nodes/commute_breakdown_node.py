@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import override
 
@@ -9,6 +10,59 @@ from money import Money
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.node import Node
+
+
+@dataclass(frozen=True)
+class _CommuteEntryJson:
+    """Wire shape of one per-person commute row (node_results)."""
+
+    label: str
+    trips_per_week: int
+    weeks_per_year: int
+    yearly_gbp: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            label=self.label,
+            trips_per_week=self.trips_per_week,
+            weeks_per_year=self.weeks_per_year,
+            yearly_gbp=self.yearly_gbp,
+        )
+
+
+@dataclass(frozen=True)
+class _PersonCommuteJson:
+    """Wire shape of one person's commute block (node_results)."""
+
+    daily_gbp: str
+    yearly_gbp: str
+    commutes: list[_CommuteEntryJson]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            daily_gbp=self.daily_gbp,
+            yearly_gbp=self.yearly_gbp,
+            commutes=[c.to_dict() for c in self.commutes],
+        )
+
+
+@dataclass(frozen=True)
+class _CommuteAggregateJson:
+    """Wire shape of the CommuteBreakdownNode VALUE dict (node_results)."""
+
+    persons: dict[str, dict]
+    yearly_total_gbp: str
+    formula_explanation: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            persons=self.persons,
+            yearly_total_gbp=self.yearly_total_gbp,
+            formula_explanation=self.formula_explanation,
+        )
 
 
 class CommuteBreakdownNode(DerivedNode[dict]):
@@ -81,7 +135,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             if not isinstance(name, str):
                 # A person entry without a usable name still needs a stable dict key.
                 name = "?"
-            commutes: list[dict] = []
+            commutes: list[_CommuteEntryJson] = []
             for poi in pois or ():
                 key = f"{name}/{poi.label}"
                 commute_node = self._commute_selectors.get(key)
@@ -108,27 +162,24 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                     person_yearly += yearly_person_poi
                     yearly_total += yearly_person_poi
                     commutes.append(
-                        # lucidlint: ignore record-shape commute entry — node_results wire shape (coding-standards.md)
-                        {
-                            "label": poi.label,
-                            "trips_per_week": poi.trips_per_week,
-                            "weeks_per_year": poi.weeks_per_year,
-                            "yearly_gbp": str(yearly_person_poi.amount),
-                        }
+                        _CommuteEntryJson(
+                            label=poi.label,
+                            trips_per_week=poi.trips_per_week,
+                            weeks_per_year=poi.weeks_per_year,
+                            yearly_gbp=str(yearly_person_poi.amount),
+                        )
                     )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-            per_person[name] = {
-                "daily_gbp": str(daily_amount.amount) if daily_amount is not None else "0",
-                "yearly_gbp": str(person_yearly.amount),
-                "commutes": commutes,
-            }
+            per_person[name] = _PersonCommuteJson(
+                daily_gbp=str(daily_amount.amount) if daily_amount is not None else "0",
+                yearly_gbp=str(person_yearly.amount),
+                commutes=commutes,
+            ).to_dict()
         return Attempt.succeeded(
-            # lucidlint: ignore record-shape the node VALUE dict — serialized to node_results (coding-standards.md)
-            {
-                "persons": per_person,
-                "yearly_total_gbp": str(yearly_total.amount),
-                "formula_explanation": "Aggregated from DAG nodes",
-            }
+            _CommuteAggregateJson(
+                persons=per_person,
+                yearly_total_gbp=str(yearly_total.amount),
+                formula_explanation="Aggregated from DAG nodes",
+            ).to_dict()
         )
 
     @override

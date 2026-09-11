@@ -18,11 +18,18 @@ from houses.database import get_connection
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class CommentEntry:
+    """A comment as stored and served — one row of the comments wire shape."""
+
     person: str  # "Ashby" | "Simon" | "Lorena"
     text: str
     timestamp: str  # ISO 8601, set server-side
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the comment wire shape (coding-standards.md)
+        return {"person": self.person, "text": self.text, "timestamp": self.timestamp}
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -33,8 +40,7 @@ def get_comments(rid: str) -> list[dict[str, Any]]:
         "SELECT person, text, created_at FROM comments WHERE rid = ? ORDER BY created_at ASC",
         (rid,),
     ).fetchall()
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return [{"person": row["person"], "text": row["text"], "timestamp": row["created_at"]} for row in rows]
+    return [CommentEntry(person=row["person"], text=row["text"], timestamp=row["created_at"]).to_dict() for row in rows]
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -47,7 +53,4 @@ def add_comment(rid: str, person: str, text: str) -> dict[str, Any]:
         (rid, person, text, now),
     )
     conn.commit()
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {"person": person, "text": text, "timestamp": now}
-
-
+    return CommentEntry(person=person, text=text, timestamp=now).to_dict()

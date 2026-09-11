@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar, override
 from urllib.parse import parse_qs, unquote, urlparse
@@ -45,6 +46,20 @@ def set_cache_dir(path: str | Path) -> None:
     # lucidlint: ignore global-state deliberate test seam — unit conftest calls set_cache_dir() to isolate the cache
     global CACHE_DIR
     CACHE_DIR = Path(path)
+
+
+@dataclass(frozen=True)
+class CacheEnvelope:
+    """The wrapped-error envelope stored in the cache file: a
+    deterministic non-2xx response with its status preserved."""
+
+    status: int
+    body: object
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the cache-file shape (coding-standards)
+        return dict(_cached_status=self.status, _cached_body=self.body)
 
 # lucidlint: ignore-file data-clump this module's public cache API deliberately threads one request identity (method,
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -220,9 +235,8 @@ class CachingTransport(httpx.AsyncBaseTransport):
                     request.method,
                     url_path,
                     params,
-                    # lucidlint: ignore record-shape wire-format dict — the wrapped-error envelope IS the cache file's
                     body,
-                    {"_cached_status": response.status_code, "_cached_body": data},
+                    CacheEnvelope(status=response.status_code, body=data).to_dict(),
                 )
         # lucidlint: ignore broad-except deliberate fallback — a cache-write failure must never break the request
         except Exception as e:

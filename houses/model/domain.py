@@ -46,7 +46,6 @@ class PlaceOfInterest:
     # derived by ``effective_acceptable_modes`` and is what routing uses.
     acceptable_modes: tuple[str, ...] = ()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> str:
         """User-friendly projection for provenance display: where the
         destination is, not a raw field dump."""
@@ -66,6 +65,28 @@ class HomeCoOwner:
 
     name: str
     share: int
+
+
+@dataclass(frozen=True)
+class _PersonProvenanceJson:
+    """Wire shape of a person's provenance projection — the identity-
+    relevant fields; money fields render through their canonical string
+    form via the generic projector."""
+
+    name: str
+    has_car: bool
+    is_child: bool
+    places: list[str]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the provenance wire shape (coding-standards.md)
+        return {
+            "name": self.name,
+            "has_car": self.has_car,
+            "is_child": self.is_child,
+            "places": self.places,
+        }
 
 
 @dataclass(frozen=True)
@@ -98,20 +119,19 @@ class Person:
     # False means no current home: the deposit is cash only.
     selling_home: bool | None = None
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display.
 
         Keeps the identity-relevant fields; money fields render through
         their canonical string form via the generic projector.
         """
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {
-            "name": self.name,
-            "has_car": self.has_car,
-            "is_child": self.is_child,
-            "places": [p.to_provenance_value() for p in self.places_of_interest],
-        }
+        return _PersonProvenanceJson(
+            name=self.name,
+            has_car=self.has_car,
+            is_child=self.is_child,
+            places=[p.to_provenance_value() for p in self.places_of_interest],
+        ).to_dict()
 
 
 # Canonical order for the all-modes set (also the UI checkbox order).

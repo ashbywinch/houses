@@ -16,7 +16,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.http_error import HttpError
-from houses.api_cache import cached_async_client, evict_cached, get_cached, set_cached
+from houses.api_cache import CacheEnvelope, cached_async_client, evict_cached, get_cached, set_cached
 from houses.car_park import ApcoaCarParkLookup, CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.location import geocode, geocode_address
@@ -39,6 +39,34 @@ class _TravelDate:
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction mirrors the TfL query param shape (coding-standards.md)
         return dict(date=self.date, time=self.time)
+
+
+@dataclass(frozen=True)
+class _JourneyParams:
+    """The TfL Journey API request query params (nationalSearch + mode set)."""
+
+    national_search: str
+    time_is: str
+    journey_preference: str
+    mode: str
+    date: str
+    time: str
+    app_key: str | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the TfL query param shape (coding-standards.md)
+        params = dict(
+            nationalSearch=self.national_search,
+            timeIs=self.time_is,
+            journeyPreference=self.journey_preference,
+            mode=self.mode,
+            date=self.date,
+            time=self.time,
+        )
+        if self.app_key:
+            params["app_key"] = self.app_key
+        return params
 
 
 # lucidlint: ignore record-shape static dispatch table mode-to-LegMode — keyed dispatch, not a record (review-log)
@@ -156,20 +184,6 @@ class ParkingCostResult:
     cost_groups: list[CostGroup]
 
 
-@dataclass(frozen=True)
-class _CacheEnvelope:
-    """The wrapped-error envelope stored in the fare cache file: a
-    deterministic non-2xx TfL response with its status preserved."""
-
-    status: int
-    body: object
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the cache-file shape (coding-standards)
-        return dict(_cached_status=self.status, _cached_body=self.body)
-
-
 # lucidlint: ignore latent-class all 19 methods share the TfL API surface; no field-disjoint split (review-log)
 class TflClient:
     """TfL API client for public-transit route planning in London.
@@ -245,14 +259,14 @@ class TflClient:
         if allow_bus:
             modes.append("bus")
         url = f"{TflClient.TFL_JOURNEY_URL}/{origin}/to/{destination_postcode}"
-        params = {
-            "nationalSearch": "true",
-            "timeIs": "arriving",
-            "journeyPreference": "leasttime",
-            "mode": ",".join(modes),
+        params = _JourneyParams(
+            national_search="true",
+            time_is="arriving",
+            journey_preference="leasttime",
+            mode=",".join(modes),
             **TflClient._next_weekday_date_params(),
             **TflClient._tfl_auth_params(),
-        }
+        ).to_dict()
         fetch = fetch or TflClient._cached_with_retry
         data = await fetch(url, params)
 # lucidlint: ignore special-case sentinel handling is the contract here
@@ -580,7 +594,7 @@ class TflClient:
             elif 300 <= resp.status_code < 400:
                 set_cached(
                     "GET", url, cache_params, None,
-                    _CacheEnvelope(status=resp.status_code, body=data).to_dict(),
+                    CacheEnvelope(status=resp.status_code, body=data).to_dict(),
                 )
             elif resp.status_code == 404:
                 # 404 "cannot route this station" is genuinely deterministic —
@@ -589,7 +603,7 @@ class TflClient:
                 # expiry, 409 planner outage) and must not poison the cache.
                 set_cached(
                     "GET", url, cache_params, None,
-                    _CacheEnvelope(status=404, body=data).to_dict(),
+                    CacheEnvelope(status=404, body=data).to_dict(),
                 )
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(
@@ -628,14 +642,14 @@ class TflClient:
             modes.append("bus")
 
         url = f"{TflClient.TFL_JOURNEY_URL}/{self._origin}/to/{self._destination}"
-        params = {
-            "nationalSearch": "true",
-            "timeIs": "arriving",
-            "journeyPreference": "leasttime",
-            "mode": ",".join(modes),
+        params = _JourneyParams(
+            national_search="true",
+            time_is="arriving",
+            journey_preference="leasttime",
+            mode=",".join(modes),
             **TflClient._next_weekday_date_params(),
             **TflClient._tfl_auth_params(),
-        }
+        ).to_dict()
 
         try:
             data = await self._cached_call(url, params)

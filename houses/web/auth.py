@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import secrets
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -39,6 +39,18 @@ class _SessionClaims:
     picture: str
     is_superuser: bool
     impersonating: str | None = None
+
+    @classmethod
+    # lucidlint: ignore record-shape from_dict parses the signed cookie claims — serialization boundary
+    # (coding-standards.md)
+    def from_dict(cls, data: dict) -> _SessionClaims:
+        return cls(
+            email=data["email"],
+            name=data["name"],
+            picture=data["picture"],
+            is_superuser=data["is_superuser"],
+            impersonating=data.get("impersonating"),
+        )
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
@@ -67,6 +79,58 @@ class _OAuthState:
     code_verifier: str
     created_at: float
 
+@dataclass(frozen=True)
+class _SessionStatus:
+    """The authenticated session-status response (wire shape)."""
+
+    email: str
+    name: str
+    picture: str
+    person: str | None
+    is_superuser: bool
+    impersonating: str | None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return {
+            "authenticated": True,
+            "email": self.email,
+            "name": self.name,
+            "picture": self.picture,
+            "person": self.person,
+            "is_superuser": self.is_superuser,
+            "impersonating": self.impersonating,
+        }
+
+
+@dataclass(frozen=True)
+class _ImpersonateRequest:
+    """The impersonate request body: {person: name | null} (wire shape)."""
+
+    person: str | None
+
+    @classmethod
+    # lucidlint: ignore record-shape from_dict parses the caller's wire payload — serialization boundary
+    # (coding-standards.md)
+    def from_dict(cls, body: dict) -> _ImpersonateRequest:
+        return cls(person=body.get("person"))
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(person=self.person)
+
+
+@dataclass(frozen=True)
+class _ImpersonationResponse:
+    """The impersonate response envelope: status plus the active impersonation (wire shape)."""
+
+    impersonating: str | None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return dict(status="ok", impersonating=self.impersonating)
 
 
 auth_router = APIRouter(prefix="/api/auth")
@@ -107,9 +171,10 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
     if not cookie:
         return None
     try:
-        return get_serializer().loads(cookie, max_age=int(SESSION_MAX_AGE.total_seconds()))
+        claims = _SessionClaims.from_dict(get_serializer().loads(cookie, max_age=int(SESSION_MAX_AGE.total_seconds())))
     except (BadSignature, SignatureExpired):
         return None
+    return claims.to_dict()
 
 
 def _person_superuser_flag(email: str, persons_attempt_value: Any) -> bool | None:
@@ -149,7 +214,8 @@ def effective_session_user(request: Request) -> dict[str, Any] | None:
         if persons_attempt.succeeded:
             live = _person_superuser_flag(session.get("email", ""), persons_attempt.value_or_none())
             if live is not None and live != session.get("is_superuser", False):
-                session = {**session, "is_superuser": live}
+                claims = _SessionClaims.from_dict(session)
+                session = replace(claims, is_superuser=live).to_dict()
     # lucidlint: ignore broad-except live superuser re-derivation failure logs and returns the session unchanged
     except Exception:
         logger.exception("Failed to re-derive superuser flag from settings")
@@ -452,16 +518,14 @@ async def me(request: Request):
     # Look up associated Person by email
     person_name = _current_person_name(session)
 
-# lucidlint: ignore record-shape session-status response — serialization boundary owns the shape (coding-standards.md)
-    return {
-        "authenticated": True,
-        "email": session["email"],
-        "name": session["name"],
-        "picture": session.get("picture", ""),
-        "person": person_name,
-        "is_superuser": session.get("is_superuser", False),
-        "impersonating": session.get("impersonating"),
-    }
+    return _SessionStatus(
+        email=session["email"],
+        name=session["name"],
+        picture=session.get("picture", ""),
+        person=person_name,
+        is_superuser=session.get("is_superuser", False),
+        impersonating=session.get("impersonating"),
+    ).to_dict()
 
 
 @auth_router.post("/logout")
@@ -492,7 +556,7 @@ async def impersonate(request: Request, body: dict):
     if not session.get("is_superuser"):
         raise HTTPException(status_code=403, detail="Only superusers can impersonate")
 
-    person = body.get("person")
+    person = _ImpersonateRequest.from_dict(body).person
     if person is not None and not isinstance(person, str):
         raise HTTPException(status_code=400, detail="person must be a string or null")
     if person is not None:
@@ -513,8 +577,6 @@ async def impersonate(request: Request, body: dict):
         impersonating=person,
     )
 
-    # lucidlint: ignore record-shape impersonation response — serialization boundary owns the shape
-    # (coding-standards.md)
-    response = JSONResponse(content={"status": "ok", "impersonating": person})
+    response = JSONResponse(content=_ImpersonationResponse(impersonating=person).to_dict())
     _set_session_cookie(response, new_cookie, _is_secure(request))
     return response

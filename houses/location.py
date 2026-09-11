@@ -48,6 +48,65 @@ OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
+
+# ── Geocoder query params (external API wire shapes) ───────────────
+
+
+@dataclass(frozen=True)
+class _NominatimParams:
+    """Query params for the Nominatim search API."""
+
+    q: str
+    format: str
+    limit: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {"q": self.q, "format": self.format, "limit": self.limit}
+
+
+@dataclass(frozen=True)
+class _GoogleParams:
+    """Query params for the Google Maps geocode API."""
+
+    address: str
+    key: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {"address": self.address, "key": self.key}
+
+
+@dataclass(frozen=True)
+class _OrsSearchParams:
+    """Query params for the ORS Pelias search API."""
+
+    text: str
+    size: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {"text": self.text, "size": self.size}
+
+
+@dataclass(frozen=True)
+class _OrsReverseParams:
+    """Query params for the ORS Pelias reverse API."""
+
+    point_lat: float
+    point_lon: float
+    size: int
+    boundary_country: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {
+            "point.lat": self.point_lat,
+            "point.lon": self.point_lon,
+            "size": self.size,
+            "boundary.country": self.boundary_country,
+        }
+
 # ── Regex patterns ───────────────────────────────────────────────
 
 _OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
@@ -220,9 +279,8 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
     since_last = now - get_geo_state(services=services).nominatim_last_call
     if since_last < 1.0:
         await asyncio.sleep(1.0 - since_last)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    params = {"q": f"{clean}, UK", "format": "json", "limit": 1}
-    cached = get_cached("GET", NOMINATIM_URL, params, None)
+    params = _NominatimParams(q=f"{clean}, UK", format="json", limit=1)
+    cached = get_cached("GET", NOMINATIM_URL, params.to_dict(), None)
     if cached is not None:
         # Nominatim returns a JSON array of results — not a dict — so treat
         # the cached payload as Any, mirroring the fresh `resp.json()` path.
@@ -240,13 +298,13 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
             async with cached_async_client(timeout=10.0) as client:
                 resp = await client.get(
                     NOMINATIM_URL,
-                    params=params,
+                    params=params.to_dict(),
                     headers={"User-Agent": "HousesApp/1.0"},
                 )
                 get_geo_state(services=services).nominatim_last_call = asyncio.get_event_loop().time()
                 resp.raise_for_status()
                 data = resp.json()
-                set_cached("GET", NOMINATIM_URL, params, None, data)
+                set_cached("GET", NOMINATIM_URL, params.to_dict(), None, data)
                     # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
                 if data:
                     lat = float(data[0]["lat"])
@@ -273,8 +331,7 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
         logger.debug("Skipping Google Maps — API quota exhausted")
         return None
     googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    params = {"address": f"{address}, UK", "key": settings.google_maps_api_key}
+    params = _GoogleParams(address=f"{address}, UK", key=settings.google_maps_api_key)
     cache_params = {"address": f"{address}, UK"}
     cached = get_cached("GET", googlegeocode_url, cache_params, None)
     if cached is not None:
@@ -297,7 +354,7 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
         return None
     try:
         async with cached_async_client(timeout=10.0) as client:
-            resp = await client.get(googlegeocode_url, params=params)
+            resp = await client.get(googlegeocode_url, params=params.to_dict())
             resp.raise_for_status()
             data = resp.json()
             if data.get("status") == "OK" and data.get("results"):
@@ -328,9 +385,8 @@ async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = N
     """Geocode *address* via ORS Pelias; ``None`` means "try the next provider"."""
     if get_geo_state(services=services).ors_geo_exhausted:
         return None
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    params = {"text": f"{address}, UK", "size": 1}
-    cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
+    params = _OrsSearchParams(text=f"{address}, UK", size=1)
+    cached = get_cached("GET", ORS_GEOCODE_URL, params.to_dict(), None)
     if cached is not None:
         data = cached
         features = data.get("features", [])
@@ -346,12 +402,12 @@ async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = N
         async with cached_async_client(timeout=10.0) as client:
             resp = await client.get(
                 ORS_GEOCODE_URL,
-                params=params,
+                params=params.to_dict(),
                 headers={"Authorization": settings.ors_api_key},
             )
             resp.raise_for_status()
             data = resp.json()
-            set_cached("GET", ORS_GEOCODE_URL, params, None, data)
+            set_cached("GET", ORS_GEOCODE_URL, params.to_dict(), None, data)
             # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared geocoder
             features = data.get("features", [])
             if features:
@@ -473,8 +529,7 @@ async def find_nearest_town_name(
     """
     options = options or ReverseGeocodeOptions()
     rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    params = {"point.lat": lat, "point.lon": lon, "size": 1, "boundary.country": "GBR"}
+    params = _OrsReverseParams(point_lat=lat, point_lon=lon, size=1, boundary_country="GBR")
     headers = {}
     api_key = options.api_key
     if api_key is None:
@@ -486,16 +541,16 @@ async def find_nearest_town_name(
     set_cached_fn = options.set_cached_fn or set_cached
     client_factory = options.client_factory or cached_async_client
 
-    cached = get_cached_fn("GET", rev_url, params, None)
+    cached = get_cached_fn("GET", rev_url, params.to_dict(), None)
     if cached is not None:
         data = cached
     else:
         try:
             async with client_factory(timeout=10.0) as client:
-                resp = await client.get(rev_url, params=params, headers=headers or None)
+                resp = await client.get(rev_url, params=params.to_dict(), headers=headers or None)
                 resp.raise_for_status()
                 data = resp.json()
-                set_cached_fn("GET", rev_url, params, None, data)
+                set_cached_fn("GET", rev_url, params.to_dict(), None, data)
         except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
             raise  # transient — let DAG retry handle it
         # lucidlint: ignore broad-except boundary — reverse-geocode failures convert to an impossible attempt

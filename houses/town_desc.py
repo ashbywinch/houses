@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -23,6 +24,37 @@ def _reset():
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
+@dataclass(frozen=True)
+class _ChatMessage:
+    """A single message in the OpenRouter chat-completions request body."""
+
+    role: str
+    content: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {"role": self.role, "content": self.content}
+
+
+@dataclass(frozen=True)
+class _ChatBody:
+    """Wire shape of the OpenRouter chat-completions request body."""
+
+    model: str
+    messages: list[_ChatMessage]
+    max_tokens: int
+    temperature: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {
+            "model": self.model,
+            "messages": [m.to_dict() for m in self.messages],
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+        }
+
+
 async def generate_town_description(
     town_name: str,
     postcode: str,
@@ -43,13 +75,12 @@ async def generate_town_description(
     with_cache_fn = with_cache_fn or with_cache
 
     try:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        body = {
-            "model": settings.llm_model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
+        body = _ChatBody(
+            model=settings.llm_model,
+            messages=[
+                _ChatMessage(
+                    role="system",
+                    content=(
                         "You describe a UK neighbourhood for someone choosing where to buy a home."
                         " Exactly ONE sentence — no more. Never list multiple areas."
                         " Be specific and balanced: mention character and notable trade-offs"
@@ -58,34 +89,26 @@ async def generate_town_description(
                         " Do NOT mention: prices, transport links, commute times, or schools (separate columns)."
                         " Do not start by repeating the area name."
                     ),
-                },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-                {
-                    "role": "user",
-                    "content": f"{town_name}, {postcode}",
-                },
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-                {
-                    "role": "user",
-                    "content": f"{town_name}, {postcode}.",
-                },
+                ),
+                _ChatMessage(role="user", content=f"{town_name}, {postcode}"),
+                _ChatMessage(role="user", content=f"{town_name}, {postcode}."),
             ],
-            "max_tokens": settings.llm_max_tokens,
-            "temperature": settings.llm_temperature,
-        }
+            max_tokens=settings.llm_max_tokens,
+            temperature=settings.llm_temperature,
+        )
 
         async def _fetch():
             async with client_factory(timeout=15.0) as client:
                 resp = await client.post(
                     API_URL,
-                    json=body,
+                    json=body.to_dict(),
                     headers={"Authorization": f"Bearer {settings.llm_api_key}"},
                 )
             assert isinstance(resp, httpx.Response)
             resp.raise_for_status()
             return resp.json()
 
-        result = await with_cache_fn("POST", API_URL, body=body, fetch=_fetch)
+        result = await with_cache_fn("POST", API_URL, body=body.to_dict(), fetch=_fetch)
         raw = result["choices"][0]["message"]["content"].strip()
         description = raw.split(".")[0].strip() + "."
         _town_cache[key] = description

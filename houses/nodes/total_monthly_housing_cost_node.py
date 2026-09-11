@@ -21,7 +21,7 @@ class GroupFigureResult:
 
     value: Decimal
     stddev: float
-    breakdown: dict
+    breakdown: _GroupBreakdownJson
 
 
 @dataclass(frozen=True)
@@ -430,17 +430,16 @@ class _GroupCostCalculator:
             stddev = (main_payer_count / split.main_payer_total) * float(ctx.council_stddev) / float(MONTHS_PER_YEAR)
         if split.payers:
             stddev += (payer_count / len(split.payers)) * split.annexe_stddev / float(MONTHS_PER_YEAR)
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        breakdown = {
-            "commutes": round(float(commutes), 2),
-            "insurance": round(float(insurance), 2),
+        breakdown = _GroupBreakdownJson(
+            commutes=round(float(commutes), 2),
+            insurance=round(float(insurance), 2),
             # Main bill only — the annexe bill has its own row below, so
             # the breakdown rows sum to the group total.
-            "council_tax": round(float(main_share), 2),
-            "sinking_fund": round(float(sinking_share), 2),
-        }
+            council_tax=round(float(main_share), 2),
+            sinking_fund=round(float(sinking_share), 2),
+        )
         if annexe_share:
-            breakdown["annexe_council_tax"] = round(float(annexe_share), 2)
+            breakdown.annexe_council_tax = round(float(annexe_share), 2)
         return GroupFigureResult(value, round(stddev, 2), breakdown)
 
 
@@ -492,11 +491,85 @@ class _GroupCostContext:
     insurance_scale: int
 
 
+@dataclass
+class _GroupBreakdownJson:
+    """Wire shape of one group's breakdown rows (node_results).
+
+    Not frozen: the assemblers append the rent, mortgage and
+    rental-income rows after ``group_figure`` returns — the original
+    dict was mutated in place at those sites.
+    """
+
+    commutes: float
+    insurance: float
+    council_tax: float
+    sinking_fund: float
+    annexe_council_tax: float | None = None
+    rent_paid: float | None = None
+    mortgage: float | None = None
+    rental_income: float | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        d = dict(
+            commutes=self.commutes,
+            insurance=self.insurance,
+            council_tax=self.council_tax,
+            sinking_fund=self.sinking_fund,
+        )
+        if self.annexe_council_tax is not None:
+            d["annexe_council_tax"] = self.annexe_council_tax
+        if self.rent_paid is not None:
+            d["rent_paid"] = self.rent_paid
+        if self.mortgage is not None:
+            d["mortgage"] = self.mortgage
+        if self.rental_income is not None:
+            d["rental_income"] = self.rental_income
+        return d
+
+
+@dataclass(frozen=True)
+class _GroupFigureJson:
+    """The {value, stddev} figure wrapper for one group."""
+
+    value: str
+    stddev: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(value=self.value, stddev=self.stddev)
+
+
+@dataclass(frozen=True)
+class _GroupCostsJson:
+    """Wire shape of the GroupMonthlyCostNode value dict."""
+
+    couple: _GroupFigureJson
+    others: _GroupFigureJson
+    couple_label: str
+    couple_names: str
+    others_label: str
+    couple_breakdown: _GroupBreakdownJson
+    others_breakdown: _GroupBreakdownJson
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            couple=self.couple.to_dict(),
+            others=self.others.to_dict(),
+            couple_label=self.couple_label,
+            couple_names=self.couple_names,
+            others_label=self.others_label,
+            couple_breakdown=self.couple_breakdown.to_dict(),
+            others_breakdown=self.others_breakdown.to_dict(),
+        )
+
+
 def _group_figure_result(calc, ctx, group, owner_share, rent) -> GroupFigureResult:
     """One group's monthly figure, stddev and breakdown (rent applied)."""
     fig = calc.group_figure(ctx, group, owner_share, rent)
     if rent:
-        fig.breakdown["rent_paid"] = round(float(rent), 2)
+        fig.breakdown.rent_paid = round(float(rent), 2)
     return fig
 
 
@@ -550,25 +623,22 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
     )
     couple_val = couple_fig.value + mortgage_val - rental_val
     couple_std, couple_breakdown = couple_fig.stddev, couple_fig.breakdown
-    couple_breakdown["mortgage"] = round(float(mortgage_val), 2)
-    couple_breakdown["rental_income"] = round(-float(rental_val), 2)
+    couple_breakdown.mortgage = round(float(mortgage_val), 2)
+    couple_breakdown.rental_income = round(-float(rental_val), 2)
     others_fig = _group_figure_result(calc, ctx, others, others_share, others_rent_paid)
     others_val, others_std, others_breakdown = others_fig.value, others_fig.stddev, others_fig.breakdown
     return Attempt.succeeded(
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        {
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
-            "couple": {"value": f"{couple_val:.2f}", "stddev": couple_std},
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
-            "others": {"value": f"{others_val:.2f}", "stddev": others_std},
-            "couple_label": "+".join(p.name[0].upper() for p in adults if p.name in owners),
+        _GroupCostsJson(
+            couple=_GroupFigureJson(value=f"{couple_val:.2f}", stddev=couple_std),
+            others=_GroupFigureJson(value=f"{others_val:.2f}", stddev=others_std),
+            couple_label="+".join(p.name[0].upper() for p in adults if p.name in owners),
             # Full names, not initials — the detail page says "Ashby",
             # not "A". The card still uses the short couple label.
-            "couple_names": "+".join(p.name for p in adults if p.name in owners),
-            "others_label": "+".join(p.name for p in others),
-            "couple_breakdown": couple_breakdown,
-            "others_breakdown": others_breakdown,
-        }
+            couple_names="+".join(p.name for p in adults if p.name in owners),
+            others_label="+".join(p.name for p in others),
+            couple_breakdown=couple_breakdown,
+            others_breakdown=others_breakdown,
+        ).to_dict()
     )
 
 
