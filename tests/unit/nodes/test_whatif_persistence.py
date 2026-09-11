@@ -223,20 +223,22 @@ def test_restore_responds_without_draining_the_cascade(whatif_world):
     """Restore must answer immediately: the re-price cascade drains in
     the background. A restore that flushed the queue inline would hang
     the click for the whole backlog (the 2026-09-08 hang report)."""
-    from unittest.mock import patch
-
     import dag.scheduler as sched
+    from tests.unit.conftest import flush_all
 
     client, rid = whatif_world
     assert client.post("/api/what-if/apply", json={"persons": [_apply_body(0)]}).status_code == 200
+    flush_all()  # settle the apply's cascade: the counter starts at zero
 
     scheduler = sched.get_scheduler()
-    with patch.object(scheduler, "process_pending", wraps=scheduler.process_pending) as spy:
-        resp = client.post("/api/what-if/restore")
-        assert resp.status_code == 200
-        assert spy.call_count == 0, (
-            "restore must not drain the DAG queue inline — the cascade belongs to the background drain"
-        )
+    assert isinstance(scheduler, sched.AsyncQueueScheduler)
+    queued_before = scheduler.enqueued_since_flush
+    resp = client.post("/api/what-if/restore")
+    assert resp.status_code == 200
+    assert scheduler.enqueued_since_flush > queued_before, (
+        "restore flushed the re-price cascade inline — the click would hang for the whole backlog. "
+        "The call answered with the cascade still queued, by construction (enqueue-only restore)."
+    )
     flush_all()  # settle the cascade the restore queued
 
 
