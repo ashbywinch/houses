@@ -26,12 +26,12 @@ class HttpError(Exception):
         message: str = "",
         *,
         headers: dict[str, str] | None = None,
-        body: str = "",
+        body: object = "",
         user_message: str = "",
     ) -> None:
         self.status: int = status
         self.headers: dict[str, str] = headers or {}
-        self.body: str = body
+        self.body: object = body
         self.user_message: str = user_message or f"HTTP {status}: {message or _status_phrase(status)}"
         reason = message or _status_phrase(status)
         super().__init__(f"HTTP {status}: {reason}")

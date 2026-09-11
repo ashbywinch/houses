@@ -194,7 +194,7 @@ class RoutesPostClient(Protocol):
     # lucidlint: ignore record-shape transport seam contract — the request body is the caller's
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
-        self, body: WirePayload | dict, field_mask: str, *, options: GoogleRoutesOptions | None = None
+        self, body: WirePayload, field_mask: str, *, options: GoogleRoutesOptions | None = None
     ) -> dict | None: ...
 
 
@@ -241,7 +241,7 @@ class GoogleRoutesClient:
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self,
-        body: WirePayload | dict,
+        body: WirePayload,
         field_mask: str,
         *,
         options: GoogleRoutesOptions | None = None,

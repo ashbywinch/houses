@@ -20,7 +20,7 @@ class TestWalkCommuteFailsFast:
         """_google_routes_post must raise ValueError when Google API key is missing."""
         import asyncio
 
-        from houses.commute_router import GoogleRoutesClient
+        from houses.commute_router import GoogleRoutesClient, _LatLng, _RoutesBody, _Waypoint
         from houses.settings import settings
 
         client = GoogleRoutesClient()
@@ -28,7 +28,12 @@ class TestWalkCommuteFailsFast:
         try:
             settings.google_maps_api_key = ""
             with pytest.raises(ValueError, match="Google Maps API key not configured"):
-                asyncio.run(client.post({}, "test"))
+                empty = _RoutesBody(
+                    origin=_Waypoint(location=_LatLng(latitude=0.0, longitude=0.0)),
+                    destination=_Waypoint(location=_LatLng(latitude=0.0, longitude=0.0)),
+                    travel_mode="DRIVE",
+                )
+                asyncio.run(client.post(empty, "test"))
         finally:
             settings.google_maps_api_key = original
 
@@ -636,7 +641,7 @@ class TestGoogleRoutesPostReturn:
     async def test_returns_data_on_cache_miss(self):
         from unittest.mock import AsyncMock
 
-        from houses.commute_router import GoogleRoutesClient, GoogleRoutesOptions
+        from houses.commute_router import GoogleRoutesClient, GoogleRoutesOptions, _LatLng, _RoutesBody, _Waypoint
 
 
         fake_resp = AsyncMock()
@@ -654,8 +659,13 @@ class TestGoogleRoutesPostReturn:
                 return False
 
         set_cached_calls = []
+        body = _RoutesBody(
+            origin=_Waypoint(location=_LatLng(latitude=51.5, longitude=-0.1)),
+            destination=_Waypoint(location=_LatLng(latitude=51.6, longitude=-0.2)),
+            travel_mode="DRIVE",
+        )
         result = await GoogleRoutesClient().post(
-            {"x": 1},
+            body,
             "mask",
             options=GoogleRoutesOptions(
                 api_key="fake-key",

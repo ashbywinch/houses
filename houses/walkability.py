@@ -111,18 +111,17 @@ async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoi
 
     rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
     params = _ReverseGeocodeParamsJson(point_lat=lat, point_lon=lng, size=1, boundary_country="GBR")
-    payload = params.to_dict()
 
-    cached = get_cached("GET", rev_url, payload, None)
+    cached = get_cached("GET", rev_url, params, None)
     if cached is not None:
         data = cached
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(rev_url, params=payload)
+                resp = await client.get(rev_url, params=params.to_dict())
                 resp.raise_for_status()
                 data = resp.json()
-                set_cached("GET", rev_url, payload, None, data)
+                set_cached("GET", rev_url, params, None, data)
         except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
             raise  # transient — let DAG retry handle it
         # lucidlint: ignore broad-except deliberate fallback — reverse-geocode failure returns None
@@ -149,7 +148,6 @@ async def _walk_duration(
     origin = [lng, lat]
     dest = [town_centre.lon, town_centre.lat]
     body = _ORSWalkBody(coordinates=[origin, dest])
-    payload = body.to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
@@ -160,12 +158,12 @@ async def _walk_duration(
                         "Authorization": settings.ors_api_key,
                         "Content-Type": "application/json",
                     },
-                    json=payload,
+                    json=body.to_dict(),
                 )
                 resp.raise_for_status()
                 return resp.json()
 
-            data = await with_cache("POST", ORS_WALKING_URL, body=payload, fetch=_fetch)
+            data = await with_cache("POST", ORS_WALKING_URL, body=body, fetch=_fetch)
         response = _DirectionsResponseJson.from_dict(data)
         return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
     except (KeyError, IndexError) as e:
@@ -195,7 +193,6 @@ async def _google_places_text(lat: float, lng: float) -> str:
             circle=_PlacesCircle(center=_PlacesCircleCenter(latitude=lat, longitude=lng), radius=1000.0)
         ),
     )
-    payload = places_body.to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
@@ -208,12 +205,12 @@ async def _google_places_text(lat: float, lng: float) -> str:
                         "X-Goog-FieldMask": "places.displayName,places.types,places.location",
                         "Content-Type": "application/json",
                     },
-                    json=payload,
+                    json=places_body.to_dict(),
                 )
                 resp.raise_for_status()
                 return resp.json()
 
-            data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=payload, fetch=_fetch_places)
+            data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=places_body, fetch=_fetch_places)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status == HTTP_TOO_MANY_REQUESTS or (HTTP_5XX_START <= status < HTTP_5XX_END):
@@ -245,20 +242,19 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         f");out center 5;"
     )
     overpass_params = _OverpassParamsJson(data=overpass_query)
-    payload = overpass_params.to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
             async def _fetch_overpass():
                 resp = await client.get(
                     overpass_url,
-                    params=payload,
+                    params=overpass_params.to_dict(),
                     headers={"Accept": "application/json", "User-Agent": "HousesApp/1.0"},
                 )
                 resp.raise_for_status()
                 return resp.json()
 
-            data = await with_cache("GET", overpass_url, params=payload, fetch=_fetch_overpass)
+            data = await with_cache("GET", overpass_url, params=overpass_params, fetch=_fetch_overpass)
         places = _format_overpass(_OverpassResponseJson.from_dict(data), lat, lng)
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
