@@ -68,14 +68,15 @@ class _NominatimParams:
 
 @dataclass(frozen=True)
 class _GoogleParams:
-    """Query params for the Google Maps geocode API."""
+    """Query params for the Google Maps geocode API. The API key is AUTH,
+    not request identity: it travels in the wire query at the httpx edge and
+    never in the record, so cache keys stay key-driven-free (605accb)."""
 
     address: str
-    key: str
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        return {"address": self.address, "key": self.key}
+        return {"address": self.address}
 
 
 @dataclass(frozen=True)
@@ -332,9 +333,8 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
         logger.debug("Skipping Google Maps — API quota exhausted")
         return None
     googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
-    params = _GoogleParams(address=f"{address}, UK", key=settings.google_maps_api_key)
-    cache_params = {"address": f"{address}, UK"}
-    cached = get_cached("GET", googlegeocode_url, cache_params, None)
+    params = _GoogleParams(address=f"{address}, UK")
+    cached = get_cached("GET", googlegeocode_url, params, None)
     if cached is not None:
         data = cached
         if data.get("status") == "OK" and data.get("results"):
@@ -355,11 +355,15 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
         return None
     try:
         async with cached_async_client(timeout=10.0) as client:
-            resp = await client.get(googlegeocode_url, params=params.to_dict())
+            # The key is auth, not identity: attached to the wire query here
+            # (the httpx edge), never part of the request record or cache key.
+            resp = await client.get(
+                googlegeocode_url, params={**params.to_dict(), "key": settings.google_maps_api_key}
+            )
             resp.raise_for_status()
             data = resp.json()
             if data.get("status") == "OK" and data.get("results"):
-                set_cached("GET", googlegeocode_url, cache_params, None, data)
+                set_cached("GET", googlegeocode_url, params, None, data)
                 # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
                 loc = data["results"][0]["geometry"]["location"]
                 gp = GeoPoint(loc["lat"], loc["lng"])

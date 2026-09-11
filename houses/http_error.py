@@ -20,11 +20,11 @@ class HttpError(Exception):
         message: str = "",
         *,
         headers: dict[str, str] | None = None,
-        body: str = "",
+        body: object = "",
     ) -> None:
         self.status: int = status
         self.headers: dict[str, str] = headers or {}
-        self.body: str = body
+        self.body: object = body
         reason = message or _status_phrase(status)
         super().__init__(f"HTTP {status}: {reason}")
 

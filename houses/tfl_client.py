@@ -52,22 +52,24 @@ class _JourneyParams:
     mode: str
     date: str
     time: str
-    app_key: str | None = None
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction mirrors the TfL query param shape (coding-standards.md)
-        params = dict(
-            nationalSearch=self.national_search,
-            timeIs=self.time_is,
-            journeyPreference=self.journey_preference,
-            mode=self.mode,
-            date=self.date,
-            time=self.time,
-        )
-        if self.app_key:
-            params["app_key"] = self.app_key
-        return params
+        # The API key is AUTH, not request identity: it is appended at the
+        # httpx edge, so the cache key stays key-free (same shape the seam
+        # previously derived by stripping app_key).
+        # Omit falsy params: httpx drops empty values from the wire query,
+        # so to_dict must mirror the wire — the cache identity (derived from
+        # the URL query) would otherwise disagree with the record.
+        return {k: v for k, v in {
+            "nationalSearch": self.national_search,
+            "timeIs": self.time_is,
+            "journeyPreference": self.journey_preference,
+            "mode": self.mode,
+            "date": self.date,
+            "time": self.time,
+        }.items() if v}
 
 @dataclass(frozen=True)
 class _TubeFareParams:
@@ -76,15 +78,17 @@ class _TubeFareParams:
     date: str
     time: str
     national_search: str
-    app_key: str | None = None
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction mirrors the TfL query param shape (coding-standards.md)
-        params = dict(date=self.date, time=self.time, nationalSearch=self.national_search)
-        if self.app_key:
-            params["app_key"] = self.app_key
-        return params
+        # Falsy params are dropped — httpx drops them from the wire query, and
+        # to_dict must mirror the wire so cache identities agree.
+        return {k: v for k, v in {
+            "date": self.date,
+            "time": self.time,
+            "nationalSearch": self.national_search,
+        }.items() if v}
 
 
 @dataclass(frozen=True)
@@ -273,6 +277,18 @@ class _TflJourneyResponse:
 
 
 _EMPTY_LEG = _TflLeg.from_dict({})
+
+
+@dataclass(frozen=True)
+class _TflApiError:
+    """TfL's raw ApiError JSON (status in ``httpStatusCode``) — the
+    legacy poisoned-entry shape read from the cache file."""
+
+    http_status_code: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> _TflApiError:
+        return cls(http_status_code=data.get("httpStatusCode"))
 
 
 # lucidlint: ignore record-shape static dispatch table mode-to-LegMode — keyed dispatch, not a record (review-log)
@@ -475,7 +491,6 @@ class TflClient:
             journey_preference="leasttime",
             mode=",".join(modes),
             **TflClient._next_weekday_date_params(),
-            **TflClient._tfl_auth_params(),
         )
         fetch = fetch or TflClient._cached_with_retry
         data = await fetch(url, request)
@@ -542,7 +557,6 @@ class TflClient:
         request = _TubeFareParams(
             **TflClient._next_weekday_date_params(),
             national_search="false",
-            **TflClient._tfl_auth_params(),
         )
 
         try:
@@ -701,7 +715,7 @@ class TflClient:
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_with_retry(
-        url: str, request: WirePayload | dict, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
+        url: str, request: WirePayload, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
     ) -> dict | None:
         """Cached TfL call with backoff on transient HTTP errors and network failures.
 
@@ -733,19 +747,18 @@ class TflClient:
 
     @staticmethod
 # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
-    def _is_transient_error_body(data: dict) -> bool:
+    def _is_transient_error_body(entry: CacheEnvelope | _TflApiError) -> bool:
         """True for cached entries that are TRANSIENT error responses.
 
         Only 429/5xx must be rejected and evicted on the cache hit path — a
         transient outage must not poison the route, and retries must be
         genuine. Deterministic no-route responses (404, "cannot route" bodies)
         are legitimately cached and served: re-hitting the endpoint for the
-        same impossible request wastes calls. Two legacy shapes exist: the
-        transport's ``{"_cached_status": ...}`` wrapper and TfL's raw
-        ``ApiError`` JSON (status in ``httpStatusCode``).
+        same impossible request wastes calls. Two shapes exist: the transport's
+        ``CacheEnvelope`` wrapper and TfL's raw ``ApiError`` (status in
+        ``httpStatusCode``) — both ingested into records at the read edge.
         """
-        for key in ("_cached_status", "httpStatusCode"):
-            status = data.get(key)
+        for status in (getattr(entry, "status", None), getattr(entry, "http_status_code", None)):
             if isinstance(status, int):
                 # Poison: auth failures (401/403), planner outages (409), rate
                 # limits (429) and server errors are transient — they must not
@@ -758,7 +771,7 @@ class TflClient:
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_api_call(
-        url: str, request: WirePayload | dict, *, _client_factory: Callable | None = None
+        url: str, request: WirePayload, *, _client_factory: Callable | None = None
     ) -> dict | None:
         """Make a cached TfL API call. Strips auth from cache keys.
         Transient errors (429, 5xx, httpx.RequestError) are re-raised for DAG retry.
@@ -772,20 +785,19 @@ class TflClient:
         monkeypatching ``cached_async_client`` keeps working).
         ``request`` is the caller's request record (``_JourneyParams`` /
         ``_TubeFareParams``) — ``to_dict()`` is called ONCE here, at the
-        httpx/cache-key edge.  A legacy plain-dict request (unit tests) is
-        passed through unchanged."""
-        params = request if isinstance(request, dict) else request.to_dict()
-        cache_params = {k: v for k, v in params.items() if k != "app_key"}
-        cached = get_cached("GET", url, cache_params)
+        httpx/cache-key edge."""
+        params = request.to_dict()
+        cached = get_cached("GET", url, request)
         if cached is not None:
-            if isinstance(cached, dict) and "_cached_status" in cached and "_cached_body" in cached:
+            if "_cached_status" in cached:
+                entry = CacheEnvelope.from_dict(cached)
                 # Wrapped deterministic non-2xx — a cached 404 must behave
                 # like a LIVE 404 (raise HttpError) so the caller's
                 # conversion sets the no-route reason/detail; other
                 # statuses unwrap as before.  A WRAPPED transient status
                 # (legacy 429/5xx) is evicted, never served as data.
-                if cached["_cached_status"] == 404:
-                    body = cached["_cached_body"]
+                if entry.status == 404:
+                    body = entry.body
                     # Same two-tier shape as the LIVE 404: raw body in
                     # message/body, friendly text to the UI.
                     raise HttpError(
@@ -794,24 +806,26 @@ class TflClient:
                         body=body,
                         user_message=_friendly_tfl_message(404),
                     )
-                if TflClient._is_transient_error_body(cached):
+                if TflClient._is_transient_error_body(entry):
                     logger.warning("evicting cached transient error response for %s", url)
-                    evict_cached("GET", url, cache_params, None)
+                    evict_cached("GET", url, request, None)
                     cached = None
                 else:
-                    return cached["_cached_body"]
-            elif TflClient._is_transient_error_body(cached):
+                    body_json = entry.body
+                    assert isinstance(body_json, dict), "cache envelope body is the raw TfL JSON"
+                    return body_json
+            elif TflClient._is_transient_error_body(_TflApiError.from_dict(cached)):
                 # Legacy poisoned entry (429/5xx cached before the rule): reject
                 # and evict so the route is re-fetched — transient errors are
                 # never served from cache.
                 # lucidlint: ignore duplicate-block the legacy-entry eviction intentionally mirrors the
                 logger.warning("evicting cached transient error response for %s", url)
-                evict_cached("GET", url, cache_params, None)
+                evict_cached("GET", url, request, None)
                 cached = None
             else:
                 return cached
         async with (_client_factory or cached_async_client)(timeout=20.0) as client:
-            resp = await client.get(url, params=params)
+            resp = await client.get(url, params={**params, **TflClient._tfl_auth_params()})
             data = resp.json()
             # Cache deterministic responses — 2xx/3xx/4xx (including 404
             # "cannot route this station" bodies: re-hitting the endpoint for
@@ -820,10 +834,10 @@ class TflClient:
             # hits. NEVER cache transient errors (429, 5xx): a cached outage
             # body would poison the route and make retries non-genuine.
             if resp.status_code < 300:
-                set_cached("GET", url, cache_params, None, data)
+                set_cached("GET", url, request, None, data)
             elif 300 <= resp.status_code < 400:
                 set_cached(
-                    "GET", url, cache_params, None,
+                    "GET", url, request, None,
                     CacheEnvelope(status=resp.status_code, body=data).to_dict(),
                 )
             elif resp.status_code == 404:
@@ -832,7 +846,7 @@ class TflClient:
                 # wastes calls. Every OTHER 4xx is transient-ish (401/403 key
                 # expiry, 409 planner outage) and must not poison the cache.
                 set_cached(
-                    "GET", url, cache_params, None,
+                    "GET", url, request, None,
                     CacheEnvelope(status=404, body=data).to_dict(),
                 )
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
@@ -880,7 +894,6 @@ class TflClient:
             journey_preference="leasttime",
             mode=",".join(modes),
             **TflClient._next_weekday_date_params(),
-            **TflClient._tfl_auth_params(),
         )
 
         try:
@@ -966,7 +979,7 @@ class TflClient:
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _geocode_fallback(self, request: WirePayload | dict) -> dict | None:
+    async def _geocode_fallback(self, request: WirePayload) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""
         pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", self._origin)
         pc = pc_match.group(0).strip().upper() if pc_match else None

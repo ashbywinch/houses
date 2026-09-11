@@ -4,6 +4,7 @@ import pytest
 from money import Money
 
 from houses.stations import Station
+from houses.tfl_client import _JourneyParams
 
 # ── get_tube_leg_fare ───────────────────────────────────────────────────
 
@@ -506,7 +507,12 @@ class TestTflCachedApiCall4xx:
             patch("houses.tfl_client.set_cached"),
         ):
             try:
-                await TflClient._cached_api_call("https://api.tfl.gov.uk/x", {})
+                await TflClient._cached_api_call(
+                    "https://api.tfl.gov.uk/x",
+                    _JourneyParams(
+                        national_search="true", time_is="", journey_preference="", mode="", date="", time=""
+                    ),
+                )
                 raise AssertionError("Expected HttpError for 409")
             except HttpError as e:
                 assert e.status == 409

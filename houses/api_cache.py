@@ -62,25 +62,38 @@ class CacheEnvelope:
         # lucidlint: ignore record-shape to_dict construction mirrors the cache-file shape (coding-standards)
         return dict(_cached_status=self.status, _cached_body=self.body)
 
+    @classmethod
+    def from_dict(cls, data: dict) -> CacheEnvelope:
+        """The cache-file envelope, read at the cache edge."""
+        return cls(status=data["_cached_status"], body=data["_cached_body"])
+
+
+@dataclass(frozen=True)
+class _UrlQuery:
+    """The parsed URL query at the httpx transport edge — the one place
+    a request identity comes from the network, not from a caller."""
+
+    params: dict[str, str] | None
+
+    def to_dict(self) -> dict:
+        return self.params or {}
+
 # lucidlint: ignore-file data-clump this module's public cache API deliberately threads one request identity (method,
-# lucidlint: ignore record-shape WirePayload is the contract; legacy plain dicts pass through (coding-standards.md)
 # lucidlint: ignore record-shape the return is the params fragment entering the cache key (coding-standards.md)
-def _wire_params(params: WirePayload | dict[str, Any] | None) -> dict[str, Any] | None:
+def _wire_params(params: WirePayload | None) -> dict[str, Any] | None:
     """Serialise a request record exactly once, at the cache-key edge.
 
     The cache seams take the caller's request RECORD (``WirePayload``);
-    ``to_dict()`` happens here, never in the callers.  Legacy plain-dict
-    params (the httpx transport's parsed query, direct module callers)
-    pass through unchanged so the unified key space stays byte-identical.
+    ``to_dict()`` happens here, never in the callers.
     """
     if params is None:
         return None
-    return params.to_dict() if not isinstance(params, dict) else params
+    return params.to_dict()
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _make_key(
-    method: str, url: str, params: WirePayload | dict[str, Any] | None, body: str | None
+    method: str, url: str, params: WirePayload | None, body: str | None
 ) -> str:
     parts = [method.upper(), url]
     wire = _wire_params(params)
@@ -101,13 +114,13 @@ def _cache_path(key: str) -> Path:
 def get_cached(
     method: str,
     url: str,
-    params: WirePayload | dict[str, Any] | None = None,
+    params: WirePayload | None = None,
     body: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the cached JSON response for a request, or ``None``.
 
     ``params`` is the caller's request record — serialized once at the
-    cache-key edge; legacy plain-dict identities pass through unchanged.
+    cache-key edge.
     """
     path = _cache_path(_make_key(method, url, params, body))
     if path.exists():
@@ -120,7 +133,7 @@ def get_cached(
 def set_cached(
     method: str,
     url: str,
-    params: WirePayload | dict[str, Any] | None,
+    params: WirePayload | None,
     body: str | None,
     data: dict[str, Any],
 ) -> None:
@@ -173,7 +186,7 @@ def _cached_secret_key() -> str:
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 def evict_cached(
-    method: str, url: str, params: WirePayload | dict[str, Any] | None, body: str | None
+    method: str, url: str, params: WirePayload | None, body: str | None
 ) -> None:
     """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
     _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
@@ -184,8 +197,8 @@ def evict_cached(
 async def with_cache(  # lucidlint: ignore record-shape return is the cached API response body — wire format
     method: str,
     url: str,
-    params: WirePayload | dict[str, Any] | None = None,
-    body: WirePayload | dict[str, Any] | None = None,
+    params: WirePayload | None = None,
+    body: WirePayload | None = None,
     *,
     fetch,
 ) -> dict[str, Any]:
@@ -233,9 +246,12 @@ class CachingTransport(httpx.AsyncBaseTransport):
         # with auth params — a parallel key space where every response was
         # stored twice and each layer was blind to the other's entries.
         url_path = unquote(f"{parsed.scheme}://{parsed.netloc}{parsed.path}")
-        params = {k: v[0] for k, v in parse_qs(parsed.query).items()} if parsed.query else None
-        if params:
-            params = {k: v for k, v in params.items() if k != "app_key"} or None
+        query = {k: v[0] for k, v in parse_qs(parsed.query).items()} if parsed.query else None
+        if query:
+            query = {k: v for k, v in query.items() if k != "app_key"} or None
+        # The URL query IS the wire request at this edge — own it in a
+        # record, never thread the raw dict through the seams.
+        params = _UrlQuery(query)
         body = request.content.decode() if request.content else None
 
         cached = get_cached(request.method, url_path, params, body)
