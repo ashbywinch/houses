@@ -62,9 +62,6 @@ class _LayerJson:
     fill_opacity: float | None = None
     weight: int | None = None
     visible_by_default: bool | None = None
-    fill_opacity: float | None = None
-    weight: int | None = None
-    visible_by_default: bool | None = None
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
