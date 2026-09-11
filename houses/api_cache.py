@@ -88,7 +88,11 @@ def _wire_params(params: WirePayload | None) -> dict[str, Any] | None:
     """
     if params is None:
         return None
-    return params.to_dict()
+    # Normalize an empty serialization to None EXPLICITLY: the key omits
+    # the query part when there is nothing on the wire, and no later truthy
+    # check should be what makes that true.
+    wire = params.to_dict()
+    return wire or None
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
