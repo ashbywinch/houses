@@ -82,6 +82,11 @@ def _on_node_refreshed(node):
         return
     if kind == "settings":
         asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
+        return
+    # An unknown or undeclared kind is dropped on purpose — but loudly:
+    # a new node kind that was not given a role would otherwise vanish
+    # silently, which is exactly how the id-shape bug stayed hidden.
+    logger.debug("refresh of node with no declared role — no broadcast: %s", kind)
 
 
 def _deploy_hash() -> str:
