@@ -8,11 +8,23 @@ from __future__ import annotations
 import dataclasses
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 from money import Money
 
 _GBP_SCALE = Decimal("0.01")
+
+
+class WirePayload(Protocol):
+    """Any record that serializes to its wire dict.
+
+    The transport-seam contract: a caller's request/summary record flows
+    through our code as the object, and ``to_dict()`` is called ONCE at
+    the network edge (httpx kwarg, cache key, envelope, json.dumps) —
+    never a verbatim payload dict threaded through a seam.
+    """
+
+    def to_dict(self) -> dict: ...
 
 
 @dataclasses.dataclass(frozen=True)

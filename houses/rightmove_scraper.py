@@ -115,8 +115,7 @@ class _PropertyExtractJson:
     """The property fields pulled from a Rightmove page's data sources.
 
     Only the fields a source actually yields are set; to_dict omits the
-    rest, so the merged extraction keeps each source's key set (the
-    _MERGE_KEYS wire shape).
+    rest, so the merged extraction keeps each source's key set.
     """
 
     address: str | None = None
@@ -314,16 +313,16 @@ def _page_model_location(data: Any, prop: Any) -> _PageModelLocation | None:
     return None
 
 
-_MERGE_KEYS = ("address", "postcode", "bedrooms", "price", "latitude", "longitude")
-
-
-# lucidlint: ignore record-shape keyed collection, not a record — result is a variable-key accumulator of whichever
-# lucidlint: ignore record-shape keyed collection, not a record — source is likewise a variable-key extraction result,
-def _merge_missing(result: dict[str, Any], source: dict[str, Any]) -> None:
+def _merge_missing(result: _PropertyExtractJson, source: _PropertyExtractJson) -> _PropertyExtractJson:
     """Fill fields absent from result from a secondary extraction source."""
-    for key in _MERGE_KEYS:
-        if key not in result and key in source:
-            result[key] = source[key]
+    return _PropertyExtractJson(
+        address=result.address if result.address is not None else source.address,
+        postcode=result.postcode if result.postcode is not None else source.postcode,
+        bedrooms=result.bedrooms if result.bedrooms is not None else source.bedrooms,
+        price=result.price if result.price is not None else source.price,
+        latitude=result.latitude if result.latitude is not None else source.latitude,
+        longitude=result.longitude if result.longitude is not None else source.longitude,
+    )
 
 
 def _parse_html(html: str, url: str) -> RightmoveProperty | None:
@@ -340,44 +339,38 @@ def _parse_html(html: str, url: str) -> RightmoveProperty | None:
     may fill gaps left by JSON-LD.  Returns ``None`` when no data can be
     extracted from the HTML.
     """
-    if not html.strip():
-        return None
-
-    result: dict[str, Any] = {}
-
-    # 1. __PAGE_MODEL (most reliable for modern Rightmove)
-    result.update(_parse_page_model(html).to_dict())
+    result = _parse_page_model(html)
 
     # 2. JSON-LD (fills gaps)
-    _merge_missing(result, _parse_json_ld(html).to_dict())
+    result = _merge_missing(result, _parse_json_ld(html))
 
     # 3. Preloaded state (fills bedrooms, lat/lon that JSON-LD may lack)
-    _merge_missing(result, _parse_preloaded_state(html).to_dict())
+    result = _merge_missing(result, _parse_preloaded_state(html))
 
     # 4. Map coords fallback
-    if "latitude" not in result:
-        result.update(_parse_map_coords(html).to_dict())
+    if result.latitude is None:
+        result = _merge_missing(result, _parse_map_coords(html))
 
     # 5. DOM extraction fallback
-    if "address" not in result:
+    if result.address is None:
         addr = _extract_by_testid(html, "address-label")
         if addr:
-            result["address"] = addr
-    if "bedrooms" not in result:
+            result = replace(result, address=addr)
+    if result.bedrooms is None:
         beds = _extract_bedrooms_from_html(html)
         if beds is not None:
-            result["bedrooms"] = beds
+            result = replace(result, bedrooms=beds)
 
-    if not result:
+    if result == _PropertyExtractJson():
         return None
     return RightmoveProperty(
         url=url,
-        address=result.get("address", ""),
-        postcode=result.get("postcode", ""),
-        bedrooms=result.get("bedrooms"),
-        price=result.get("price"),
-        latitude=result.get("latitude"),
-        longitude=result.get("longitude"),
+        address=result.address or "",
+        postcode=result.postcode or "",
+        bedrooms=result.bedrooms,
+        price=result.price,
+        latitude=result.latitude,
+        longitude=result.longitude,
     )
 
 

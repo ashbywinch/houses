@@ -18,6 +18,7 @@ from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.geopoint import GeoPoint
 from houses.services_provider import get_services
 from houses.settings import settings
+from houses.web.json_utils import WirePayload
 
 logger = logging.getLogger(__name__)
 HTTP_TOO_MANY_REQUESTS = 429
@@ -138,8 +139,8 @@ class ReverseGeocodeOptions:
     """
 
     api_key: str | None = None
-    get_cached_fn: Callable[[str, str, dict[str, Any] | None, str | None], dict[str, Any] | None] | None = None
-    set_cached_fn: Callable[[str, str, dict[str, Any] | None, str | None, dict[str, Any]], None] | None = None
+    get_cached_fn: Callable[[str, str, WirePayload | None, str | None], dict[str, Any] | None] | None = None
+    set_cached_fn: Callable[[str, str, WirePayload | None, str | None, dict[str, Any]], None] | None = None
     client_factory: Callable[..., AbstractAsyncContextManager[Any]] | None = None
 
 
@@ -280,7 +281,7 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
     if since_last < 1.0:
         await asyncio.sleep(1.0 - since_last)
     params = _NominatimParams(q=f"{clean}, UK", format="json", limit=1)
-    cached = get_cached("GET", NOMINATIM_URL, params.to_dict(), None)
+    cached = get_cached("GET", NOMINATIM_URL, params, None)
     if cached is not None:
         # Nominatim returns a JSON array of results — not a dict — so treat
         # the cached payload as Any, mirroring the fresh `resp.json()` path.
@@ -304,7 +305,7 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
                 get_geo_state(services=services).nominatim_last_call = asyncio.get_event_loop().time()
                 resp.raise_for_status()
                 data = resp.json()
-                set_cached("GET", NOMINATIM_URL, params.to_dict(), None, data)
+                set_cached("GET", NOMINATIM_URL, params, None, data)
                     # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
                 if data:
                     lat = float(data[0]["lat"])
@@ -386,7 +387,7 @@ async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = N
     if get_geo_state(services=services).ors_geo_exhausted:
         return None
     params = _OrsSearchParams(text=f"{address}, UK", size=1)
-    cached = get_cached("GET", ORS_GEOCODE_URL, params.to_dict(), None)
+    cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
     if cached is not None:
         data = cached
         features = data.get("features", [])
@@ -407,7 +408,7 @@ async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = N
             )
             resp.raise_for_status()
             data = resp.json()
-            set_cached("GET", ORS_GEOCODE_URL, params.to_dict(), None, data)
+            set_cached("GET", ORS_GEOCODE_URL, params, None, data)
             # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared geocoder
             features = data.get("features", [])
             if features:
@@ -541,7 +542,7 @@ async def find_nearest_town_name(
     set_cached_fn = options.set_cached_fn or set_cached
     client_factory = options.client_factory or cached_async_client
 
-    cached = get_cached_fn("GET", rev_url, params.to_dict(), None)
+    cached = get_cached_fn("GET", rev_url, params, None)
     if cached is not None:
         data = cached
     else:
@@ -550,7 +551,7 @@ async def find_nearest_town_name(
                 resp = await client.get(rev_url, params=params.to_dict(), headers=headers or None)
                 resp.raise_for_status()
                 data = resp.json()
-                set_cached_fn("GET", rev_url, params.to_dict(), None, data)
+                set_cached_fn("GET", rev_url, params, None, data)
         except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
             raise  # transient — let DAG retry handle it
         # lucidlint: ignore broad-except boundary — reverse-geocode failures convert to an impossible attempt

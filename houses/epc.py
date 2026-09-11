@@ -132,7 +132,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
     pc = postcode.strip().upper()
     params = _EpcSearchParams(postcode=pc, page_size=50)
 
-    cached = get_cached("GET", EPC_SEARCH_URL, params.to_dict())
+    cached = get_cached("GET", EPC_SEARCH_URL, params)
     if cached is not None:
         certs = cached.get("data", [])
         return _match_cert(certs, building_id, address)
@@ -152,7 +152,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
                 return Attempt.impossible(f"EPC API returned status {resp.status_code}")
 
             data = resp.json()
-            set_cached("GET", EPC_SEARCH_URL, params.to_dict(), None, data)
+            set_cached("GET", EPC_SEARCH_URL, params, None, data)
             certs = data.get("data", [])
             return _match_cert(certs, building_id, address)
 

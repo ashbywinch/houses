@@ -110,19 +110,19 @@ async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoi
     """Use ORS Pelias reverse geocode to find the nearest town and its centre."""
 
     rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-    params = {"point.lat": lat, "point.lon": lng, "size": 1, "boundary.country": "GBR"}
+    params = _ReverseGeocodeParamsJson(point_lat=lat, point_lon=lng, size=1, boundary_country="GBR")
+    payload = params.to_dict()
 
-    cached = get_cached("GET", rev_url, params, None)
+    cached = get_cached("GET", rev_url, payload, None)
     if cached is not None:
         data = cached
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(rev_url, params=params)
+                resp = await client.get(rev_url, params=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                set_cached("GET", rev_url, params, None, data)
+                set_cached("GET", rev_url, payload, None, data)
         except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
             raise  # transient — let DAG retry handle it
         # lucidlint: ignore broad-except deliberate fallback — reverse-geocode failure returns None
@@ -130,11 +130,11 @@ async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoi
             logger.warning("ORS reverse geocode failed for (%.4f, %.4f)", lat, lng, exc_info=True)
             return None
 
-    features = data.get("features", [])
+    features = _GeocodeResponseJson.from_dict(data).features
     if not features:
         return None
-    props = features[0].get("properties", {})
-    town = props.get("locality") or props.get("borough")
+    props = features[0].properties
+    town = props.locality or props.borough
     if not town:
         return None
     # Forward-geocode the town name to get its centre
@@ -148,7 +148,8 @@ async def _walk_duration(
 ) -> int | None:
     origin = [lng, lat]
     dest = [town_centre.lon, town_centre.lat]
-    body = _ORSWalkBody(coordinates=[origin, dest]).to_dict()
+    body = _ORSWalkBody(coordinates=[origin, dest])
+    payload = body.to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
@@ -159,13 +160,14 @@ async def _walk_duration(
                         "Authorization": settings.ors_api_key,
                         "Content-Type": "application/json",
                     },
-                    json=body,
+                    json=payload,
                 )
                 resp.raise_for_status()
                 return resp.json()
 
-            data = await with_cache("POST", ORS_WALKING_URL, body=body, fetch=_fetch)
-        return round(data["routes"][0]["summary"]["duration"] / SECONDS_PER_MINUTE)
+            data = await with_cache("POST", ORS_WALKING_URL, body=payload, fetch=_fetch)
+        response = _DirectionsResponseJson.from_dict(data)
+        return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
     except (KeyError, IndexError) as e:
         logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
         return None
@@ -192,7 +194,8 @@ async def _google_places_text(lat: float, lng: float) -> str:
         location_restriction=_PlacesLocationRestriction(
             circle=_PlacesCircle(center=_PlacesCircleCenter(latitude=lat, longitude=lng), radius=1000.0)
         ),
-    ).to_dict()
+    )
+    payload = places_body.to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
@@ -205,12 +208,12 @@ async def _google_places_text(lat: float, lng: float) -> str:
                         "X-Goog-FieldMask": "places.displayName,places.types,places.location",
                         "Content-Type": "application/json",
                     },
-                    json=places_body,
+                    json=payload,
                 )
                 resp.raise_for_status()
                 return resp.json()
 
-            data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=places_body, fetch=_fetch_places)
+            data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=payload, fetch=_fetch_places)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status == HTTP_TOO_MANY_REQUESTS or (HTTP_5XX_START <= status < HTTP_5XX_END):
@@ -223,7 +226,7 @@ async def _google_places_text(lat: float, lng: float) -> str:
     except (KeyError, IndexError) as e:
         logger.warning("Google Places API failed (%s), falling back to Overpass", e)
         return ""
-    return _format_places(data, lat, lng)
+    return _format_places(_PlacesResponseJson.from_dict(data), lat, lng)
 
 
 async def _nearby_amenities(lat: float, lng: float) -> str:
@@ -241,21 +244,22 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         f'way(around:1000,{lat},{lng})["leisure"="park"];'
         f");out center 5;"
     )
-    overpass_params = {"data": overpass_query}
+    overpass_params = _OverpassParamsJson(data=overpass_query)
+    payload = overpass_params.to_dict()
     try:
         async with cached_async_client(timeout=15.0) as client:
 
             async def _fetch_overpass():
                 resp = await client.get(
                     overpass_url,
-                    params=overpass_params,
+                    params=payload,
                     headers={"Accept": "application/json", "User-Agent": "HousesApp/1.0"},
                 )
                 resp.raise_for_status()
                 return resp.json()
 
-            data = await with_cache("GET", overpass_url, params=overpass_params, fetch=_fetch_overpass)
-        places = _format_overpass(data, lat, lng)
+            data = await with_cache("GET", overpass_url, params=payload, fetch=_fetch_overpass)
+        places = _format_overpass(_OverpassResponseJson.from_dict(data), lat, lng)
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
     # lucidlint: ignore broad-except deliberate fallback — Overpass failure returns the partial places string
@@ -266,17 +270,16 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
     return places
 
 
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-def _format_places(data: dict, lat: float, lng: float) -> str:
+def _format_places(data: _PlacesResponseJson, lat: float, lng: float) -> str:
     """Format Google Places response into a human-readable string."""
-    google_places = data.get("places", [])
+    google_places = data.places
     if not google_places:
         return ""
     origin = GeoPoint(lat, lng)
     hits = []
-    for p in google_places:
-        p_types = set(p.get("types", []))
-        if p_types & {
+    for place in google_places:
+        place_types = set(place.types)
+        if place_types & {
             "transit_station",
             "bus_stop",
             "bus_station",
@@ -285,10 +288,9 @@ def _format_places(data: dict, lat: float, lng: float) -> str:
             "administrative_area_level_4",
         }:
             continue
-        name = p.get("displayName", {}).get("text", "Unknown")
-        location = p.get("location", {})
-        place_lat = location.get("latitude")
-        place_lng = location.get("longitude")
+        name = place.display_name.text
+        place_lat = place.location.latitude
+        place_lng = place.location.longitude
         if place_lat is not None and place_lng is not None:
             dist_km = origin.distance_km_to(GeoPoint(place_lat, place_lng))
             walk_min = max(1, round(dist_km / WALKING_SPEED_KMH * MINUTES_PER_HOUR))
@@ -299,19 +301,17 @@ def _format_places(data: dict, lat: float, lng: float) -> str:
     return " | ".join(name for _, name in hits[:5])
 
 
-# lucidlint: ignore record-shape external API request/response — keys owned by the provider (review-log)
-def _format_overpass(data: dict, lat: float, lng: float) -> str:
+def _format_overpass(data: _OverpassResponseJson, lat: float, lng: float) -> str:
     """Format Overpass API response into a human-readable string."""
-    elements = data.get("elements", [])
+    elements = data.elements
     origin = GeoPoint(lat, lng)
     hits = []
-    for e in elements:
-        tags = e.get("tags", {})
-        name = tags.get("name", "")
+    for element in elements:
+        name = element.tags.name
         if not name:
             continue
-        e_lat = e.get("lat") or (e.get("center") or {}).get("lat")
-        e_lng = e.get("lon") or (e.get("center") or {}).get("lon")
+        e_lat = element.lat or (element.center.lat if element.center else None)
+        e_lng = element.lon or (element.center.lon if element.center else None)
         if e_lat is not None and e_lng is not None:
             dist_km = origin.distance_km_to(GeoPoint(e_lat, e_lng))
             walk_min = max(1, round(dist_km / WALKING_SPEED_KMH * MINUTES_PER_HOUR))
@@ -359,6 +359,209 @@ async def _walk_to_town_minutes(
             # the original walk_to_town_minutes as-is (may be None or invalid).
     return walk_to_town_minutes if _plausible_walk(walk_to_town_minutes) else None
 
+
+
+@dataclass(frozen=True)
+class _ReverseGeocodeParamsJson:
+    """The ORS reverse-geocode query params — {point.lat, point.lon, size, boundary.country}."""
+
+    point_lat: float
+    point_lon: float
+    size: int
+    boundary_country: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the ORS query-param names (coding-standards.md)
+        return {
+            "point.lat": self.point_lat,
+            "point.lon": self.point_lon,
+            "size": self.size,
+            "boundary.country": self.boundary_country,
+        }
+
+
+@dataclass(frozen=True)
+class _OverpassParamsJson:
+    """The Overpass API query-string params — the {data} wire shape."""
+
+    data: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(data=self.data)
+
+
+@dataclass(frozen=True)
+class _GeocodeResponseJson:
+    """The ORS (Pelias) reverse-geocode response root — the {features} wire shape."""
+
+    features: list[_GeocodeFeatureJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _GeocodeResponseJson:
+        return cls(features=[_GeocodeFeatureJson.from_dict(f) for f in raw.get("features") or []])
+
+
+@dataclass(frozen=True)
+class _GeocodeFeatureJson:
+    """An ORS geocode feature — the {properties} wire shape."""
+
+    properties: _GeocodePropertiesJson
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _GeocodeFeatureJson:
+        return cls(properties=_GeocodePropertiesJson.from_dict(raw.get("properties", {})))
+
+
+@dataclass(frozen=True)
+class _GeocodePropertiesJson:
+    """The ORS geocode feature properties — the {locality, borough} wire shape."""
+
+    locality: str | None
+    borough: str | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _GeocodePropertiesJson:
+        return cls(locality=raw.get("locality"), borough=raw.get("borough"))
+
+
+@dataclass(frozen=True)
+class _DirectionsResponseJson:
+    """The ORS walking-directions response root — the {routes} wire shape."""
+
+    routes: list[_DirectionsRouteJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _DirectionsResponseJson:
+        return cls(routes=[_DirectionsRouteJson.from_dict(r) for r in raw["routes"]])
+
+
+@dataclass(frozen=True)
+class _DirectionsRouteJson:
+    """An ORS directions route — the {summary} wire shape."""
+
+    summary: _DirectionsSummaryJson
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _DirectionsRouteJson:
+        return cls(summary=_DirectionsSummaryJson.from_dict(raw["summary"]))
+
+
+@dataclass(frozen=True)
+class _DirectionsSummaryJson:
+    """The ORS route summary — the {duration} wire shape."""
+
+    duration: float
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _DirectionsSummaryJson:
+        return cls(duration=raw["duration"])
+
+
+@dataclass(frozen=True)
+class _PlacesResponseJson:
+    """The Google Places nearby-search response root — the {places} wire shape."""
+
+    places: list[_PlacesPlaceJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _PlacesResponseJson:
+        return cls(places=[_PlacesPlaceJson.from_dict(p) for p in raw.get("places") or []])
+
+
+@dataclass(frozen=True)
+class _PlacesPlaceJson:
+    """A Google Places place — the {types, displayName, location} wire shape."""
+
+    types: list[str]
+    display_name: _PlacesDisplayNameJson
+    location: _PlacesLocationJson
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _PlacesPlaceJson:
+        return cls(
+            types=raw.get("types", []),
+            display_name=_PlacesDisplayNameJson.from_dict(raw.get("displayName", {})),
+            location=_PlacesLocationJson.from_dict(raw.get("location", {})),
+        )
+
+
+@dataclass(frozen=True)
+class _PlacesDisplayNameJson:
+    """A Google Places displayName — the {text} wire shape."""
+
+    text: str
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _PlacesDisplayNameJson:
+        return cls(text=raw.get("text", "Unknown"))
+
+
+@dataclass(frozen=True)
+class _PlacesLocationJson:
+    """A Google Places location — the {latitude, longitude} wire shape."""
+
+    latitude: float | None
+    longitude: float | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _PlacesLocationJson:
+        return cls(latitude=raw.get("latitude"), longitude=raw.get("longitude"))
+
+
+@dataclass(frozen=True)
+class _OverpassResponseJson:
+    """The Overpass API response root — the {elements} wire shape."""
+
+    elements: list[_OverpassElementJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _OverpassResponseJson:
+        return cls(elements=[_OverpassElementJson.from_dict(e) for e in raw.get("elements", [])])
+
+
+@dataclass(frozen=True)
+class _OverpassElementJson:
+    """An Overpass element — the {tags, lat, lon, center} wire shape."""
+
+    tags: _OverpassTagsJson
+    lat: float | None
+    lon: float | None
+    center: _OverpassCenterJson | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _OverpassElementJson:
+        center = raw.get("center")
+        return cls(
+            tags=_OverpassTagsJson.from_dict(raw.get("tags", {})),
+            lat=raw.get("lat"),
+            lon=raw.get("lon"),
+            center=_OverpassCenterJson.from_dict(center) if center else None,
+        )
+
+
+@dataclass(frozen=True)
+class _OverpassTagsJson:
+    """An Overpass element's tags — the {name} wire shape."""
+
+    name: str
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _OverpassTagsJson:
+        return cls(name=raw.get("name", ""))
+
+
+@dataclass(frozen=True)
+class _OverpassCenterJson:
+    """An Overpass way's center — the {lat, lon} wire shape."""
+
+    lat: float | None
+    lon: float | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _OverpassCenterJson:
+        return cls(lat=raw.get("lat"), lon=raw.get("lon"))
 
 
 @dataclass(frozen=True)

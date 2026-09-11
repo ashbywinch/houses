@@ -77,6 +77,98 @@ class _LayerJson:
         return d
 
 
+@dataclass(frozen=True)
+class _UnionComponentJson:
+    """One transit-shed component of union.json — the {outline} map shape."""
+
+    outline: Any | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _UnionComponentJson:
+        return cls(outline=raw.get("outline"))
+
+
+@dataclass(frozen=True)
+class _UnionArtifactJson:
+    """The union.json artifact root — the {components} shape."""
+
+    components: list[_UnionComponentJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _UnionArtifactJson:
+        return cls(components=[_UnionComponentJson.from_dict(c) for c in raw.get("components") or []])
+
+
+@dataclass(frozen=True)
+class _DriveDestinationJson:
+    """The {label} destination block of a drive search."""
+
+    label: str
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _DriveDestinationJson:
+        return cls(label=raw.get("label", ""))
+
+
+@dataclass(frozen=True)
+class _DriveSearchJson:
+    """One drive-searches entry — the {destination, polygon, name, rightmove_url} shape."""
+
+    destination: _DriveDestinationJson | None
+    polygon: Any
+    name: str
+    rightmove_url: str
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _DriveSearchJson:
+        destination = raw.get("destination")
+        return cls(
+            destination=_DriveDestinationJson.from_dict(destination) if destination else None,
+            polygon=raw["polygon"],
+            name=raw.get("name", ""),
+            rightmove_url=raw.get("rightmove_url", ""),
+        )
+
+
+@dataclass(frozen=True)
+class _DriveSearchesJson:
+    """The drive_searches.json artifact root — the {searches} shape."""
+
+    searches: list[_DriveSearchJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _DriveSearchesJson:
+        return cls(searches=[_DriveSearchJson.from_dict(s) for s in raw.get("searches", [])])
+
+
+@dataclass(frozen=True)
+class _IntersectionSearchJson:
+    """One intersection search — the {polygon, name, rightmove_url} shape."""
+
+    polygon: Any
+    name: str
+    rightmove_url: str
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _IntersectionSearchJson:
+        return cls(
+            polygon=raw["polygon"],
+            name=raw.get("name", ""),
+            rightmove_url=raw.get("rightmove_url", ""),
+        )
+
+
+@dataclass(frozen=True)
+class _IntersectionArtifactJson:
+    """The intersection.json artifact root — the {searches} shape."""
+
+    searches: list[_IntersectionSearchJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _IntersectionArtifactJson:
+        return cls(searches=[_IntersectionSearchJson.from_dict(s) for s in raw.get("searches") or []])
+
+
 # lucidlint: ignore record-shape consumes the committed commute artifacts — toolchain wire payload (coding-standards.md)
 def _load(path: Path) -> dict | None:
     if not path.is_file():
@@ -92,15 +184,18 @@ def _union_layer(union_path: Path) -> list[_LayerJson]:
     """The transit shed layer from the union artifact, or [] when absent."""
     union = _load(union_path)
     layers = []
-    if union and union.get("components"):
+    if not union:
+        return layers
+    artifact = _UnionArtifactJson.from_dict(union)
+    if artifact.components:
         layers.append(
             _LayerJson(
                 name="Train: Pimlico & Aldgate",
                 color=_COLORS[0],
                 polygons=[
-                    _PolygonJson(coords=c["outline"], name="", url="")
-                    for c in union["components"]
-                    if c.get("outline")
+                    _PolygonJson(coords=component.outline, name="", url="")
+                    for component in artifact.components
+                    if component.outline
                 ],
             )
         )
@@ -113,20 +208,19 @@ def _drive_layers(drive_path: Path) -> list[_LayerJson]:
     layers = []
     if not drive:
         return layers
+    artifact = _DriveSearchesJson.from_dict(drive)
     drive_by_label = {}
-    for s in drive.get("searches", []):
-        label = (s.get("destination") or {}).get("label", "")
+    for search in artifact.searches:
+        label = search.destination.label if search.destination else ""
         if label:
-            drive_by_label.setdefault(label, []).append(s)
+            drive_by_label.setdefault(label, []).append(search)
     layers.extend(
         _LayerJson(
             name=f"Drive to {label}",
             color=_DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)],
             polygons=[
-                _PolygonJson(
-                    coords=s["polygon"], name=s.get("name", ""), url=s.get("rightmove_url", "")
-                )
-                for s in searches
+                _PolygonJson(coords=search.polygon, name=search.name, url=search.rightmove_url)
+                for search in searches
             ],
         )
         for i, (label, searches) in enumerate(drive_by_label.items(), 1)
@@ -138,7 +232,10 @@ def _intersection_layer(intersection_path: Path) -> list[_LayerJson]:
     """The all-commutes intersection layer, or [] when the artifact is absent."""
     intersection = _load(intersection_path)
     layers = []
-    if intersection and intersection.get("searches"):
+    if not intersection:
+        return layers
+    artifact = _IntersectionArtifactJson.from_dict(intersection)
+    if artifact.searches:
         layers.append(
             _LayerJson(
                 name="Where we could live",
@@ -149,10 +246,8 @@ def _intersection_layer(intersection_path: Path) -> list[_LayerJson]:
                 # isochrone layers start hidden behind the key.
                 visible_by_default=True,
                 polygons=[
-                    _PolygonJson(
-                        coords=s["polygon"], name=s.get("name", ""), url=s.get("rightmove_url", "")
-                    )
-                    for s in intersection["searches"]
+                    _PolygonJson(coords=search.polygon, name=search.name, url=search.rightmove_url)
+                    for search in artifact.searches
                 ],
             )
         )

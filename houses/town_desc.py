@@ -108,7 +108,7 @@ async def generate_town_description(
             resp.raise_for_status()
             return resp.json()
 
-        result = await with_cache_fn("POST", API_URL, body=body.to_dict(), fetch=_fetch)
+        result = await with_cache_fn("POST", API_URL, body=body, fetch=_fetch)
         raw = result["choices"][0]["message"]["content"].strip()
         description = raw.split(".")[0].strip() + "."
         _town_cache[key] = description

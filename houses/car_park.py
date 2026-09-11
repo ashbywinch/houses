@@ -30,7 +30,7 @@ from money import Money
 from playwright.async_api import async_playwright
 
 from dag.attempt import Attempt
-from houses.apcoa_scraper import ApcoaScraper
+from houses.apcoa_scraper import ApcoaPageRecord, ApcoaScraper
 from houses.stations import Station
 
 logger = logging.getLogger(__name__)
@@ -67,16 +67,14 @@ def _parse_cost(raw_cost: str) -> Money | None:
         return None
 
 
-# lucidlint: ignore record-shape returns the same scraper page record it was given — wire shape
-# lucidlint: ignore record-shape result is the APCOA scraper's parsed page record — its dict shape is fixed by the
-def _log_apcoa_find(result: dict, source: str, station: Station) -> dict:
+def _log_apcoa_find(result: ApcoaPageRecord, source: str, station: Station) -> ApcoaPageRecord:
     """Log a successful APCOA lookup and pass the result through."""
     logger.info(
         "APCOA %s for '%s': %s = £%.2f",
         source,
         station.name,
-        result.get("name", "?"),
-        result["price"],
+        result.name or "?",
+        result.price,
     )
     return result
 
@@ -95,13 +93,13 @@ class ApcoaCarParkLookup:
     def __init__(
         self,
         registry: CarParkRegistry,
-        apcoa_lookup_fn: Callable[[Station], Awaitable[dict | None]] | None = None,
+        apcoa_lookup_fn: Callable[[Station], Awaitable[ApcoaPageRecord | None]] | None = None,
     ) -> None:
         """``apcoa_lookup_fn`` is a test seam — it defaults to the real
         APCOA scrape, so tests never monkeypatch module globals.
         """
         self._registry: CarParkRegistry = registry
-        self._apcoa_lookup_fn: Callable[[Station], Awaitable[dict | None]] = (
+        self._apcoa_lookup_fn: Callable[[Station], Awaitable[ApcoaPageRecord | None]] = (
             apcoa_lookup_fn or self._apcoa_lookup
         )
 
@@ -122,11 +120,11 @@ class ApcoaCarParkLookup:
         if result is None:
             return Attempt.impossible(f"No APCOA rate found for {station.name}")
 
-        car_park.daily_cost = Money(str(result["price"]), "GBP")
-        if result.get("address"):
-            car_park.address = result["address"]
-        if result.get("name"):
-            car_park.name = result["name"]
+        car_park.daily_cost = Money(str(result.price), "GBP")
+        if result.address:
+            car_park.address = result.address
+        if result.name:
+            car_park.name = result.name
 
         self._registry._persist_results(station, car_park)
         return Attempt.succeeded(car_park)
@@ -143,16 +141,15 @@ class ApcoaCarParkLookup:
             return Attempt.impossible(f"No APCOA car park found near {station.name}")
 
         car_park = CarPark(
-            name=result.get("name") or f"{station.name} Station Car Park",
-            daily_cost=Money(str(result["price"]), "GBP"),
-            address=result.get("address"),
+            name=result.name or f"{station.name} Station Car Park",
+            daily_cost=Money(str(result.price), "GBP"),
+            address=result.address,
         )
 
         self._registry._persist_results(station, car_park)
         return Attempt.succeeded(car_park)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _apcoa_lookup(self, station: Station) -> dict | None:
+    async def _apcoa_lookup(self, station: Station) -> ApcoaPageRecord | None:
         """Scrape APCOA for a car park near *station*.
 
         Strategy (matching ``scripts/sync_parking_rates.py``):
@@ -161,8 +158,8 @@ class ApcoaCarParkLookup:
           2. Fall back to the prebook listing page near the station's
              coordinates.
 
-        Returns dict with ``name``, ``address``, and ``price`` keys,
-        or ``None`` if nothing found.
+        Returns an ``ApcoaPageRecord`` with ``name``, ``address``, and
+        ``price`` fields, or ``None`` if nothing found.
         """
         async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
             page = await browser.new_page()

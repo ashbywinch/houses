@@ -211,11 +211,12 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
         if addr:
             item["home_property_address"] = addr
 
-async def settings_payload(session_user: dict | None = None) -> dict:
+async def settings_payload(session_user: dict | None = None) -> _SettingsPayloadJson:
     """The settings document: persons, financial aggregates, commute
     thresholds, the household deposit, and the what-if flag. Shared by
     the GET endpoint and the settings_updated websocket push, so both
-    surfaces always speak the same shape."""
+    surfaces always speak the same shape. Returns the record; callers
+    ``to_dict()`` at their own serialization edge."""
     svc = get_services()
     persons_json = await svc.persons_source.to_json()
     attempt = svc.persons_source.latest_attempt()
@@ -245,7 +246,7 @@ async def settings_payload(session_user: dict | None = None) -> dict:
             ),
         ),
         what_if_active=bool(started),
-    ).to_dict()
+    )
 
 def _deposit_breakdown(persons: list) -> DepositBreakdown:
     """Per-person deposit (distributed home equity + cash) and the

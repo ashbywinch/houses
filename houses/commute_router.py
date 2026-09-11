@@ -27,6 +27,7 @@ from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.services_provider import get_services
 from houses.settings import settings
+from houses.web.json_utils import WirePayload
 
 logger = logging.getLogger(__name__)
 
@@ -75,14 +76,115 @@ class _Waypoint:
 class _RoutesBody:
     """A Google Routes directions POST body (request wire shape)."""
 
-    origin: dict
-    destination: dict
+    origin: _Waypoint
+    destination: _Waypoint
     travel_mode: str
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(origin=self.origin, destination=self.destination, travelMode=self.travel_mode)
+        return dict(
+            origin=self.origin.to_dict(),
+            destination=self.destination.to_dict(),
+            travelMode=self.travel_mode,
+        )
+
+
+@dataclass(frozen=True)
+class _RoutesResponseJson:
+    """The Google Routes directions response root — the {routes} wire shape."""
+
+    routes: list[_RouteJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RoutesResponseJson:
+        return cls(routes=[_RouteJson.from_dict(route) for route in raw.get("routes") or []])
+
+
+@dataclass(frozen=True)
+class _RouteJson:
+    """A Google Routes route — the {duration, distanceMeters, legs} wire shape."""
+
+    duration: str
+    distance_meters: int
+    legs: list[_RouteLegJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RouteJson:
+        return cls(
+            duration=raw.get("duration", "0s"),
+            distance_meters=raw.get("distanceMeters", 0),
+            legs=[_RouteLegJson.from_dict(leg) for leg in raw.get("legs") or []],
+        )
+
+
+@dataclass(frozen=True)
+class _RouteLegJson:
+    """A Google Routes route leg — the {steps} wire shape."""
+
+    steps: list[_RouteStepJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RouteLegJson:
+        return cls(steps=[_RouteStepJson.from_dict(step) for step in raw.get("steps") or []])
+
+
+@dataclass(frozen=True)
+class _RouteStepJson:
+    """A Google Routes leg step — the {travelMode, staticDuration, transitDetails} wire shape."""
+
+    travel_mode: str | None
+    static_duration: str
+    transit_details: _RouteTransitDetailsJson | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RouteStepJson:
+        details = raw.get("transitDetails")
+        return cls(
+            travel_mode=raw.get("travelMode"),
+            static_duration=raw.get("staticDuration", "0s"),
+            transit_details=_RouteTransitDetailsJson.from_dict(details) if details else None,
+        )
+
+
+@dataclass(frozen=True)
+class _RouteTransitDetailsJson:
+    """A Google Routes step's transitDetails — the {transitLine} wire shape."""
+
+    transit_line: _RouteTransitLineJson | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RouteTransitDetailsJson:
+        line = raw.get("transitLine")
+        return cls(transit_line=_RouteTransitLineJson.from_dict(line) if line else None)
+
+
+@dataclass(frozen=True)
+class _RouteTransitLineJson:
+    """A Google Routes transit line — the {nameShort, name, agencies} wire shape."""
+
+    name_short: str | None
+    name: str | None
+    agencies: list[_RouteAgencyJson]
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RouteTransitLineJson:
+        return cls(
+            name_short=raw.get("nameShort"),
+            name=raw.get("name"),
+            agencies=[_RouteAgencyJson.from_dict(agency) for agency in raw.get("agencies") or []],
+        )
+
+
+@dataclass(frozen=True)
+class _RouteAgencyJson:
+    """A Google Routes transit agency — the {name} wire shape."""
+
+    name: str | None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RouteAgencyJson:
+        return cls(name=raw.get("name"))
 
 
 @runtime_checkable
@@ -92,7 +194,7 @@ class RoutesPostClient(Protocol):
     # lucidlint: ignore record-shape transport seam contract — the request body is the caller's
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
-        self, body: dict, field_mask: str, *, options: GoogleRoutesOptions | None = None
+        self, body: WirePayload | dict, field_mask: str, *, options: GoogleRoutesOptions | None = None
     ) -> dict | None: ...
 
 
@@ -139,7 +241,7 @@ class GoogleRoutesClient:
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self,
-        body: dict,
+        body: WirePayload | dict,
         field_mask: str,
         *,
         options: GoogleRoutesOptions | None = None,
@@ -159,14 +261,17 @@ class GoogleRoutesClient:
             "X-Goog-Api-Key": google_key,
             "X-Goog-FieldMask": field_mask,
         }
-        key = json.dumps(body, sort_keys=True)
+        # lucidlint: ignore record-shape the seam materializes the caller's request record exactly once, at the
+        # transport edge; legacy raw-dict callers pass through unchanged (coding-standards.md)
+        payload = body.to_dict() if hasattr(body, "to_dict") else body
+        key = json.dumps(payload, sort_keys=True)
         cached = get_cached("POST", self.GOOGLE_ROUTES_URL, None, key)
         if cached is not None:
             return cached
 
         client_factory = options.client_factory or cached_async_client
         async with client_factory(timeout=options.timeout) as client:
-            resp = await client.post(self.GOOGLE_ROUTES_URL, json=body, headers=headers)
+            resp = await client.post(self.GOOGLE_ROUTES_URL, json=payload, headers=headers)
             if resp.status_code == 429:
                 raise HttpError(429, "rate limited", headers=dict(resp.headers))
             self._raise_with_body(resp)
@@ -413,10 +518,10 @@ class CommuteRouter:
                     )
 
         body = _RoutesBody(
-            origin=self._address_waypoint(origin).to_dict(),
-            destination=self._address_waypoint(dest).to_dict(),
+            origin=self._address_waypoint(origin),
+            destination=self._address_waypoint(dest),
             travel_mode=mode,
-        ).to_dict()
+        )
         mask = "routes.duration,routes.distanceMeters,routes.legs"
         try:
             data = await self._google_routes_client.post(
@@ -431,13 +536,13 @@ class CommuteRouter:
         if data is None:
             return self._infeasible_commute("Google Routes API returned no data")
 
-        routes = data.get("routes", [])
+        routes = _RoutesResponseJson.from_dict(data).routes
         if not routes:
             return self._infeasible_commute("Google Routes returned no routes")
 
-        duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
+        duration_sec = int(routes[0].duration.rstrip("s"))
         duration_min = round(duration_sec / 60)
-        distance_meters = routes[0].get("distanceMeters", 0)
+        distance_meters = routes[0].distance_meters
 
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
         if mode == "WALK":
@@ -513,10 +618,10 @@ class CommuteRouter:
         if isinstance(dest, str):
             dest = PlaceOfInterest(label="", address=dest)
         body = _RoutesBody(
-            origin=self._address_waypoint(origin).to_dict(),
-            destination=self._address_waypoint(dest.address).to_dict(),
+            origin=self._address_waypoint(origin),
+            destination=self._address_waypoint(dest.address),
             travel_mode="TRANSIT",
-        ).to_dict()
+        )
         mask = (
             "routes.duration,routes.legs.steps.travelMode,"
             "routes.legs.steps.staticDuration,routes.legs.steps.transitDetails"
@@ -531,7 +636,7 @@ class CommuteRouter:
             return None
         if not data:
             return None
-        routes = data.get("routes") or []
+        routes = _RoutesResponseJson.from_dict(data).routes
         if not routes:
             return None
         legs = self._transit_legs(routes[0])
@@ -539,7 +644,7 @@ class CommuteRouter:
             return None
         # Total from the route's own duration — the sum of per-leg
         # rounded minutes drifts (99.2 → 98 when legs round individually).
-        total_min = round(int(str(routes[0].get("duration", "0s")).rstrip("s")) / 60)
+        total_min = round(int(str(routes[0].duration).rstrip("s")) / 60)
         return Commute(
             person=Person(name="", has_car=False),
             label=dest.label,
@@ -550,22 +655,22 @@ class CommuteRouter:
             _details=(CostGroup(legs=tuple(legs), operator="TfL", cost=None),),
         )
 
-    def _transit_legs(self, route: dict[str, Any]) -> list[JourneyLeg]:
+    def _transit_legs(self, route: _RouteJson) -> list[JourneyLeg]:
         """Parse a Google Routes TRANSIT route into journey legs."""
         legs: list[JourneyLeg] = []
-        for leg in route.get("legs") or []:
-            for step in leg.get("steps") or []:
-                duration = Quantity(round(int(str(step.get("staticDuration", "0s")).rstrip("s")) / 60), "minute")
-                travel_mode = step.get("travelMode", "")
-                transit_details = step.get("transitDetails") or {}
-                line = transit_details.get("transitLine") or {}
+        for leg in route.legs:
+            for step in leg.steps:
+                duration = Quantity(round(int(str(step.static_duration).rstrip("s")) / 60), "minute")
+                travel_mode = step.travel_mode
+                transit_details = step.transit_details
                 if travel_mode == "WALK":
                     legs.append(JourneyLeg(mode=LegMode.WALK, duration=duration))
                     continue
                 if travel_mode == "TRANSIT":
+                    line = transit_details.transit_line if transit_details else None
                     mode = self._transit_leg_mode(line)
-                    line_name = line.get("nameShort") or line.get("name") or ""
-                    agencies = [a.get("name") or "" for a in line.get("agencies") or []]
+                    line_name = (line.name_short or line.name or "") if line else ""
+                    agencies = [agency.name or "" for agency in line.agencies] if line else []
                     end_station = self._NR_LONDON_TERMINUS.get(agencies[0], "") if agencies else ""
                     legs.append(
                         JourneyLeg(
@@ -578,12 +683,12 @@ class CommuteRouter:
         return legs
 
     @staticmethod
-    def _transit_leg_mode(line: dict[str, Any]) -> LegMode:
+    def _transit_leg_mode(line: _RouteTransitLineJson | None) -> LegMode:
         """Classify a transit leg from its line/agency (the API gates
         vehicle type).  TfL-run lines are tube when named, bus when
         numbered; anything else on the national network is a train."""
-        name = (line.get("nameShort") or line.get("name") or "").strip()
-        agencies = [a.get("name") or "" for a in line.get("agencies") or []]
+        name = (line.name_short or line.name or "").strip() if line else ""
+        agencies = [agency.name or "" for agency in line.agencies] if line else []
         if any("Transport for London" in a for a in agencies):
             return LegMode.BUS if name.isdigit() else LegMode.TUBE
         return LegMode.TRAIN

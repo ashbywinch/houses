@@ -9,7 +9,7 @@ from scripts.sync_parking_rates import city_slugs, extract_daily_rate_from_tarif
 
 
 @dataclass(frozen=True)
-class _ApcoaPageRecord:
+class ApcoaPageRecord:
     """Wire shape of a parsed APCOA page: name, address, and price."""
 
     name: str | None
@@ -56,13 +56,12 @@ class ApcoaScraper:
     # ── APCOA page parsers (pure functions, testable with fixtures) ───
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    def _parse_apcoa_location_page(page_text: str, page_title: str) -> dict | None:
+    def _parse_apcoa_location_page(page_text: str, page_title: str) -> ApcoaPageRecord | None:
         """Extract car park name, address, and price from an APCOA location page.
 
         The page has a "Pricing and payment" accordion open, with tariff
-        text visible.  Returns dict with ``name``, ``address``, and
-        ``price`` keys, or ``None`` if parsing fails.
+        text visible.  Returns an ``ApcoaPageRecord`` with ``name``,
+        ``address``, and ``price`` fields, or ``None`` if parsing fails.
         """
         # Name: from page title (e.g. "Bourne End Station - Bourne End - APCOA")
         name = page_title
@@ -101,19 +100,19 @@ class ApcoaScraper:
         if not (0 <= price <= 100):
             return None
 
-        return _ApcoaPageRecord(
+        return ApcoaPageRecord(
             name=name,
             address=address,
             price=round(price, 2),
-        ).to_dict()
+        )
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    def _parse_apcoa_prebook_listing(page_text: str) -> dict | None:
+    def _parse_apcoa_prebook_listing(page_text: str) -> ApcoaPageRecord | None:
         """Extract name, address, and price from an APCOA prebook listing page.
 
         The page lists nearby car parks with "From £X.XX" prices.
-        Returns dict with ``name``, ``address``, ``price`` or ``None``.
+        Returns an ``ApcoaPageRecord`` with ``name``, ``address``, and
+        ``price`` fields, or ``None``.
         """
         lines = [ln.strip() for ln in page_text.split("\n") if ln.strip()]
         name: str | None = None
@@ -138,8 +137,8 @@ class ApcoaScraper:
         if not (0 <= cost <= 100):
             return None
 
-        return _ApcoaPageRecord(
+        return ApcoaPageRecord(
             name=name,
             address=address,
             price=round(cost, 2),
-        ).to_dict()
+        )
