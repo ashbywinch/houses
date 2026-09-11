@@ -11,13 +11,13 @@ state at deferral time:
   behind one): re-queueing would spin the drain forever, so the node
   parks. The input's push signal owns the wake-up for the whole chain.
 """
-from typing import Any, override
+from typing import override
 
 import pytest
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.scheduler import flush_processor, get_scheduler
+from dag.scheduler import AsyncQueueScheduler, flush_processor, get_scheduler
 from dag.user_input_node import UserInputNode
 
 
@@ -62,10 +62,11 @@ class _PendingOnce(DerivedNode[str]):
         return Attempt.succeeded(str(val).upper())
 
 
-def _sched_state() -> tuple[Any, Any]:
-    """(queue_depth, scheduled-map) of the active scheduler, duck-typed."""
+def _sched_state() -> tuple[int, dict]:
+    """(queue depth, scheduled-map) of the active scheduler."""
     sched = get_scheduler()
-    return getattr(sched, "queue_depth", None), getattr(sched, "_scheduled", None)
+    assert isinstance(sched, AsyncQueueScheduler)
+    return sched._queue.qsize(), dict(sched._scheduled)
 
 
 @pytest.mark.asyncio
