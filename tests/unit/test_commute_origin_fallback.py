@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from tools.commute.station_shed import Station
@@ -67,9 +69,9 @@ class _FakeCachedFetch:
 
     def __init__(self, results: list[dict | None]):
         self.results = list(results)
-        self.called: list[tuple[str, dict]] = []
+        self.called: list[tuple[str, Any]] = []
 
-    async def __call__(self, url: str, params: dict) -> dict | None:
+    async def __call__(self, url: str, params: Any) -> dict | None:
         self.called.append((url, params))
         return self.results.pop(0) if self.results else None
 
@@ -167,10 +169,10 @@ async def test_route_duration_builds_national_search_request():
     await TflClient.route_duration(COORDS, DEST, fetch=fetch)
     url, params = fetch.called[0]
     assert url == "https://api.tfl.gov.uk/Journey/JourneyResults/52.5648,-0.237/to/SW1P 1AA"
-    assert params["nationalSearch"] == "true"
-    assert params["timeIs"] == "arriving"
-    assert "bus" in params["mode"]
-    assert "tube" in params["mode"]
+    assert params.national_search == "true"
+    assert params.time_is == "arriving"
+    assert "bus" in params.mode
+    assert "tube" in params.mode
 
 
 @pytest.mark.asyncio
@@ -179,4 +181,4 @@ async def test_route_duration_respects_allow_bus():
 
     fetch = _FakeCachedFetch([{"journeys": [{"duration": 79}]}])
     await TflClient.route_duration(COORDS, DEST, allow_bus=False, fetch=fetch)
-    assert "bus" not in fetch.called[0][1]["mode"]
+    assert "bus" not in fetch.called[0][1].mode

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, override
+from dataclasses import dataclass
+from typing import override
 
 from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
@@ -8,6 +9,37 @@ from dag.node import Node
 from houses.geopoint import GeoPoint
 from houses.school_gender import SchoolGender
 from houses.services_provider import get_services
+
+
+@dataclass(frozen=True)
+class _SchoolJson:
+    """Wire shape of the nearest-school value — lat/lon included only
+    when the school has coordinates."""
+
+    name: str
+    ofsted: str
+    walk: None
+    url: str
+    postcode: str
+    full_address: str
+    lat: float | None = None
+    lon: float | None = None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        d: dict[str, object] = dict(
+            name=self.name,
+            ofsted=self.ofsted,
+            walk=self.walk,
+            url=self.url,
+            postcode=self.postcode,
+            full_address=self.full_address,
+        )
+        if self.lat is not None:
+            d["lat"] = self.lat
+            d["lon"] = self.lon
+        return d
 
 
 class NearestSchoolNode(DerivedNode[dict]):
@@ -47,19 +79,18 @@ class NearestSchoolNode(DerivedNode[dict]):
         school = attempt.value_or_none()
         if school is None:
             return Attempt.impossible(f"no {self.stage} school found within search radius")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        result: dict[str, Any] = {
-            "name": school.name,
-            "ofsted": school.ofsted_rating,
-            "walk": None,
-            "url": school.url,
-            "postcode": school.postcode,
-            "full_address": school.full_address,
-        }
-        if school.coords:
-            result["lat"] = school.coords.lat
-            result["lon"] = school.coords.lon
-        return Attempt.succeeded(result)
+        return Attempt.succeeded(
+            _SchoolJson(
+                name=school.name,
+                ofsted=school.ofsted_rating,
+                walk=None,
+                url=school.url,
+                postcode=school.postcode,
+                full_address=school.full_address,
+                lat=school.coords.lat if school.coords else None,
+                lon=school.coords.lon if school.coords else None,
+            ).to_dict()
+        )
 
 
 class PrimarySchoolNode(NearestSchoolNode):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
-from typing import override
+from typing import Any, override
 
 from money import Money
 
@@ -171,6 +171,48 @@ class CommuteSelectorInputs:
     drive: Attempt[Commute] | None = None
 
 
+@dataclass(frozen=True)
+class _CommuteSelectorJson:
+    """Wire shape of CommuteSelectorNode.to_json — the node record plus
+    the selector's ``is_child`` flag. Every listed key is emitted;
+    ``error`` only when the attempt is impossible."""
+
+    status: str
+    value: Any
+    is_child: bool
+    succeeded: bool
+    pending: bool
+    impossible: bool
+    error: str | None
+    provenance: dict
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        d = dict(status=self.status, value=self.value, is_child=self.is_child)
+        d["succeeded"] = self.succeeded
+        d["pending"] = self.pending
+        d["impossible"] = self.impossible
+        if self.impossible:
+            d["error"] = self.error
+        d["provenance"] = self.provenance
+        return d
+
+
+@dataclass(frozen=True)
+class _CommuteValueJson:
+    """Wire shape of CommuteSelectorNode.to_json_value — the base node
+    record (NodeJson None-omission) with ``is_child`` appended last."""
+
+    base: dict
+    is_child: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return {**self.base, "is_child": self.is_child}
+
+
 class CommuteSelectorNode(DerivedNode[Commute]):
     """Selects the best commute from walk, transit, and drive options.
 
@@ -324,43 +366,42 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return result
 
     @override
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json(self) -> dict:
         attempt = await self.attempt()
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        result: dict = {
-            "status": attempt.status,
-            "value": None,
-            "is_child": self.is_child,
-        }
-        result["succeeded"] = attempt.succeeded
-        result["pending"] = attempt.pending
-        result["impossible"] = attempt.impossible
+        value = None
         if attempt.succeeded and attempt.value_or_none() is not None:
             try:
                 value = self._adapter.dump_python(attempt.value_or_none(), mode="json")
                 # Rename private _details field back to details for the frontend
                 if isinstance(value, dict) and "_details" in value:
                     value["details"] = value.pop("_details")
-                result["value"] = value
             # lucidlint: ignore broad-except serialization failure nulls value; node still succeeds
             except Exception:
                 logger.exception("Failed to serialize commute value to JSON")
-                result["value"] = None
+                value = None
+        error = None
         if attempt.impossible:
             info = attempt.error_info
-            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
-        result["provenance"] = (await self.build_provenance()).to_dict()
-        return result
+            error = (info.display_message if info is not None else attempt.error) or attempt.error
+        return _CommuteSelectorJson(
+            status=attempt.status,
+            value=value,
+            is_child=self.is_child,
+            succeeded=attempt.succeeded,
+            pending=attempt.pending,
+            impossible=attempt.impossible,
+            error=error,
+            provenance=(await self.build_provenance()).to_dict(),
+        ).to_dict()
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     @override
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
-        result["is_child"] = self.is_child
         if "_details" in result:
             result["details"] = result.pop("_details")
-        return result
+        return _CommuteValueJson(base=result, is_child=self.is_child).to_dict()
 
 
 class MergeRailFareNode(DerivedNode[Commute]):

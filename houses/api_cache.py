@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar, override
 from urllib.parse import parse_qs, unquote, urlparse
@@ -29,6 +30,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 from houses.settings import settings
+from houses.web.json_utils import WirePayload
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +48,44 @@ def set_cache_dir(path: str | Path) -> None:
     global CACHE_DIR
     CACHE_DIR = Path(path)
 
+
+@dataclass(frozen=True)
+class CacheEnvelope:
+    """The wrapped-error envelope stored in the cache file: a
+    deterministic non-2xx response with its status preserved."""
+
+    status: int
+    body: object
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the cache-file shape (coding-standards)
+        return dict(_cached_status=self.status, _cached_body=self.body)
+
 # lucidlint: ignore-file data-clump this module's public cache API deliberately threads one request identity (method,
+# lucidlint: ignore record-shape WirePayload is the contract; legacy plain dicts pass through (coding-standards.md)
+# lucidlint: ignore record-shape the return is the params fragment entering the cache key (coding-standards.md)
+def _wire_params(params: WirePayload | dict[str, Any] | None) -> dict[str, Any] | None:
+    """Serialise a request record exactly once, at the cache-key edge.
+
+    The cache seams take the caller's request RECORD (``WirePayload``);
+    ``to_dict()`` happens here, never in the callers.  Legacy plain-dict
+    params (the httpx transport's parsed query, direct module callers)
+    pass through unchanged so the unified key space stays byte-identical.
+    """
+    if params is None:
+        return None
+    return params.to_dict() if not isinstance(params, dict) else params
+
+
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _make_key(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> str:
+def _make_key(
+    method: str, url: str, params: WirePayload | dict[str, Any] | None, body: str | None
+) -> str:
     parts = [method.upper(), url]
-    if params:
-        parts.append(json.dumps(params, sort_keys=True))
+    wire = _wire_params(params)
+    if wire:
+        parts.append(json.dumps(wire, sort_keys=True))
     if body:
         parts.append(body)
     raw = "::".join(parts)
@@ -67,10 +101,14 @@ def _cache_path(key: str) -> Path:
 def get_cached(
     method: str,
     url: str,
-    params: dict[str, Any] | None = None,
+    params: WirePayload | dict[str, Any] | None = None,
     body: str | None = None,
 ) -> dict[str, Any] | None:
-    """Return the cached JSON response for a request, or ``None``."""
+    """Return the cached JSON response for a request, or ``None``.
+
+    ``params`` is the caller's request record — serialized once at the
+    cache-key edge; legacy plain-dict identities pass through unchanged.
+    """
     path = _cache_path(_make_key(method, url, params, body))
     if path.exists():
         return json.loads(path.read_text())
@@ -79,7 +117,13 @@ def get_cached(
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
-def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None, data: dict[str, Any]) -> None:
+def set_cached(
+    method: str,
+    url: str,
+    params: WirePayload | dict[str, Any] | None,
+    body: str | None,
+    data: dict[str, Any],
+) -> None:
     """Store a JSON response so future identical requests skip the API."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(_make_key(method, url, params, body))
@@ -128,18 +172,20 @@ def _cached_secret_key() -> str:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
-def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> None:
+def evict_cached(
+    method: str, url: str, params: WirePayload | dict[str, Any] | None, body: str | None
+) -> None:
     """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
     _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
 
 
-# lucidlint: ignore record-shape request params enter the cache key verbatim — wire format (coding-standards.md)
-# lucidlint: ignore record-shape request body is the external API's wire payload (coding-standards.md)
+# lucidlint: ignore record-shape request params/body serialize once at the cache-key edge (coding-standards.md)
+# lucidlint: ignore record-shape the cached response body is the provider's wire payload (coding-standards.md)
 async def with_cache(  # lucidlint: ignore record-shape return is the cached API response body — wire format
     method: str,
     url: str,
-    params: dict[str, Any] | None = None,
-    body: dict[str, Any] | None = None,
+    params: WirePayload | dict[str, Any] | None = None,
+    body: WirePayload | dict[str, Any] | None = None,
     *,
     fetch,
 ) -> dict[str, Any]:
@@ -149,8 +195,11 @@ async def with_cache(  # lucidlint: ignore record-shape return is the cached API
     Example::
 
         data = await with_cache("GET", url, params=params, fetch=lambda: resp.json())
+
+    ``params``/``body`` are the caller's request records — serialized once
+    at the cache-key edge; legacy plain dicts pass through unchanged.
     """
-    body_str = json.dumps(body, sort_keys=True) if body else None
+    body_str = json.dumps(_wire_params(body), sort_keys=True) if body else None
     cached = get_cached(method, url, params, body_str)
     if cached is not None:
         return cached
@@ -220,9 +269,8 @@ class CachingTransport(httpx.AsyncBaseTransport):
                     request.method,
                     url_path,
                     params,
-                    # lucidlint: ignore record-shape wire-format dict — the wrapped-error envelope IS the cache file's
                     body,
-                    {"_cached_status": response.status_code, "_cached_body": data},
+                    CacheEnvelope(status=response.status_code, body=data).to_dict(),
                 )
         # lucidlint: ignore broad-except deliberate fallback — a cache-write failure must never break the request
         except Exception as e:

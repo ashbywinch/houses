@@ -20,7 +20,7 @@ from dag.scheduler import flush_processor
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.commute import commute_colour, format_duration
-from houses.nodes.property_nodes import PropertyNodes
+from houses.nodes.property_nodes import PropertyNodes, _SummaryJson
 from houses.property_registry import register_property
 from houses.web.api_router import _score_from_summary
 from tests.helpers import make_services
@@ -176,15 +176,15 @@ class TestOfstedColour:
     """
 
     @staticmethod
-    def _summary_with_ofsted(ofsted: str) -> dict:
-        return {
+    def _summary_with_ofsted(ofsted: str) -> _SummaryJson:
+        return _SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk": None}}},
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
             "walkability": {"value": None},
-        }
+        })
 
     def test_outstanding_is_good(self):
         """Outstanding → score 2 (was colour 'good')."""
@@ -216,26 +216,26 @@ class TestScoringSurvivesAnUnpricedCommute:
     (2026-09-10), taking the whole index page down."""
 
     @staticmethod
-    def _summary_with_a_null_commute() -> dict:
-        return {
+    def _summary_with_a_null_commute() -> _SummaryJson:
+        return _SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {"commute": {"status": "succeeded", "value": None}},
             },
             "schools": {},
             "walkability": {"value": None},
-        }
+        })
 
     def test_null_commute_value_scores_without_crashing(self):
         assert _score_from_summary(self._summary_with_a_null_commute()) == 0
 
     def test_missing_commute_envelope_scores_without_crashing(self):
         s = self._summary_with_a_null_commute()
-        s["commutes"]["Simon/Dad"] = {"commute": None}
+        s.commutes["Simon/Dad"] = {"commute": None}
         assert _score_from_summary(s) == 0
 
     def test_null_duration_scores_without_crashing(self):
         s = self._summary_with_a_null_commute()
-        s["commutes"]["Simon/Bracknell"] = {
+        s.commutes["Simon/Bracknell"] = {
             "commute": {"status": "succeeded", "value": {"duration": None}},
         }
         assert _score_from_summary(s) == 0
@@ -249,15 +249,15 @@ class TestWalkColour:
     """
 
     @staticmethod
-    def _summary_with_walk(minutes: int | None) -> dict:
-        return {
+    def _summary_with_walk(minutes: int | None) -> _SummaryJson:
+        return _SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
             "walkability": {"value": {"walk_to_town": {"value": minutes, "unit": "minute"}}},
-        }
+        })
 
     def test_good_under_15(self):
         """walk < 15 → score 2 (was colour 'good')."""
@@ -437,12 +437,12 @@ class TestScoring:
     @pytest.mark.asyncio
     async def test_score_is_integer(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = _SummaryJson(**await prop.to_json_summary())
         score = _score_from_summary(s)
         assert score == 16
 
     def test_all_green_returns_max(self):
-        summary = {
+        summary = _SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
@@ -469,12 +469,12 @@ class TestScoring:
                 },
             },
             "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
-        }
+        })
         score = _score_from_summary(summary)
         assert score == 16  # 8 metrics × 2
 
     def test_greens_and_warns_mixed(self):
-        summary = {
+        summary = _SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
@@ -501,12 +501,12 @@ class TestScoring:
                 },
             },
             "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
-        }
+        })
         score = _score_from_summary(summary)
         assert score == 14  # 2×3 + 1 + 2×3 + 2 + 1 + 2
 
     def test_bad_values_subtract(self):
-        summary = {
+        summary = _SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
@@ -528,25 +528,25 @@ class TestScoring:
                 "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "", "walk": None}}},
             },
             "walkability": {"value": {"walk_to_town": None}},
-        }
+        })
         score = _score_from_summary(summary)
         assert score == -5  # 3 red commutes (-1 each) + red ofsted (-1) + bad walk (-1)
 
     def test_muted_contributes_zero(self):
-        summary = {
+        summary = _SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
             "walkability": {"value": None},
-        }
+        })
         score = _score_from_summary(summary)
         assert score == 0
 
     def test_bracknell_thresholds(self):
         """Bracknell commutes use 30/60 thresholds instead of 45/75."""
-        summary = {
+        summary = _SummaryJson(**{
             "commutes": {
                 "Simon/Bracknell": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 25, "unit": "minute"}}}
@@ -557,11 +557,11 @@ class TestScoring:
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
             "walkability": {"value": None},
-        }
+        })
         assert _score_from_summary(summary) == 2  # green = 2
-        summary["commutes"]["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 35
+        summary.commutes["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 35
         assert _score_from_summary(summary) == 1  # warn = 1
-        summary["commutes"]["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 65
+        summary.commutes["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 65
         assert _score_from_summary(summary) == -1  # bad = -1
 
 
@@ -570,15 +570,15 @@ class TestCardSorting:
 
     def test_sorted_by_score_descending(self):
         """Verify the sorting logic used by get_all_properties()."""
-        high = {
+        high = _SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
             "walkability": {"value": None},
-        }
-        mid = {
+        })
+        mid = _SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {
@@ -595,8 +595,8 @@ class TestCardSorting:
                 },
             },
             "walkability": {"value": None},
-        }
-        low = {
+        })
+        low = _SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
@@ -607,8 +607,7 @@ class TestCardSorting:
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
             "walkability": {"value": None},
-        }
-
+        })
         results = {"low": low, "high": high, "mid": mid}
         scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
         assert [r[0] for r in scored] == ["mid", "high", "low"]

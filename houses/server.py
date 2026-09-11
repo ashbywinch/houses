@@ -298,6 +298,18 @@ async def list_properties(
     return _PropertyListing(tab=tab, properties=props).to_dict()
 
 
+@dataclass(frozen=True)
+class _DuplicateError:
+    """The 400 response body when a property already exists."""
+
+    status: str
+    error: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(status=self.status, error=self.error)
+
+
 def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
     """A 400 response when the property already exists; None to proceed.
 
@@ -308,11 +320,10 @@ def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
         return None
     if rid in property_rids():
         return JSONResponse(
-            # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the
-            content={
-                "status": "error",
-                "error": f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
-            },
+            content=_DuplicateError(
+                status="error",
+                error=f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
+            ).to_dict(),
             status_code=400,
         )
     return None
@@ -456,8 +467,37 @@ def _job_wire(job):
     return None if job is None else job.to_dict()
 
 
-# lucidlint: ignore record-shape wire-format dict — the worker's report body is a wire record (coding-standards.md)
-async def _apply_scraped_report(rid: str, data: dict) -> bool:
+@dataclass(frozen=True)
+class _ScrapedReportJson:
+    """The scraped-listing block of a worker's report body (wire shape).
+
+    The worker's ``data`` object: scraped TEXT fields, guarded at the DAG
+    seed (a non-parseable value re-queues the job, never 500s)."""
+
+    url: str
+    address: str
+    postcode: str
+    bedrooms: Any
+    price: Any
+    latitude: Any
+    longitude: Any
+
+    @classmethod
+    # lucidlint: ignore record-shape from_dict parses the worker's report body — serialization boundary
+    # (coding-standards.md)
+    def from_dict(cls, raw: dict) -> "_ScrapedReportJson":
+        return cls(
+            url=raw.get("url", ""),
+            address=raw.get("address", ""),
+            postcode=raw.get("postcode", ""),
+            bedrooms=raw.get("bedrooms"),
+            price=raw.get("price"),
+            latitude=raw.get("latitude"),
+            longitude=raw.get("longitude"),
+        )
+
+
+async def _apply_scraped_report(rid: str, data: _ScrapedReportJson) -> bool:
     """Push a worker's scraped listing into the property's DAG — the same
     seed the sync add path performs, sourced entirely from the report.
     Returns False when the DAG seed fails (the caller re-queues the job)."""
@@ -465,17 +505,17 @@ async def _apply_scraped_report(rid: str, data: dict) -> bool:
     # non-parseable value re-queues the job instead of 500ing and
     # leaving it in_progress (PR #68 review).
     try:
-        bedrooms = int(data["bedrooms"]) if data.get("bedrooms") is not None else 0
-        price = Money(str(data["price"]), "GBP") if data.get("price") is not None else Money(amount="0", currency="GBP")
+        bedrooms = int(data.bedrooms) if data.bedrooms is not None else 0
+        price = Money(str(data.price), "GBP") if data.price is not None else Money(amount="0", currency="GBP")
     except (ValueError, TypeError):
         return False
     enriched = EnrichedProperty(
-        url=data.get("url", ""),
-        address=upgrade_address(data.get("address", ""), data.get("postcode", "")),
+        url=data.url,
+        address=upgrade_address(data.address, data.postcode),
         bedrooms=bedrooms,
         price=price,
-        approx_latitude=data.get("latitude"),
-        approx_longitude=data.get("longitude"),
+        approx_latitude=data.latitude,
+        approx_longitude=data.longitude,
     )
 
     seeded = await run_on_processor(lambda: _seed_dag(rid, enriched))
@@ -507,11 +547,11 @@ async def report_scrape(request: Request, body: dict) -> JSONResponse:
     if not isinstance(job_id, int):
         raise HTTPException(status_code=422, detail="job_id required")
     if body.get("ok"):
-        data = body.get("data") or {}
+        data = _ScrapedReportJson.from_dict(body.get("data") or {})
         # A login wall / block page can parse to an empty address — such a
         # "success" would seed a garbage property. Reject it: the job is
         # re-queued with backoff instead of deleted.
-        if not data.get("address"):
+        if not data.address:
             _scrape_queue.report_scrape(job_id, ok=False, error="report missing an address")
             return JSONResponse(content={"status": "ok"})
         rid = _scrape_queue.scrape_job_rid(job_id)
@@ -528,14 +568,26 @@ async def report_scrape(request: Request, body: dict) -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
 
 
+@dataclass(frozen=True)
+class _ScrapeStatus:
+    """Queue depth by status as serialized to the /api/scrapes/status response."""
+
+    pending: int
+    in_progress: int
+    failed: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(scrapes=dict(pending=self.pending, in_progress=self.in_progress, failed=self.failed))
+
+
 @app.get("/api/scrapes/status", response_model=None)
 async def scrape_status(request: Request) -> JSONResponse:
     """Queue depth by status for the operator (superuser)."""
     _require_superuser(request)
     st = _scrape_queue.scrape_queue_status()
     return JSONResponse(
-        # lucidlint: ignore record-shape wire-format dict — API response payload, serialization boundary owns the shape
-        content={"scrapes": {"pending": st.pending, "in_progress": st.in_progress, "failed": st.failed}}
+        content=_ScrapeStatus(pending=st.pending, in_progress=st.in_progress, failed=st.failed).to_dict()
     )
 
 

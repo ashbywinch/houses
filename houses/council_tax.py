@@ -137,6 +137,18 @@ def _normalise_keep_commas(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9,]", " ", text.upper())).strip()
 
 
+@dataclass(frozen=True)
+class _CivAccountRateJson:
+    """The CivAccount council API payload — the Band-D rate it reports."""
+
+    band_d_rate: float | None = None
+
+    # lucidlint: ignore record-shape from_dict parses the CivAccount API payload (coding-standards.md)
+    @classmethod
+    def from_dict(cls, raw: dict) -> _CivAccountRateJson:
+        return cls(band_d_rate=raw.get("band_d_rate"))
+
+
 def _civaccount_rate(
     band: str,
     local_authority: str,
@@ -149,8 +161,7 @@ def _civaccount_rate(
         with client_factory(timeout=10.0) as client:
             civ = client.get(url)
             if civ.status_code == HTTP_OK:
-                civ_data = civ.json()
-                band_d_rate = civ_data.get("band_d_rate")
+                band_d_rate = _CivAccountRateJson.from_dict(civ.json()).band_d_rate
                 if band_d_rate and band in BAND_RATIOS:
                     return Money(str(round(band_d_rate * BAND_RATIOS[band], 2)), "GBP")
     # lucidlint: ignore broad-except API fallback — any CivAccount lookup failure degrades to None (unavailable)
@@ -299,6 +310,13 @@ class _VoaRow:
             local_authority=self.local_authority,
         )
 
+    # lucidlint: ignore record-shape from_dict parses the cached VOA row (coding-standards.md)
+    @classmethod
+    def from_dict(cls, raw: dict) -> _VoaRow:
+        raw.setdefault("postcode", "")
+        raw.setdefault("local_authority", "")
+        return cls(**raw)
+
 
 class CachedVOAClient:
     """Async context manager that wraps ``VOAClient`` with disk caching.
@@ -327,11 +345,7 @@ class CachedVOAClient:
         key = f"voa/{postcode.strip().upper()}"
         cached = get_cached("GET", key)
         if cached is not None:
-            rows = []
-            for r in cached.get("rows", []):
-                r.setdefault("postcode", "")
-                r.setdefault("local_authority", "")
-                rows.append(_VoaRow(**r))
+            rows = [_VoaRow.from_dict(r) for r in cached.get("rows", [])]
             return type("Page", (), {"rows": rows})()
 
         if self._inner is None:
@@ -350,9 +364,9 @@ async def _fetch_voa_results(
     postcode: str,
     page_fetcher: Callable[[str, int], Any] | None,
     voa_client_factory: Callable[[], Any] | None,
-):
+) -> list[_VoaRow]:
     """Fetch the VOA rows for a postcode via the injected fetcher or the
-    cached VOA client, normalized to plain dicts.
+    cached VOA client, as records.
 
     ``page_fetcher`` may return a page or a coroutine for one; the async
     context managers are the real ``CachedVOAClient`` path.  httpx errors
@@ -372,10 +386,10 @@ async def _fetch_voa_results(
         _VoaRow(
             band=str(r.band), address=str(r.address),
             local_authority=str(r.local_authority or ""),
-        ).to_dict()
+        )
         for r in page.rows
         if r.address and r.band
-]
+    ]
 
 def _building_identifier(address: str):
     """The building descriptor dict, its id, and its normalized id."""
@@ -384,7 +398,7 @@ def _building_identifier(address: str):
     return building, building_id, _normalise(building_id)
 
 
-def _match_by_number(active, norm_id: str, address: str):
+def _match_by_number(active: list[_VoaRow], norm_id: str, address: str) -> list[_VoaRow] | None:
     """Rows whose address pairs the house number with the following street
     token; None when the address does not identify a single property.
 
@@ -402,7 +416,7 @@ def _match_by_number(active, norm_id: str, address: str):
         return None
     street_first = addr_tokens[house_idx + 1]
     pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street_first)}(?![A-Z0-9])"
-    return [r for r in active if re.search(pattern, _normalise(r["address"]))]
+    return [r for r in active if re.search(pattern, _normalise(r.address))]
 
 
 def _is_unit_descriptor(first: str, tokens: list[str]) -> bool:
@@ -460,10 +474,10 @@ class _PropertyRef:
 
 
 def _match_building_name(
-    active,
+    active: list[_VoaRow],
     building,
     query: _PropertyRef,
-):
+) -> list[_VoaRow] | None:
     """Rows matching a named building; None when the name is present but
     never identifies a specific unit on its own (the caller reports the
     address as not identifying a single property)."""
@@ -472,22 +486,22 @@ def _match_building_name(
     matches = [
         r
         for r in active
-        if _name_row_match(_normalise_keep_commas(r["address"]), name_norm, unit_norm)
+        if _name_row_match(_normalise_keep_commas(r.address), name_norm, unit_norm)
     ]
     if not matches:
         # The name is present but never identifies a unit on its own.
         norm_id = _normalise(query.building_id)
-        if any(norm_id in _normalise(r["address"]) for r in active):
+        if any(norm_id in _normalise(r.address) for r in active):
             logger.debug(
                 "Address %r names a building/street but no specific unit in %s",
                 query.building_id,
                 query.postcode,
             )
             return None
-    return matches
+    return matches or []
 
 
-def _match_rows(active, building, query: _PropertyRef):
+def _match_rows(active: list[_VoaRow], building, query: _PropertyRef) -> list[_VoaRow] | None:
     """VOA rows matching the building identifier, or None when the address
     cannot positively identify a single property."""
     building_id = building.building_number or building.building_name or ""
@@ -497,7 +511,7 @@ def _match_rows(active, building, query: _PropertyRef):
     return _match_building_name(active, building, query)
 
 
-def _collapse_exact_matches(matches, address: str):
+def _collapse_exact_matches(matches: list[_VoaRow] | None, address: str) -> list[_VoaRow]:
     """Prefer rows whose address is a token-aligned prefix of the query.
 
     Multiple exact prefixes are the SAME property with locality variants
@@ -509,22 +523,22 @@ def _collapse_exact_matches(matches, address: str):
     """
     norm_query_tokens = _strip_postcode(_normalise(address).split(), address)
     exact_matches = []
-    for m in matches:
-        row_tokens = _strip_postcode(_normalise(m["address"]).split(), m["address"])
+    for m in matches or []:
+        row_tokens = _strip_postcode(_normalise(m.address).split(), m.address)
         if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
             exact_matches.append(m)
     if len(exact_matches) >= 1:
-        bands = {m["band"] for m in exact_matches}
+        bands = {m.band for m in exact_matches}
         if len(bands) == 1:
-            return sorted(exact_matches, key=lambda m: not bool(m.get("local_authority")))[:1]
+            return sorted(exact_matches, key=lambda m: not bool(m.local_authority))[:1]
         return exact_matches
-    return matches
+    return matches or []
 
 
 def _select_matched_row(
-    matches,
+    matches: list[_VoaRow] | None,
     query: _PropertyRef,
-):
+) -> tuple[_VoaRow | None, str | None]:
     """Reduce matches to one unambiguous row.
 
     Returns (row, None) when the address identifies a single property, or
@@ -533,7 +547,7 @@ def _select_matched_row(
     provenance is actually troubleshooting-useful.
     """
     matches = _collapse_exact_matches(matches, query.address)
-    unique_addresses = sorted({m["address"] for m in matches})
+    unique_addresses = sorted({m.address for m in matches})
     if len(unique_addresses) > 1:
         logger.debug(
             "Ambiguous address %r — matched %d different VOA addresses for %s",
@@ -560,8 +574,8 @@ def _is_letter_suffix_annexe(row_tokens: list[str], main_tokens: list[str]) -> b
 
 
 def _find_annexe(
-    active,
-    matched,
+    active: list[_VoaRow],
+    matched: _VoaRow,
     rate_lookup: Callable[[str, str], Money | None],
 ) -> AnnexeDwelling | None:
     """The single OTHER VOA property whose address is the main address
@@ -571,10 +585,10 @@ def _find_annexe(
     contains "2 WILLOWMEAD GARDENS".  Locality-suffixed duplicates ("2
     WILLOWMEAD GARDENS MARLOW") are the same property, not an annexe.
     """
-    main_tokens = _strip_postcode(_normalise(matched["address"]).split(), matched["address"])
+    main_tokens = _strip_postcode(_normalise(matched.address).split(), matched.address)
     annexe_rows = []
     for r in active:
-        row_tokens = _strip_postcode(_normalise(r["address"]).split(), r["address"])
+        row_tokens = _strip_postcode(_normalise(r.address).split(), r.address)
         if row_tokens == main_tokens:
             continue
         # The main designation appears contiguously after a unit prefix —
@@ -591,19 +605,19 @@ def _find_annexe(
                     break
     if len(annexe_rows) == 1:
         r = annexe_rows[0]
-        annexe_yearly = rate_lookup(r["band"], r["local_authority"]) if r["local_authority"] else None
+        annexe_yearly = rate_lookup(r.band, r.local_authority) if r.local_authority else None
         return AnnexeDwelling(
-            address=r["address"],
-            band=r["band"],
+            address=r.address,
+            band=r.band,
             yearly_cost=Measurement(annexe_yearly, 0.0) if annexe_yearly is not None else None,
         )
     return None
 
 def _lookup_matched_rate(
-    matched,
+    matched: _VoaRow,
     rate_lookup: Callable[[str, str], Money | None],
     query: _PropertyRef,
-):
+) -> tuple[Money | None, str, str]:
     """(yearly cost, evidence URL, lookup error) for the matched row.
 
     The CivAccount WEBSITE has no /councils/<slug> pages (they 404 for
@@ -613,24 +627,24 @@ def _lookup_matched_rate(
     yearly_cost = None
     evidence_url = ""
     lookup_error = ""
-    if matched["local_authority"]:
-        slug = matched["local_authority"].lower().replace(" ", "-").replace(".", "")
+    if matched.local_authority:
+        slug = matched.local_authority.lower().replace(" ", "-").replace(".", "")
         evidence_url = f"{CIVACCOUNT_URL}/{slug}"
-        yearly_cost = rate_lookup(matched["band"], matched["local_authority"])
+        yearly_cost = rate_lookup(matched.band, matched.local_authority)
         if yearly_cost is None:
             # The band is real but the rate is not — the provenance must
             # say why there is no figure instead of silently omitting it.
-            lookup_error = f"no yearly rate found for {matched['local_authority']}"
+            lookup_error = f"no yearly rate found for {matched.local_authority}"
     else:
         logger.warning("No local authority found for %s postcode %s", query.building_id, query.postcode)
     return yearly_cost, evidence_url, lookup_error
 
 
-def _active_rows(results_raw):
+def _active_rows(results: list[_VoaRow]) -> list[_VoaRow]:
     """Rows with a live band (A–H or I), excluding DELETED/archived rows."""
-    return [r for r in results_raw if r["band"] in BAND_RATIOS or r["band"] == "I"]
+    return [r for r in results if r.band in BAND_RATIOS or r.band == "I"]
 
-def _match_failure(matches, query: _PropertyRef):
+def _match_failure(matches: list[_VoaRow] | None, query: _PropertyRef) -> str | None:
     """The impossible-reason when matches do not identify a single
     property; None to proceed with the match."""
     if matches is None:
@@ -671,7 +685,7 @@ async def lookup_council_tax(
     if rate_lookup is None:
         rate_lookup = _lookup_yearly_cost
     try:
-        results_raw = await _fetch_voa_results(postcode, page_fetcher, voa_client_factory)
+        results = await _fetch_voa_results(postcode, page_fetcher, voa_client_factory)
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
     # lucidlint: ignore broad-except boundary — unknown VOA failures convert to an impossible attempt, never raise
@@ -683,7 +697,7 @@ async def lookup_council_tax(
         logger.debug("No address provided — cannot positively identify property")
         return Attempt.impossible("no address provided")
 
-    active = _active_rows(results_raw)
+    active = _active_rows(results)
     if not active:
         logger.debug("VOA returned no active properties for %s", postcode)
         return Attempt.impossible("no active properties in VOA results")
@@ -709,7 +723,7 @@ async def lookup_council_tax(
 
     return Attempt.succeeded(
         CouncilTaxInfo(
-            band=matched["band"],
+            band=matched.band,
             yearly_cost=Measurement(yearly_cost, 0.0) if yearly_cost is not None else None,
             evidence_url=evidence_url,
             lookup_error=lookup_error,

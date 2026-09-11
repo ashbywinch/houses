@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 
 import httpx
 
@@ -72,6 +73,36 @@ ROAD_SUFFIXES = frozenset(
 HTTP_OK = 200
 
 
+@dataclass(frozen=True)
+class _EpcSearchParams:
+    """Query params for the EPC domestic search API."""
+
+    postcode: str
+    page_size: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {"postcode": self.postcode, "page_size": self.page_size}
+
+
+@dataclass(frozen=True)
+class _EpcCertificate:
+    """A certificate row from the EPC search API response."""
+
+    address_line1: str
+    registration_date: str
+    current_energy_efficiency_band: str
+
+    # lucidlint: ignore record-shape from_dict parses the external API certificate row (coding-standards.md)
+    @classmethod
+    def from_dict(cls, cert: dict) -> _EpcCertificate:
+        return cls(
+            address_line1=cert.get("addressLine1", ""),
+            registration_date=cert.get("registrationDate", ""),
+            current_energy_efficiency_band=cert.get("currentEnergyEfficiencyBand", ""),
+        )
+
+
 def _is_road_name(first_token: str) -> bool:
     """Check if the first address token is a road name (ends with road suffix as a separate word)."""
     lower = first_token.strip().lower()
@@ -99,8 +130,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         return Attempt.impossible("address has no building identifier")
 
     pc = postcode.strip().upper()
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    params = {"postcode": pc, "page_size": 50}
+    params = _EpcSearchParams(postcode=pc, page_size=50)
 
     cached = get_cached("GET", EPC_SEARCH_URL, params)
     if cached is not None:
@@ -111,7 +141,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         async with cached_async_client(timeout=10.0) as client:
             resp = await client.get(
                 EPC_SEARCH_URL,
-                params=params,
+                params=params.to_dict(),
                 headers={
                     "Accept": "application/json",
                     "Authorization": f"Bearer {settings.epc_bearer_token}",
@@ -181,7 +211,8 @@ def _street_after_token(tokens: list[str], token: str) -> str:
 
 # lucidlint: ignore data-clump the lookup identity (address, building_id) travels with its certificates by design
 # lucidlint: ignore data-clump (certs, building_id, address) is _match_cert's public signature — ~20 test call sites in
-def _filter_candidates(certs, building_id: str, address: str):  # lucidlint: ignore data-clump (address, certs) travel
+# lucidlint: ignore data-clump (address, certs) travel
+def _filter_candidates(certs: list[_EpcCertificate], building_id: str, address: str):
     """Certificates whose address matches the building identifier.
 
     A NUMBER identifier is matched as a whole token — "2" must not claim
@@ -198,11 +229,11 @@ def _filter_candidates(certs, building_id: str, address: str):  # lucidlint: ign
         pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}(?![A-Z0-9])"
         if street:
             pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street)}(?![A-Z0-9])"
-        return [c for c in certs if re.search(pattern, _normalise(c.get("addressLine1", "")))]
-    return [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
+        return [c for c in certs if re.search(pattern, _normalise(c.address_line1))]
+    return [c for c in certs if norm_id in _normalise(c.address_line1)]
 
 
-def _match_by_building(certs, building_id: str, address: str):
+def _match_by_building(certs: list[_EpcCertificate], building_id: str, address: str):
     """Certificates for the building identifier plus an impossible-reason.
 
     Returns (candidates, error) — error is None when the certificates
@@ -223,7 +254,7 @@ def _match_by_building(certs, building_id: str, address: str):
         exact_candidates = []
         for c in candidates:
             row_tokens = _strip_postcode(
-                _normalise(c.get("addressLine1", "")).split(), c.get("addressLine1", "")
+                _normalise(c.address_line1).split(), c.address_line1
             )
             if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
                 exact_candidates.append(c)
@@ -238,17 +269,17 @@ def _match_by_building(certs, building_id: str, address: str):
         # Ambiguity check: more than one distinct address matches.  Name
         # the first two (sorted, deterministic) + the count so the
         # provenance can be used to troubleshoot the match.
-        unique_addresses = sorted({c.get("addressLine1", "") for c in candidates})
+        unique_addresses = sorted({c.address_line1 for c in candidates})
         if len(unique_addresses) > 1:
             sample = ", ".join(repr(a) for a in unique_addresses[:2])
             return candidates, f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
     return candidates, None
 
 
-def _newest_band(candidates) -> Attempt[str]:
+def _newest_band(candidates: list[_EpcCertificate]) -> Attempt[str]:
     """Band from the newest certificate; impossible when it has none."""
-    candidates.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
-    band = candidates[0].get("currentEnergyEfficiencyBand", "")
+    candidates.sort(key=lambda c: c.registration_date, reverse=True)
+    band = candidates[0].current_energy_efficiency_band
     raw = band.strip() if band else ""
     if not raw:
         return Attempt.impossible("certificate has no energy band")
@@ -268,12 +299,13 @@ def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attem
     """
     if not certs:
         return Attempt.impossible("no certificates found")
+    records = [_EpcCertificate.from_dict(c) for c in certs]
     if building_id:
-        candidates, error = _match_by_building(certs, building_id, address)
+        candidates, error = _match_by_building(records, building_id, address)
         if error is not None:
             return Attempt.impossible(error)
     else:
-        candidates = certs
+        candidates = records
     return _newest_band(candidates)
 
 

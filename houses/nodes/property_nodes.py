@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from money import Money
@@ -108,19 +108,19 @@ class _FreshnessJson:
 class _SummaryJson:
     """Wire shape of PropertyNodes.to_json_summary."""
 
-    rid: str
-    best_address: Any
-    best_location: Any
-    rightmove_price: Any
-    rightmove_bedrooms: Any
-    group_monthly_cost: Any
-    town_name: Any
-    commutes: dict
-    schools: dict
-    walkability: Any
-    epc: Any
-    triage: dict
-    freshness: dict
+    rid: str = ""
+    best_address: Any = None
+    best_location: Any = None
+    rightmove_price: Any = None
+    rightmove_bedrooms: Any = None
+    group_monthly_cost: Any = None
+    town_name: Any = None
+    commutes: dict = field(default_factory=dict)
+    schools: dict = field(default_factory=dict)
+    walkability: Any = None
+    epc: Any = None
+    triage: dict = field(default_factory=dict)
+    freshness: dict = field(default_factory=dict)
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:

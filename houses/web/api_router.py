@@ -29,10 +29,11 @@ from houses.model.domain import (
     PlaceOfInterest,
 )
 from houses.nodes.commute import commute_band
+from houses.nodes.property_nodes import _PropertyJson, _SummaryJson
 from houses.nodes.settings_node import API_KEY_TO_NODE
 from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
-from houses.web.auth import SESSION_MAX_AGE, effective_session_user, get_serializer
+from houses.web.auth import SESSION_MAX_AGE, _SessionClaims, effective_session_user, get_serializer
 from houses.web.broadcaster import register_client
 from houses.web.monthly_delta import attach as attach_monthly_delta
 from houses.web.settings_payload import SessionPersons, settings_payload
@@ -331,13 +332,12 @@ def _walkability_score(walk_val: object) -> int:
     return _walk_score(int(val))
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _score_from_summary(s: dict) -> int:
+def _score_from_summary(s: _SummaryJson) -> int:
     """Compute card score matching old ``card_data`` formula:
     green=2, orange=1, red=-1, muted=0, summed across 8 metrics.
     """
     score = 0
-    for key, cd in s.get("commutes", {}).items():
+    for key, cd in s.commutes.items():
         # An unpriced commute is a normal live state: the tolerant wrapper
         # serves succeeded with a null value when a destination's route
         # failed, so a broken route cannot blank the household figures.
@@ -348,34 +348,43 @@ def _score_from_summary(s: dict) -> int:
         dur = duration.get("value") if c.get("status") == "succeeded" else None
         if isinstance(dur, (int, float)):
             score += _commute_score(int(dur), bracknell="Bracknell" in key)
-    score += _school_score(s.get("schools", {}).get("primary", {}).get("school", {}).get("value", {}))
-    score += _school_score(s.get("schools", {}).get("secondary", {}).get("school", {}).get("value", {}))
-    score += _walkability_score(s.get("walkability", {}))
+    score += _school_score(s.schools.get("primary", {}).get("school", {}).get("value", {}))
+    score += _school_score(s.schools.get("secondary", {}).get("school", {}).get("value", {}))
+    score += _walkability_score(s.walkability)
     return score
 
-
-# lucidlint: ignore record-shape wire-format dict — the summary is a wire record (coding-standards.md)
-def _attach_scrape_state(summary: dict, rid: str) -> None:
-    """Attach the property's REAL scrape-queue state to a summary, when a
-    job exists — the card's honest states come from here, never a fake
-    client-side timer. Wire-record at the serialization boundary."""
+# lucidlint: ignore record-shape the scrape attach IS the serialization boundary — the summary record
+# carries no scrape field (coding-standards.md)
+def _attach_scrape_state(summary: _SummaryJson | _PropertyJson, rid: str) -> dict:
+    """Attach the property's REAL scrape-queue state to the summary wire
+    dict, when a job exists — the card's honest states come from here,
+    never a fake client-side timer. Wire-record at the serialization
+    boundary: returns the serialized summary plus the optional scrape."""
+    d = summary.to_dict()
     status = scrape_status_for_rid(rid)
     if status is not None:
-        summary["scrape"] = status.to_dict()
-
+        d["scrape"] = status.to_dict()
+    return d
 
 @api_router.get("/properties/all")
+
+
 async def get_all_properties():
     results: dict[str, dict] = {}
+    scores: dict[str, int] = {}
     for rid in _registry_rids():
         prop = _registry_property(rid)
         if prop is None:
             continue
-        summary = await prop.to_json_summary()
-        _attach_scrape_state(summary, rid)
-        await attach_monthly_delta(summary, rid, get_services().property_registry)
-        results[rid] = summary
-    scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
+        # property_nodes.to_json_summary still returns the wire dict (its
+        # record conversion is out of this wave's file set) — reconstruct
+        # the record at the consumption boundary.
+        summary = _SummaryJson(**await prop.to_json_summary())
+        wire = _attach_scrape_state(summary, rid)
+        await attach_monthly_delta(wire, rid, get_services().property_registry)
+        results[rid] = wire
+        scores[rid] = _score_from_summary(summary)
+    scored = sorted(results.items(), key=lambda kv: scores[kv[0]], reverse=True)
     return dict(scored)
 
 
@@ -415,9 +424,8 @@ async def get_property(rid: str):
     prop = _registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    summary = await prop.to_json()
-    _attach_scrape_state(summary, rid)
-    return summary
+    prop_json = _PropertyJson(**await prop.to_json())
+    return _attach_scrape_state(prop_json, rid)
 
 
 @api_router.get("/properties/{rid}/detail")
@@ -553,18 +561,17 @@ class CommentBody(BaseModel):
         return stripped
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _comment_person(request: Request, session_user: dict, svc) -> str:
+def _comment_person(request: Request, session_user: _SessionClaims, svc) -> str:
     """Resolve the comment author — impersonation header for superusers,
     else the session email's linked person in settings."""
     impersonate = request.headers.get("X-Impersonate-Person", "")
     if impersonate:
-        if not session_user.get("is_superuser"):
+        if not session_user.is_superuser:
             raise HTTPException(status_code=403, detail="Only superusers can impersonate")
         if not impersonate.strip():
             raise HTTPException(status_code=400, detail="Impersonation person name must not be empty")
         return impersonate
-    folded_email = session_user.get("email", "").casefold()
+    folded_email = session_user.email.casefold()
     persons_attempt = svc.persons_source.latest_attempt()
     if persons_attempt.succeeded:
         for p in persons_attempt.value_or_none() or []:
@@ -593,19 +600,18 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
     prop = _registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail="Property not found")
-
     session_user = effective_session_user(request)
     if not session_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     svc = get_services()
-    person = _comment_person(request, session_user, svc)
+    person = _comment_person(request, _SessionClaims.from_dict(session_user), svc)
     return add_comment(rid, person, body.text)
 
 
 @api_router.get("/settings")
 async def get_settings(request: Request):
-    return await settings_payload(effective_session_user(request))
+    return (await settings_payload(effective_session_user(request))).to_dict()
 
 
 
@@ -930,6 +936,19 @@ async def patch_works_estimate(
     return {"status": "ok"}
 
 
+@dataclass(frozen=True)
+class _PersonSummary:
+    """One person as serialized to the /persons response."""
+
+    name: str
+    email: str
+    is_child: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(name=self.name, email=self.email, is_child=self.is_child)
+
+
 @api_router.get("/persons")
 async def list_persons():
     """Return ALL persons (name, email when present, is_child).
@@ -944,18 +963,65 @@ async def list_persons():
     result: list[dict[str, object]] = []
     if persons_attempt.succeeded:
         result = [
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary
-            {"name": p.get("name", ""), "email": p.get("email", ""), "is_child": bool(p.get("is_child"))}
-            if isinstance(p, dict)
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary
-            else {
-                "name": getattr(p, "name", ""),
-                "email": getattr(p, "email", ""),
-                "is_child": bool(getattr(p, "is_child", False)),
-            }
+            (
+                _PersonSummary(
+                    name=p.get("name", ""),
+                    email=p.get("email", ""),
+                    is_child=bool(p.get("is_child")),
+                )
+                if isinstance(p, dict)
+                else _PersonSummary(
+                    name=getattr(p, "name", ""),
+                    email=getattr(p, "email", ""),
+                    is_child=bool(getattr(p, "is_child", False)),
+                )
+            ).to_dict()
             for p in persons_attempt.value_or_none() or []
         ]
     return {"persons": result}
+
+
+@dataclass(frozen=True)
+class _SchedulerError:
+    """The non-AsyncQueueScheduler branch of /debug/scheduler."""
+
+    type: str
+    error: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(type=self.type, error=self.error)
+
+
+@dataclass(frozen=True)
+class _QueueEntry:
+    """One queued node as serialized to the /debug/scheduler response."""
+
+    node_id: str
+    scheduled_at: float
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(node_id=self.node_id, scheduled_at=self.scheduled_at)
+
+
+@dataclass(frozen=True)
+class _SchedulerSnapshot:
+    """The scheduler's pending work as serialized to the response."""
+
+    queue_size: int
+    scheduled_count: int
+    wakeup_set: bool
+    queue: list[_QueueEntry]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            queue_size=self.queue_size,
+            scheduled_count=self.scheduled_count,
+            wakeup_set=self.wakeup_set,
+            queue=[entry.to_dict() for entry in self.queue],
+        )
 
 
 @api_router.get("/debug/scheduler")
@@ -969,24 +1035,48 @@ async def debug_scheduler():
     """
     sched = dag.scheduler.get_scheduler()
     if not isinstance(sched, AsyncQueueScheduler):
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"type": type(sched).__name__, "error": "not AsyncQueueScheduler"}
+        return _SchedulerError(type=type(sched).__name__, error="not AsyncQueueScheduler").to_dict()
 
     # _scheduled: node_id -> QueueEvent, one entry per queued node (the
     # queue itself is drained by the processor — never touch it here)
     queue_snapshot = [
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        {"node_id": node_id, "scheduled_at": event.scheduled_at}
+        _QueueEntry(node_id=node_id, scheduled_at=event.scheduled_at)
         for node_id, event in list(sched._scheduled.items())[:500]
     ]
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        "queue_size": sched._queue.qsize(),
-        "scheduled_count": len(sched._scheduled),
-        "wakeup_set": sched._wakeup.is_set(),
-        "queue": queue_snapshot,
-    }
+    return _SchedulerSnapshot(
+        queue_size=sched._queue.qsize(),
+        scheduled_count=len(sched._scheduled),
+        wakeup_set=sched._wakeup.is_set(),
+        queue=queue_snapshot,
+    ).to_dict()
+
+
+@dataclass(frozen=True)
+class _TypeCount:
+    """One object-type bucket in the /debug/memory response."""
+
+    type: str
+    count: int
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(type=self.type, count=self.count)
+
+
+@dataclass(frozen=True)
+class _MemorySnapshot:
+    """Object counts by type as serialized to the /debug/memory response."""
+
+    total_objects: int
+    top_types: list[_TypeCount]
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return dict(
+            total_objects=self.total_objects,
+            top_types=[t.to_dict() for t in self.top_types],
+        )
 
 
 @api_router.get("/debug/memory")
@@ -997,9 +1087,7 @@ async def debug_memory():
     obj_counts = Counter(type(o).__name__ for o in gc.get_objects())
     top = obj_counts.most_common(TOP_TYPES_LIMIT)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        "total_objects": sum(obj_counts.values()),
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        "top_types": [{"type": t, "count": c} for t, c in top],
-    }
+    return _MemorySnapshot(
+        total_objects=sum(obj_counts.values()),
+        top_types=[_TypeCount(type=t, count=c) for t, c in top],
+    ).to_dict()

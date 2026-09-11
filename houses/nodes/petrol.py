@@ -9,7 +9,7 @@ household finances.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import override
 
 from money import Money
@@ -71,6 +71,20 @@ class PersonPetrolMpgNode(DerivedNode[int]):
             if getattr(p, "name", None) == self._person_name:
                 return Attempt.succeeded(int(getattr(p, "petrol_mpg", 45)))
         return Attempt.succeeded(45)
+
+
+@dataclass(frozen=True)
+class _PetrolAugmentJson:
+    """The serialized petrol-augment payload: the base node record with
+    the entry-level ``is_child`` flag appended last."""
+
+    base: dict
+    is_child: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return {**self.base, "is_child": self.is_child}
 
 
 class PetrolCostAugmentNode(DerivedNode[Commute]):
@@ -172,20 +186,22 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         )
         return Attempt.succeeded(new_commute)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _attach_is_child(self, base: dict) -> dict:
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    async def _attach_is_child(self, base: dict) -> _PetrolAugmentJson:
         """Annotate a serialized payload with the entry-level ``is_child`` flag."""
         attempt = await self.attempt()
         value = attempt.value_or_none() if attempt.succeeded else None
-        base["is_child"] = bool(value.is_child) if value is not None else self._is_child
-        return base
+        return _PetrolAugmentJson(
+            base=base,
+            is_child=bool(value.is_child) if value is not None else self._is_child,
+        )
 
     @override
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json(self) -> dict:
-        return await self._attach_is_child(await super().to_json())
+        return (await self._attach_is_child(await super().to_json())).to_dict()
 
     @override
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json_value(self) -> dict:
-        return await self._attach_is_child(await super().to_json_value())
+        return (await self._attach_is_child(await super().to_json_value())).to_dict()

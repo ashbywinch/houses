@@ -8,11 +8,36 @@ from __future__ import annotations
 import dataclasses
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 from money import Money
 
 _GBP_SCALE = Decimal("0.01")
+
+
+class WirePayload(Protocol):
+    """Any record that serializes to its wire dict.
+
+    The transport-seam contract: a caller's request/summary record flows
+    through our code as the object, and ``to_dict()`` is called ONCE at
+    the network edge (httpx kwarg, cache key, envelope, json.dumps) —
+    never a verbatim payload dict threaded through a seam.
+    """
+
+    def to_dict(self) -> dict: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class MoneyJson:
+    """The serialized money wire shape: a canonical 2-dp amount plus currency."""
+
+    amount: str
+    currency: str
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction mirrors the money wire shape (coding-standards.md)
+        return dict(amount=self.amount, currency=self.currency)
 
 
 def _money_amount_str(m: Money) -> str:
@@ -27,8 +52,7 @@ def asdict_serializable(obj: Any) -> Any:
     their values.
     """
     if isinstance(obj, Money):
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"amount": _money_amount_str(obj), "currency": obj.currency}
+        return MoneyJson(amount=_money_amount_str(obj), currency=obj.currency).to_dict()
     if isinstance(obj, Enum):
         return obj.value
     if dataclasses.is_dataclass(obj):

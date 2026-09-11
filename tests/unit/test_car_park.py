@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from money import Money
 
-from houses.apcoa_scraper import ApcoaScraper
+from houses.apcoa_scraper import ApcoaPageRecord, ApcoaScraper
 from houses.car_park import ApcoaCarParkLookup, CarPark, CarParkRegistry
 from houses.geopoint import GeoPoint
 from houses.stations import Station
@@ -34,10 +34,10 @@ class TestParseApcoaLocationPage:
         page_text, title = self._load_fixture("bourne_end")
         result = self.scraper._parse_apcoa_location_page(page_text, title)
         assert result is not None
-        assert "Bourne End Station" in result["name"]
-        assert result["address"] is not None
-        assert "Station Road" in result["address"]
-        assert result["price"] == 4.0
+        assert "Bourne End Station" in (result.name or "")
+        assert result.address is not None
+        assert "Station Road" in result.address
+        assert result.price == 4.0
 
     def test_parse_name_from_title(self):
         """Name is extracted from the page title before ' - APCOA'."""
@@ -46,7 +46,7 @@ class TestParseApcoaLocationPage:
             "Woking Station Car Park - APCOA",
         )
         assert result is not None
-        assert result["name"] == "Woking Station Car Park"
+        assert result.name == "Woking Station Car Park"
 
     def test_parse_no_tariff_returns_none(self):
         """Page without 'Parking tariff' section returns None."""
@@ -81,9 +81,9 @@ class TestParseApcoaPrebookListing:
         text = "APCOA Maidenhead\nStation Approach, Maidenhead\nFrom £9.00 per day\nMore details"
         result = self.scraper._parse_apcoa_prebook_listing(text)
         assert result is not None
-        assert result["name"] == "APCOA Maidenhead"
-        assert result["address"] == "Station Approach, Maidenhead"
-        assert result["price"] == 9.0
+        assert result.name == "APCOA Maidenhead"
+        assert result.address == "Station Approach, Maidenhead"
+        assert result.price == 9.0
 
     def test_parse_listing_no_price_returns_none(self):
         text = "APCOA Maidenhead\nStation Approach, Maidenhead\nNo price info"
@@ -309,11 +309,11 @@ class TestCarParkRegistry:
         csv_path.write_text("station_name,crs,daily_cost_gbp\nWoking,WOK,\n")
 
         async def _mock_apcoa(_station):
-            return {
-                "name": "Woking Station Car Park",
-                "address": "Woking Station Approach",
-                "price": 12.80,
-            }
+            return ApcoaPageRecord(
+                name="Woking Station Car Park",
+                address="Woking Station Approach",
+                price=12.80,
+            )
 
         registry = CarParkRegistry(rates_path=csv_path)
         lookup = ApcoaCarParkLookup(registry, apcoa_lookup_fn=_mock_apcoa)
@@ -358,11 +358,11 @@ class TestCarParkRegistry:
         csv_path.write_text("station_name,crs,daily_cost_gbp\n")
 
         async def _mock_apcoa(_station):
-            return {
-                "name": "Reading Station Car Park",
-                "address": "Reading Station Rd",
-                "price": 15.00,
-            }
+            return ApcoaPageRecord(
+                name="Reading Station Car Park",
+                address="Reading Station Rd",
+                price=15.00,
+            )
 
         registry = CarParkRegistry(rates_path=csv_path)
         lookup = ApcoaCarParkLookup(registry, apcoa_lookup_fn=_mock_apcoa)
