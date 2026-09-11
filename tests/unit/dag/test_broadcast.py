@@ -16,7 +16,7 @@ import pytest
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
+from dag.scheduler import AsyncQueueScheduler, flush_processor, get_scheduler, set_scheduler
 from dag.user_input_node import UserInputNode
 
 
@@ -31,12 +31,22 @@ class _Node(DerivedNode[str]):
 
 @pytest.mark.asyncio
 async def test_cascade_processing_is_silent_until_the_hook_routes_it():
-    """A cascade with NO after-refresh callback registered sends
-    nothing: broadcasts happen only through the production hook."""
+    """Cascade processing alone sends nothing: broadcasts flow only
+    through the after-refresh hook the production server registers
+    (set_after_refresh). A drained cascade without that hook must leave
+    no callback behind — the silence is by construction, pinned here at
+    the scheduler level. (The routing itself is covered end-to-end in
+    tests/unit/web/test_summary_broadcast.py.)"""
     set_scheduler(AsyncQueueScheduler(respect_time=False))
-
+    sched = get_scheduler()
     src = UserInputNode[str]("bc_src", str)
-    _Node("prop123/test_bc_node", deps=(src,))
+    child = _Node("prop123/test_bc_node", deps=(src,))
 
     src.push("go", "test")
     await flush_processor()
+
+    assert (await child.attempt()).value_or_none() == "computed", "the cascade must have run"
+    assert sched._after_refresh_callback is None, (
+        "cascade processing installed a refresh hook — broadcasts must flow only "
+        "through the one the production server registers (set_after_refresh)"
+    )
