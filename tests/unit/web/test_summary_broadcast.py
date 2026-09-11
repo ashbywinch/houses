@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -201,6 +202,37 @@ async def test_settings_node_refresh_pushes_the_settings_payload():
         assert payload["what_if_active"] is False
         assert _messages(fake, "node_updated") == []
     finally:
+        await _stop_broadcasts(fake, task)
+
+@pytest.mark.asyncio
+async def test_refresh_routing_is_explicit_never_a_settings_catchall():
+    """The DAG→frontend seam routes by membership, not by exclusion: the
+    what-if flag node must still push settings (its flag lives in the
+    payload), and an unknown non-property node must push NOTHING — a new
+    node kind has to be added to a branch, not silently broadcast."""
+    import houses.server as server_mod
+
+    loop = asyncio.get_running_loop()
+    server_mod._main_loop = loop
+    fake, task = await _wire_broadcasts()
+    try:
+        # The what-if start/stop marker is a settings-family node: its
+        # refresh must re-push the payload so what_if_active flips.
+        server_mod._on_node_refreshed(SimpleNamespace(_id="whatif_started_at"))
+        for _ in range(20):
+            await asyncio.sleep(0.1)
+            if _messages(fake, "settings_updated"):
+                break
+        assert len(_messages(fake, "settings_updated")) == 1
+
+        # An internal node that is neither property- nor settings-shaped
+        # must be dropped — no settings push, no summary, nothing.
+        fake.sent.clear()
+        server_mod._on_node_refreshed(SimpleNamespace(_id="scheduler/internal"))
+        await asyncio.sleep(0.3)
+        assert _messages(fake) == [], "an unknown node must not broadcast anything"
+    finally:
+        server_mod._main_loop = None
         await _stop_broadcasts(fake, task)
 
 
