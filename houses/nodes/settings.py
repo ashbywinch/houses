@@ -10,6 +10,7 @@ helper used by the production ``Services`` constructor.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, override
 
@@ -22,6 +23,7 @@ from houses.model.domain import Person, PlaceOfInterest
 from houses.settings import settings
 
 _app_mode = False
+logger = logging.getLogger(__name__)
 SIMON_BUS_WALK_PENALTY = 20
 LORENA_BUS_WALK_PENALTY = 15
 ASHBY_BUS_WALK_PENALTY = 10
@@ -104,6 +106,104 @@ class SettingsNode(UserInputNode):
             scripts_may_write=scripts_may_write,
         )
         super().push(value, source_label)
+
+
+
+def _poi_labels(person: Any) -> set[str]:
+    places = (
+        person.get("places_of_interest")
+        if isinstance(person, dict)
+        else getattr(person, "places_of_interest", None)
+    )
+    labels: set[str] = set()
+    for q in places or ():
+        label = q.get("label") if isinstance(q, dict) else getattr(q, "label", None)
+        if label:
+            labels.add(label)
+    return labels
+
+
+#: Persons writes that carry the user's own intent.  A removal here is the
+#: user editing Settings, so it is announced (INFO) and pages nobody.
+USER_INTENT_PERSONS_SOURCES = frozenset({"user"})
+
+
+def alarm_household_shrink(previous: Any, incoming: Any, source_label: str) -> None:
+    """Announce any loss of persons or destinations between two household docs.
+
+    A persons push that silently drops people or destinations is how the
+    2026-09-09 data incident presented — the household shrank to a single
+    destination and nobody noticed until the figures looked wrong. Every
+    persons write therefore passes through here.
+
+    Severity follows intent: a write from the user's own Settings save
+    (``USER_INTENT_PERSONS_SOURCES``) is a deliberate edit and logs at INFO;
+    any other write that loses people or destinations logs at CRITICAL with
+    the write path and the exact losses, so the responsible code path is
+    found the same day.  Neither blocks the write.
+    """
+
+    def _doc(persons: Any) -> dict[str, set[str]]:
+        out: dict[str, set[str]] = {}
+        for p in persons or ():
+            name = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
+            if name:
+                out[name] = _poi_labels(p)
+        return out
+
+    old_doc, new_doc = _doc(previous), _doc(incoming)
+    lost_persons = sorted(set(old_doc) - set(new_doc))
+    lost_destinations = {
+        name: sorted(old_doc[name] - new_doc.get(name, set()))
+        for name in old_doc
+        if name in new_doc and old_doc[name] - new_doc.get(name, set())
+    }
+    if not lost_persons and not lost_destinations:
+        return
+    if source_label in USER_INTENT_PERSONS_SOURCES:
+        logger.info(
+            "Household edited (source=%s): removed persons=%s; removed destinations=%s.",
+            source_label,
+            lost_persons,
+            lost_destinations,
+        )
+        return
+    logger.critical(
+        "HOUSEHOLD SHRUNK (source=%s): lost persons=%s; lost destinations=%s. "
+        "Inspect the node_results history for node 'persons' and find the "
+        "code path that produced this write.",
+        source_label,
+        lost_persons,
+        lost_destinations,
+    )
+
+
+class PersonsSourceNode(SettingsNode):
+    """The household persons source, with the loud shrink alarm wired
+    into every push (see alarm_household_shrink)."""
+
+    @override
+    def push(
+        self,
+        value: Any,
+        source_label: str = "",
+        *,
+        testing: bool | None = None,
+        app_mode: bool | None = None,
+        scripts_may_write: bool | None = None,
+    ) -> None:
+        previous = None
+        attempt = self.latest_attempt()
+        if attempt is not None and attempt.succeeded:
+            previous = attempt.value_or_none()
+        super().push(
+            value,
+            source_label,
+            testing=testing,
+            app_mode=app_mode,
+            scripts_may_write=scripts_may_write,
+        )
+        alarm_household_shrink(previous, value, source_label)
 
 
 def make_default_persons() -> list[Person]:

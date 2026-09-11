@@ -199,16 +199,39 @@ function commuteMode(commute: unknown): string | undefined {
   return (val?.mode as string) || undefined
 }
 
-function getSchoolWalkMinutes(labelPart: string): { value: number; unit: string } | null {
+interface SchoolWalk { minutes: number; person: string }
+
+/** The child's school walk, found in the commute entries: the school
+ *  rows themselves carry the school's name and Ofsted grade; the walk
+ *  time lives on the child's commute to it. */
+function schoolWalk(labelPart: string): SchoolWalk | null {
   if (!props.data.commutes) return null
   for (const [key, v] of Object.entries(props.data.commutes)) {
     if (!key.includes(labelPart)) continue
     const val = (v.commute?.value as Record<string, unknown> | undefined)
     if (!val?.is_child) continue
     const dur = val.duration as { value: number; unit: string } | undefined
-    return dur ? { value: Math.round(dur.value), unit: 'minute' } : null
+    if (!dur) continue
+    return { minutes: Math.round(dur.value), person: key.split('/')[0] }
   }
   return null
+}
+
+function getSchoolWalkMinutes(labelPart: string): { value: number; unit: string } | null {
+  const found = schoolWalk(labelPart)
+  return found ? { value: found.minutes, unit: 'minute' } : null
+}
+
+/** The school walk pill is a walk time like any other: the child's own
+ *  walk bands colour it (green ≤ good, amber ≤ fine, red beyond), never
+ *  a neutral grey. */
+function schoolWalkPillClass(labelPart: string): string {
+  const found = schoolWalk(labelPart)
+  if (found === null) return 'pill--slate'
+  const { goodMax, fineMax } = pillThresholds(`${found.person}/`, true)
+  if (found.minutes <= goodMax) return 'pill--good'
+  if (found.minutes <= fineMax) return 'pill--warn'
+  return 'pill--bad'
 }
 
 function commuteLabel(c: unknown, key: string): string {
@@ -252,24 +275,40 @@ function monthlyOf(leg: PersonCommuteLeg | null): { cost: number; title: string 
   return { cost: Math.round(yearly / 12), title: `${leg.trips_per_week} days/wk · £${leg.yearly_gbp}/yr` }
 }
 
+/** Why a value could not be computed, in the DAG's own user-facing words.
+ *  The card never invents an excuse: an uncomputable figure shows the reason
+ *  so somebody can act on it — a failure hidden behind a plausible number is
+ *  the bug we are fixing (2026-09-10). */
+function uncomputableReason(attempt: unknown): string {
+  const a = attempt as { succeeded?: boolean; error?: string | null; error_detail?: { user_message?: string } | null } | undefined
+  if (!a || a.succeeded) return ''
+  return a.error_detail?.user_message || a.error || ''
+}
+
 /** Adult rows for the commute section, enriched with the summary
  *  breakdown's monthly figure when it carries the destination. A
- *  destination with trips_per_week 0 takes NO row at all — no pill,
- *  no muted line. */
+ *  destination that does not happen — trips_per_week 0, or
+ *  weeks_per_year 0 — takes NO row at all: no pill, no muted line. */
 const adultCommutes = computed(() => {
   if (!props.data.commutes) return {}
   const rows: Record<string, { commute: CommuteSummary['commute']; monthly: { cost: number; title: string } | null }> = {}
   for (const [key, v] of Object.entries(props.data.commutes)) {
     if (isChildCommute(v.commute)) continue
     const leg = summaryLeg(key, commuteLabel(v.commute, key))
-    if (leg?.trips_per_week === 0) continue
+    if (leg?.trips_per_week === 0 || leg?.weeks_per_year === 0) continue
     rows[key] = { commute: v.commute, monthly: monthlyOf(leg) }
   }
   return rows
 })
 
 function isChildCommute(c: unknown): boolean {
-  return (c as Record<string, unknown> | undefined)?.is_child === true
+  const entry = c as Record<string, unknown> | undefined
+  if (entry?.is_child === true) return true
+  // The entry-level flag is the source of truth, but a child's row must
+  // never render as an adult one when it is missing: the wrapped value
+  // carries the flag too (a school commute that showed twice, live
+  // 2026-09-10).
+  return (entry?.value as Record<string, unknown> | undefined)?.is_child === true
 }
 /** C?: the commute colour bands are the person's own thresholds
  *  (Settings → 'commute bands'), not a global constant: good = the
@@ -363,8 +402,13 @@ async function toggleViewed() {
         <span
           v-else
           class="card__monthly-cost card__monthly-cost--unknown"
-          title="Can't calculate yet — see the property page (often Council Tax)"
+          :title="uncomputableReason(data.group_monthly_cost) || 'Not computed yet'"
         >£—/mo</span>
+      </div>
+
+      <!-- Why the figure is unknown: the DAG's reason, never a generic excuse -->
+      <div v-if="uncomputableReason(data.group_monthly_cost)" class="card__cost-error">
+        {{ uncomputableReason(data.group_monthly_cost) }}
       </div>
 
       <!-- Meta tags: price · bedrooms · freshness -->
@@ -380,8 +424,13 @@ async function toggleViewed() {
         <div v-for="(c, key) in adultCommutes" :key="key" class="card__commute-row">
           <span class="card__commute-person">{{ commutePerson(c.commute, key) }} → {{ commuteLabel(c.commute, key) }}</span>
           <div class="card__commute-data">
+            <span
+              v-if="uncomputableReason(c.commute)"
+              class="card__commute-error"
+              :title="uncomputableReason(c.commute)"
+            >{{ uncomputableReason(c.commute) }}</span>
             <a
-              v-if="location"
+              v-else-if="location"
               :href="'https://www.google.com/maps/dir/' + location.lat + ',' + location.lon + '/' + encodeURIComponent(commuteAddress(c.commute, key))"
               class="pill-link"
               target="_blank"
@@ -410,14 +459,14 @@ async function toggleViewed() {
           <a v-if="data.schools.primary.school.value!.url" :href="data.schools.primary.school.value!.url" target="_blank" class="card__school-name">{{ data.schools.primary.school.value!.name }}</a>
           <span v-else class="card__school-name">{{ data.schools.primary.school.value!.name }}</span>
           <span class="pill pill--xs" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ simpleOfsted(data.schools.primary.school.value!.ofsted) }}</span>
-          <span v-if="getSchoolWalkMinutes('Primary') !== null" class="pill pill--xs pill--slate">{{ schoolWalkMin(getSchoolWalkMinutes('Primary')) }}</span>
+          <span v-if="getSchoolWalkMinutes('Primary') !== null" class="pill pill--xs card__school-walk" :class="schoolWalkPillClass('Primary')">{{ schoolWalkMin(getSchoolWalkMinutes('Primary')) }}</span>
         </div>
         <div v-if="data.schools?.secondary?.school?.succeeded" class="card__school-row">
           <span class="card__school-type">Secondary</span>
           <a v-if="data.schools.secondary.school.value!.url" :href="data.schools.secondary.school.value!.url" target="_blank" class="card__school-name">{{ data.schools.secondary.school.value!.name }}</a>
           <span v-else class="card__school-name">{{ data.schools.secondary.school.value!.name }}</span>
           <span class="pill pill--xs" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ simpleOfsted(data.schools.secondary.school.value!.ofsted) }}</span>
-          <span v-if="getSchoolWalkMinutes('Secondary') !== null" class="pill pill--xs pill--slate">{{ schoolWalkMin(getSchoolWalkMinutes('Secondary')) }}</span>
+          <span v-if="getSchoolWalkMinutes('Secondary') !== null" class="pill pill--xs card__school-walk" :class="schoolWalkPillClass('Secondary')">{{ schoolWalkMin(getSchoolWalkMinutes('Secondary')) }}</span>
         </div>
         <div v-if="data.epc?.succeeded && data.epc.value" class="card__school-row card__schools-epc">
           <span class="card__school-type">EPC</span>
@@ -609,6 +658,20 @@ async function toggleViewed() {
   color: var(--text-secondary);
 }
 .pill-link { text-decoration: none; }
+/* A commute that could not be computed: the reason, in the DAG's words. */
+.card__cost-error {
+  font-size: var(--fs-xs);
+  color: var(--red-text);
+  line-height: 1.3;
+}
+.card__commute-error {
+  font-size: var(--fs-xs);
+  color: var(--red-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22ch;
+}
 
 /* School rows */
 .card__schools {
@@ -695,7 +758,9 @@ async function toggleViewed() {
 .card__school-row .pill--good { background: var(--green-bg); color: var(--green); }
 .card__school-row .pill--warn { background: var(--orange-bg); color: var(--orange-text); }
 .card__school-row .pill--bad { background: var(--red-bg); color: var(--red-text); }
-.card__school-row .pill--slate { background: var(--slate-100); color: var(--slate-600); margin-left: auto; }
+.card__school-row .pill--slate { background: var(--slate-100); color: var(--slate-600); }
+/* The walk pill sits at the end of the row whatever it is coloured. */
+.card__school-row .card__school-walk { margin-left: auto; }
 /* ── Pending-scrape card (add-flow states) ─────────────────────────── */
 .card--queued, .card--scraping { border-left: 4px solid var(--green); }
 .card--offline { border-left: 4px solid var(--amber); }

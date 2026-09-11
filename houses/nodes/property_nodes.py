@@ -10,11 +10,13 @@ import dag.persistence as _dag_per
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from dag.persistence import property_created_at
+from dag.regenerate import schedule_code_stale_nodes
 from dag.scheduler import get_scheduler
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
+from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.commute_pipeline_builder import build_commute_pipeline
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.equity_total_node import EquityTotalNode
@@ -33,8 +35,6 @@ from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 from houses.services_provider import get_services
 
 if TYPE_CHECKING:
-    from houses.nodes.commute import CommuteSelectorNode
-    from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
     from houses.services import Services
 
 
@@ -202,7 +202,6 @@ class _CommentsJson:
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
         return asdict(self)
-
 
 
 @dataclass(frozen=True)
@@ -411,14 +410,21 @@ class PropertyNodes:
             acceptable=_school_acceptable,
         )
         # ── Commute Pipeline ────────────────────────────────────────────
-        # The builder attaches these in place; declare them so pyrefly
-        # knows the attributes exist before the helper assigns them.
-        self.commute_selectors: dict[str, CommuteSelectorNode] = {}
-        self.commute_breakdown: CommuteBreakdownNode | None = None
+        # Pipelines are materialized for the initial destination set, and
+        # the breakdown node is created ONCE, wired to the live selectors
+        # dict via its deps provider. _on_persons_changed then only adds
+        # or removes individual pipelines — the dict and the breakdown
+        # object are stable for the property's lifetime, so nothing that
+        # wired itself to them at construction can be orphaned.
+        self.commute_selectors: dict[str, DerivedNode] = {}
+        self.commute_pois: dict[str, UserInputNode[str]] = {}
         self._build_commute_pipeline()
-        # The builder always attaches the breakdown node; narrow the
-        # Optional declaration for the config wiring below.
-        assert self.commute_breakdown is not None, "commute pipeline not built"
+        self.commute_breakdown = CommuteBreakdownNode(
+            f"{rid}/commute_breakdown",
+            commute_selectors=self.commute_selectors,
+            persons_source=self._svc.persons_source,
+        )
+        self._svc.persons_source.changed.connect(self._on_persons_changed)
 
         # ── Monthly Cost Calculation Nodes ──────────────────────────────
         self.stamp_duty: StampDutyNode = StampDutyNode(
@@ -532,6 +538,48 @@ class PropertyNodes:
 
         build_commute_pipeline(self)
 
+    def _on_persons_changed(self) -> None:
+        """The ONE invalidation point for the commute aggregate: every
+        persons push re-prices the breakdown through it.
+
+        Destination-set changes materialize or disconnect individual
+        pipelines — the selectors dict is mutated IN PLACE and the
+        breakdown node is never replaced, because the household-cost
+        node wired itself to the breakdown object at construction (the
+        live 0.0-commutes regression). A moved destination (same key,
+        new address) pushes the new address into its pipeline's poi
+        node, so routes re-plan and the congestion-zone gate
+        re-evaluates — all through the DAG's own change mechanics.
+        Value-only changes (trips/car/MPG) need no structural work at
+        all. Runs on the DAG processor thread (persons pushes land
+        there)."""
+        wanted = {
+            f"{p.name}/{q.label}" for p in (self._svc.persons_source._value or []) for q in (p.places_of_interest or [])
+        }
+        current = set(self.commute_selectors)
+
+        # Teardown pipelines whose destination was removed: disconnect
+        # every node under the removed keys (drops scheduler registration
+        # and signal slots), then drop the key from the selectors dict —
+        # the breakdown reads that dict by reference.
+        removed = current - set(wanted)
+        for key in removed:
+            prefix = f"{self.rid}/{key}/"
+            for nid, node in list(get_scheduler().registered_nodes().items()):
+                if nid.startswith(prefix):
+                    node.disconnect()
+            self.commute_selectors.pop(key, None)
+
+        # Materialize pipelines for newly added destinations. Existing
+        # pipelines and the breakdown are untouched; the breakdown's
+        # deps provider reads the live selectors dict, so the new
+        # pipelines are its deps the moment they exist.
+        build_commute_pipeline(self, keys=set(wanted) - current)
+
+        # Re-price the aggregate (idempotent if already queued).
+        get_scheduler().schedule(self.commute_breakdown)
+
+
     def _on_node_changed(self) -> None:
         self.changed.emit()
 
@@ -566,29 +614,35 @@ class PropertyNodes:
         if last == _dag_derived._CODE_VERSION_EPOCH:
             return
 
-        # Walk the whole node graph via deps — vars(self) alone misses
-        # nodes stored in containers (the commute selectors dict and
-        # their sub-pipeline are only reachable through deps).
-        seen: set[int] = set()
-        queue = [n for n in vars(self).values() if isinstance(n, Node)]
-        while queue:
-            node = queue.pop()
-            if id(node) in seen:
-                continue
-            seen.add(id(node))
-            if isinstance(node, DerivedNode):
-                if node.code_is_stale():
-                    get_scheduler().schedule(node)
-                queue.extend(node._get_active_deps())
+        # Walk the whole node graph — vars(self) alone misses nodes stored
+        # in containers (the commute selectors dict and their sub-pipeline
+        # are only reachable through deps).  The walk follows every
+        # dependency, including the ones a node's active set hides: the
+        # commute wrapper drops a FAILED pipeline from its active deps so
+        # the failure cannot propagate, and a refresh that inherited that
+        # narrowing could never reach the pipeline it must refresh.
+        schedule_code_stale_nodes(n for n in vars(self).values() if isinstance(n, Node))
         self._code_refresh_epoch = _dag_derived._CODE_VERSION_EPOCH
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _commute_breakdown_json(self) -> dict:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""
-        assert self.commute_breakdown is not None, "commute pipeline not built"
         return await self.commute_breakdown.to_json()
+
+
+    def _commuted_destinations(self) -> set[str]:
+        """Selector keys whose destination is actually commuted (trips
+        and weeks both > 0). A destination that does not happen — zero
+        days a week, or zero weeks a year — takes no pill and no cost
+        entry. The cost calculation itself just multiplies; this filter
+        is presentational (the index card's pills)."""
+        return {
+            f"{p.name}/{q.label}"
+            for p in (self._svc.persons_source._value or [])
+            for q in (p.places_of_interest or [])
+            if q.trips_per_week > 0 and q.weeks_per_year > 0
+        }
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json_summary(self) -> dict[str, Any]:
@@ -611,7 +665,11 @@ class PropertyNodes:
             rightmove_bedrooms=await self.rightmove_bedrooms.to_json_value(),
             group_monthly_cost=await self.group_monthly_cost.to_json_value(),
             town_name=await self.town_name.to_json_value(),
-            commutes={k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
+            commutes={
+                k: {"commute": await v.to_json_value()}
+                for k, v in self.commute_selectors.items()
+                if k in self._commuted_destinations()
+            },
             schools=schools.to_dict(),
             walkability=await self.walkability.to_json_value(),
             epc=await self.epc.to_json_value(),
@@ -680,7 +738,11 @@ class PropertyNodes:
             town_name=await self.town_name.to_json(),
             epc=await self.epc.to_json(),
             location=location.to_dict(),
-            commutes={k: await v.to_json() for k, v in self.commute_selectors.items()},
+            commutes={
+                k: await v.to_json()
+                for k, v in self.commute_selectors.items()
+                if k in self._commuted_destinations()
+            },
             schools=schools.to_dict(),
             affordability=affordability.to_dict(),
             council_tax_apportionment=apportionment.to_dict(),
@@ -689,9 +751,7 @@ class PropertyNodes:
             comments=comments.to_dict(),
             settings=_SettingsBlock(
                 persons=await self._svc.persons_source.to_json(),
-                financial=_SettingsFinancial(
-                    status="succeeded", value=aggregate_dict(self._svc.setting_nodes)
-                ),
+                financial=_SettingsFinancial(status="succeeded", value=aggregate_dict(self._svc.setting_nodes)),
             ),
         )
         return rec.to_dict()

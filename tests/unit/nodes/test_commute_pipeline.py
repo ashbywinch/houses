@@ -407,7 +407,7 @@ class TestFullCommutePipeline:
             commute_node=park_and_ride,
             petrol_mpg_node=mpg_node,
             petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
-        )
+            is_child=False,)
         # Bus is slower than transit so transit wins
         from houses.nodes.rail_fare_node import RailFareNode
 
@@ -586,7 +586,7 @@ class TestFullCommutePipeline:
             commute_node=merge_node,
             petrol_mpg_node=mpg_node,
             petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
-        )
+            is_child=False,)
 
         await flush_processor()
 

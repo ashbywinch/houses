@@ -22,7 +22,7 @@ from typing import Any
 
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from dag.scheduler import flush_processor
+from dag.scheduler import flush_processor, get_scheduler
 
 
 def pattern_regex(pattern: str) -> re.Pattern[str]:
@@ -60,3 +60,34 @@ async def force_regenerate(nodes: Iterable[Node]) -> tuple[list[dict[str, Any]],
     # scheduler so the response reflects the completed cascade.
     await flush_processor()
     return regenerated, skipped
+
+
+def schedule_code_stale_nodes(roots: Iterable[Node]) -> list[DerivedNode]:
+    """Schedule every DerivedNode reachable from ``roots`` whose persisted
+    result was produced by different code — or which disagrees with its
+    dependencies' current results (a start-up race) — and return them.
+
+    The walk follows EVERY dependency (``deps_for_traversal``), never the
+    node's active dep set.  An active set narrows on purpose — a wrapper
+    drops a failed pipeline so the failure cannot propagate, a conditional
+    node evaluates one branch — and a refresh walk that inherited the
+    narrowing could never reach the hidden node, so its persisted result
+    would stay for good.  That is exactly how a transient crash while the
+    module was mid-edit became permanent, unpriced school commutes on the
+    live pages (2026-09-10): the sweep saw the wrapper, whose active deps
+    were empty, and stopped.
+    """
+    seen: set[int] = set()
+    queue: list[Node] = list(roots)
+    stale: list[DerivedNode] = []
+    while queue:
+        node = queue.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, DerivedNode):
+            if node.code_is_stale() or node.needs_refresh():
+                get_scheduler().schedule(node)
+                stale.append(node)
+            queue.extend(node.deps_for_traversal())
+    return stale

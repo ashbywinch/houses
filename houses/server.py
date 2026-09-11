@@ -93,6 +93,8 @@ def _on_node_refreshed(node):
     )
 
 
+
+
 def _deploy_hash() -> str:
     """Return the short git HEAD hash, or ``""`` when git is unavailable."""
     try:
@@ -581,7 +583,8 @@ async def patch_property_details(rid: str, body: dict) -> JSONResponse:
     # address-only form must leave the job to fill price/bedrooms.
     if body.get("price") is not None and body.get("bedrooms") is not None:
         _scrape_queue.cancel_scrape_for_rid(rid)
-    await run_on_processor(flush_processor)
+    # No inline drain: the endpoint returns as soon as the seeding is queued
+    # (docs/dag-library.md → Thread rules, 7).
     return JSONResponse(content={"status": "ok"})
 
 

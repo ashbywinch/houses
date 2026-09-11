@@ -80,12 +80,25 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
     estimating distance from total drive minutes at 48 km/h.
     """
 
-    def __init__(self, node_id: str, *, commute_node, petrol_mpg_node, petrol_cost_per_litre_node):
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        commute_node,
+        petrol_mpg_node,
+        petrol_cost_per_litre_node,
+        is_child: bool,
+    ):
         self.commute_node: Node = commute_node
         deps = (commute_node, petrol_mpg_node, petrol_cost_per_litre_node)
         super().__init__(node_id, Commute, deps)
         self._mpg_node: Node = petrol_mpg_node
         self._cost_node: Node = petrol_cost_per_litre_node
+        # The owner's child-ness, known when the pipeline is built: the
+        # card classifies a row as a child's school commute from the ENTRY
+        # flag, and that must hold before the pipeline has priced (and if
+        # it never does) — the value only carries it once it exists.
+        self._is_child: bool = is_child
         self.display_name: str = "Petrol Cost"
 
     @override
@@ -160,14 +173,11 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         return Attempt.succeeded(new_commute)
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _attach_is_child(self, base: dict) -> dict:
-        """Annotate a serialized payload with the value's ``is_child`` flag."""
+        """Annotate a serialized payload with the entry-level ``is_child`` flag."""
         attempt = await self.attempt()
-        if attempt.succeeded:
-            val = attempt.value_or_none()
-            if val is not None:
-                base["is_child"] = val.is_child
+        value = attempt.value_or_none() if attempt.succeeded else None
+        base["is_child"] = bool(value.is_child) if value is not None else self._is_child
         return base
 
     @override

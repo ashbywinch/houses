@@ -10,6 +10,7 @@ import logging
 import textwrap
 import traceback
 from abc import abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
@@ -362,15 +363,33 @@ class DerivedNode(Node[T], Generic[T]):
         self,
         node_id: str,
         value_type: type[T],
-        deps: tuple[Node, ...],
+        deps: tuple[Node, ...] | Callable[[], tuple[Node, ...]],
         source_url: str = "",
         dep_names: tuple[str, ...] | None = None,
     ) -> None:
+        """``deps`` may be a static tuple of nodes, or a zero-arg callable
+        re-evaluated on every staleness/refresh check — the composition
+        form for dynamic dependency sets (a node whose inputs appear and
+        disappear at runtime, e.g. destinations added in Settings).
+
+        The callable must close over its own data, never over ``self``:
+        the base class may consult it at any point in the node's life,
+        and a provider that reads not-yet-assigned subclass state would
+        reintroduce the construction-ordering hazard this exists to
+        remove (2026-09-09: base register() → _is_stale() →
+        _get_active_deps() ran before the subclass finished __init__).
+        """
         super().__init__(node_id, value_type, source_url)
-        self._deps: tuple[Node, ...] = deps
+        self._deps_provider: Callable[[], tuple[Node, ...]] | None = (
+            deps if callable(deps) else None
+        )
+        self._deps: tuple[Node, ...] = () if callable(deps) else deps
+        # A provider's deps are re-read per staleness/refresh check —
+        # static wiring (signals) covers explicitly listed deps only.
+        static_deps: tuple[Node, ...] = self._deps
         self._dep_names: tuple[str, ...] | None = dep_names
-        if dep_names is not None and len(dep_names) != len(deps):
-            raise ValueError(f"{self._id}: dep_names ({len(dep_names)}) must match deps ({len(deps)})")
+        if dep_names is not None and len(dep_names) != len(static_deps):
+            raise ValueError(f"{self._id}: dep_names ({len(dep_names)}) must match deps ({len(static_deps)})")
         self._attempt: Attempt[T] = Attempt.pending()
         self._connections: list[Connection] = []
         self._slots: list[Slot] = []
@@ -387,14 +406,18 @@ class DerivedNode(Node[T], Generic[T]):
         loaded = self._load_attempt_from_db()
         if loaded is not None:
             self._attempt = loaded
-        for i, dep in enumerate(deps):
+        # Signal wiring covers the STATIC deps only: a provider's dynamic
+        # deps are re-read on every staleness/refresh check instead — the
+        # library defers to the provider rather than calling into node
+        # state during construction.
+        for i, dep in enumerate(static_deps):
             if dep is None:
                 raise ValueError(
                     f"{self._id}: dependency at index {i} is None — "
                     f"DAG nodes must not have None dependencies. "
                     f"Check the caller's deps list."
                 )
-        for dep in deps:
+        for dep in static_deps:
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
             conn = dep.changed.connect(slot)
@@ -402,19 +425,7 @@ class DerivedNode(Node[T], Generic[T]):
 
         get_scheduler().register(self)
 
-    # ── Compute dispatch ───────────────────────────────
-    # compute() is called with the active deps' attempts.  Nodes whose
-    # deps are CONDITIONAL (built dynamically, or _get_active_deps
-    # gating a subset) declare ``dep_names`` so attempts bind by NAME —
-    # a dropped middle dep can never shift later arguments into the
-    # wrong parameter (the historical group-node misalignment).  Other
-    # nodes stay positional, guarded by an arity check that fails
-    # loudly instead of letting a mismatch surface as a confusing
     def _call_compute(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Any:
-        # Returns either the Attempt or a coroutine resolving to one —
-        # the caller awaits via iscoroutine().  Typed as Any because the
-        # two shapes defeat a static union (attribute access on the
-        # coroutine branch is checked at the await site).
         if self._dep_names is not None:
             # Bind by dep identity against the static deps, so a
             # non-trailing subset of active deps still reaches the
@@ -478,6 +489,22 @@ class DerivedNode(Node[T], Generic[T]):
         get_scheduler().unregister(self)
 
     def _get_active_deps(self) -> tuple[Node, ...]:
+        if self._deps_provider is not None:
+            return self._deps_provider()
+        return self._deps
+
+    def deps_for_traversal(self) -> tuple[Node, ...]:
+        """Every dependency, including the ones the active set hides.
+
+        ``_get_active_deps()`` answers "what does THIS evaluation depend
+        on" and narrows on purpose: a wrapper drops a failed dependency so
+        its failure cannot propagate, and a conditional node evaluates one
+        branch.  A graph walk must not inherit that narrowing — a node
+        hidden behind a failed or unchosen dependency would otherwise keep
+        its persisted result forever (see ``dag.regenerate.schedule_code_stale_nodes``).
+        """
+        if self._deps_provider is not None:
+            return self._deps_provider()
         return self._deps
 
     @override
@@ -493,6 +520,19 @@ class DerivedNode(Node[T], Generic[T]):
         if not self._is_stale():
             return
         get_scheduler().schedule(self)
+
+    def needs_refresh(self) -> bool:
+        """True when this node's result disagrees with the code, or with its
+        dependencies' current results.
+
+        ``_is_stale`` answers this on the signal path (a dependency wrote);
+        a process start asks the same question after attempts load, because
+        a start can race a dependency's write — the node then holds an
+        older row than its dependency and nothing signals the difference
+        (live 2026-09-10: Lorena's Aldgate commute served no value all
+        session while its pipeline had a priced journey on disk).
+        """
+        return self._is_stale()
 
     def _is_stale(self) -> bool:
         # Staleness is a NORMAL condition (any dep change re-schedules the

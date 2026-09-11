@@ -337,12 +337,24 @@ def delete_node_results_for_rid(rid: str) -> None:
     conn.commit()
 
 
+#: Node-id namespaces that are not properties.  The global settings nodes
+#: live under ``settings/<name>``; the slash-less sources (``persons``,
+#: ``financial``, …) never reach this query.
+NON_PROPERTY_NAMESPACES = frozenset({"settings"})
+
+
 def property_rids() -> list[str]:
-    """Return distinct property RIDs from the node_results table."""
+    """Every node-id prefix that could be a property RID.
+
+    The global settings namespace is excluded; nothing else is.  Filtering
+    for numeric prefixes here made the startup loader's pollution guard
+    unreachable — a row under a test-data id was silently ignored instead of
+    failing loudly, which is the opposite of what that guard exists for.
+    """
     if not _table_exists("node_results"):
         return []
     conn = _get_db()
     rows = conn.execute(
         "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
-    return sorted(set(r[0] for r in rows if r[0] and r[0].isdigit()))
+    return sorted(rid for rid in {r[0] for r in rows} if rid and rid not in NON_PROPERTY_NAMESPACES)

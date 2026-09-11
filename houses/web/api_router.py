@@ -338,10 +338,16 @@ def _score_from_summary(s: dict) -> int:
     """
     score = 0
     for key, cd in s.get("commutes", {}).items():
-        c = cd.get("commute", {})
-        dur = c.get("value", {}).get("duration", {}).get("value") if c.get("status") == "succeeded" else None
-        if dur is not None:
-            score += _commute_score(dur, bracknell="Bracknell" in key)
+        # An unpriced commute is a normal live state: the tolerant wrapper
+        # serves succeeded with a null value when a destination's route
+        # failed, so a broken route cannot blank the household figures.
+        # Such an entry scores nothing — it must never take the page down.
+        c = (cd or {}).get("commute") or {}
+        value = c.get("value") or {}
+        duration = value.get("duration") or {}
+        dur = duration.get("value") if c.get("status") == "succeeded" else None
+        if isinstance(dur, (int, float)):
+            score += _commute_score(int(dur), bracknell="Bracknell" in key)
     score += _school_score(s.get("schools", {}).get("primary", {}).get("school", {}).get("value", {}))
     score += _school_score(s.get("schools", {}).get("secondary", {}).get("school", {}).get("value", {}))
     score += _walkability_score(s.get("walkability", {}))

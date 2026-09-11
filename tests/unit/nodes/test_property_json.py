@@ -254,6 +254,25 @@ class TestCommuteData:
             assert val["label"], f"{key}: empty label"
 
     @pytest.mark.asyncio
+    async def test_every_summary_commute_carries_entry_level_is_child(self, prop):
+        """The card splits adult rows from child (school) rows by the
+        ENTRY-level is_child flag — PropertyCard.vue::isChildCommute reads
+        cd["commute"].is_child.  A school commute whose flag is missing
+        renders TWICE: once in the school section, once as an adult
+        commute row (live 2026-09-10, property 90970053, George's
+        schools).  The flag must be present on every entry, whatever
+        serialization path the pipeline took."""
+        await flush_processor()
+        s = await prop.to_json_summary()
+        assert s["commutes"], "summary must contain commutes"
+        for key, cd in s["commutes"].items():
+            assert "is_child" in cd["commute"], (
+                f"{key}: entry-level is_child missing — the card cannot "
+                f"tell a child row from an adult one (entry keys="
+                f"{sorted(cd['commute'])})"
+            )
+
+    @pytest.mark.asyncio
     async def test_commute_duration_appears_in_summary(self, prop):
         """List page PropertyCard accesses c.commute.value.duration.value."""
         await flush_processor()
