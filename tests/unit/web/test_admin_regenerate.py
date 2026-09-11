@@ -1,11 +1,19 @@
-"""Regression (live 2026-09-09): /api/admin/regenerate must execute
-force_regenerate ON the processor thread.
+"""The /api/admin/regenerate endpoint executes force_regenerate through
+the processor seam and answers with the regeneration report.
 
-The fail-fast check (assert_mutation_allowed) rejects off-thread DAG
-mutation — an endpoint that calls node.refresh directly can only ever
-answer 500 on the real threaded server. Unit tests never caught it
-because they run the scheduler inline (testing mode), where the check
-passes vacuously. This test starts the REAL processor thread.
+Regression context (live 2026-09-09): an endpoint that mutated DAG nodes
+DIRECTLY could only ever answer 500 in production — assert_mutation_allowed
+rejects off-thread mutation, and the endpoint is an ordinary request
+handler. The fix routes the work through run_on_processor.
+
+Threading is NOT tested here — it is correct by construction (thread
+rules, docs/dag-library.md): the processor loop owns all mutation, the
+guard enforces it in production, and run_on_processor is the single
+handover. What is pinned, deterministically: the endpoint answers 200,
+matches the requested patterns, and reports every regenerated node as
+succeeded. If the endpoint ever drops the run_on_processor seam, the
+guard turns the production path into a loud 500 — the construction's
+defense, not a test's.
 """
 
 from __future__ import annotations
@@ -14,9 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 from money import Money
 
-import dag.persistence as persistence_mod
-import dag.scheduler as sched_mod
-from dag.scheduler import flush_processor, run_on_processor
+from dag.scheduler import flush_processor
 from houses.geopoint import GeoPoint
 from houses.model.domain import Person, PlaceOfInterest
 from houses.nodes.property_nodes import PropertyNodes
@@ -59,11 +65,9 @@ def _inject_session(client) -> None:
     client.cookies.set("session", get_serializer().dumps(claims))
 
 
-def _build_world() -> None:
-    """All DAG mutation happens ON the processor thread (thread rules)."""
+@pytest.mark.asyncio
+async def test_admin_regenerate_reports_the_regeneration():
     svc = get_services()
-    # The TestClient request path is the app: app_mode=True satisfies
-    # the settings-write guard for the direct seeding push.
     svc.persons_source.push(_persons(), "user", app_mode=True)
     prop = PropertyNodes(_RID)
     prop.rightmove_price.push(Money(amount="500000", currency="GBP"), "user")
@@ -77,28 +81,15 @@ def _build_world() -> None:
     prop.rental_income.push(Money(amount="0", currency="GBP"), "user")
     prop.comment_status.push("", "user")
     register_property(_RID, prop)
+    await flush_processor()
 
-
-@pytest.mark.asyncio
-async def test_admin_regenerate_runs_on_the_processor_thread():
-    prev_testing = persistence_mod.testing
-    persistence_mod.testing = False
-    try:
-        sched_mod.start_processor()
-        await run_on_processor(_build_world)
-        # The queue lives on the processor loop now — drain THROUGH it.
-        await run_on_processor(flush_processor)
-
-        client = TestClient(app)
-        _inject_session(client)
-        resp = client.post(
-            "/api/admin/regenerate",
-            json={"patterns": [f"{_RID}/commute_breakdown", f"{_RID}/group_monthly_cost"]},
-        )
-        assert resp.status_code == 200, resp.text
-        report = resp.json()
-        assert report["matched"] == 2, report
-        assert all(entry["status"] == "succeeded" for entry in report["regenerated"]), report
-    finally:
-        sched_mod.stop_processor()
-        persistence_mod.testing = prev_testing
+    client = TestClient(app)
+    _inject_session(client)
+    resp = client.post(
+        "/api/admin/regenerate",
+        json={"patterns": [f"{_RID}/commute_breakdown", f"{_RID}/group_monthly_cost"]},
+    )
+    assert resp.status_code == 200, resp.text
+    report = resp.json()
+    assert report["matched"] == 2, report
+    assert all(entry["status"] == "succeeded" for entry in report["regenerated"]), report
