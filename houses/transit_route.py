@@ -11,6 +11,7 @@ from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.location import geocode, geocode_address
 from houses.settings import settings
 from houses.stations import find as find_station
+from houses.web.json_utils import optional_parse
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +126,10 @@ class _FirstLegJson:
 
     @classmethod
     def from_dict(cls, raw: dict) -> _FirstLegJson:
-        arrival = raw.get("arrivalPoint")
         return cls(
             mode=_LegModeJson.from_dict(raw.get("mode", {})),
             duration=raw.get("duration", 0),
-            arrival_point=_ArrivalPointJson.from_dict(arrival) if arrival else None,
+            arrival_point=optional_parse(raw, "arrivalPoint", _ArrivalPointJson.from_dict),
         )
 
 

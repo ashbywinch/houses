@@ -27,7 +27,7 @@ from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.services_provider import get_services
 from houses.settings import settings
-from houses.web.json_utils import WirePayload
+from houses.web.json_utils import WirePayload, optional_parse
 
 logger = logging.getLogger(__name__)
 
@@ -139,11 +139,10 @@ class _RouteStepJson:
 
     @classmethod
     def from_dict(cls, raw: dict) -> _RouteStepJson:
-        details = raw.get("transitDetails")
         return cls(
             travel_mode=raw.get("travelMode"),
             static_duration=raw.get("staticDuration", "0s"),
-            transit_details=_RouteTransitDetailsJson.from_dict(details) if details else None,
+            transit_details=optional_parse(raw, "transitDetails", _RouteTransitDetailsJson.from_dict),
         )
 
 

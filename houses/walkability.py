@@ -12,6 +12,7 @@ from houses.api_cache import cached_async_client, get_cached, set_cached, with_c
 from houses.geopoint import GeoPoint
 from houses.location import PropertyLocation, WalkabilityFns
 from houses.settings import settings
+from houses.web.json_utils import optional_parse
 
 logger = logging.getLogger(__name__)
 
@@ -528,12 +529,11 @@ class _OverpassElementJson:
 
     @classmethod
     def from_dict(cls, raw: dict) -> _OverpassElementJson:
-        center = raw.get("center")
         return cls(
             tags=_OverpassTagsJson.from_dict(raw.get("tags", {})),
             lat=raw.get("lat"),
             lon=raw.get("lon"),
-            center=_OverpassCenterJson.from_dict(center) if center else None,
+            center=optional_parse(raw, "center", _OverpassCenterJson.from_dict),
         )
 
 
