@@ -145,7 +145,6 @@ def _existing_searches(path: Path) -> dict | None:
         return None
 
 
-# lucidlint: ignore latent-class (payload, out_dir) is the natural (what, where) of a write function — each writer
 def write_searches(payload: SearchesPayload, out_dir: str | Path) -> None:
     """Write searches.json + .txt — but never churn an identical artifact.
 

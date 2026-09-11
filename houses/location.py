@@ -63,6 +63,7 @@ class _NominatimParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return {"q": self.q, "format": self.format, "limit": self.limit}
 
 
@@ -88,6 +89,7 @@ class _OrsSearchParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return {"text": self.text, "size": self.size}
 
 
@@ -102,6 +104,7 @@ class _OrsReverseParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return {
             "point.lat": self.point_lat,
             "point.lon": self.point_lon,
@@ -603,6 +606,8 @@ async def reverse_geocode_postcode(lat: float, lon: float, *, services: Any | No
             if not results:
                 return ""
             return results[0].get("postcode", "")
+    # lucidlint: ignore broad-except boundary — reverse-geocode failure
+    # means "try the next provider", never a crash; logged
     except Exception:
         logger.exception("Reverse postcode lookup failed at %s,%s", lat, lon)
         return ""

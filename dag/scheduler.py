@@ -104,7 +104,7 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._wakeup: asyncio.Event = asyncio.Event()
         self._after_refresh_callback: Callable[[DerivedNode], object] | None = None
         self._respect_time: bool = respect_time
-        self._enqueued_since_flush = 0
+        self._enqueued_since_flush: int = 0
         """Work items enqueued since the last complete drain — the conftest
         flush_all() no-op guard reads it."""
         self._requeue_counts: dict[str, int] = {}
@@ -215,8 +215,7 @@ class AsyncQueueScheduler(RefreshScheduler):
         bound means a pending dep never enters the queue — a contract
         bug — and must fail loudly rather than spin the drain.
         """
-        # Local import: DerivedNode is TYPE_CHECKING-only at module scope
-        # (derived_node imports this module's get_scheduler).
+        # lucidlint: ignore inline-import cycle break — DerivedNode imports get_scheduler from this module
         from dag.derived_node import DerivedNode
         active = [dep for dep in event.node._get_active_deps() if dep is not None]
         # Re-queue only when the deferral waits on queueable work: a
@@ -341,13 +340,15 @@ def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
 # processor owns recompute AND persistence (blocking sqlite3 is harmless
 # here — that is the point). See .kilo/plans/dag-save-queue.md.
 
-# lucidlint: ignore global-state bounded module cache/state — single processor thread, deliberate
 _processor_thread: threading.Thread | None = None
 _processor_loop: asyncio.AbstractEventLoop | None = None
 _processor_sched: AsyncQueueScheduler | None = None
 _processor_task: asyncio.Task | None = None
 
 
+
+# lucidlint: ignore unused deliberate test seam asserted by the isolation fixture
+# and the queue tests — production never needs to ask who the processor is.
 def current_processor_thread() -> threading.Thread | None:
     """The processor thread once running; None in tests, lifespan-less
     scripts and startup — single-threaded contexts where mutation is safe
@@ -377,6 +378,7 @@ def start_processor() -> None:
     synchronously) and when already running.
     """
     global _processor_thread, _processor_loop, _processor_sched
+    # lucidlint: ignore inline-import cycle break — persistence imports this module's scheduler at top
     from dag.persistence import testing as _testing
 
     if _testing:
@@ -435,12 +437,13 @@ def stop_processor(timeout: float = 10.0) -> int:
             # A submission applies its write and enqueues its cascade; give it
             # a slice before deciding the processor is idle.  Not sleep(0):
             # that spins the loop at full tilt while a submission runs.
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(_DRAIN_YIELD_S)
         return len(sched._scheduled)
 
     abandoned = 0
     try:
         abandoned = asyncio.run_coroutine_threadsafe(_drain(), _processor_loop).result(timeout=timeout)
+    # lucidlint: ignore swallow logged above — a wedged drain must not hang systemctl stop
     except concurrent.futures.TimeoutError:
         logger.error("processor drain did not finish within %ss", timeout)
     _processor_loop.call_soon_threadsafe(_cancel_background_task)
@@ -458,6 +461,10 @@ def stop_processor(timeout: float = 10.0) -> int:
 #: scheduler queue AND this count: a submission in flight (or one whose
 #: cascade has not been enqueued yet) must land before the process exits,
 #: or a write the user already saw confirmed would vanish.
+#: The yield granted to an in-flight submission between drain slices —
+#: a responsive idle decision without a busy spin.
+_DRAIN_YIELD_S = 0.01
+
 _pending_submissions: int = 0
 _submissions_lock = threading.Lock()
 
@@ -496,7 +503,9 @@ def _run_and_log(fn: Callable[[], Any]) -> None:
             # must be synchronous here (the processor path awaits coroutines).
             result.close()
             raise RuntimeError("queued work must be synchronous without a processor thread")
-    # lucidlint: ignore broad-except — the producer has already returned; the failure must be visible
+    
+    # lucidlint: ignore swallow the producer has already returned — the failing work is logged for the
+    # operator; a raise here would take down the caller long after the fact
     except Exception:
         logger.exception("processor work failed (production of a queued write)")
 
@@ -510,9 +519,10 @@ def _submission_finished(future: concurrent.futures.Future) -> None:
 
 
 def _log_processor_failure(future: concurrent.futures.Future) -> None:
-    # lucidlint: ignore broad-except — surfaced from another thread's loop
+
     try:
         future.result()
+    # lucidlint: ignore swallow the callback is the failure's ONLY surface — logging it IS the delivery
     except Exception:
         logger.exception("queued processor work failed after the producer returned")
 

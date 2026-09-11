@@ -20,7 +20,7 @@ from dag.scheduler import flush_processor
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.commute import commute_colour, format_duration
-from houses.nodes.property_nodes import PropertyNodes, _SummaryJson
+from houses.nodes.property_nodes import PropertyNodes, SummaryJson
 from houses.property_registry import register_property
 from houses.web.api_router import _score_from_summary
 from tests.helpers import make_services
@@ -176,8 +176,8 @@ class TestOfstedColour:
     """
 
     @staticmethod
-    def _summary_with_ofsted(ofsted: str) -> _SummaryJson:
-        return _SummaryJson(**{
+    def _summary_with_ofsted(ofsted: str) -> SummaryJson:
+        return SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk": None}}},
@@ -216,8 +216,8 @@ class TestScoringSurvivesAnUnpricedCommute:
     (2026-09-10), taking the whole index page down."""
 
     @staticmethod
-    def _summary_with_a_null_commute() -> _SummaryJson:
-        return _SummaryJson(**{
+    def _summary_with_a_null_commute() -> SummaryJson:
+        return SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {"commute": {"status": "succeeded", "value": None}},
             },
@@ -249,8 +249,8 @@ class TestWalkColour:
     """
 
     @staticmethod
-    def _summary_with_walk(minutes: int | None) -> _SummaryJson:
-        return _SummaryJson(**{
+    def _summary_with_walk(minutes: int | None) -> SummaryJson:
+        return SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
@@ -437,12 +437,12 @@ class TestScoring:
     @pytest.mark.asyncio
     async def test_score_is_integer(self, prop):
         await flush_processor()
-        s = _SummaryJson(**await prop.to_json_summary())
+        s = SummaryJson(**await prop.to_json_summary())
         score = _score_from_summary(s)
         assert score == 16
 
     def test_all_green_returns_max(self):
-        summary = _SummaryJson(**{
+        summary = SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
@@ -474,7 +474,7 @@ class TestScoring:
         assert score == 16  # 8 metrics × 2
 
     def test_greens_and_warns_mixed(self):
-        summary = _SummaryJson(**{
+        summary = SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
@@ -506,7 +506,7 @@ class TestScoring:
         assert score == 14  # 2×3 + 1 + 2×3 + 2 + 1 + 2
 
     def test_bad_values_subtract(self):
-        summary = _SummaryJson(**{
+        summary = SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
@@ -533,7 +533,7 @@ class TestScoring:
         assert score == -5  # 3 red commutes (-1 each) + red ofsted (-1) + bad walk (-1)
 
     def test_muted_contributes_zero(self):
-        summary = _SummaryJson(**{
+        summary = SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
@@ -546,7 +546,7 @@ class TestScoring:
 
     def test_bracknell_thresholds(self):
         """Bracknell commutes use 30/60 thresholds instead of 45/75."""
-        summary = _SummaryJson(**{
+        summary = SummaryJson(**{
             "commutes": {
                 "Simon/Bracknell": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 25, "unit": "minute"}}}
@@ -570,7 +570,7 @@ class TestCardSorting:
 
     def test_sorted_by_score_descending(self):
         """Verify the sorting logic used by get_all_properties()."""
-        high = _SummaryJson(**{
+        high = SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
@@ -578,7 +578,7 @@ class TestCardSorting:
             },
             "walkability": {"value": None},
         })
-        mid = _SummaryJson(**{
+        mid = SummaryJson(**{
             "commutes": {},
             "schools": {
                 "primary": {
@@ -596,7 +596,7 @@ class TestCardSorting:
             },
             "walkability": {"value": None},
         })
-        low = _SummaryJson(**{
+        low = SummaryJson(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}

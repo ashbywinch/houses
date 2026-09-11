@@ -35,7 +35,8 @@ class WirePayload(Protocol):
     the network edge (httpx kwarg, cache key, envelope, json.dumps) —
     never a verbatim payload dict threaded through a seam.
     """
-
+    # lucidlint: ignore record-shape Protocol to_dict return IS the transport-seam contract — every implementing
+    # record serializes here, the boundary owns the shape (coding-standards.md)
     def to_dict(self) -> dict: ...
 
 

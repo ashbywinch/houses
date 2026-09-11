@@ -53,7 +53,6 @@ def _pyrefly_binary() -> str:
 
 
 # Extra args passed to every pyrefly invocation.
-# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 PYREFLY_BASE_ARGS = [_pyrefly_binary(), "check", "--output-format", "json"]
 
 

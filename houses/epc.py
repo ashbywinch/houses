@@ -82,6 +82,7 @@ class _EpcSearchParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return {"postcode": self.postcode, "page_size": self.page_size}
 
 
@@ -93,7 +94,7 @@ class _EpcCertificate:
     registration_date: str
     current_energy_efficiency_band: str
 
-    # lucidlint: ignore record-shape from_dict parses the external API certificate row (coding-standards.md)
+    
     @classmethod
     def from_dict(cls, cert: dict) -> _EpcCertificate:
         return cls(
@@ -209,7 +210,7 @@ def _street_after_token(tokens: list[str], token: str) -> str:
     return ""
 
 
-# lucidlint: ignore data-clump the lookup identity (address, building_id) travels with its certificates by design
+
 # lucidlint: ignore data-clump (certs, building_id, address) is _match_cert's public signature — ~20 test call sites in
 # lucidlint: ignore data-clump (address, certs) travel
 def _filter_candidates(certs: list[_EpcCertificate], building_id: str, address: str):

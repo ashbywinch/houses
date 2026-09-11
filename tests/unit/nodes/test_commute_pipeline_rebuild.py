@@ -109,6 +109,7 @@ def test_rebuild_keeps_finances_and_co_ownership_intact():
     assert simon.home_sale_price == Money(amount="550000", currency="GBP")
 
 
+    # lucidlint: ignore fakefs pure in-memory rebuild — no FS use; pyfakefs not the house standard (testing-standards)
 def test_unchanged_destination_set_is_a_noop():
     """Trips/car/MPG edits must not rebuild pipelines — those nodes read
     the persons source live; only the destination set changes structure."""

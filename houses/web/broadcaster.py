@@ -17,11 +17,11 @@ from dataclasses import dataclass
 
 from fastapi import WebSocket
 
-from houses.nodes.property_nodes import _SummaryJson
+from houses.nodes.property_nodes import SummaryJson
 from houses.services_provider import get_services
 from houses.web.monthly_delta import CURRENT_STATUS
 from houses.web.monthly_delta import attach as attach_monthly_delta
-from houses.web.settings_payload import _SettingsPayloadJson, settings_payload
+from houses.web.settings_payload import SettingsPayloadJson, settings_payload
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,6 @@ _websocket_clients: set[WebSocket] = set()
 
 def _reset():
     """Reset broadcast state for test isolation."""
-    # lucidlint: ignore global-state deliberate test seam — _reset() swaps the queue for test isolation
     global _broadcast_queue, _pending_notify_rids, _notify_debounce_task
     _broadcast_queue = asyncio.Queue()
     _pending_notify_rids = set()
@@ -72,14 +71,14 @@ class _PropertyUpdatedEnvelope:
 class _SettingsUpdatedEnvelope:
     """The settings_updated websocket message envelope (wire shape)."""
 
-    data: _SettingsPayloadJson
+    data: SettingsPayloadJson
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(type="settings_updated", data=self.data.to_dict())
 
-async def _push_summary(rid: str) -> _SummaryJson | None:
+async def _push_summary(rid: str) -> SummaryJson | None:
     """Build, delta-attach, and push one property's summary to all clients.
 
     Returns the pushed summary record, or None when the rid has no
@@ -90,7 +89,7 @@ async def _push_summary(rid: str) -> _SummaryJson | None:
     # property_nodes.to_json_summary still returns the wire dict (its
     # record conversion is out of this wave's file set) — reconstruct the
     # record at the consumption boundary, then serialize at the edge.
-    summary = _SummaryJson(**await prop.to_json_summary())
+    summary = SummaryJson(**await prop.to_json_summary())
     wire = summary.to_dict()
     await attach_monthly_delta(wire, rid, get_services().property_registry)
     msg = json.dumps(_PropertyUpdatedEnvelope(rid=rid, data=wire).to_dict())

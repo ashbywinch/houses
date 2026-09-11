@@ -45,7 +45,6 @@ class FareProductType(Enum):
 
 # Maps JSON product keys to FareProductType
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
-# lucidlint: ignore global-state static lookup table (JSON product key → FareProductType); never mutated
 _KEY_TO_TYPE: dict[str, FareProductType] = {
     "adult_single": FareProductType.SINGLE,
     "adult_return": FareProductType.RETURN,
@@ -97,7 +96,7 @@ class _StopCoord:
     lon: float
     zone: str | None
 
-    # lucidlint: ignore record-shape from_dict parses the stop-coordinate wire row (coding-standards.md)
+    
     @classmethod
     def from_dict(cls, sc: dict) -> _StopCoord:
         return cls(lat=sc["lat"], lon=sc["lon"], zone=sc.get("zone"))
@@ -127,7 +126,6 @@ def _zone_pair_key(dep_zone: str, arr_zone: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-# lucidlint: ignore latent-class the 12 methods all operate on the shared _data/_meta fare-product store (not
 class BusJourneyRegistry:
     """Lazy-loaded registry of bus fare zone data.
 

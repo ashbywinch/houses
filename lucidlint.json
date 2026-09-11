@@ -1,3 +1,18 @@
 {
-  "actions": []
+  "actions": [
+    "latent-class:dag/derived_node.py:335:DerivedNode",
+    "latent-class:houses/epc.py:216:_filter_candidates",
+    "latent-class:houses/rightmove_scraper.py:266:_page_model_address",
+    "latent-class:houses/web/api_router.py:194:what_if_apply",
+    "latent-class:houses/web/api_router.py:466:patch_address",
+    "latent-class:houses/web/api_router.py:489:patch_council_tax",
+    "record-shape:houses/web/api_router.py:542:",
+    "latent-class:tools/capture_dom.py:394:capture_page",
+    "latent-class:tools/commute/searches.py:148:write_searches"
+  ],
+  "config_ignored": {
+    "global-state": 37,
+    "god-class": 4,
+    "assembly-class": 6
+  }
 }

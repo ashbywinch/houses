@@ -71,7 +71,6 @@ def decompress_result(raw: str | bytes) -> str:
 
 
 def _get_db() -> sqlite3.Connection:
-    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global DB_PATH
     if DB_PATH is None:
         DB_PATH = Path("data/houses.db")
@@ -172,7 +171,6 @@ def _ensure_code_version_column() -> None:
 
 def init_db(db_path: str | None = None) -> None:
     """Initialise the SQLite database schema, migrating older databases."""
-    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global DB_PATH
     if db_path:
         DB_PATH = Path(db_path)
@@ -218,6 +216,7 @@ def save_node_result(
     thread (or a single-threaded context — startup, tests, scripts);
     see docs/dag-library.md → 'Thread rules'.
     """
+    # lucidlint: ignore inline-import cycle break — scheduler imports this module's writers at top
     from dag.scheduler import assert_mutation_allowed
 
     assert_mutation_allowed()
@@ -251,16 +250,33 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     unwritten rows by construction — docs/dag-library.md → 'Thread
     rules').
     """
+    return _fetch_latest_row(node_id)
+
+
+
+# lucidlint: ignore record-shape wire-format dict — the stored node to_json() payload, serialization boundary (keys
+# vary per node type; the _-prefixed metadata is added here, never in the node) (coding-standards.md)
+def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any] | None:
+    """The row fetch shared by latest_node_result and node_result_before:
+    read committed state as-is (WAL snapshot; the optional ``before``
+    timestamp excludes unwritten rows by construction — thread rules)."""
     if not _table_exists("node_results"):
         init_db()
         return None
     _ensure_code_version_column()
     conn = _get_db()
-    row = conn.execute(
-        "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
-        " WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
-        (node_id,),
-    ).fetchone()
+    if before is None:
+        row = conn.execute(
+            "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
+            " WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
+            (node_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
+            " WHERE node_id=? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+            (node_id, before),
+        ).fetchone()
     if row is None:
         return None
     result = json.loads(decompress_result(row["result_json"]))
@@ -269,7 +285,8 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     result["_code_version"] = row["code_version"]
     return result
 
-
+# lucidlint: ignore record-shape wire-format dict — serialization boundary (same stored node payload as
+# latest_node_result, read strictly-before a timestamp) (coding-standards.md)
 def node_result_before(node_id: str, before: str) -> dict[str, Any] | None:
     """Return the most recent to_json() dict for a node STRICTLY BEFORE
     the ISO-8601 timestamp *before*, or None.
@@ -279,23 +296,7 @@ def node_result_before(node_id: str, before: str) -> dict[str, Any] | None:
     restore reads the persons attempt from before the scenario started.
     Reads never block on writes — see latest_node_result.
     """
-    if not _table_exists("node_results"):
-        init_db()
-        return None
-    _ensure_code_version_column()
-    conn = _get_db()
-    row = conn.execute(
-        "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
-        " WHERE node_id=? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
-        (node_id, before),
-    ).fetchone()
-    if row is None:
-        return None
-    result = json.loads(decompress_result(row["result_json"]))
-    result["_dep_timestamps"] = json.loads(row["dep_timestamps"]) if row["dep_timestamps"] else {}
-    result["_persisted_at"] = row["created_at"]
-    result["_code_version"] = row["code_version"]
-    return result
+    return _fetch_latest_row(node_id, before)
 
 
 def _table_exists(name: str) -> bool:

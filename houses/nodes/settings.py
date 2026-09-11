@@ -36,7 +36,6 @@ def set_app_mode() -> None:
     reloader respawn) runs the lifespan; an ad-hoc script or REPL kernel
     that merely imports the app modules does not.
     """
-    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global _app_mode
     _app_mode = True
 
@@ -44,6 +43,7 @@ def set_app_mode() -> None:
 def guard_settings_write(
     *,
     testing: bool | None = None,
+    isolation_armed: bool | None = None,
     app_mode: bool | None = None,
     scripts_may_write: bool | None = None,
 ) -> None:
@@ -61,12 +61,14 @@ def guard_settings_write(
     """
     if testing is None:
         testing = _persistence.testing
+    if isolation_armed is None:
+        isolation_armed = _persistence.testing
     if app_mode is None:
         app_mode = _app_mode
     if scripts_may_write is None:
         scripts_may_write = os.environ.get("HOUSES_SCRIPTS_MAY_WRITE") == "1"
     if testing:
-        if not _persistence.testing:
+        if not isolation_armed:
             raise RuntimeError(
                 "Refusing a settings write while pytest is running but the "
                 "DB-isolation fixture is not armed — it would reach the real "
@@ -144,6 +146,8 @@ def alarm_household_shrink(previous: Any, incoming: Any, source_label: str) -> N
     found the same day.  Neither blocks the write.
     """
 
+    # lucidlint: ignore record-shape person-name → POI-label-set loss-detection map — variable keys, never serialized
+    # (only set math inside alarm_household_shrink)
     def _doc(persons: Any) -> dict[str, set[str]]:
         out: dict[str, set[str]] = {}
         for p in persons or ():
@@ -312,6 +316,7 @@ class _ThresholdJson:
 
 # lucidlint: ignore record-shape person-keyed defaults map — keyed collection, not a fixed record shape (review-log)
 def make_default_thresholds() -> dict[str, dict[str, int]]:
+    # lucidlint: ignore record-shape person-keyed defaults map — keyed collection, not a fixed record shape (review-log)
     return {
         "Simon": _ThresholdJson(good_max_minutes=30, fine_max_minutes=45).to_dict(),
         "Lorena": _ThresholdJson(good_max_minutes=40, fine_max_minutes=60).to_dict(),

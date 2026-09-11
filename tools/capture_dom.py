@@ -134,7 +134,6 @@ async def wait_for_server(url: str, label: str, timeout: float = 30) -> None:
 
 
 async def get_browser():
-    # lucidlint: ignore global-state process-wide Playwright singleton; single writer get_browser
     global _browser, _playwright
     if _browser and _browser.is_connected():
         return _browser
@@ -392,7 +391,6 @@ async def login(state_file: Path) -> None:
     print(f"Session saved → {state_file} (localhost session cookie only)")
 
 
-# lucidlint: ignore latent-class two event handlers append to one local errors list — a collector class for 3 lines of
 async def capture_page(url: str, output_dir: str | Path, label: str, state_file: Path):
     browser = await get_browser()
     context = await browser.new_context(

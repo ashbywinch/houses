@@ -56,7 +56,6 @@ def _humanify(name: str) -> str:
 
 # Cache TypeAdapters by value type to avoid OOM from creating thousands
 # of Pydantic schemas at startup (~19s, 5GB for 6000 nodes).
-# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 _adapter_cache: dict[type, TypeAdapter] = {}
 
 

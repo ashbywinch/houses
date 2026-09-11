@@ -29,7 +29,7 @@ class _TransitPreferencesJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        
         return dict(routingPreference=self.routing_preference)
 
 

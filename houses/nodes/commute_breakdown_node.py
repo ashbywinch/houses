@@ -23,6 +23,7 @@ class _CommuteEntryJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(
             label=self.label,
             trips_per_week=self.trips_per_week,
@@ -41,6 +42,7 @@ class _PersonCommuteJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(
             daily_gbp=self.daily_gbp,
             yearly_gbp=self.yearly_gbp,
@@ -58,6 +60,7 @@ class _CommuteAggregateJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(
             persons=self.persons,
             yearly_total_gbp=self.yearly_total_gbp,
@@ -68,7 +71,7 @@ class _CommuteAggregateJson:
 class CommuteBreakdownNode(DerivedNode[dict]):
     """Aggregates commute costs across all persons and POIs."""
 
-    # lucidlint: ignore record-shape keyed selector→node map (variable keys), not a fixed record shape
+    
     def __init__(self, node_id: str, *, commute_selectors: Mapping[str, Node], persons_source: Node):
         # Live selectors dict — also captured by the deps closure below;
         # compute reads the attribute, the provider re-reads the dict on

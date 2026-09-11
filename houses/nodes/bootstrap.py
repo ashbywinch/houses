@@ -173,6 +173,12 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
 
 
 
+# Rightmove property IDs are 6-10 digits; anything shorter or longer is
+# test data that must not enter the production DB.
+_RID_MIN_LENGTH = 6
+_RID_MAX_LENGTH = 10
+
+
 
 def load_property_nodes_from_db() -> int:
     """Create PropertyNodes for every RID found in the DB.
@@ -188,7 +194,7 @@ def load_property_nodes_from_db() -> int:
         # do, startup fails loudly instead of silently serving them:
         # delete the offending rows immediately (back the rows up first)
         # and fix whatever wrote them.
-        if not rid.isdigit() or not 6 <= len(rid) <= 10:
+        if not rid.isdigit() or not _RID_MIN_LENGTH <= len(rid) <= _RID_MAX_LENGTH:
             raise RuntimeError(
                 f"node_results contains test-data rows under invalid property "
                 f"RID {rid!r}. Test data must never live in the real DB — "

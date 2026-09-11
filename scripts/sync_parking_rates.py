@@ -390,7 +390,6 @@ def _filter_missing(args, stations, existing) -> list[dict]:
     return filtered
 
 
-# lucidlint: ignore latent-class args is the CLI namespace (DI of flags) — only _select_stations and _filter_missing
 async def main():
     parser = argparse.ArgumentParser(description="Sync parking rates from APCOA via Playwright")
     parser.add_argument("--crs", help="Comma-separated CRS codes to process")

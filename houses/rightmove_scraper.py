@@ -263,7 +263,6 @@ _PageModelAddress = tuple[str, str]  # (address, postcode)
 _PageModelLocation = tuple[float, float]  # (lat, lng)
 
 
-# lucidlint: ignore latent-class (data, prop) is a context pair — the parsed page-model JSON and its schema map —
 def _page_model_address(data: Any, prop: Any) -> _PageModelAddress | None:
     """(address, postcode) from the page model, or None when the fields are absent."""
     try:
@@ -433,7 +432,6 @@ def _is_port_open(port: int) -> bool:
 
 async def _ensure_chrome():
     """Start a headless Chrome with remote debugging if not already running."""
-    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global _CHROME_PROCESS, _WE_STARTED_CHROME
 
     if _is_port_open(settings.rightmove_chrome_port):
@@ -507,7 +505,6 @@ async def _pkill_owned_chrome(fingerprint: str) -> None:
 
 async def stop_chrome():
     """Kill the Chrome instance we spawned, using user-data-dir as a fingerprint."""
-    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global _CHROME_PROCESS, _WE_STARTED_CHROME
     if not _WE_STARTED_CHROME:
         return

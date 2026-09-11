@@ -253,7 +253,6 @@ def _intersection_searches(
         )
     return searches
 
-# lucidlint: ignore latent-class pipeline over pure helpers — drive_raw feeds common_grid/_missing_destinations and
 def build_payload(
     *,
     shed: ShedPayload,

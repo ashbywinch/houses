@@ -32,7 +32,6 @@ RENTAL_INCOME_MONTHLY = "settings/rental_income_monthly"
 
 # ── Default factories ────────────────────────────────────
 
-# lucidlint: ignore global-state static defaults table (setting node → default factory); never mutated
 SETTING_DEFAULTS: dict[str, tuple[type, Callable[[], Decimal | int | Money]]] = {
     MORTGAGE_RATE: (Decimal, lambda: Decimal("0.0495")),
     MORTGAGE_TERM: (int, lambda: 27),
@@ -46,7 +45,6 @@ SETTING_DEFAULTS: dict[str, tuple[type, Callable[[], Decimal | int | Money]]] = 
 }
 
 # Mapping from API dict key (the old financial_source keys) to setting node ID
-# lucidlint: ignore global-state static API-key → node-id mapping table; never mutated
 # lucidlint: ignore record-shape keyed lookup table — API key → node ID, never a wire record (review-log)
 API_KEY_TO_NODE: dict[str, str] = {
     "mortgage_rate": MORTGAGE_RATE,

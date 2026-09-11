@@ -170,8 +170,8 @@ class TestProcessorPipeline:
             async def refresh(self, force: bool = False) -> None:
                 done.append(self._id)
 
-        sched.schedule(_Flaky())  # type: ignore[arg-type]
-        sched.schedule(_Fine())  # type: ignore[arg-type]
+        sched.schedule(_Flaky())  # type: ignore[arg-type]  # why: scheduler.schedule takes DerivedNode; the test class is structurally one
+        sched.schedule(_Fine())  # type: ignore[arg-type]  # why: same structural-subclass rationale as _Flaky above
 
         async def _run() -> None:
             task = asyncio.create_task(sched._background_loop())

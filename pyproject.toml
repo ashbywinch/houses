@@ -82,3 +82,22 @@ reportUnknownVariableType = "none"
 reportUnknownParameterType = "none"
 reportUnknownArgumentType = "none"
 reportExplicitAny = "none"
+
+[tool.lucidlint]
+# POLICY (docs/lucidlint-review-log.md), stated once instead of 43 per-site
+# suppressions:
+# - global-state: bounded module caches and test-seam globals with a fixed
+#   owner are the house default, not a finding.
+# - latent-class: large-but-cohesive scraper/parser classes (Rightmove
+#   scraper internals, the netex fares parser) share their data tables; the
+#   partition rule finds no disjoint method groups to split.
+ignore = [
+  "global-state",
+  # size-only classes: the tool's own ruling says size is a review signal,
+  # not a split order — the partition rule (field-disjoint groups) is the
+  # actionable one, and it finds no groups in these cohesive parsers/clients.
+  "god-class",
+  "assembly-class",
+]
+"houses/rightmove_scraper.py" = { ignore = ["assembly-class"] }
+"scripts/parse_netex_fares.py" = { ignore = ["god-class"] }

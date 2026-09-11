@@ -31,7 +31,7 @@ SESSION_MAX_AGE = timedelta(days=30)
 
 
 @dataclass(frozen=True)
-class _SessionClaims:
+class SessionClaims:
     """The signed session-cookie claims (its serialized wire shape)."""
 
     email: str
@@ -41,9 +41,9 @@ class _SessionClaims:
     impersonating: str | None = None
 
     @classmethod
-    # lucidlint: ignore record-shape from_dict parses the signed cookie claims — serialization boundary
+    
     # (coding-standards.md)
-    def from_dict(cls, data: dict) -> _SessionClaims:
+    def from_dict(cls, data: dict) -> SessionClaims:
         return cls(
             email=data["email"],
             name=data["name"],
@@ -111,7 +111,7 @@ class _ImpersonateRequest:
     person: str | None
 
     @classmethod
-    # lucidlint: ignore record-shape from_dict parses the caller's wire payload — serialization boundary
+    
     # (coding-standards.md)
     def from_dict(cls, body: dict) -> _ImpersonateRequest:
         return cls(person=body.get("person"))
@@ -137,7 +137,6 @@ auth_router = APIRouter(prefix="/api/auth")
 
 # In-memory OAuth state store — maps state_token to its PKCE record.
 # Ephemeral — lost on server restart.
-# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 _oauth_states: dict[str, _OAuthState] = {}
 _STATE_MAX_AGE = timedelta(minutes=10)
 _STATE_MAX_ENTRIES = 100
@@ -171,7 +170,7 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
     if not cookie:
         return None
     try:
-        claims = _SessionClaims.from_dict(get_serializer().loads(cookie, max_age=int(SESSION_MAX_AGE.total_seconds())))
+        claims = SessionClaims.from_dict(get_serializer().loads(cookie, max_age=int(SESSION_MAX_AGE.total_seconds())))
     except (BadSignature, SignatureExpired):
         return None
     return claims.to_dict()
@@ -214,7 +213,7 @@ def effective_session_user(request: Request) -> dict[str, Any] | None:
         if persons_attempt.succeeded:
             live = _person_superuser_flag(session.get("email", ""), persons_attempt.value_or_none())
             if live is not None and live != session.get("is_superuser", False):
-                claims = _SessionClaims.from_dict(session)
+                claims = SessionClaims.from_dict(session)
                 session = replace(claims, is_superuser=live).to_dict()
     # lucidlint: ignore broad-except live superuser re-derivation failure logs and returns the session unchanged
     except Exception:
@@ -245,7 +244,7 @@ def _make_session_cookie(
     impersonating: str | None = None,
 ) -> str:
     """Create a signed session cookie value."""
-    payload = _SessionClaims(
+    payload = SessionClaims(
         email=email, name=name, picture=picture,
         is_superuser=is_superuser, impersonating=impersonating,
     ).to_dict()
@@ -266,7 +265,7 @@ def _build_session(user: GoogleUserInfo) -> SessionMint:
     is_superuser = _is_superuser_for_email(folded_email)
 
     cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
-    payload = _SessionClaims(
+    payload = SessionClaims(
         email=folded_email, name=name, picture=picture,
         is_superuser=is_superuser, impersonating=None,
     ).to_dict()
