@@ -46,7 +46,6 @@ CRS_CODE_LENGTH = 3
 MIN_LOC_LINE_LENGTH = 60
 
 
-# lucidlint: ignore latent-class one-shot ETL script — z is a parse input handed to three independent section parsers
 def main():
     if len(sys.argv) < 2:
         print("Usage: uv run python scripts/extract_rail_fares.py <fares_zip_path>")

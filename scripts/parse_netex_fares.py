@@ -213,12 +213,10 @@ def _build_station_grid(stations: list[Station]) -> list[list[list[Station]]]:
     return grid
 
 
-# lucidlint: ignore global-state lazy-built station-grid memo (perf: built once per run); single writer is_near_station
 STATION_GRID: list[list[list[Station]]] = []
 
 
 def is_near_station(lat: float, lon: float, stations: list[Station], max_dist_km: float = 0.2) -> bool:
-    # lucidlint: ignore global-state lazy-built station-grid memo; single writer is_near_station
     global STATION_GRID
     if not STATION_GRID:
         STATION_GRID = _build_station_grid(stations)

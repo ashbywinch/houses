@@ -13,7 +13,7 @@ import asyncio
 import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from google.auth.exceptions import TransportError
 from google.auth.transport import requests as google_requests
@@ -55,6 +55,7 @@ class GeocodingService(Protocol):
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]: ...
 
+    @staticmethod
     async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]: ...
 
     async def reverse_geocode_postcode(self, lat: float, lon: float) -> Attempt[str]: ...
@@ -334,7 +335,6 @@ class _DefaultOAuthService:
 # instance is returned on every Services() construction.  This means
 # a PATCH to /api/settings/financial updates the canonical node that
 # all PropertyNodes reference, without needing a server restart.
-# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 SETTINGS_SOURCE_CACHE: dict[str, UserInputNode] = {}
 
 
@@ -398,10 +398,12 @@ class _DefaultGeocoder:
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         return await geocode_address(address, services=self._services)
 
-    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]:
+    @staticmethod
+    async def reverse_geocode_town(lat: float, lon: float) -> Attempt[str]:
         return await find_nearest_town_name(lat, lon)
 
     async def reverse_geocode_postcode(self, lat: float, lon: float) -> Attempt[str]:
+        # lucidlint: ignore inline-import cycle break — location imports this module's services_provider at top
         from houses.location import reverse_geocode_postcode as _reverse
 
         postcode = await _reverse(lat, lon, services=self._services)
@@ -499,7 +501,9 @@ def _default_auth_enabled() -> bool:
 @dataclasses.dataclass
 class Services:
     auth_enabled: bool = dataclasses.field(default_factory=_default_auth_enabled)
-    geocoder: GeocodingService = dataclasses.field(default_factory=_DefaultGeocoder)
+    geocoder: GeocodingService = dataclasses.field(
+        default_factory=lambda: cast(GeocodingService, _DefaultGeocoder())
+    )
     route_planner: RoutePlanner = dataclasses.field(default_factory=_DefaultRoutePlanner)
     tfl_client_factory: Callable[..., Any] = dataclasses.field(default_factory=_default_tfl_client_factory)
     commute_router: Any = dataclasses.field(default_factory=_default_commute_router)

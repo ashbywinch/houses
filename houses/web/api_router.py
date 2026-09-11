@@ -6,6 +6,7 @@ import gc
 import logging
 import typing
 from collections import Counter
+from collections.abc import Iterable, MutableMapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 import dag.scheduler
 from dag.persistence import node_result_before
 from dag.scheduler import AsyncQueueScheduler, run_on_processor
+from dag.user_input_node import UserInputNode
 from houses.comments import add_comment, get_comments
 from houses.geopoint import GeoPoint
 from houses.map_layers import DRIVE_PATH, INTERSECTION_PATH, UNION_PATH, isochrone_layers
@@ -29,11 +31,11 @@ from houses.model.domain import (
     PlaceOfInterest,
 )
 from houses.nodes.commute import commute_band
-from houses.nodes.property_nodes import _PropertyJson, _SummaryJson
+from houses.nodes.property_nodes import PropertyJson, PropertyNodes, SummaryJson
 from houses.nodes.settings_node import API_KEY_TO_NODE
 from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
-from houses.web.auth import SESSION_MAX_AGE, _SessionClaims, effective_session_user, get_serializer
+from houses.web.auth import SESSION_MAX_AGE, SessionClaims, effective_session_user, get_serializer
 from houses.web.broadcaster import register_client
 from houses.web.monthly_delta import attach as attach_monthly_delta
 from houses.web.settings_payload import SessionPersons, settings_payload
@@ -89,6 +91,25 @@ class _StalenessReport:
             d["error"] = self.error
         return d
 
+
+
+def _registered_properties() -> Iterable[PropertyNodes]:
+    """Every registered property — the skip-absent case lives here once
+    (list endpoints iterate; the per-endpoint None check is gone)."""
+    for rid in _registry_rids():
+        prop = _registry_property(rid)
+        if prop is None:
+            continue
+        yield prop
+
+
+def _require_property(rid: str) -> PropertyNodes:
+    """The registered property or a 404 — one absent-case handling for every
+    endpoint, instead of a per-endpoint None check."""
+    prop = _registry_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    return prop
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -156,9 +177,20 @@ def _require_family_member(request: Request) -> None:
     )
     if not session_user.get("is_superuser") and not view.session_name():
         raise HTTPException(status_code=403, detail="This account is not linked to a family member")
+@dataclass(frozen=True)
+class _WhatIfApplyJson:
+    """The what-if apply request body: the person updates to merge."""
 
+    persons: list
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _WhatIfApplyJson:
+        people = raw.get("persons")
+        return cls(persons=people if isinstance(people, list) else [])
 
 @api_router.post("/what-if/apply")
+# lucidlint: ignore record-shape the FastAPI request body IS the wire boundary — _WhatIfApplyJson.from_dict ingests it
+# at the network edge; the same shape tolerates any person-update subset inside the list (coding-standards.md)
 async def what_if_apply(body: dict, request: Request):
     """Apply what-if person values THROUGH THE DAG.
 
@@ -173,10 +205,9 @@ async def what_if_apply(body: dict, request: Request):
     the marker points before. No numbers are copied anywhere.
     """
     _require_family_member(request)
-    updates = body.get("persons")
+    updates = _WhatIfApplyJson.from_dict(body).persons
     if not isinstance(updates, list) or not updates:
         raise HTTPException(status_code=422, detail="persons required")
-
     svc = get_services()
     started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
     if not started:
@@ -332,7 +363,7 @@ def _walkability_score(walk_val: object) -> int:
     return _walk_score(int(val))
 
 
-def _score_from_summary(s: _SummaryJson) -> int:
+def _score_from_summary(s: SummaryJson) -> int:
     """Compute card score matching old ``card_data`` formula:
     green=2, orange=1, red=-1, muted=0, summed across 8 metrics.
     """
@@ -355,7 +386,7 @@ def _score_from_summary(s: _SummaryJson) -> int:
 
 # lucidlint: ignore record-shape the scrape attach IS the serialization boundary — the summary record
 # carries no scrape field (coding-standards.md)
-def _attach_scrape_state(summary: _SummaryJson | _PropertyJson, rid: str) -> dict:
+def _attach_scrape_state(summary: SummaryJson | PropertyJson, rid: str) -> dict:
     """Attach the property's REAL scrape-queue state to the summary wire
     dict, when a job exists — the card's honest states come from here,
     never a fake client-side timer. Wire-record at the serialization
@@ -372,14 +403,12 @@ def _attach_scrape_state(summary: _SummaryJson | _PropertyJson, rid: str) -> dic
 async def get_all_properties():
     results: dict[str, dict] = {}
     scores: dict[str, int] = {}
-    for rid in _registry_rids():
-        prop = _registry_property(rid)
-        if prop is None:
-            continue
+    for prop in _registered_properties():
+        rid = prop.rid
         # property_nodes.to_json_summary still returns the wire dict (its
         # record conversion is out of this wave's file set) — reconstruct
         # the record at the consumption boundary.
-        summary = _SummaryJson(**await prop.to_json_summary())
+        summary = SummaryJson(**await prop.to_json_summary())
         wire = _attach_scrape_state(summary, rid)
         await attach_monthly_delta(wire, rid, get_services().property_registry)
         results[rid] = wire
@@ -406,10 +435,8 @@ async def list_current_homes():
     """The family's CURRENT house(s) — properties marked status=current —
     so a person can link their settings home fields to the right one."""
     result: list[_CurrentHome] = []
-    for rid in _registry_rids():
-        prop = _registry_property(rid)
-        if prop is None:
-            continue
+    for prop in _registered_properties():
+        rid = prop.rid
         status = prop.comment_status.latest_attempt()
         if not status.succeeded or (status.value_or_none() or "").strip().lower() != "current":
             continue
@@ -421,18 +448,14 @@ async def list_current_homes():
 
 @api_router.get("/properties/{rid}")
 async def get_property(rid: str):
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    prop_json = _PropertyJson(**await prop.to_json())
+    prop = _require_property(rid)
+    prop_json = PropertyJson(**await prop.to_json())
     return _attach_scrape_state(prop_json, rid)
 
 
 @api_router.get("/properties/{rid}/detail")
 async def get_property_detail(rid: str):
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    prop = _require_property(rid)
     detail = await prop.to_json_detail()
     await attach_monthly_delta(detail, rid, get_services().property_registry)
     return detail
@@ -440,11 +463,8 @@ async def get_property_detail(rid: str):
 
 @api_router.patch("/properties/{rid}/address")
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
-# lucidlint: ignore latent-class FastAPI handler signatures — rid is a decorated path param and body the request body;
 async def patch_address(rid: str, body: dict):
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    prop = _require_property(rid)
 
     prop.corrected_address.push(body.get("address", ""), "user")
     # Recompute before responding — the frontend refetches the detail
@@ -455,9 +475,7 @@ async def patch_address(rid: str, body: dict):
 @api_router.patch("/properties/{rid}/location")
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_location(rid: str, body: dict):
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    prop = _require_property(rid)
     lat = body.get("lat")
     lon = body.get("lon")
     if lat is None or lon is None:
@@ -479,9 +497,7 @@ async def patch_council_tax(rid: str, body: dict):
     ``ignored`` — the detected second dwelling is unrelated; hide it and
     exclude its costs.
     """
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    prop = _require_property(rid)
 
     def _names(value) -> list[str]:
         if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
@@ -511,21 +527,28 @@ async def patch_council_tax(rid: str, body: dict):
 @api_router.patch("/properties/{rid}/triage")
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 async def patch_triage(rid: str, body: dict):
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    prop = _require_property(rid)
 
     def _apply_triage() -> None:
-        if "favourite" in body:
-            prop.favourite.push(bool(body["favourite"]), "user")
-        if "dismissed" in body:
-            prop.dismissed.push(bool(body["dismissed"]), "user")
-        if "is_viewed" in body:
-            prop.is_viewed.push(bool(body["is_viewed"]), "user")
-        if "user_notes" in body:
-            prop.user_notes.push(str(body["user_notes"]), "user")
-        if "triage_status" in body:
-            prop.triage_status.push(str(body["triage_status"]), "user")
+        # lucidlint: ignore record-shape field-name → coercer keyed dispatch table — variable subsets of the body,
+        # never a wire dict of its own (coding-standards.md)
+        coercers = {
+            "favourite": bool,
+            "dismissed": bool,
+            "is_viewed": bool,
+            "user_notes": str,
+            "triage_status": str,
+        }
+        nodes: dict[str, UserInputNode[Any]] = {
+            "favourite": prop.favourite,
+            "dismissed": prop.dismissed,
+            "is_viewed": prop.is_viewed,
+            "user_notes": prop.user_notes,
+            "triage_status": prop.triage_status,
+        }
+        for key, convert in coercers.items():
+            if key in body:
+                nodes[key].push(convert(body[key]), "user")
 
     _apply_triage()
     return {"status": "ok"}
@@ -539,9 +562,7 @@ async def get_property_comments(rid: str):
     its comments were migrated to this table long ago).
     """
     # Validate the property exists
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail="Property not found")
+    _require_property(rid)
     return get_comments(rid)
 
 
@@ -561,7 +582,7 @@ class CommentBody(BaseModel):
         return stripped
 
 
-def _comment_person(request: Request, session_user: _SessionClaims, svc) -> str:
+def _comment_person(request: Request, session_user: SessionClaims, svc) -> str:
     """Resolve the comment author — impersonation header for superusers,
     else the session email's linked person in settings."""
     impersonate = request.headers.get("X-Impersonate-Person", "")
@@ -597,15 +618,13 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
     Person is determined from the authenticated session, with optional
     X-Impersonate-Person header for superusers.
     """
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail="Property not found")
+    _require_property(rid)
     session_user = effective_session_user(request)
     if not session_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     svc = get_services()
-    person = _comment_person(request, _SessionClaims.from_dict(session_user), svc)
+    person = _comment_person(request, SessionClaims.from_dict(session_user), svc)
     return add_comment(rid, person, body.text)
 
 
@@ -706,22 +725,13 @@ def _parse_places_of_interest(pois: object) -> tuple:
     return tuple(normalized)
 
 
-def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = False) -> Person:
-    """MERGE an API dict into an existing Person — never replace.
+def _coerce_person_updates(
+    updates: MutableMapping[str, Any], target: Person, merge_destinations: bool
+) -> MutableMapping[str, Any]:
 
-    Only the fields present in the body change; every unmentioned field
-    keeps the target's value.  Replace semantics silently reset real data
-    (emails, walk penalties, flags) whenever a client sends a partial
-    body — that is exactly how the family emails were wiped.
-
-    ``merge_destinations``: merge ``places_of_interest`` BY LABEL — a
-    destination the body doesn't mention survives (a what-if scenario
-    only names the destinations it edits, and a partial panel copy must
-    never delete the rest of the household's destinations).  Without it,
-    the body's list replaces the tuple (the settings UI manages the full
-    destination list, where omission means removal).
-    """
-    updates = {k: v for k, v in d.items() if k != "thresholds"}
+    """Parse each present field with its own parser — the per-field guards
+    are a flat table of rules, extracted so _person_from_dict stays a
+    merge, not a parser."""
     for f in _PERSON_MONEY_FIELDS:
         if f in updates:
             updates[f] = _parse_money(updates[f], whole_pounds=f in _WHOLE_POUND_FIELDS, field=f)
@@ -746,6 +756,26 @@ def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = Fal
             updates["places_of_interest"] = merged + tuple(by_label.values())
         else:
             updates["places_of_interest"] = parsed
+    return updates
+
+def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = False) -> Person:
+    """MERGE an API dict into an existing Person — never replace.
+
+    Only the fields present in the body change; every unmentioned field
+    keeps the target's value.  Replace semantics silently reset real data
+    (emails, walk penalties, flags) whenever a client sends a partial
+    body — that is exactly how the family emails were wiped.
+
+    ``merge_destinations``: merge ``places_of_interest`` BY LABEL — a
+    destination the body doesn't mention survives (a what-if scenario
+    only names the destinations it edits, and a partial panel copy must
+    never delete the rest of the household's destinations).  Without it,
+    the body's list replaces the tuple (the settings UI manages the full
+    destination list, where omission means removal).
+    """
+    updates = _coerce_person_updates(
+        {k: v for k, v in d.items() if k != "thresholds"}, target, merge_destinations
+    )
     return replace(target, **updates)
 
 
@@ -855,9 +885,7 @@ async def patch_rental_income(
 
     Body: {"value": 1200} or {"value": null} to clear.
     """
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail="Property not found")
+    prop = _require_property(rid)
 
     value = body.get("value")
     if value is not None and not isinstance(value, (int, float)):
@@ -912,9 +940,7 @@ async def patch_works_estimate(
 
     Body: {"person": "Ashby", "value": 15000}
     """
-    prop = _registry_property(rid)
-    if prop is None:
-        raise HTTPException(status_code=404, detail="Property not found")
+    prop = _require_property(rid)
 
     person_name = body.get("person", "")
     _validate_works_person(person_name)
@@ -946,6 +972,7 @@ class _PersonSummary:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(name=self.name, email=self.email, is_child=self.is_child)
 
 
@@ -990,6 +1017,7 @@ class _SchedulerError:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(type=self.type, error=self.error)
 
 
@@ -1002,6 +1030,7 @@ class _QueueEntry:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(node_id=self.node_id, scheduled_at=self.scheduled_at)
 
 
@@ -1016,6 +1045,7 @@ class _SchedulerSnapshot:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(
             queue_size=self.queue_size,
             scheduled_count=self.scheduled_count,
@@ -1061,6 +1091,7 @@ class _TypeCount:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(type=self.type, count=self.count)
 
 
@@ -1073,6 +1104,7 @@ class _MemorySnapshot:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(
             total_objects=self.total_objects,
             top_types=[t.to_dict() for t in self.top_types],

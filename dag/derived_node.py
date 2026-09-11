@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 _CODE_VERSION_CACHE: dict[type, str] = {}
 _CODE_VERSION_EPOCH: int = 0
 
@@ -300,7 +299,6 @@ def _compute_code_version(node: DerivedNode) -> str:
     _CODE_VERSION_CACHE[cls] = digest
     # Bump the epoch whenever a NEW fingerprint is computed — the epoch
     # is the cheap 'did any code change since my last scan' signal.
-    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global _CODE_VERSION_EPOCH
     _CODE_VERSION_EPOCH += 1
     return digest
@@ -503,9 +501,12 @@ class DerivedNode(Node[T], Generic[T]):
         hidden behind a failed or unchosen dependency would otherwise keep
         its persisted result forever (see ``dag.regenerate.schedule_code_stale_nodes``).
         """
-        if self._deps_provider is not None:
-            return self._deps_provider()
-        return self._deps
+        # The two methods READ the same base fields; their divergence is the
+        # subclass OVERRIDE of _get_active_deps (11 nodes narrow there), which
+        # a traversal must NOT inherit — expressed here in the base's own terms
+        # so the walk never picks up a conditional node's narrowing.
+        provider, static = self._deps_provider, self._deps
+        return provider() if provider is not None else static
 
     @override
     def latest_attempt(self) -> Attempt:

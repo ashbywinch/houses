@@ -199,6 +199,7 @@ class TestNetworkFares:
         assert nf["product_type"] == "adult_day"
         assert "010a" in nf["covered_stops"]
 
+        # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
     def test_tariff_first_fare_zone_ref_only_pins_wire_shape(self):
         xml = XML.replace(
             '<Tariff id="t1">\n    <FareZoneRef ref="Z1"/>\n  </Tariff>',

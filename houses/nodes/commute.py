@@ -209,7 +209,7 @@ class _CommuteValueJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        
         return {**self.base, "is_child": self.is_child}
 
 
@@ -376,7 +376,9 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                 # Rename private _details field back to details for the frontend
                 if isinstance(value, dict) and "_details" in value:
                     value["details"] = value.pop("_details")
-            # lucidlint: ignore broad-except serialization failure nulls value; node still succeeds
+            
+            # lucidlint: ignore swallow serialization failure is surfaced by the logger and degrades to None —
+            # a broken custom node must not kill the whole to_json
             except Exception:
                 logger.exception("Failed to serialize commute value to JSON")
                 value = None

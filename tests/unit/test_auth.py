@@ -19,7 +19,10 @@ client = TestClient(app)
 class _FakeProperty:
     """Minimal property stand-in for auth tests that need a valid RID."""
 
-    __slots__ = ()
+    __slots__ = ("rid",)
+
+    def __init__(self, rid: str = "test-rid") -> None:
+        self.rid = rid
 
     async def to_json_summary(self) -> dict:
         return {}

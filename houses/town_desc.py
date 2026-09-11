@@ -12,7 +12,6 @@ from houses.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 _town_cache: dict[str, str] = {}
 
 
@@ -33,6 +32,7 @@ class _ChatMessage:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return {"role": self.role, "content": self.content}
 
 
@@ -47,6 +47,7 @@ class _ChatBody:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return {
             "model": self.model,
             "messages": [m.to_dict() for m in self.messages],

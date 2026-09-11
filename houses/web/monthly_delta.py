@@ -18,10 +18,49 @@ FastAPI imports so the wire shapes test as plain data.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 CURRENT_STATUS = "current"
+
+
+@dataclass(frozen=True)
+class _RawFigure:
+    """One raw DAG group figure ({value, stddev}), ingested at the edge."""
+
+    value: object
+    stddev: float
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> _RawFigure:
+        return cls(value=raw.get("value"), stddev=float(raw.get("stddev") or 0))
+
+
+def _as_figure(raw: object) -> _RawFigure | None:
+    """The ingested figure when *raw* is its dict shape, else None."""
+    return _RawFigure.from_dict(raw) if isinstance(raw, dict) else None
+
+
+def _figure_or_empty(raw: object) -> _RawFigure:
+    """The ingested figure — an empty one when *raw* is absent (mirrors the
+    historical ``or {}``: a missing couple figure serializes as "None")."""
+    figure = _as_figure(raw)
+    return figure if figure is not None else _RawFigure(value=None, stddev=0.0)
+
+
+@dataclass(frozen=True)
+class _FigureWire:
+    """One group figure as serialized: {value, approx} (wire shape)."""
+
+    value: str
+    approx: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return {"value": self.value, "approx": self.approx}
 
 
 @dataclass(frozen=True)
@@ -40,13 +79,14 @@ class MonthlyBaseline:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_wire(self) -> dict:
-        couple = self.group_value.get("couple") or {}
-        others = self.group_value.get("others")
+        couple = _figure_or_empty(self.group_value.get("couple"))
+        others = _as_figure(self.group_value.get("others"))
+        # lucidlint: ignore record-shape to_wire construction IS the serialization boundary (coding-standards.md)
         return {
             "rid": self.rid,
             "address": self.address,
-            "couple": _wire_figure(couple),
-            "others": _wire_figure(others) if isinstance(others, dict) and others.get("value") is not None else None,
+            "couple": _wire_figure(couple).to_dict(),
+            "others": _wire_figure_or_none(others),
             "others_rent_paid": self.others_rent_paid,
         }
 
@@ -55,14 +95,25 @@ def _figure_value(figure: object) -> object:
     """A group figure's amount — None when the figure is uncomputable."""
     return figure.get("value") if isinstance(figure, dict) else None
 
+def _wire_figure(figure: _RawFigure) -> _FigureWire:
+    return _FigureWire(value=str(figure.value), approx=_is_approx(figure))
 
-def _wire_figure(figure: dict) -> dict:
-    return {"value": str(figure.get("value")), "approx": _is_approx(figure)}
+
+# lucidlint: ignore record-shape the serialized figure dict IS the wire shape — {value, approx} owned by _FigureWire,
+# None when the figure is uncomputable (coding-standards.md)
+def _wire_figure_or_none(figure: _RawFigure | None) -> dict | None:
+    """The figure's serialized shape — None when it is uncomputable."""
+    if figure is None or figure.value is None:
+        return None
+    return _wire_figure(figure).to_dict()
 
 
-def _is_approx(figure: object) -> bool:
+
+
+
+def _is_approx(figure: _RawFigure) -> bool:
     """The figure carries uncertainty (nonzero stddev)."""
-    return isinstance(figure, dict) and float(figure.get("stddev") or 0) > 0
+    return figure.stddev > 0
 
 
 def _status_is_current(prop) -> bool:
@@ -112,36 +163,50 @@ def resolve_baseline(registry) -> MonthlyBaseline | None:
     )
 
 
-def _group_delta(own: object, base: object) -> dict | None:
+def _group_delta(own: _RawFigure | None, base: _RawFigure | None) -> _FigureWire | None:
     """One group's delta — null when EITHER side's figure is uncomputable."""
-    own_value, base_value = _figure_value(own), _figure_value(base)
-    if own_value is None or base_value is None:
+    if own is None or base is None or own.value is None or base.value is None:
         return None
-    delta = Decimal(str(own_value)) - Decimal(str(base_value))
-    return {"value": f"{delta:+.2f}", "approx": _is_approx(own) or _is_approx(base)}
+    delta = Decimal(str(own.value)) - Decimal(str(base.value))
+    return _FigureWire(value=f"{delta:+.2f}", approx=_is_approx(own) or _is_approx(base))
 
 
-def delta_vs_home(group_value: dict, baseline: MonthlyBaseline) -> dict:
-    """The per-group delta shape for one candidate's group figures."""
+@dataclass(frozen=True)
+class _GroupDeltasJson:
+    """The per-group delta block {couple, others} (wire shape)."""
+
+    couple: _FigureWire | None
+    others: _FigureWire | None
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+        return {
+            "couple": self.couple.to_dict() if self.couple is not None else None,
+            "others": self.others.to_dict() if self.others is not None else None,
+        }
+
+
+# lucidlint: ignore record-shape the per-group delta dict IS the wire shape — owned by _GroupDeltasJson; tests pin the
+# dict-returning signature (delta["couple"] indexing), so the record serializes at the boundary (coding-standards.md)
+def delta_vs_home(group_value: Mapping[str, object], baseline: MonthlyBaseline) -> dict:
+    """The per-group delta shape for one candidate's group figures.
+
+    ``group_value`` is the raw group-monthly-cost DAG value dict (couple and
+    others figures; the degenerate no-adults shapes omit the labels) — tests
+    pin the dict signature; the figures are ingested via ``_as_figure`` at
+    this edge.
+    """
     base = baseline.group_value
-    return {
-        "couple": _group_delta(group_value.get("couple"), base.get("couple")),
-        "others": _group_delta(group_value.get("others"), base.get("others")),
-    }
+    return _GroupDeltasJson(
+        couple=_group_delta(_as_figure(group_value.get("couple")), _as_figure(base.get("couple"))),
+        others=_group_delta(_as_figure(group_value.get("others")), _as_figure(base.get("others"))),
+    ).to_dict()
 
 
-def outcome_delta_vs_home(
-    group_value: dict, rid: str, baseline: MonthlyBaseline | None
-) -> dict | None:
-    """A what-if outcome's delta vs the REAL baseline (never the staged
-    hypothetical one) — null without a baseline or for the baseline
-    property itself."""
-    if baseline is None or rid == baseline.rid:
-        return None
-    return delta_vs_home(group_value, baseline)
-
-
-def _group_block(summary: dict) -> dict | None:
+# lucidlint: ignore record-shape the extracted group block IS part of the variable-keyed property payload — passthrough
+# of a wire subsection, not a fixed record shape of its own (coding-standards.md)
+def _group_block(summary: Mapping[str, object]) -> dict | None:
     """The ``{status, value, ...}`` group dict — top level on property
     summaries, under ``affordability`` on detail payloads."""
     group = summary.get("group_monthly_cost")
@@ -151,7 +216,9 @@ def _group_block(summary: dict) -> dict | None:
     return group if isinstance(group, dict) else None
 
 
-async def attach(summary: dict, rid: str, registry) -> dict:
+# summary is the variable-keyed property wire payload (see _group_block) — mutated and returned in place, no fixed
+# record exists across property states; the delta fields are attached at the serialization edge
+async def attach(summary: MutableMapping[str, Any], rid: str, registry) -> MutableMapping[str, Any]:
     """Attach the three monthly-delta fields to a summary or detail payload.
 
     Mutates and returns *summary*. The delta is inserted into a fresh copy

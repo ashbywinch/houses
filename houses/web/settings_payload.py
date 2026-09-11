@@ -93,7 +93,7 @@ class _HouseholdDepositJson:
 
 
 @dataclass(frozen=True)
-class _SettingsPayloadJson:
+class SettingsPayloadJson:
     """The settings document wire shape (GET /api/settings and the websocket push)."""
 
     persons: dict
@@ -211,7 +211,7 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
         if addr:
             item["home_property_address"] = addr
 
-async def settings_payload(session_user: dict | None = None) -> _SettingsPayloadJson:
+async def settings_payload(session_user: dict | None = None) -> SettingsPayloadJson:
     """The settings document: persons, financial aggregates, commute
     thresholds, the household deposit, and the what-if flag. Shared by
     the GET endpoint and the settings_updated websocket push, so both
@@ -233,7 +233,7 @@ async def settings_payload(session_user: dict | None = None) -> _SettingsPayload
     started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
 
     commute_thresholds = await svc.commute_thresholds_source.to_json()
-    return _SettingsPayloadJson(
+    return SettingsPayloadJson(
         persons=persons_json,
         financial=_FinancialJson(status="succeeded", value=aggregate_dict(svc.setting_nodes)),
         commute_thresholds=commute_thresholds,

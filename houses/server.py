@@ -307,6 +307,7 @@ class _DuplicateError:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(status=self.status, error=self.error)
 
 
@@ -578,6 +579,7 @@ class _ScrapeStatus:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(scrapes=dict(pending=self.pending, in_progress=self.in_progress, failed=self.failed))
 
 

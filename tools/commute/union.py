@@ -20,7 +20,6 @@ from tools.commute.tile import Grid, GridCell
 
 # unit directions: (dlat, dlon)
 N, S, E, W = (1, 0), (-1, 0), (0, 1), (0, -1)
-# lucidlint: ignore global-state static turn-left lookup table; never mutated
 _LEFT = {N: W, W: S, S: E, E: N}  # turn left from a direction
 COLLINEAR_EPSILON = 1e-9  # degree tolerance for treating outline points as collinear
 

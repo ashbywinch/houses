@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# lucidlint: ignore global-state statutory Band-D ratio table; never mutated (data, not state)
 # lucidlint: ignore record-shape statutory ratio table — data, not a record (review-log)
 BAND_RATIOS = {
     "A": 6 / 9,
@@ -48,7 +47,6 @@ HTTP_OK = 200
 
 def _reset():
     """Clear the cached council tax rates for test isolation."""
-    # lucidlint: ignore global-state deliberate test seam — isolation_fixtures calls _reset() to clear cached rates
     global _cached_rates
     _cached_rates = None
 
@@ -66,7 +64,6 @@ _RATE_ALIASES = {
 
 
 def _load_rates() -> dict[str, float]:
-    # lucidlint: ignore global-state lazy memo of the rates CSV; single writer _load_rates
     global _cached_rates
     if _cached_rates is not None:
         return _cached_rates
@@ -143,7 +140,7 @@ class _CivAccountRateJson:
 
     band_d_rate: float | None = None
 
-    # lucidlint: ignore record-shape from_dict parses the CivAccount API payload (coding-standards.md)
+    
     @classmethod
     def from_dict(cls, raw: dict) -> _CivAccountRateJson:
         return cls(band_d_rate=raw.get("band_d_rate"))
@@ -310,7 +307,7 @@ class _VoaRow:
             local_authority=self.local_authority,
         )
 
-    # lucidlint: ignore record-shape from_dict parses the cached VOA row (coding-standards.md)
+    
     @classmethod
     def from_dict(cls, raw: dict) -> _VoaRow:
         raw.setdefault("postcode", "")
@@ -535,16 +532,33 @@ def _collapse_exact_matches(matches: list[_VoaRow] | None, address: str) -> list
     return matches or []
 
 
+@dataclass(frozen=True)
+class _RowMatch:
+    """The unambiguous VOA row or the ambiguity reason — exactly one is set."""
+
+    row: _VoaRow | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class _RateLookup:
+    """The matched row's yearly cost plus its evidence URL and lookup error."""
+
+    yearly_cost: Money | None
+    evidence_url: str
+    lookup_error: str
+
+
 def _select_matched_row(
     matches: list[_VoaRow] | None,
     query: _PropertyRef,
-) -> tuple[_VoaRow | None, str | None]:
+) -> _RowMatch:
     """Reduce matches to one unambiguous row.
 
-    Returns (row, None) when the address identifies a single property, or
-    (None, reason) when it is ambiguous — the reason names the first two
-    addresses (sorted, deterministic) and the total count so the
-    provenance is actually troubleshooting-useful.
+    Returns ``_RowMatch(row, None)`` when the address identifies a single
+    property, or ``_RowMatch(None, reason)`` when it is ambiguous — the
+    reason names the first two addresses (sorted, deterministic) and the
+    total count so the provenance is actually troubleshooting-useful.
     """
     matches = _collapse_exact_matches(matches, query.address)
     unique_addresses = sorted({m.address for m in matches})
@@ -556,8 +570,9 @@ def _select_matched_row(
             query.postcode,
         )
         sample = ", ".join(repr(a) for a in unique_addresses[:2])
-        return None, f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
-    return matches[0], None
+        reason_msg = f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
+        return _RowMatch(row=None, reason=reason_msg)
+    return _RowMatch(row=matches[0], reason=None)
 
 
 def _is_letter_suffix_annexe(row_tokens: list[str], main_tokens: list[str]) -> bool:
@@ -617,13 +632,14 @@ def _lookup_matched_rate(
     matched: _VoaRow,
     rate_lookup: Callable[[str, str], Money | None],
     query: _PropertyRef,
-) -> tuple[Money | None, str, str]:
-    """(yearly cost, evidence URL, lookup error) for the matched row.
+) -> _RateLookup:
+    """The matched row's yearly cost, evidence URL and lookup error.
 
     The CivAccount WEBSITE has no /councils/<slug> pages (they 404 for
     every authority) — the API endpoint that actually serves the rate is
     the only working evidence link.
     """
+
     yearly_cost = None
     evidence_url = ""
     lookup_error = ""
@@ -637,7 +653,7 @@ def _lookup_matched_rate(
             lookup_error = f"no yearly rate found for {matched.local_authority}"
     else:
         logger.warning("No local authority found for %s postcode %s", query.building_id, query.postcode)
-    return yearly_cost, evidence_url, lookup_error
+    return _RateLookup(yearly_cost=yearly_cost, evidence_url=evidence_url, lookup_error=lookup_error)
 
 
 def _active_rows(results: list[_VoaRow]) -> list[_VoaRow]:
@@ -661,7 +677,6 @@ def _match_failure(matches: list[_VoaRow] | None, query: _PropertyRef) -> str | 
 
 
 
-# lucidlint: ignore latent-class state already explicit — after the _PropertyRef refactor only _find_annexe and
 async def lookup_council_tax(
     postcode: str,
     address: str = "",
@@ -714,21 +729,24 @@ async def lookup_council_tax(
     if failure is not None:
         return Attempt.impossible(failure)
 
-    matched, match_error = _select_matched_row(matches, query)
-    if match_error is not None or matched is None:
-        return Attempt.impossible(match_error or "no matching VOA property row")
+    selection = _select_matched_row(matches, query)
+    if selection.reason is not None or selection.row is None:
+        return Attempt.impossible(selection.reason or "no matching VOA property row")
 
+    matched = selection.row
     annexe = _find_annexe(active, matched, rate_lookup)
-    yearly_cost, evidence_url, lookup_error = _lookup_matched_rate(matched, rate_lookup, query)
+    rate = _lookup_matched_rate(matched, rate_lookup, query)
 
     return Attempt.succeeded(
         CouncilTaxInfo(
             band=matched.band,
-            yearly_cost=Measurement(yearly_cost, 0.0) if yearly_cost is not None else None,
-            evidence_url=evidence_url,
-            lookup_error=lookup_error,
+            yearly_cost=Measurement(rate.yearly_cost, 0.0) if rate.yearly_cost is not None else None,
+            evidence_url=rate.evidence_url,
+            lookup_error=rate.lookup_error,
             annexe=annexe,
         ),
     )
+
+
 
 

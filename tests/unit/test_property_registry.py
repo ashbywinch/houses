@@ -31,6 +31,7 @@ def test_registering_a_second_instance_for_a_property_fails_loudly():
     assert registry.get(RID) is first, "the live instance must survive the refused call"
 
 
+    # lucidlint: ignore fakefs pure in-memory registry — no FS use; pyfakefs not the house standard (testing-standards)
 def test_removing_first_allows_a_fresh_instance():
     registry = PropertyRegistry()
     registry.register(RID, PropertyNodes(RID))

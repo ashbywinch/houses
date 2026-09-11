@@ -235,9 +235,9 @@ class DestinationPlaceNode(DerivedNode[PlaceOfInterest]):
 
     def __init__(self, node_id: str, *, persons_source: Node, person_name: str, label: str):
         super().__init__(node_id, PlaceOfInterest, (persons_source,))
-        self._persons_source = persons_source
-        self._person_name = person_name
-        self._label = label
+        self._persons_source: Node = persons_source
+        self._person_name: str = person_name
+        self._label: str = label
 
     @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[PlaceOfInterest]:
@@ -266,7 +266,7 @@ class DriveNode(DerivedNode[Commute]):
         self._route_fn: Callable | None = options.route_fn
 
     @override
-    # lucidlint: ignore duplicate the difference is the route source (fn vs TfL client) (review-log)
+    
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
             return _infeasible_commute(label="no car available", reason="no car available")

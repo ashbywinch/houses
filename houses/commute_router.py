@@ -190,7 +190,7 @@ class _RouteAgencyJson:
 class RoutesPostClient(Protocol):
     """Structural type for the transport seam tests stub out."""
 
-    # lucidlint: ignore record-shape transport seam contract — the request body is the caller's
+    
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self, body: WirePayload, field_mask: str, *, options: GoogleRoutesOptions | None = None
@@ -236,7 +236,7 @@ class GoogleRoutesClient:
             body = resp.text[:1000]
             raise httpx.HTTPStatusError(f"{e} — {body}", request=e.request, response=e.response) from e
 
-    # lucidlint: ignore record-shape transport seam contract — the request body is the caller's
+    
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self,
@@ -260,7 +260,7 @@ class GoogleRoutesClient:
             "X-Goog-Api-Key": google_key,
             "X-Goog-FieldMask": field_mask,
         }
-        # lucidlint: ignore record-shape the seam materializes the caller's request record exactly once, at the
+        
         # transport edge; legacy raw-dict callers pass through unchanged (coding-standards.md)
         payload = body.to_dict() if hasattr(body, "to_dict") else body
         key = json.dumps(payload, sort_keys=True)
@@ -280,7 +280,6 @@ class GoogleRoutesClient:
 
 
 
-# lucidlint: ignore latent-class DI surface — every method hangs off the injected route/client fns, so no
 class CommuteRouter:
     """Aggregates all commute-routing logic: walk, transit, drive, and bus fallback."""
 

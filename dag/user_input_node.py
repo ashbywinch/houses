@@ -240,6 +240,8 @@ class UserInputNode(Node[T], Generic[T]):
         }
         submit_to_processor(lambda: self._apply_push(result_dict))
 
+    # lucidlint: ignore record-shape the node-result persist payload crosses the processor seam as a wire dict —
+    # serialization boundary (the value field is node-generic; _persist writes it verbatim) (coding-standards.md)
     def _apply_push(self, result_dict: dict[str, Any]) -> None:
         """The queued half of a push — persist the row and notify dependents.
 

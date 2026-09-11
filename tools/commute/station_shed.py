@@ -568,7 +568,6 @@ def _limit_stations(stations: list[Station], limit: int, out_path: Path) -> Limi
     return LimitedStations(stations, None)
 
 
-# lucidlint: ignore latent-class linear one-off batch main — offices is a stage input, not accumulated state; stages
 async def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the commutable-station shed (one-off TfL batch).")
     parser.add_argument("--csv", default=str(DEFAULT_CSV))

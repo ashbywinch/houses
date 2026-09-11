@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class _PropertyJson:
+class PropertyJson:
     """Wire shape of PropertyNodes.to_json."""
 
     rid: str
@@ -105,7 +105,7 @@ class _FreshnessJson:
 
 
 @dataclass(frozen=True)
-class _SummaryJson:
+class SummaryJson:
     """Wire shape of PropertyNodes.to_json_summary."""
 
     rid: str = ""
@@ -419,7 +419,7 @@ class PropertyNodes:
         self.commute_selectors: dict[str, DerivedNode] = {}
         self.commute_pois: dict[str, UserInputNode[str]] = {}
         self._build_commute_pipeline()
-        self.commute_breakdown = CommuteBreakdownNode(
+        self.commute_breakdown: CommuteBreakdownNode = CommuteBreakdownNode(
             f"{rid}/commute_breakdown",
             commute_selectors=self.commute_selectors,
             persons_source=self._svc.persons_source,
@@ -527,6 +527,8 @@ class PropertyNodes:
     # Empty-valid input defaults, kept next to the node definitions.
     # A new user-input node with an "empty is valid" semantic must be
     # registered here.
+    # lucidlint: ignore record-shape keyed dispatch table — node-attr name → empty-valid default maker, variable keys,
+    # never serialized (review-log style)
     _EMPTY_VALID_INPUT_DEFAULTS = {
         "comment_status": lambda: "",
         "comment_status_reason": lambda: "",
@@ -585,7 +587,7 @@ class PropertyNodes:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json(self) -> dict[str, Any]:
-        rec = _PropertyJson(
+        rec = PropertyJson(
             rid=self.rid,
             best_address=await self.best_address.to_json(),
             best_location=await self.best_location.to_json(),
@@ -657,7 +659,7 @@ class PropertyNodes:
             primary=_SchoolEntry(school=await self.primary_school.to_json_value()),
             secondary=_SchoolEntry(school=await self.secondary_school.to_json_value()),
         )
-        rec = _SummaryJson(
+        rec = SummaryJson(
             rid=self.rid,
             best_address=await self.best_address.to_json_value(),
             best_location=await self.best_location.to_json_value(),

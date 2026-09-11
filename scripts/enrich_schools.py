@@ -44,7 +44,6 @@ postcodes = sorted({r["Postcode"].strip().upper() for r in rows if r.get("Postco
 print(f"Unique postcodes to geocode: {len(postcodes)}")
 
 # Geocode in batches of 100
-# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 results: dict[str, tuple[float, float]] = {}
 batch_size = 100
 

@@ -55,7 +55,7 @@ class _JourneyParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the TfL query param shape (coding-standards.md)
+        
         # The API key is AUTH, not request identity: it is appended at the
         # httpx edge, so the cache key stays key-free (same shape the seam
         # previously derived by stripping app_key).
@@ -81,7 +81,7 @@ class _TubeFareParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the TfL query param shape (coding-standards.md)
+        
         # Falsy params are dropped — httpx drops them from the wire query, and
         # to_dict must mirror the wire so cache identities agree.
         return {k: v for k, v in {
@@ -292,7 +292,6 @@ class _TflApiError:
 
 
 # lucidlint: ignore record-shape static dispatch table mode-to-LegMode — keyed dispatch, not a record (review-log)
-# lucidlint: ignore global-state static TfL mode-name-to-LegMode mapping table; never mutated
 _MODE_MAP: dict[str, LegMode] = {
     "walking": LegMode.WALK,
     "tube": LegMode.TUBE,
@@ -362,7 +361,6 @@ def _tram_leg_label(clean_arr: str, duration: int, instr: str) -> str:
 
 
 # lucidlint: ignore record-shape static dispatch table mode → formatter callable; not a data record
-# lucidlint: ignore global-state static TfL mode-name → leg-label formatter table; never mutated
 _LEG_LABEL_FORMATTERS: dict[str, Callable[[str, int, str], str]] = {
     "tube": _tube_leg_label,
     "driving": _driving_leg_label,
@@ -406,7 +404,6 @@ class ParkingCostResult:
     cost_groups: list[CostGroup]
 
 
-# lucidlint: ignore latent-class all 19 methods share the TfL API surface; no field-disjoint split (review-log)
 class TflClient:
     """TfL API client for public-transit route planning in London.
 
@@ -712,7 +709,7 @@ class TflClient:
     # ── Internal fetch / process ─────────────────────────────────────
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+
 # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_with_retry(
         url: str, request: WirePayload, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
@@ -746,7 +743,7 @@ class TflClient:
         return None
 
     @staticmethod
-# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
+
     def _is_transient_error_body(entry: CacheEnvelope | _TflApiError) -> bool:
         """True for cached entries that are TRANSIENT error responses.
 
@@ -768,7 +765,7 @@ class TflClient:
         return False
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+
 # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_api_call(
         url: str, request: WirePayload, *, _client_factory: Callable | None = None
@@ -977,7 +974,7 @@ class TflClient:
             )
         )
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _geocode_fallback(self, request: WirePayload) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""

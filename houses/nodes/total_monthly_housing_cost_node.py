@@ -174,7 +174,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         *,
         config: HousingCostConfig,
     ):
-        self._config = config
+        self._config: HousingCostConfig = config
         self._annexe_payers_node: Node | None = config.annexe_payers_node
         self._annexe_ignored_node: Node | None = config.annexe_ignored_node
         self._council_tax_payers_node: Node | None = config.council_tax_payers_node
@@ -290,21 +290,20 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             if council_val is not None:
                 parts = []
                 if council_val.yearly_cost is not None:
-                    who = ", ".join(main_payers) or "all adults"
-                    amount = council_val.yearly_cost.value.amount
                     parts.append(
-                        f"main band {council_val.band or '?'}: £{amount}/yr, split across: {who}"
+                        _band_line(
+                            "main", council_val.band, council_val.yearly_cost.value.amount,
+                            ", ".join(main_payers) or "all adults", ignored=False,
+                        )
                     )
                 annexe = council_val.annexe
                 if annexe is not None and annexe.yearly_cost is not None:
-                    if ignored:
-                        parts.append("annexe excluded as unrelated")
-                    else:
-                        who = ", ".join(annexe_payers) or "all adults"
-                        amount = annexe.yearly_cost.value.amount
-                        parts.append(
-                            f"annexe band {annexe.band or '?'}: £{amount}/yr, split across: {who}"
+                    parts.append(
+                        _band_line(
+                            "annexe", annexe.band, annexe.yearly_cost.value.amount,
+                            ", ".join(annexe_payers) or "all adults", ignored=ignored,
                         )
+                    )
                 if parts:
                     line = "Council tax — " + "; ".join(parts)
                     prov.description = f"{prov.description} — {line}" if prov.description else line
@@ -314,6 +313,14 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
 MONTHS_PER_YEAR = 12
 SHARE_DECIMALS = 4
 
+
+
+def _band_line(label: str, band: str | None, amount: object, who: str, ignored: bool) -> str:
+    """One council-tax provenance line — the main bill and the annexe
+    share the shape; only the label and the ignored branch differ."""
+    if ignored:
+        return f"{label} excluded as unrelated"
+    return f"{label} band {band or '?'}: £{amount}/yr, split across: {who}"
 
 class _GroupCostCalculator:
     """Per-group monthly figures for the GroupMonthlyCostNode.
@@ -511,6 +518,7 @@ class _GroupBreakdownJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         d = dict(
             commutes=self.commutes,
             insurance=self.insurance,
@@ -539,6 +547,7 @@ class _GroupFigureJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(value=self.value, stddev=self.stddev)
 
 
@@ -556,6 +565,7 @@ class _GroupCostsJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
+        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(
             couple=self.couple.to_dict(),
             others=self.others.to_dict(),
