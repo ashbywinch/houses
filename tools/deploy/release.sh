@@ -98,6 +98,37 @@ if [ -n "${HOUSES_DIST_TARBALL:-}" ]; then
   mark "frontend dist unpacked into the standby (no on-box build)"
 fi
 
+# R6 — SHIP box tooling from the ref's own checkout. The deploy key is
+# command-restricted to release.sh/switch.sh (authorized_keys), so no scp/
+# install can ever reach /opt/houses or /etc/systemd — the release itself is
+# the only elevated path, by design. Install the ref's copies of the units,
+# watchdog, switch.sh and run-instance.sh, then reload + (re)enable.
+mark "shipping box tooling (units, watchdog, switch, run-instance)"
+install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-blue.service" /etc/systemd/system/
+install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-green.service" /etc/systemd/system/
+install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-network-watchdog.service" /etc/systemd/system/
+install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-network-watchdog.timer" /etc/systemd/system/
+install -m 0755 "$ROOT/$SIDE/tools/deploy/network-watchdog.sh" /opt/houses/network-watchdog.sh
+install -m 0755 "$ROOT/$SIDE/tools/deploy/switch.sh" /opt/houses/switch.sh
+install -m 0755 "$ROOT/$SIDE/tools/deploy/run-instance.sh" /opt/houses/run-instance.sh
+systemctl daemon-reload
+if grep -qi google /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
+  systemctl enable --now houses-network-watchdog.timer
+else
+  mark "box-setup: not a GCP guest — network watchdog NOT enabled"
+fi
+mark "box tooling shipped (switch.sh sha: $(sha256sum /opt/houses/switch.sh | cut -c1-16))"
+
+# R1 — the workflow pipes the CI-built dist on STDIN (scp is impossible:
+# the deploy key's command= allows only release.sh/switch.sh). Read it when
+# /dev/stdin is a pipe; unpack into the standby checkout so the boot skips
+# any on-box build. The env-tarball path above remains for manual use.
+if [ -p /dev/stdin ]; then
+  mkdir -p "$ROOT/$SIDE/houses/frontend"
+  tar -xzf - -C "$ROOT/$SIDE/houses/frontend"
+  mark "frontend dist unpacked from stdin (no on-box build)"
+fi
+
 # Snapshot the live DB into the standby's smoke copy — sqlite .backup is
 # consistent even with a live WAL writer. The standby then reads/writes its
 # OWN copy; the live DB is never touched by the standby.

@@ -107,44 +107,14 @@ jobs:
           tar -czf /tmp/houses-dist.tar.gz -C . dist
           echo "dist: $(du -h /tmp/houses-dist.tar.gz | cut -f1)"
 
-      - name: Ship box tooling (R6 — units, switch, run-instance, watchdog)
-        env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          # The box's /opt/houses copies are provision-time-frozen; the
-          # deploy payload must re-ship them so the NEXT switch/rollback runs
-          # the bounded release.sh-era switch (2026-09-07: the box's stale
-          # switch.sh still used the unbounded CLI .backup).
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          tar -czf /tmp/houses-tooling.tar.gz -C tools/deploy units network-watchdog.sh switch.sh run-instance.sh
-          scp -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-            /tmp/houses-tooling.tar.gz "$BOX_USER@$BOX_HOST:/tmp/houses-tooling.tar.gz"
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$BOX_HOST" '
-              set -eu
-              sudo rm -rf /opt/houses/tooling && sudo mkdir -p /opt/houses/tooling
-              sudo tar -xzf /tmp/houses-tooling.tar.gz -C /opt/houses/tooling
-              sudo install -m 0644 /opt/houses/tooling/units/houses-blue.service /etc/systemd/system/
-              sudo install -m 0644 /opt/houses/tooling/units/houses-green.service /etc/systemd/system/
-              sudo install -m 0644 /opt/houses/tooling/units/houses-network-watchdog.service /etc/systemd/system/
-              sudo install -m 0644 /opt/houses/tooling/units/houses-network-watchdog.timer /etc/systemd/system/
-              sudo install -m 0755 /opt/houses/tooling/network-watchdog.sh /opt/houses/network-watchdog.sh
-              sudo install -m 0755 /opt/houses/tooling/switch.sh /opt/houses/switch.sh
-              sudo install -m 0755 /opt/houses/tooling/run-instance.sh /opt/houses/run-instance.sh
-              sudo systemctl daemon-reload
-              if grep -qi google /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
-                sudo systemctl enable --now houses-network-watchdog.timer
-              else
-                echo "box-setup: not a GCP guest — network watchdog NOT enabled"
-              fi
-              sha256sum /opt/houses/switch.sh /opt/houses/run-instance.sh /opt/houses/network-watchdog.sh
-            '
-        timeout-minutes: 5
+      # NOTE: no "ship tooling" step here — the deploy key is
+      # command-restricted to `sudo /opt/houses/release.sh …` and
+      # `sudo /opt/houses/switch.sh` (authorized_keys), so scp/install can
+      # never reach the box. The release script itself (running as root)
+      # installs the ref's own units/watchdog/switch.sh/run-instance.sh —
+      # R6, inside the security model.
+
+
       - name: Deploy ref to standby and smoke-test it
         env:
           BOX_HOST: ${{ secrets.BOX_HOST }}
@@ -156,14 +126,17 @@ jobs:
           echo "Deploying $REF to the standby..."
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
-          scp -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-            /tmp/houses-dist.tar.gz "$BOX_USER@$BOX_HOST:/tmp/houses-dist.tar.gz"
-          # R4 — the whole release runs under a 15-minute envelope so a hang
-          # (2026-09-07: 90 min inside the DB snapshot) cannot leave the box
-          # mid-release for hours again.
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          # The dist rides the EXEC channel on stdin, not scp: the deploy
+          # key's command= allows only `sudo /opt/houses/release.sh <ref>`
+          # (and switch.sh) — release.sh reads /dev/stdin when it is a pipe.
+          # The remote command must stay exactly that shape: no local
+          # wrapper inside the quotes, or authorized_keys refuses it.
+          # R4 envelope: local timeout wraps ssh (900 s) on top of the
+          # step's 90-minute cap; release.sh's snapshot has its own 120 s
+          # deadline, so no stage can hang unbounded.
+          cat /tmp/houses-dist.tar.gz | timeout 900 ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$BOX_HOST" "timeout 900 sudo HOUSES_DIST_TARBALL=/tmp/houses-dist.tar.gz /opt/houses/release.sh $REF"
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh $REF"
         timeout-minutes: 90
 
       - name: Surface the box-side release log (best-effort)
@@ -202,30 +175,8 @@ jobs:
   rollback:
     if: inputs.action == 'rollback'
     runs-on: ubuntu-latest
+
     steps:
-      - name: Ship box tooling (R6 — the box's switch.sh is frozen at provision time)
-        env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          tar -czf /tmp/houses-tooling.tar.gz -C tools/deploy units network-watchdog.sh switch.sh run-instance.sh
-          scp -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-            /tmp/houses-tooling.tar.gz "$BOX_USER@$BOX_HOST:/tmp/houses-tooling.tar.gz"
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$BOX_HOST" '
-              set -eu
-              sudo rm -rf /opt/houses/tooling && sudo mkdir -p /opt/houses/tooling
-              sudo tar -xzf /tmp/houses-tooling.tar.gz -C /opt/houses/tooling
-              sudo install -m 0755 /opt/houses/tooling/switch.sh /opt/houses/switch.sh
-              sudo install -m 0755 /opt/houses/tooling/run-instance.sh /opt/houses/run-instance.sh
-              sudo systemctl daemon-reload
-            '
-        timeout-minutes: 5
       - name: Roll back to the previous side
         env:
           BOX_HOST: ${{ secrets.BOX_HOST }}
