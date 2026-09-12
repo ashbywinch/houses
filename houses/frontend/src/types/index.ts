@@ -67,6 +67,9 @@ export interface MoneyValue {
 export interface MonthlyDeltaSide {
   value: string
   approx: boolean
+  /** The derivation (candidate − baseline, both figures named) — the
+   *  vs-row's ⓘ renders this through the standard ProvenanceToggle. */
+  provenance?: Provenance
 }
 
 /** Per-group delta vs the current home; a group is null when either

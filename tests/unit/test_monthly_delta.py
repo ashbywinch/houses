@@ -115,16 +115,26 @@ class TestGroupDelta:
         from houses.web.monthly_delta import delta_vs_home
 
         delta = delta_vs_home(self.CANDIDATE, _baseline(self.BASELINE))
-        assert delta == {
-            "couple": {"value": "+1308.06", "approx": False},
-            "others": {"value": "-411.28", "approx": False},
-        }
+        for side, expected in (("couple", "+1308.06"), ("others", "-411.28")):
+            wire = delta[side]
+            assert wire["value"] == expected, wire
+            assert wire["approx"] is False, wire
+            # Each side carries its derivation for the standard ⓘ.
+            prov = wire["provenance"]
+            assert prov["label"] == "Monthly difference vs your home", prov
+            assert prov["formula"]["result"] == f"{expected}/mo", prov
+        assert [fl["value"] for fl in delta["couple"]["provenance"]["formula"]["lines"]] == [
+            "£3091.67/mo",
+            "£1783.61/mo",
+        ]
 
     def test_zero_delta_keeps_explicit_sign_and_two_dp(self):
         from houses.web.monthly_delta import delta_vs_home
 
         delta = delta_vs_home(self.CANDIDATE, _baseline(self.CANDIDATE))
-        assert delta["couple"] == {"value": "+0.00", "approx": False}
+        assert delta["couple"]["value"] == "+0.00"
+        assert delta["couple"]["approx"] is False
+        assert delta["couple"]["provenance"]["formula"]["result"] == "+0.00/mo"
 
     def test_approx_from_candidate_stddev(self):
         from houses.web.monthly_delta import delta_vs_home
@@ -148,14 +158,16 @@ class TestGroupDelta:
         candidate = {"couple": None, "others": {"value": "241.64", "stddev": 0.0}}
         delta = delta_vs_home(candidate, _baseline(self.BASELINE))
         assert delta["couple"] is None
-        assert delta["others"] == {"value": "-411.28", "approx": False}
+        assert delta["others"]["value"] == "-411.28"
+        assert delta["others"]["provenance"]["formula"]["result"] == "-411.28/mo"
 
     def test_baseline_group_uncomputable_gives_null_group(self):
         from houses.web.monthly_delta import delta_vs_home
 
         baseline = {"couple": {"value": "1783.61", "stddev": 0.0}, "others": None}
         delta = delta_vs_home(self.CANDIDATE, _baseline(baseline))
-        assert delta["couple"] == {"value": "+1308.06", "approx": False}
+        assert delta["couple"]["value"] == "+1308.06"
+        assert delta["couple"]["provenance"]["formula"]["result"] == "+1308.06/mo"
         assert delta["others"] is None
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
@@ -7,10 +8,62 @@ from typing import override
 
 from money import Money
 
-from dag.attempt import Attempt, Formula, FormulaLine
+from dag.attempt import Attempt, Formula, FormulaLine, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
 
+_FREQ_RE = re.compile(r"\d+x/wk · \d+ wks/yr")
+
+
+def _patch_commute_frequency(prov: Provenance, live: dict[tuple[str, str], tuple[int, int]]) -> None:
+    """Patch stale 'Nx/wk · M wks/yr' strings in per-commute subtrees.
+
+    Each final_fuel subtree is keyed '<rid>/<person>/<label>/final_fuel'
+    but the Provenance tree is keyed by node id without the rid — match
+    on the trailing '<person>/<label>/...' path. The breakdown's own
+    entries (from the live persons push) are the authority; the journey
+    chain's Commute.destination stamp is route-plan-time history.
+    Zero-trip destinations render WITHOUT a frequency suffix (matching
+    Commute.to_provenance_value, which omits it when trips/weeks is 0).
+    """
+
+    def patch(node: Provenance, person: str | None, label: str | None) -> None:
+        freq = live.get((person, label)) if person is not None and label is not None else None
+        if freq is not None and isinstance(node.value, str) and "to " + (label or "") in node.value:
+            trips, weeks = freq
+            fresh = f"{trips}x/wk · {weeks} wks/yr" if trips and weeks else ""
+            if _FREQ_RE.search(node.value):
+                patched = _FREQ_RE.sub(fresh, node.value).replace(" ·  · ", " · ")
+                node.value = patched[:-3] if patched.endswith(" · ") else patched
+            elif fresh and node.value and not node.value.endswith(fresh):
+                node.value = f"{node.value} · {fresh}"
+        for key, child in (node.sources or {}).items():
+            parts = key.split("/")
+            if len(parts) >= 3 and parts[-1] in (
+                "final_fuel",
+                "merge",
+                "commute",
+                "computed_transit",
+                "bus_augment",
+                "park_and_ride",
+                "drive",
+                "walk",
+                "tfl_no_bus",
+                "tfl_with_bus",
+                "rail_fare_if",
+            ):
+                patch(child, parts[-3], parts[-2])
+            else:
+                patch(child, person, label)
+
+    for key, child in (prov.sources or {}).items():
+        # Top-level keys are '<rid>/<person>/<label>/final_fuel' (plus the
+        # persons source): the label is the segment before final_fuel.
+        parts = key.split("/")
+        if len(parts) >= 3 and parts[-1] == "final_fuel":
+            patch(child, parts[-3], parts[-2])
+        else:
+            patch(child, None, None)
 
 @dataclass(frozen=True)
 class _CommuteEntryJson:
@@ -192,9 +245,29 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         The node VALUE stays the breakdown dict (the expression system
         reads yearly_total_gbp); only the provenance display value is
         swapped for the human figure.
+
+        The per-commute subtrees are ALSO re-derived here: the persisted
+        journey chain (selector → transit/walk/drive → merge → fuel)
+        re-prices on live inputs but carries the trips/weeks STAMPED at
+        route-plan time in Commute.destination. After a trips-only
+        what-if (Pimlico 1→0 days, live 90970053) the chain's own rows
+        still project 'to Pimlico · 1x/wk' while the aggregate prices
+        £0 — the value is right and its provenance text is stale. The
+        breakdown's own entries ARE the current trips (they come from
+        the live persons push), so patch each final_fuel subtree's
+        displayed Commute strings to the live frequency before
+        persisting. Re-planning is untouched: only the displayed
+        strings change, never the priced journeys.
         """
         prov = await super().build_provenance()
         v = self._attempt.value_or_none()
         if self._attempt.succeeded and isinstance(v, dict) and v.get("yearly_total_gbp") is not None:
             prov.value = f"£{Decimal(str(v['yearly_total_gbp'])):,.2f}/yr"
+        live = {
+            (name, c.get("label")): (c.get("trips_per_week", 0), c.get("weeks_per_year", 0))
+            for name, pv in ((v.get("persons") if isinstance(v, dict) else None) or {}).items()
+            for c in (pv.get("commutes") or ())
+        }
+        if live:
+            _patch_commute_frequency(prov, live)
         return prov
