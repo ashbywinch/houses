@@ -48,6 +48,13 @@ jobs:
     if: github.event_name == 'push' || inputs.action == 'deploy'
     runs-on: ubuntu-latest
     steps:
+      # The workspace starts EMPTY without a checkout — the Guard step only
+      # git-inits and fetches refs, so the frontend build below needs an
+      # explicit checkout of the ref being released (v1.4.0 deploy failed
+      # on `cd houses/frontend`).
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
       - name: Guard — released ref must be on main (tags) or explicitly dispatched
         env:
           REF: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
