@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # /opt/houses/switch.sh — flip the ACTIVE side, or roll back to the previous side.
 #
 # Usage:
@@ -20,6 +20,11 @@ set -eu
 ROOT="${HOUSES_ROOT:-/opt/houses}"
 ACTION="${1:-flip}"
 TS=$(date +%Y%m%d-%H%M%S)
+LOG_DIR="${HOUSES_LOG_DIR:-$ROOT/logs/releases}"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/switch-$(date +%Y%m%d-%H%M%S)-${ACTION##--}.log"
+exec > >(tee -a "$LOG") 2>&1
+mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "switch $*"; }
 
 CURRENT=$(cat "$ROOT/ACTIVE")
 
@@ -43,12 +48,13 @@ fi
 # Pre-flip snapshot: the rollback restore target (and belt-and-braces safety
 # net for the flip itself).
 SNAPSHOT="/var/backups/houses-pre-flip-$TS.db"
-echo "== pre-flip snapshot"
+mark "pre-flip snapshot"
 sudo mkdir -p /var/backups
-sudo sqlite3 "$ROOT/data/houses.db" ".backup '$SNAPSHOT'"
+sudo timeout 300 sqlite3 -cmd '.timeout 30000' "$ROOT/data/houses.db" ".backup '$SNAPSHOT'" \
+    || { mark "pre-flip snapshot timed out — aborting flip (live DB untouched)"; exit 1; }
 sudo chmod 600 "$SNAPSHOT"
 
-echo "== stopping $OLD"
+mark "stopping $OLD"
 sudo systemctl stop "houses-$OLD"
 
 # Rollback also restores the newest pre-flip snapshot BEFORE the old side
@@ -73,7 +79,7 @@ fi
 echo "$NEW" > "$ROOT/ACTIVE"
 echo "$OLD" > "$ROOT/PREVIOUS"
 
-echo "== restarting $NEW on the live DB"
+mark "restarting $NEW on the live DB"
 # restart, not start: the standby has been RUNNING (as the smoke target
 # on the smoke DB + :8766) — `start` would no-op and the unit would keep
 # its stale environment.  A restart makes run-instance.sh re-read ACTIVE
@@ -85,7 +91,8 @@ for i in $(seq 1 60); do
   sleep 2
 done
 curl -fsS --max-time 3 "localhost:$PORT/health" >/dev/null 2>&1 || {
-  echo "switch: $NEW not healthy on :$PORT — rolling back" >&2
+  mark "switch: $NEW not healthy on :$PORT — rolling back"
+    journalctl -u "houses-$NEW" --since="5 minutes ago" --no-pager 2>/dev/null | tail -30 || true
   sudo systemctl stop "houses-$NEW" || true
   echo "$OLD" > "$ROOT/ACTIVE"
   sudo cp "$SNAPSHOT" "$ROOT/data/houses.db"
@@ -104,7 +111,7 @@ MAIN_HOST=$(grep '^HOUSES_MAIN_HOST=' /etc/houses.env 2>/dev/null | head -1 | cu
 MAIN_HOST=${MAIN_HOST:-houses.blueumbrella.net}
 echo "== verifying https://$MAIN_HOST (best-effort)"
 if curl -fsS --max-time 8 "https://$MAIN_HOST/health" >/dev/null 2>&1; then
-  echo "== live on $NEW: https://$MAIN_HOST (pre-flip snapshot $SNAPSHOT)"
+  mark "live on $NEW: https://$MAIN_HOST (pre-flip snapshot $SNAPSHOT)"
 else
   echo "WARNING: https check failed — the app is up locally; check the DNS A record and Caddy's cert state (journalctl -u caddy)."
 fi
