@@ -1,0 +1,10 @@
+# /etc/systemd/system/houses-network-watchdog.service — one-shot check of the
+# guest network (see houses-network-watchdog.timer for the cadence, and
+# tools/deploy/network-watchdog.sh for the logic).
+[Unit]
+Description=Houses network watchdog (reboot if the guest loses networking)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/houses/network-watchdog.sh

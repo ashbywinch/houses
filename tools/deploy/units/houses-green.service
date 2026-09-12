@@ -5,13 +5,28 @@
 Description=Houses app (green instance)
 After=network-online.target houses-chrome.service
 Wants=network-online.target
+# R3 (2026-09-07 incident): stop a crash-loop instead of rebuilding forever.
+# Restart=always + no cap let one bad run hammer the box for 13 hours.
+StartLimitIntervalSec=600
+StartLimitBurst=20
 
 [Service]
 User=ubuntu
 WorkingDirectory=/opt/houses/green
+# Secrets come from a root-only env file (chmod 600 — a systemd unit file is
+# world-readable, so never put secrets in Environment= lines here). Must be
+# STRICT KEY=VALUE: no quotes, no export, no $ references.
 EnvironmentFile=/etc/houses.env
 ExecStart=/bin/sh /opt/houses/run-instance.sh green
-Restart=always
+# R3 — memory containment: one runaway process must kill THIS unit, never the
+# guest. Without caps, the 2026-09-07 global OOM reaped the standby's node AND
+# the guest's networking — prod down four days while the VM reported RUNNING.
+MemoryHigh=384M
+MemoryMax=512M
+# The app must never be the kernel's first OOM candidate.
+OOMScoreAdjust=-800
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

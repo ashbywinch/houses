@@ -126,10 +126,10 @@ echo "$NEW" > "$ROOT/ACTIVE"
 echo "$OLD" > "$ROOT/PREVIOUS"
 
 mark "restarting $NEW on the live DB"
-# restart, not start: the standby has been RUNNING (as the smoke target
-# on the smoke DB + :8766) — `start` would no-op and the unit would keep
-# its stale environment.  A restart makes run-instance.sh re-read ACTIVE
-# (live DB + :8765).
+# restart, not start: the standby may be running (pre-2026-09-12 releases
+# left it warm) or stopped (R2: ephemeral) — `start` would no-op on a
+# running unit and the unit would keep its stale environment. A restart
+# makes run-instance.sh re-read ACTIVE (live DB + :8765) either way.
 sudo systemctl restart "houses-$NEW"
 PORT=8765  # the new ACTIVE side binds 8765 (role-based ports)
 for i in $(seq 1 60); do
