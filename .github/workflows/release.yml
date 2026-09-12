@@ -76,7 +76,14 @@ jobs:
             # unreviewed deploy; fail it (see docs/deploy-discipline.md).
             echo "Tag push — verifying $REF is reachable from main..."
             git init -q .
-            git remote add origin "https://github.com/${{ github.repository }}.git"
+            # actions/checkout already created origin (v1.4.1 deploy failed
+            # on `git remote add: remote origin already exists`) — be
+            # idempotent instead of assuming an empty workspace.
+            if git remote get-url origin >/dev/null 2>&1; then
+              git remote set-url origin "https://github.com/${{ github.repository }}.git"
+            else
+              git remote add origin "https://github.com/${{ github.repository }}.git"
+            fi
             git fetch -q --filter=blob:none origin \
               "+refs/heads/main:refs/remotes/origin/main" \
               "+refs/tags/$REF:refs/tags/$REF"
