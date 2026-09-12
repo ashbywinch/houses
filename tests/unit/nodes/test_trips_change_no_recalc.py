@@ -90,31 +90,43 @@ def _journey_snapshot(rid: str) -> dict:
 
 
 @pytest.fixture()
-def replan_tripwire():
-    """Tripwires on THIS test's four planner computes: a full recompute
-    (the re-plan path through the live APIs) trips them; a re-stamp
-    (cached legs, live POI stamp) does not. Per-node, so cross-test
-    registry leakage cannot pollute the count — the global planner is
-    shared process-wide and other tests' chains re-plan on every push.
+def replan_tripwire(monkeypatch):
+    """No more API calls: count the route-planner seam during the drain.
+
+    The planner nodes refresh through the normal cascade (best_location
+    re-persists on every persons push, so they ARE scheduled — that is
+    the library working as designed). The reuse gate inside compute
+    must skip the route call: the counters stay at zero. Scoped by
+    destination address to THIS test's POIs, so cross-test registry
+    leakage cannot pollute the count.
     """
-    trips: dict[str, int] = {}
+    from houses.services_provider import get_services as _gs
 
-    def _arm(node, name: str) -> None:
-        real_compute = node.compute
+    calls: dict[str, int] = {}
+    planner = _gs().route_planner
+    real_walk = type(planner).walk_route
+    real_drive = type(planner).drive_route
+    mine = ("Pimlico Rd, London", "Bracknell Rd, London", "Dad Rd, London")
 
-        async def _counting(*a, **k):
-            trips[name] = trips.get(name, 0) + 1
-            return await real_compute(*a, **k)
+    async def _walk(self, loc, dest, *a, **k):
+        if dest in mine:
+            calls["walk"] = calls.get("walk", 0) + 1
+        return await real_walk(self, loc, dest, *a, **k)
 
-        node.compute = _counting.__get__(node, type(node))
+    async def _drive(self, loc, dest, *a, **k):
+        if dest in mine:
+            calls["drive"] = calls.get("drive", 0) + 1
+        return await real_drive(self, loc, dest, *a, **k)
 
-    return trips, _arm
+    monkeypatch.setattr(type(planner), "walk_route", _walk)
+    monkeypatch.setattr(type(planner), "drive_route", _drive)
+    return calls
 
 
 def test_trips_only_change_makes_no_api_calls(replan_tripwire):
     from houses.geopoint import GeoPoint
 
-    trips, arm = replan_tripwire
+    trips = replan_tripwire
     get_services().persons_source.push(_persons(1), "user")
     rid = "42424246"
     prop = PropertyNodes(rid)
@@ -143,19 +155,10 @@ def test_trips_only_change_makes_no_api_calls(replan_tripwire):
     priced = {k: v for k, v in before.items() if v[0] is not None}
     assert priced, f"premise: some journeys priced, got {before}"
 
-    # Arm the tripwires AFTER the seed drain: only the trips-edit drain
-    # may trip them. Walk + drive plan through the fake (re-plan is a
-    # real API-shaped call); the TfL legs are impossible in unit tests
-    # (the _NoPlanTflClient returns impossible without planning — there
-    # is no plan call to count), so the tripwires cover the two legs
-    # that CAN re-plan.
-    sched = get_scheduler()
-    for sub in ("walk", "drive"):
-        node = sched.registered_nodes().get(f"{rid}/Simon/Pimlico/{sub}")
-        assert node is not None, f"premise: Pimlico/{sub} pipeline exists"
-        arm(node, sub)
-
     # THE EDIT: only Pimlico's days per week changes — nothing else.
+    # Reset the counters: the seed drain legitimately planned. Only the
+    # trips-edit drain must make zero calls.
+    trips.clear()
     get_services().persons_source.push(_persons(3), "user")
     flush_all()
 
@@ -173,6 +176,10 @@ def test_trips_only_change_makes_no_api_calls(replan_tripwire):
             assert after[k][1] == 3, f"{k} stamp did not follow the live POI: {after}"
         else:
             assert after[k] == before[k], f"untouched {k} changed: {before} -> {after}"
-    # And no planner compute ran during the drain — the re-stamp path
-    # touches cached legs only.
-    assert trips == {}, f"a trips-only change re-ran planner computes: {trips}"
+    # And the route planner was never called for this test's POIs —
+    # the reuse gate served the cached legs with the live stamp. (The
+    # TfL legs are impossible in unit tests, so walk+drive are the
+    # legs that CAN re-plan — and did not.)
+    assert trips.get("walk", 0) == 0 and trips.get("drive", 0) == 0, (
+        f"a trips-only change made route calls: {trips}"
+    )
