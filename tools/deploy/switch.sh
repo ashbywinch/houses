@@ -72,11 +72,15 @@ except sqlite3.OperationalError:
     pass
 dst = sqlite3.connect(out)
 deadline = time.monotonic() + 120
-try:
-    src.backup(dst, pages=1000, progress=lambda *_a, **_k: True if time.monotonic() > deadline else None)
-    # The callback-abort can return silently on a small copy — enforce the
-    # deadline AFTER as the contract, and sanity-check the copy is real.
+aborted = [False]
+def _progress(*_a, **_k):
     if time.monotonic() > deadline:
+        aborted[0] = True
+        return 1  # abort
+    return 0
+try:
+    src.backup(dst, pages=1000, progress=_progress)
+    if aborted[0]:
         sys.exit("backup exceeded the deadline")
     rows = dst.execute("SELECT count(*) FROM node_results").fetchone()[0]
     if rows == 0:
@@ -87,6 +91,7 @@ except sqlite3.OperationalError as e:
 finally:
     dst.close()
     src.close()
+
 
 PY
 if ! sudo "$ROOT/$CURRENT/.venv/bin/python" "$BACKUP_PY" "$ROOT/data/houses.db" "$SNAPSHOT"; then
