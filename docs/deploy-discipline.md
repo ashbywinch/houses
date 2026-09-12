@@ -180,12 +180,18 @@ Until the next release, a rollback runs the box's older `switch.sh`
 
 ### Forward-release order
 
-1. Land R1–R6 in the repo (Makefile skip path, `release.sh` cleanup +
-   gate + envelope, unit/watchdog templates, workflow shipping) + tests.
-2. Verify locally: the skip-build boot path and a dry release against a
-   copy of the standby layout.
-3. Tag `v1.4.0` → the hardened pipeline does: ship tooling → bounded
-   snapshot → start standby (no build) → smoke → **stop standby**.
+1. Landed R1–R6 in the repo + tests (PRs #106–#112).
+2. Verified locally: the skip-build boot path, the stdin dist protocol both
+   ways, the FIFO teardown order, the `dash -n` parse.
+3. **Shipped 2026-09-12: `v1.4.6` deployed through the hardened pipeline +
+   switch → prod on green (`85583a1`). New `/health` reads
+   `{status, db, last_write}` with a fresh write timestamp; box memory
+   right after the flip: 424 MiB free.**
+4. Four pipeline bugs found and fixed in-release (`v1.4.0` missing
+   checkout, `v1.4.1` non-idempotent guard, `v1.4.2` scp vs the
+   command-restricted key, `v1.4.3` bash-only process substitution,
+   `v1.4.4` FIFO teardown order, `v1.4.5` low-memory gate refusal) —
+   each caught by a guardrail, none touched prod.
 4. Switch dispatch → prod on current main with the `/health` db/last-write
    probe and release logs. Watch `/health` and box CPU until the
    first-boot cascade converges (Sep-5 precedent: ~1 h).
