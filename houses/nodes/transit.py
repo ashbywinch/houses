@@ -24,26 +24,72 @@ from houses.tfl_client import TflRouteOptions
 def _with_destination(
     result: Attempt[Commute],
     poi: PlaceOfInterest | str | None,
+    origin: GeoPoint | str | None = None,
 ) -> Attempt[Commute]:
     """Patch the full destination POI (label + trips/weeks) onto a route
     result — the route planners only know the address, so without this
     the provenance would lose the destination entirely.  A bare str poi
     (the address the route was planned against) is NOT patched: a string
-    has no place in the destination field."""
+    has no place in the destination field. The planned origin rides
+    along so a later refresh can tell an address-identical re-plan
+    from a genuinely new journey — it lives on the value, in the DAG,
+    not in node memory."""
     if poi is None or not result.succeeded or isinstance(poi, str):
         return result
     val = result.value_or_none()
 # lucidlint: ignore special-case sentinel handling is the contract here
     if val is None:
         return result
-    return Attempt.succeeded(replace(val, destination=poi))
-
+    stamped = _origin_key(origin) if origin is not None else val.origin
+    return Attempt.succeeded(replace(val, destination=poi, origin=stamped))
 
 def _with_poi_destination(commute: Commute, poi: PlaceOfInterest | None) -> Commute:
     """Patch the full destination POI onto a plain Commute."""
     if poi is None:
         return commute
     return replace(commute, destination=poi)
+
+
+def _origin_key(loc: GeoPoint | str) -> str:
+    """The origin as the route planners see it — coordinates or address."""
+    return loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
+
+def _reusable_journey(
+    attempt: Attempt[Commute],
+    location: Attempt[GeoPoint],
+    poi: Attempt[PlaceOfInterest],
+) -> Commute | None:
+    """The cached journey with the live POI re-stamped — or None.
+
+    A route depends on the origin + destination ADDRESS only. When the
+    cached journey was planned for the same address pair, the legs are
+    reused verbatim and only the destination stamp (label/trips/weeks)
+    is refreshed from the live POI — no route call, fresh value,
+    fresh provenance downstream. Any other change (new address, new
+    origin, no cached journey, infeasible result) returns None and the
+    caller plans normally.
+
+    Both inputs come from the DAG dep attempts the caller already
+    holds — nothing is stored on the side. The planned origin lives
+    on the value itself (Commute.origin), so it survives restarts,
+    unlike node-instance memory.
+    """
+    if attempt.pending or attempt.impossible:
+        return None
+    cached = attempt.value_or_none()
+    if cached is None or cached.infeasible:
+        return None
+    poi_val = poi.value_or_none()
+    if not isinstance(poi_val, PlaceOfInterest):
+        return None
+    if cached.destination.address != poi_val.address:
+        return None
+    loc_val = location.value_or_none()
+    if loc_val is None:
+        return None
+    if not cached.origin or cached.origin != _origin_key(loc_val):
+        return None
+    return replace(cached, destination=poi_val)
 
 
 def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
@@ -215,12 +261,17 @@ class WalkNode(DerivedNode[Commute]):
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
+        # The route depends on the ADDRESS only — a trips/weeks-only
+        # change reuses the cached legs with the live POI re-stamped
+        # (no route call, fresh value, fresh provenance downstream).
+        cached = _reusable_journey(self._attempt, location, poi)
+        if cached is not None:
+            return Attempt.succeeded(cached)
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest, self._max_walk)
         else:
-
             result = await get_services().route_planner.walk_route(loc, dest, self._max_walk)
-        return _with_destination(result, poi_val)
+        return _with_destination(result, poi_val, loc)
 
 
 class DestinationPlaceNode(DerivedNode[PlaceOfInterest]):
@@ -266,7 +317,6 @@ class DriveNode(DerivedNode[Commute]):
         self._route_fn: Callable | None = options.route_fn
 
     @override
-    
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
             return _infeasible_commute(label="no car available", reason="no car available")
@@ -277,6 +327,11 @@ class DriveNode(DerivedNode[Commute]):
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
+        # Same address-only reuse as WalkNode — the congestion gate
+        # below re-evaluates against the CURRENT address every refresh.
+        cached = _reusable_journey(self._attempt, location, poi)
+        if cached is not None:
+            return Attempt.succeeded(cached)
         # Congestion-charge gate (DAG-owned): resolve the destination's
         # outcode — from the address when it carries a postcode, else by
         # geocoding and reverse-looking-up the nearest postcode — and
@@ -309,11 +364,10 @@ class DriveNode(DerivedNode[Commute]):
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest)
         else:
-
             result = await get_services().route_planner.drive_route(loc, dest)
         # The destination is read from the LIVE poi dep, so the label and
         # frequency in provenance follow the current destination.
-        return _with_destination(result, poi_val)
+        return _with_destination(result, poi_val, loc)
 
 
 class TflTransitNode(DerivedNode[Commute]):
@@ -353,6 +407,11 @@ class TflTransitNode(DerivedNode[Commute]):
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
+        # Same address-only reuse — the TfL legs are cached, the live
+        # POI re-stamps the destination with no API call.
+        cached = _reusable_journey(self._attempt, location, poi)
+        if cached is not None:
+            return Attempt.succeeded(cached)
 
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
@@ -374,7 +433,7 @@ class TflTransitNode(DerivedNode[Commute]):
         else:
             result = await client.plan()
         self._last_no_route_detail = client._no_route_detail
-        return _with_destination(result, poi_val)
+        return _with_destination(result, poi_val, loc)
 
     @override
     async def build_provenance(self) -> Provenance:

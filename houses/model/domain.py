@@ -48,10 +48,19 @@ class PlaceOfInterest:
 
     def to_provenance_value(self) -> str:
         """User-friendly projection for provenance display: where the
-        destination is, not a raw field dump."""
-        if self.address:
-            return f"{self.label} — {self.address}"
-        return self.label
+        destination is, plus the commute frequency when it is zero.
+
+        A 0-days destination is NOT commuted — the breakdown prices it
+        at £0 by the multiplication — so the projection must say so:
+        a bare "Pimlico — <address>" in the persons tree reads as a
+        live destination and contradicts the £0 total (live 90970053).
+        Non-zero frequencies stay address-only (the journey chain
+        already states them; no duplication).
+        """
+        base = f"{self.label} — {self.address}" if self.address else self.label
+        if self.trips_per_week == 0 or self.weeks_per_year == 0:
+            return f"{base} · 0 days/week (not commuted)"
+        return base
 
 
 @dataclass(frozen=True)
@@ -224,6 +233,13 @@ class Commute:
     is_child: bool = False
     infeasible: bool = False
     no_route_reason: str = ""
+    # The origin the journey was planned from (the property's location
+    # at plan time). A route depends on origin + destination ADDRESS
+    # only: when a refresh finds the same address pair, the cached
+    # legs are reused with the live POI re-stamped — no route call.
+    # None means unplanned (legacy rows, infeasible results) — the
+    # caller plans normally.
+    origin: str = ""
 
     def to_provenance_value(self) -> str:
         """Human summary for provenance display — ONE canonical structure
@@ -232,11 +248,10 @@ class Commute:
         destination PlaceOfInterest (label + trips/weeks) so the tree
         always shows where and how often (guarded by
         test_commute_provenance_values_all_carry_destination).
-        The frequency is CURRENT by construction: the destination flows
-        through a live node fed by the persons source, so a what-if or
-        settings change re-prices it — provenance is never staler than
-        its value.  Full leg-by-leg details live in the formula, not
-        here.
+        The destination is re-stamped from the live POI dep on every
+        refresh (trips-only changes included) — the journey legs are
+        cached, the stamp is not.  Full leg-by-leg details live in the
+        formula, not here.
 
         An unknown fare is omitted rather than shown as £0.00/day: the
         transit step has not seen the fare yet (the rail step adds it

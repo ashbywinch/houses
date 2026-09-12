@@ -518,7 +518,15 @@ class DerivedNode(Node[T], Generic[T]):
 
     def _on_dep_changed(self) -> None:
         self._retry_count = 0
-        if not self._is_stale():
+        # The re-stamp gate is checked on the SIGNAL path, not just in
+        # refresh: a trips-only dep write emits changed while the
+        # dependent's timestamps still compare "fresh" (same-tick
+        # persistence makes dep._persisted_at <= self._computed_at), so
+        # _is_stale() is False and nothing would ever schedule the
+        # re-stamp — the provenance text would freeze at route-plan
+        # time (live 90970053). A node whose stamp disagrees with its
+        # live POI is scheduled even when not classically stale.
+        if not self._is_stale() and not self._restamp_needed():
             return
         get_scheduler().schedule(self)
 
@@ -567,6 +575,23 @@ class DerivedNode(Node[T], Generic[T]):
                 if stored and dep._db_created_at != stored:
                     return True
         return False
+
+    def _restamp_needed(self) -> bool:
+        """Whether a trips/frequency-only dep change needs a re-stamp.
+
+        Default: never — the base staleness rules decide. Journey nodes
+        (the commute chain) override this: their route/API inputs are
+        cached by design (a trips-only change must never re-plan), but
+        the destination STAMP on the cached value must follow the live
+        POI, or the provenance text freezes at route-plan time (live
+        90970053). A re-stamp refreshes the stamp, persists a fresh row,
+        and rebuilds the provenance — no API calls.
+        """
+        return False
+
+    async def _restamp_refresh(self) -> None:
+        """Refresh by re-stamping only — overridden with _restamp_needed."""
+        raise NotImplementedError(f"{self._id}: _restamp_needed without _restamp_refresh")
 
     @override
     async def attempt(self) -> Attempt[T]:
@@ -683,6 +708,12 @@ class DerivedNode(Node[T], Generic[T]):
         explicit full recomputes (admin regenerate).
         """
         assert_mutation_allowed()  # refresh mutates _attempt — processor thread only
+        # The re-stamp gate runs FIRST: a trips-only change makes the
+        # node classically stale too (dep persisted later), but the full
+        # recompute would re-plan through the live APIs. The re-stamp
+        # refreshes the stamp on cached legs with zero calls.
+        if not force and self._restamp_needed():
+            return await self._restamp_refresh()
         if not force and not self._is_stale():
             return
         active_deps = self._get_active_deps()

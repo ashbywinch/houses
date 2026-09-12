@@ -703,3 +703,43 @@ describe('PropertyList — what-if mode', () => {
     expect(wrapper.text()).toContain('£1,500/mo')
   })
 })
+
+describe('PropertyList — controls row never clips on narrow screens (defect 2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData)
+  })
+
+  async function mountList() {
+    setActivePinia(createPinia())
+    const wrapper = mount(PropertyList, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('keeps the count visible: the row wraps and pills shrink with ellipsis', async () => {
+    const wrapper = await mountList()
+    const row = wrapper.find('.controls-row')
+    expect(row.exists()).toBe(true)
+    // The sort pill carries the longest label; the count must still render.
+    expect(wrapper.find('.count-text').exists()).toBe(true)
+    expect(wrapper.find('.count-text').text()).toMatch(/found|saved/)
+  })
+
+  it('declares the wrap contract in the stylesheet (no nowrap row)', () => {
+    // jsdom has no layout engine, so assert the CSS contract directly:
+    // the row must wrap, pills must shrink, the count must not clip.
+    // ?raw bundles the co-located stylesheet as text (vite feature).
+    const css = NarrowStylesCss
+    const rowBlock = css.match(/\.controls-row\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(rowBlock).toContain('flex-wrap: wrap')
+    const pillBlock = css.match(/\.pill\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(pillBlock).toContain('min-width: 0')
+    const countBlock = css.match(/\.count-text\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(countBlock).toContain('flex-shrink: 0')
+  })
+})
+
+// The narrow-screen contract lives in CSS, which jsdom cannot lay out —
+// bundle the co-located stylesheet as text and assert against it.
+import NarrowStylesCss from '../PropertyList.vue?raw'
