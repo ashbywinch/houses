@@ -234,9 +234,18 @@ mark "snapshot ok ($(du -h "$ROOT/$SIDE-smoke.db" | cut -f1))"
 # R4 — pre-flight memory gate: never start the standby on a starved box
 # (the 2026-09-07 OOM was a second stack starting beside an already-busy
 # live side on 953 MiB). The standby needs ~300 MiB; demand 450 free.
+# Remedy first: systemctl restart the LIVE side (drops any leaked
+# growth — v1.4.5 refused at 280 MiB while the live side held 475),
+# re-check once; refuse only if the box is genuinely too small.
 FREE_MB=$(awk '/MemAvailable/ { print int($2 / 1024) }' /proc/meminfo)
 if [ "$FREE_MB" -lt 450 ]; then
-  mark "refusing to start standby: only ${FREE_MB} MiB free (need >= 450)"
+  mark "only ${FREE_MB} MiB free — restarting the live side to reclaim leaked memory"
+  systemctl restart "houses-$ACTIVE" || { mark "live-side restart failed — refusing the release"; exit 1; }
+  sleep 15
+  FREE_MB=$(awk '/MemAvailable/ { print int($2 / 1024) }' /proc/meminfo)
+fi
+if [ "$FREE_MB" -lt 450 ]; then
+  mark "refusing to start standby: only ${FREE_MB} MiB free after the live restart (need >= 450)"
   exit 1
 fi
 mark "memory pre-flight ok (${FREE_MB} MiB free)"
