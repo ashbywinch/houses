@@ -49,6 +49,9 @@ FIFO="$LOG_DIR/.tee-$$"
 mkfifo "$FIFO"
 tee -a "$LOG" < "$FIFO" &
 TEE_PID=$!
+# Preserve the ORIGINAL stderr (fd 9) before redirecting: cleanup must be
+# able to restore a working output after closing the transcript FIFO.
+exec 9>&2
 exec > "$FIFO" 2>&1
 # Arm the cleanup immediately: the FIFO/tee must be reaped even if a step
 # between here and the standby logic fails. (Re-armed after the re-exec.)
@@ -92,9 +95,9 @@ fi
 # smoke DB is what OOM-killed the 953 MiB e2-micro). The switch starts the
 # new side cold, so nothing needs the standby warm.
 cleanup() {
-  # Reap the transcript FIFO + tee before anything else (armed early, so
-  # this also covers a failure before the standby is even considered).
-  rm -f "${FIFO:-}" 2>/dev/null || true
+  exec 1>&9 2>&9 2>/dev/null || true
+  exec 9>&- 2>/dev/null || true
+  { rm -f "${FIFO:-}"; } 2>/dev/null || true
   [ -n "${TEE_PID:-}" ] && kill "$TEE_PID" 2>/dev/null || true
   # Review (PR #106): guard a bad/empty ACTIVE marker — under set -u an
   # unbound $SIDE would error inside the trap. A failed unit is inactive,
