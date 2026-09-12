@@ -73,3 +73,35 @@ Key reads:
 Marker files on the box: `ACTIVE` (live side), `PREVIOUS` (last flip),
 `SMOKE_READY` (standby smoke passed), `<side>-revision` (checked-out
 commit). Pre-flip DB snapshots accumulate in `/var/backups/houses-pre-flip-*.db`.
+
+## Why the DB copy used to hang — and the contract now
+
+`sqlite3 .backup` in the CLI runs the sqlite backup API but its own retry
+loop is `while rc==BUSY||LOCKED: sleep(250ms)` — **the `.timeout` busy
+handler does NOT govern `.backup`**. One persistently-busy source means an
+unbounded wait; on 2026-09-07 that was a 90-minute silent hang inside the
+live-DB snapshot. WAL makes it worse in a subtle way: a backup of a WAL
+database only sees what a checkpoint has applied — a `:mode=ro` connection
+cannot checkpoint, so the copy silently returns a stale/empty database
+(verified empirically: 0 rows). The release scripts now apply the safe
+pattern:
+
+1. **Write-capable connection** (a read-only one cannot checkpoint the WAL;
+   the checkpoint only normalizes WAL -> main, it changes no data).
+2. `PRAGMA wal_checkpoint(PASSIVE)` — never blocks a writer — so the copy
+   includes the WAL's content.
+3. The backup API with `pages=1000` and a **hard 120s deadline** enforced
+   both by the progress callback AND after the copy (a small copy can
+   complete past the callback), so the release can NEVER wait unbounded on
+   the live DB.
+4. The smoke copy is sanity-checked (`node_results` must contain rows) —
+   a stale or empty standby refuses to pass.
+
+## Release log retention
+
+`/opt/houses/logs/releases/` keeps the newest 32 runs of each of
+`release-*` and `switch-*`; older files are deleted by the scripts at the
+end of every successful run. journald's own size cap applies to the
+`houses-release` tag (systemd default: 10% of the volume / 4 weeks — raise
+`SystemMaxUse` in `/etc/systemd/journald.conf.d/` if a box needs more
+history).

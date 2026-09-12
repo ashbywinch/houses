@@ -26,6 +26,14 @@ LOG="$LOG_DIR/switch-$(date +%Y%m%d-%H%M%S)-${ACTION##--}.log"
 exec > >(tee -a "$LOG") 2>&1
 mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "switch $*"; }
 
+prune_logs() {
+  local keep="${1:-32}"
+  find "$LOG_DIR" -maxdepth 1 -name '*.log' -type f \
+    | sort -r \
+    | tail -n +"$((keep + 1))" \
+    | xargs -r rm -f
+}
+
 CURRENT=$(cat "$ROOT/ACTIVE")
 
 if [ "$ACTION" = "--rollback" ]; then
@@ -50,10 +58,48 @@ fi
 SNAPSHOT="/var/backups/houses-pre-flip-$TS.db"
 mark "pre-flip snapshot"
 sudo mkdir -p /var/backups
-sudo timeout 300 sqlite3 -cmd '.timeout 30000' "$ROOT/data/houses.db" ".backup '$SNAPSHOT'" \
-    || { mark "pre-flip snapshot timed out — aborting flip (live DB untouched)"; exit 1; }
-sudo chmod 600 "$SNAPSHOT"
+# Bounded backup API (never the CLI's .backup): the flip must never wait
+# unbounded on the live DB for its snapshot.
+BACKUP_PY=$(mktemp "$ROOT/.backup-XXXXXX.py")
+sudo chown ubuntu:ubuntu "$BACKUP_PY"
+sudo sh -c "cat > '$BACKUP_PY'" <<'PY'
+import sqlite3, sys, time
+live, out = sys.argv[1], sys.argv[2]
+src = sqlite3.connect(live, timeout=5)  # write-capable: a PASSIVE checkpoint must apply the WAL for the copy to include it
+try:
+    src.execute("PRAGMA wal_checkpoint(PASSIVE)")
+except sqlite3.OperationalError:
+    pass
+dst = sqlite3.connect(out)
+deadline = time.monotonic() + 120
+aborted = [False]
+def _progress(*_a, **_k):
+    if time.monotonic() > deadline:
+        aborted[0] = True
+        return 1  # abort
+    return 0
+try:
+    src.backup(dst, pages=1000, progress=_progress)
+    if aborted[0]:
+        sys.exit("backup exceeded the deadline")
+    rows = dst.execute("SELECT count(*) FROM node_results").fetchone()[0]
+    if rows == 0:
+        sys.exit("snapshot copy has no node_results rows — refusing a stale/empty standby")
+    print(f"snapshot ok: {rows} rows in node_results")
+except sqlite3.OperationalError as e:
+    sys.exit(f"backup failed within the deadline: {e}")
+finally:
+    dst.close()
+    src.close()
 
+
+PY
+if ! sudo "$ROOT/$CURRENT/.venv/bin/python" "$BACKUP_PY" "$ROOT/data/houses.db" "$SNAPSHOT"; then
+  rm -f "$BACKUP_PY"
+  mark "pre-flip snapshot failed within the deadline — aborting flip (live DB untouched)"
+  exit 1
+fi
+rm -f "$BACKUP_PY"
 mark "stopping $OLD"
 sudo systemctl stop "houses-$OLD"
 
@@ -111,7 +157,8 @@ MAIN_HOST=$(grep '^HOUSES_MAIN_HOST=' /etc/houses.env 2>/dev/null | head -1 | cu
 MAIN_HOST=${MAIN_HOST:-houses.blueumbrella.net}
 echo "== verifying https://$MAIN_HOST (best-effort)"
 if curl -fsS --max-time 8 "https://$MAIN_HOST/health" >/dev/null 2>&1; then
-  mark "live on $NEW: https://$MAIN_HOST (pre-flip snapshot $SNAPSHOT)"
+  prune_logs
+mark "live on $NEW: https://$MAIN_HOST (pre-flip snapshot $SNAPSHOT)"
 else
   echo "WARNING: https check failed — the app is up locally; check the DNS A record and Caddy's cert state (journalctl -u caddy)."
 fi
