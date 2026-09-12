@@ -213,11 +213,11 @@ print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", 
 echo "== smoke: /health"
 curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"'
 
-echo "== smoke: /api/properties/all"
+echo "== smoke: /api/properties/all (>= 1 house record)"
 ALL=$(curl -fsS --max-time 1800 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all")
 RIDS=$(echo "$ALL" | "$ROOT/$SIDE/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("properties", d)))' 2>/dev/null || echo 0)
-echo "   properties served: $RIDS"
-[ "$RIDS" -gt 0 ] || { echo "release: smoke /api/properties/all returned no properties" >&2; exit 1; }
+echo "   house records served: $RIDS"
+[ "$RIDS" -gt 0 ] || { echo "release: smoke /api/properties/all returned no house records" >&2; exit 1; }
 
 echo "== smoke: a property detail with commutes"
 RID=$(echo "$ALL" | "$ROOT/$SIDE/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); ps=d.get("properties", d); print(sorted(ps)[-1] if isinstance(ps, dict) else ps[0]["rid"])' 2>/dev/null || echo "")
@@ -225,8 +225,14 @@ if [ -n "$RID" ]; then
   curl -fsS --max-time 900 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/$RID/detail" >/dev/null
 fi
 
-echo "== smoke: frontend index"
-curl -fsS --max-time 10 "localhost:$PORT/" | grep -qi "<!doctype html\|<html"
+echo "== smoke: frontend index (HTTP 200 + HTML)"
+INDEX_FILE=$(mktemp "/tmp/houses-smoke-index-XXXXXX.html")
+F_HTTP=$(curl -sS --max-time 10 -o "$INDEX_FILE" -w "%{http_code}" "localhost:$PORT/")
+echo "   frontend HTTP $F_HTTP"
+[ "$F_HTTP" = "200" ] || { echo "release: smoke frontend returned HTTP $F_HTTP (need 200)" >&2; rm -f "$INDEX_FILE"; exit 1; }
+grep -qi "<!doctype html\|<html" "$INDEX_FILE" || { echo "release: smoke frontend returned 200 but no HTML body" >&2; rm -f "$INDEX_FILE"; exit 1; }
+echo "   frontend html ok ($(wc -c < "$INDEX_FILE") bytes)"
+rm -f "$INDEX_FILE"
 
 echo "== smoke: scrape-queue health (worker liveness)"
 STATUS=$(curl -fsS --max-time 10 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/scrapes/status" || echo '{"scrapes":{}}')
