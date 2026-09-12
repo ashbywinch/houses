@@ -15,6 +15,15 @@
 # to a killed ssh — the box log now carries the evidence either way).
 set -eu
 
+# The box's provision-time stub re-execs this script with POSIX `sh`
+# (`exec sh "$ROOT/$SIDE/tools/deploy/release.sh" "$REF"`) — but this
+# script needs bash (process-substitution tee, local, [ -p ]). If we are
+# not under bash, re-exec ourselves properly; v1.4.3 died on the box with
+# `Syntax error: redirection unexpected` at line 33 otherwise.
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
 ROOT="${HOUSES_ROOT:-/opt/houses}"
 REF="${1:?usage: release.sh <git-ref>}"
 LOG_DIR="${HOUSES_LOG_DIR:-$ROOT/logs/releases}"
@@ -29,9 +38,21 @@ esac
 PORT=8766  # the standby (this release target) always binds 8766 (role-based ports)
 
 LOG="$LOG_DIR/$(date +%Y%m%d-%H%M%S)-${REF}-${SIDE}.log"
-# Keep the box-side transcript even if the CI ssh dies mid-release.
-exec > >(tee -a "$LOG") 2>&1
 mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "$SIDE $*"; }
+
+# Keep the box-side transcript even if the CI ssh dies mid-release.
+# POSIX-safe: the box's provision-time stub re-execs this script with `sh`,
+# and dash parses the whole file before executing — process substitution
+# `>(tee …)` is a PARSE ERROR under sh (v1.4.3: `Syntax error: redirection
+# unexpected`). A named pipe + background tee is the sh-compatible form.
+FIFO="$LOG_DIR/.tee-$$"
+mkfifo "$FIFO"
+tee -a "$LOG" < "$FIFO" &
+TEE_PID=$!
+exec > "$FIFO" 2>&1
+# Arm the cleanup immediately: the FIFO/tee must be reaped even if a step
+# between here and the standby logic fails. (Re-armed after the re-exec.)
+trap cleanup EXIT
 
 # Housekeeping: the release logs must not grow unbounded on the box
 # (each run writes a few KB, but many failed runs of the same ref can
@@ -71,6 +92,10 @@ fi
 # smoke DB is what OOM-killed the 953 MiB e2-micro). The switch starts the
 # new side cold, so nothing needs the standby warm.
 cleanup() {
+  # Reap the transcript FIFO + tee before anything else (armed early, so
+  # this also covers a failure before the standby is even considered).
+  rm -f "${FIFO:-}" 2>/dev/null || true
+  [ -n "${TEE_PID:-}" ] && kill "$TEE_PID" 2>/dev/null || true
   # Review (PR #106): guard a bad/empty ACTIVE marker — under set -u an
   # unbound $SIDE would error inside the trap. A failed unit is inactive,
   # so is-active already covers the "nothing to stop" case.
