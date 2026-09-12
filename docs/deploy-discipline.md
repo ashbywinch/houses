@@ -49,3 +49,27 @@ broken verification environment is a blocker to fix, never a waiver.
 When the user reports a failure, inspect logs, queues, and service state
 before responding. Never explain a failure with an unverified assumption
 (the answer is usually one `journalctl` or status check away).
+
+## Diagnosing a failed or stalled release
+
+The box keeps the evidence even when the GitHub ssh dies mid-release
+(2026-09-07: a deploy hung inside the live-DB snapshot for the full
+90-minute CI budget and its output died with the ssh). Every step of
+`release.sh` and `switch.sh` mirrors to:
+
+- `/opt/houses/logs/releases/*.log` — the full transcript, one file per
+  run (`release-<ts>-<ref>-<side>.log`, `switch-<ts>-<action>.log`).
+- journald with tag `houses-release` — `journalctl -t houses-release`.
+
+Key reads:
+
+| What happened | Where to look |
+|---|---|
+| `release: snapshot attempt N failed or timed out` + a `live DB state:` line | writer contention on the live DB — the log carries the ACTIVE side's journald tail + `lsof` as evidence |
+| ssh connect timeout in CI (exit 255) | the box is unreachable on 22 — the GitHub job now fails in ~20s, and the box-side log step reports `/opt/houses/logs/releases/` unreadable |
+| standby not healthy after restart | `journalctl -u houses-<side> --since="5 minutes ago"`, plus the `-revision` marker (`/opt/houses/<side>-revision`) to confirm what got checked out |
+| `/health` body | now `{status, db, last_write}` — a stalled database shows `db:"error"` or a stale `last_write`, never a bare "ok" |
+
+Marker files on the box: `ACTIVE` (live side), `PREVIOUS` (last flip),
+`SMOKE_READY` (standby smoke passed), `<side>-revision` (checked-out
+commit). Pre-flip DB snapshots accumulate in `/var/backups/houses-pre-flip-*.db`.

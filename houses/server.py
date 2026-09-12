@@ -676,4 +676,22 @@ async def remove_property(rid: str) -> JSONResponse:
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    return JSONResponse(content={"status": "ok"})
+    """Liveness AND DB-readiness in one probe.
+
+    The release pipeline gates on this endpoint; a DB that is stalled or
+    locked (a release snapshot holds read locks on the live WAL) must not
+    read "ok".  The probe is one indexed MAX on the cached connection —
+    cheap enough for the health loop, and it makes a write-stall visible
+    at a glance (last_write goes stale).
+    """
+    db, last_write = "ok", ""
+    try:
+        from houses.database import get_connection
+
+        row = get_connection().execute(
+            "SELECT MAX(created_at) AS last_write FROM node_results"
+        ).fetchone()
+        last_write = row["last_write"] or "" if row is not None else ""
+    except Exception:  # lucidlint: ignore broad-except boundary — a health probe never takes the app down
+        db = "error"
+    return JSONResponse(content={"status": "ok", "db": db, "last_write": last_write})

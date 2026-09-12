@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # /opt/houses/release.sh — deploy a git ref to the STANDBY, snapshot the live
 # DB into the standby's smoke copy, start it, and smoke-test it. The live
 # side is untouched; nothing here writes the live DB.
@@ -7,10 +7,18 @@
 #
 # Exit non-zero on any failure so CI fails loudly. Safe to re-run: an
 # interrupted release restarts from the standby state.
+#
+# EVERY step is mirrored to /opt/houses/logs/releases/<ts>-<ref>-<side>.log
+# and to journald (tag houses-release): a failed or stalled release must be
+# diagnosable from the box alone, even when the GitHub ssh dies (2026-09-07:
+# a deploy hung inside the DB snapshot for 90 minutes with its output lost
+# to a killed ssh — the box log now carries the evidence either way).
 set -eu
 
 ROOT="${HOUSES_ROOT:-/opt/houses}"
 REF="${1:?usage: release.sh <git-ref>}"
+LOG_DIR="${HOUSES_LOG_DIR:-$ROOT/logs/releases}"
+mkdir -p "$LOG_DIR"
 
 ACTIVE=$(cat "$ROOT/ACTIVE")
 case "$ACTIVE" in
@@ -20,7 +28,12 @@ case "$ACTIVE" in
 esac
 PORT=8766  # the standby (this release target) always binds 8766 (role-based ports)
 
-echo "== release '$REF' -> $SIDE (standby; active=$ACTIVE)"
+LOG="$LOG_DIR/$(date +%Y%m%d-%H%M%S)-${REF}-${SIDE}.log"
+# Keep the box-side transcript even if the CI ssh dies mid-release.
+exec > >(tee -a "$LOG") 2>&1
+mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "$SIDE $*"; }
+
+mark "release '$REF' -> $SIDE (standby; active=$ACTIVE)"
 
 cd "$ROOT/$SIDE"
 git fetch --tags --force origin
@@ -47,24 +60,38 @@ sudo -u ubuntu -H /home/ubuntu/.local/bin/uv sync
 # Snapshot the live DB into the standby's smoke copy — sqlite .backup is
 # consistent even with a live WAL writer. The standby then reads/writes its
 # OWN copy; the live DB is never touched by the standby.
-echo "== snapshot live DB -> $SIDE smoke copy"
+mark "snapshot live DB -> $SIDE smoke copy"
+# Evidence first: writer activity on the live DB — the exact state that can
+# stall a backup — recorded before the lock is requested.
+mark "live DB state: $(ls -la "$ROOT/data/houses.db"* 2>/dev/null | tr '
+' ';')"
+journalctl -u "houses-$ACTIVE" --since="10 minutes ago" --no-pager 2>/dev/null | tail -15 | logger -t houses-release -s "$SIDE snapshot-writer-evidence >&2" || true
 # A live writer (the eager evaluator persisting a cascade) can hold the
-# lock — wait through contention instead of failing the release.
+# lock — wait through contention instead of failing the release. The hard
+# 300s cap guarantees the deploy cannot hang the CI budget silently again
+# (2026-09-07: 90-min silent hang here).
 snapshot_ok=0
 for i in 1 2 3 4 5; do
-  if sqlite3 -cmd '.timeout 30000' "$ROOT/data/houses.db" ".backup '$ROOT/$SIDE-smoke.db'"; then
+  if timeout 300 sqlite3 -cmd '.timeout 30000' "$ROOT/data/houses.db" ".backup '$ROOT/$SIDE-smoke.db'"; then
     snapshot_ok=1
     break
   fi
-  echo "release: snapshot attempt $i failed (locked?) — retrying" >&2
+  mark "snapshot attempt $i failed or timed out (locked?) — retrying"
   sleep 10
 done
-[ "$snapshot_ok" = 1 ] || { echo "release: could not snapshot the live DB" >&2; exit 1; }
+if [ "$snapshot_ok" != 1 ]; then
+  mark "could not snapshot the live DB — writer evidence:"
+  journalctl -u "houses-$ACTIVE" --since="20 minutes ago" --no-pager 2>/dev/null | tail -40 || true
+  lsof "$ROOT/data/houses.db" 2>/dev/null | head -20 || true
+  exit 1
+fi
 chmod 600 "$ROOT/$SIDE-smoke.db"
 # release.sh runs as root (sudo), but the app unit runs as ubuntu — a
 # root-owned 600 file is unopenable by the standby (PR #68 review).
 chown ubuntu:ubuntu "$ROOT/$SIDE-smoke.db"
+mark "snapshot ok ($(du -h "$ROOT/$SIDE-smoke.db" | cut -f1))"
 
+mark "restarting houses-$SIDE"
 systemctl restart "houses-$SIDE"
 
 # Wait for health on the standby port.  A first boot recomputes every
@@ -79,7 +106,7 @@ curl -fsS --max-time 30 "localhost:$PORT/health" >/dev/null 2>&1 || {
   systemctl status "houses-$SIDE" --no-pager | tail -20 || true
   exit 1
 }
-echo "== standby healthy on :$PORT"
+mark "standby healthy on :$PORT"
 
 # ── authenticated smoke checks (the standby is a full prod replica) ────────
 # The session secret is root-only in /etc/houses.env; mint a superuser cookie
@@ -120,5 +147,5 @@ if [ "$PENDING" -gt 0 ]; then
   echo "WARNING: $PENDING scrape job(s) pending — the LAN scrape worker may be down (journalctl -u houses-scrape-worker on the LAN machine)."
 fi
 
-echo "== release ready: smoke at http://localhost:$PORT (public: https://houses-smoke.blueumbrella.net)"
+mark "release ready: smoke at http://localhost:$PORT (public: https://houses-smoke.blueumbrella.net)"
 echo "$SIDE" > "$ROOT/SMOKE_READY"

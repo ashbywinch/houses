@@ -94,8 +94,24 @@ jobs:
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh $REF"
         timeout-minutes: 90
+
+      - name: Surface the box-side release log (best-effort)
+        if: failure()
+        env:
+          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        run: |
+          set +e
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "$BOX_USER@$BOX_HOST" "sudo sh -c 'tail -80 \$(ls -t /opt/houses/logs/releases/*.log 2>/dev/null | head -1) 2>/dev/null || echo no release log yet'" \
+            || echo "box unreachable — the release log is on the box at /opt/houses/logs/releases/"
+        timeout-minutes: 3
 
   switch:
     if: inputs.action == 'switch'
@@ -111,6 +127,7 @@ jobs:
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh"
         timeout-minutes: 20
 
@@ -128,5 +145,6 @@ jobs:
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --rollback"
         timeout-minutes: 20
