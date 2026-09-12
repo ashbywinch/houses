@@ -155,7 +155,7 @@ When `compute()` changes such that old persisted results are semantically invali
 
 ## Wiring rules
 
-Six ways to wire a calculation into the graph so that it stops working. Each
+Seven ways to wire a calculation into the graph so that it stops working. Each
 rule is a prohibition; the check beside it catches a regression.
 
 | Never | What it causes | Check |
@@ -166,6 +166,7 @@ rule is a prohibition; the check beside it catches a regression.
 | Explain a value outside its provenance | debugging by guesswork, and no evidence for the next reader | a failed value's provenance names the failure |
 | Show implementation names to the user | the reader cannot act on the message | no node id, class name or Python identifier in a user-facing payload |
 | Write the calculation twice, in code and in prose | a second, untested implementation that drifts | review finding |
+| Store derived state outside the value | restarts lose it, persistence cannot see it, a second source of truth | the value carries everything `compute` needs beyond its dep attempts |
 
 ### Never copy a dependency's value into a node
 
@@ -279,6 +280,26 @@ it into one node per calculation.
 
 **Check:** review — a provenance description encoding thresholds or branches
 that also exist in `compute()` is a finding.
+
+### Never store derived state outside the value
+
+`compute` reads its dep attempts and returns a value; anything else it
+needs (which origin it planned from, which revision it saw) lives ON
+the value, never in node-instance memory (`self._last_*`,
+`self._planned_*`, module caches). Instance memory is lost on
+restart, invisible to persistence, and unreadable to provenance —
+a second source of truth beside the DAG.
+
+```python
+# ✗ the origin lives beside the DAG: restarts re-plan, tests cannot see it
+self._planned_origin = loc
+# ✓ the origin rides the value: attempts, persistence and provenance carry it
+replace(val, destination=poi, origin=_origin_key(loc))
+```
+
+**Check:** restart the process mid-scenario — the second run must not
+re-plan. A field set in `compute` and read in the next `compute` is
+the tell.
 
 ## Thread rules
 
