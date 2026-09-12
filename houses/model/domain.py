@@ -241,11 +241,10 @@ class Commute:
         destination PlaceOfInterest (label + trips/weeks) so the tree
         always shows where and how often (guarded by
         test_commute_provenance_values_all_carry_destination).
-        The frequency is CURRENT by construction: the destination flows
-        through a live node fed by the persons source, so a what-if or
-        settings change re-prices it — provenance is never staler than
-        its value.  Full leg-by-leg details live in the formula, not
-        here.
+        The destination is re-stamped from the live POI dep on every
+        refresh (trips-only changes included) — the journey legs are
+        cached, the stamp is not.  Full leg-by-leg details live in the
+        formula, not here.
 
         An unknown fare is omitted rather than shown as £0.00/day: the
         transit step has not seen the fare yet (the rail step adds it

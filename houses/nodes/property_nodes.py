@@ -580,6 +580,24 @@ class PropertyNodes:
 
         # Re-price the aggregate (idempotent if already queued).
         get_scheduler().schedule(self.commute_breakdown)
+        # Fan OUT to every journey node whose destination stamp moved:
+        # the signal path cannot do this (same-tick persistence makes
+        # dep._persisted_at <= self._computed_at, so _is_stale() is
+        # False and _on_dep_changed never schedules). Each journey
+        # node decides for itself via _restamp_needed — untouched
+        # destinations stay parked, moved ones re-stamp with zero API
+        # calls. Without this the provenance text freezes at
+        # route-plan time (live 90970053: value £0 right, '1x/wk'
+        # wrong) because nothing ever schedules the chain.
+        for nid, node in list(get_scheduler().registered_nodes().items()):
+            if nid.startswith(f"{self.rid}/") and any(
+                nid.endswith(s) for s in ("/walk", "/drive", "/tfl_no_bus", "/tfl_with_bus")
+            ):
+                # The four route-planning nodes own cached journeys with
+                # a destination stamp; everything downstream
+                # (selector → merge → fuel → breakdown) refreshes
+                # through the normal cascade once these re-stamp.
+                get_scheduler().schedule(node)
 
 
     def _on_node_changed(self) -> None:

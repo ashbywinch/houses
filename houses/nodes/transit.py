@@ -12,6 +12,7 @@ from pint import Quantity
 from dag.attempt import Attempt, AttemptError, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from dag.scheduler import get_scheduler
 from houses.commute import LegMode
 from houses.commute_router import CommuteRouter as _CommuteRouter
 from houses.geopoint import GeoPoint
@@ -44,6 +45,23 @@ def _with_poi_destination(commute: Commute, poi: PlaceOfInterest | None) -> Comm
     if poi is None:
         return commute
     return replace(commute, destination=poi)
+
+def _stamp_is_current(commute: Commute | None, poi_val: PlaceOfInterest | str | None) -> bool:
+    """Whether the value's destination stamp already matches the live POI.
+
+    The re-stamp gate compares the STAMP (label/trips/weeks/address) —
+    never the journey (duration/legs/cost). A bare-str poi carries no
+    stamp; nothing to compare means current.
+    """
+    if commute is None or not isinstance(poi_val, PlaceOfInterest):
+        return True
+    dest = commute.destination
+    return (
+        dest.label == poi_val.label
+        and dest.address == poi_val.address
+        and dest.trips_per_week == poi_val.trips_per_week
+        and dest.weeks_per_year == poi_val.weeks_per_year
+    )
 
 
 def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
@@ -205,6 +223,42 @@ class WalkNode(DerivedNode[Commute]):
         # The full destination POI (label + trips/weeks) — the route
         # planner only knows the address, so the provenance would lose
         # the destination without this patch.
+        self._poi_node: Node = options.poi
+
+    @override
+    def _restamp_needed(self) -> bool:
+        """The live POI moved under a parked journey — re-stamp it.
+
+        Fires only when the value is a priced journey whose destination
+        stamp disagrees with the live POI dep. The refresh re-stamps the
+        cached legs with the live POI — no route call. Infeasible
+        results carry no journey to re-stamp; impossible/pending values
+        flow through the normal path.
+        """
+        if self._attempt.pending or self._attempt.impossible:
+            return False
+        val = self._attempt.value_or_none()
+        if val is None or val.infeasible:
+            return False
+        poi_att = self._poi_node.latest_attempt()
+        poi_val = poi_att.value_or_none() if poi_att.succeeded else None
+        return not _stamp_is_current(val, poi_val)
+
+    @override
+    async def _restamp_refresh(self) -> None:
+        """Re-stamp the cached journey with the live POI — no API call."""
+        from datetime import UTC, datetime
+
+        poi_att = self._poi_node.latest_attempt()
+        poi_val = poi_att.value_or_none() if poi_att.succeeded else None
+        val = self._attempt.value_or_none()
+        assert val is not None and isinstance(poi_val, PlaceOfInterest)
+        self._attempt = Attempt.succeeded(replace(val, destination=poi_val))
+        self._computed_at = datetime.now(UTC)
+        result_dict = await self._safe_result_dict("succeeded")
+        self._persist(result_dict, {d._id: d._db_created_at for d in self._get_active_deps()})
+        self.changed.emit()
+        get_scheduler().after_refresh(self)
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -264,6 +318,37 @@ class DriveNode(DerivedNode[Commute]):
         self.display_name: str = "Drive"
         self._has_car: bool = options.has_car
         self._route_fn: Callable | None = options.route_fn
+        self._poi_node: Node = options.poi
+
+    @override
+    def _restamp_needed(self) -> bool:
+        """Same re-stamp gate — the drive legs are cached, the stamp
+        follows the live POI. Infeasible results (congestion zone, no
+        car) carry no journey to re-stamp."""
+        if self._attempt.pending or self._attempt.impossible:
+            return False
+        val = self._attempt.value_or_none()
+        if val is None or val.infeasible:
+            return False
+        poi_att = self._poi_node.latest_attempt()
+        poi_val = poi_att.value_or_none() if poi_att.succeeded else None
+        return not _stamp_is_current(val, poi_val)
+
+    @override
+    async def _restamp_refresh(self) -> None:
+        """Re-stamp the cached drive journey with the live POI — no API call."""
+        from datetime import UTC, datetime
+
+        poi_att = self._poi_node.latest_attempt()
+        poi_val = poi_att.value_or_none() if poi_att.succeeded else None
+        val = self._attempt.value_or_none()
+        assert val is not None and isinstance(poi_val, PlaceOfInterest)
+        self._attempt = Attempt.succeeded(replace(val, destination=poi_val))
+        self._computed_at = datetime.now(UTC)
+        result_dict = await self._safe_result_dict("succeeded")
+        self._persist(result_dict, {d._id: d._db_created_at for d in self._get_active_deps()})
+        self.changed.emit()
+        get_scheduler().after_refresh(self)
 
     @override
     
@@ -340,6 +425,36 @@ class TflTransitNode(DerivedNode[Commute]):
         # provenance, so each must say which plan it is: two rows both called
         # "TfL" told the reader nothing (live 2026-09-10).
         self.display_name: str = "TfL (with bus)" if options.allow_bus else "TfL (no bus)"
+        self._poi_node: Node = options.poi
+
+    @override
+    def _restamp_needed(self) -> bool:
+        """Same re-stamp gate as WalkNode — the TfL legs are cached, the
+        destination stamp follows the live POI."""
+        if self._attempt.pending or self._attempt.impossible:
+            return False
+        val = self._attempt.value_or_none()
+        if val is None or val.infeasible:
+            return False
+        poi_att = self._poi_node.latest_attempt()
+        poi_val = poi_att.value_or_none() if poi_att.succeeded else None
+        return not _stamp_is_current(val, poi_val)
+
+    @override
+    async def _restamp_refresh(self) -> None:
+        """Re-stamp the cached TfL journey with the live POI — no API call."""
+        from datetime import UTC, datetime
+
+        poi_att = self._poi_node.latest_attempt()
+        poi_val = poi_att.value_or_none() if poi_att.succeeded else None
+        val = self._attempt.value_or_none()
+        assert val is not None and isinstance(poi_val, PlaceOfInterest)
+        self._attempt = Attempt.succeeded(replace(val, destination=poi_val))
+        self._computed_at = datetime.now(UTC)
+        result_dict = await self._safe_result_dict("succeeded")
+        self._persist(result_dict, {d._id: d._db_created_at for d in self._get_active_deps()})
+        self.changed.emit()
+        get_scheduler().after_refresh(self)
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
