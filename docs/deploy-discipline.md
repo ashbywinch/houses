@@ -156,22 +156,27 @@ and the switch — acceptable; the smoke already passed.
 guest; a crash-loop stops instead of rebuilding forever.
 
 **R4 — Pre-flight gate + envelope.** `release.sh` refuses to start the
-standby below 450 MiB free; the workflow wraps the run in `timeout 900`
-(the 2026-09-07 hang ran the full 90-minute CI budget); the snapshot
-carries its own 120 s deadline (PR 105).
+standby below 450 MiB free; the workflow's local `timeout 900 ssh` +
+the step's 90-minute cap bound the run (the deploy key's `command=`
+restriction means no wrapper may ride inside the remote command itself);
+the snapshot carries its own 120 s deadline (PR 105).
 
 **R5 — Self-heal the guest.** `houses-network-watchdog.timer` runs every
 2 min; `network-watchdog.sh` retries the GCP metadata server 3× and then
 `systemctl reboot`s. Worst case is a ~6-minute downtime instead of a
 4-day silent outage. Enabled only on GCP guests (dmi product_name check).
 
-**R6 — The pipeline ships its own tooling.** `release.sh` already
-re-execs the ref's own copy after checkout, so it versions itself; what
-does NOT: `/opt/houses/switch.sh`, `run-instance.sh`, and
-`/etc/systemd/system/houses-*.service` — the box's copies are
-provision-time-frozen. The deploy job's "Ship box tooling" step
-(present in the rollback job too) installs the repo's current copies and
-`daemon-reload`s before every release/rollback.
+**R6 — Tooling ships INSIDE the release (the only elevated path).** The
+deploy key is `command=`-restricted in `authorized_keys` to
+`sudo /opt/houses/release.sh …` / `sudo /opt/houses/switch.sh` — no scp,
+no arbitrary sudo. So `release.sh` (running as root) installs the ref's
+own `units/*`, `network-watchdog.sh`, `switch.sh` and `run-instance.sh`,
+`daemon-reload`s and (re)enables the watchdog timer on every release;
+the CI-built frontend dist rides the exec channel on stdin (`-p
+/dev/stdin`), never scp. `release.sh` itself re-execs the ref's copy
+after checkout, so every release both ships and applies its own tooling.
+Until the next release, a rollback runs the box's older `switch.sh`
+(still functional; CLI `.backup` snapshot — bounded only after shipping).
 
 ### Forward-release order
 
