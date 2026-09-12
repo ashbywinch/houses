@@ -33,6 +33,19 @@ LOG="$LOG_DIR/$(date +%Y%m%d-%H%M%S)-${REF}-${SIDE}.log"
 exec > >(tee -a "$LOG") 2>&1
 mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "$SIDE $*"; }
 
+# Housekeeping: the release logs must not grow unbounded on the box
+# (each run writes a few KB, but many failed runs of the same ref can
+# accumulate).  Keep the newest 32 runs of each file wildcard, delete
+# the rest.
+prune_logs() {
+  local keep="${1:-32}"
+  find "$LOG_DIR" -maxdepth 1 -name '*.log' -type f \
+    | sort -r \
+    | tail -n +"$((keep + 1))" \
+    | xargs -r rm -f
+  mark "log housekeeping: keeping newest $keep in $LOG_DIR ($(find "$LOG_DIR" -maxdepth 1 -name '*.log' | wc -l) present)"
+}
+
 mark "release '$REF' -> $SIDE (standby; active=$ACTIVE)"
 
 cd "$ROOT/$SIDE"
@@ -70,15 +83,50 @@ journalctl -u "houses-$ACTIVE" --since="10 minutes ago" --no-pager 2>/dev/null |
 # lock — wait through contention instead of failing the release. The hard
 # 300s cap guarantees the deploy cannot hang the CI budget silently again
 # (2026-09-07: 90-min silent hang here).
+# The CLI's `.backup` retries SQLITE_BUSY/LOCKED forever (its busy loop is
+# NOT governed by .timeout) — the 2026-09-07 90-minute hang. Use the backup
+# API through the ref's own python with a hard deadline and an explicit
+# busy_timeout: the release must never wait unbounded on the live DB.  A
+# PASSIVE checkpoint first (never blocks a writer) shrinks the backup window.
+BACKUP_PY=$(mktemp "$ROOT/.backup-XXXXXX.py")
+chown ubuntu:ubuntu "$BACKUP_PY"
+cat > "$BACKUP_PY" <<'PY'
+import sqlite3, sys, time
+live, out = sys.argv[1], sys.argv[2]
+src = sqlite3.connect(live, timeout=5)  # write-capable: a PASSIVE checkpoint must apply the WAL for the copy to include it
+try:
+    src.execute("PRAGMA wal_checkpoint(PASSIVE)")
+except sqlite3.OperationalError:
+    pass
+dst = sqlite3.connect(out)
+deadline = time.monotonic() + 120
+try:
+    src.backup(dst, pages=1000, progress=lambda *_a, **_k: True if time.monotonic() > deadline else None)
+    # The callback-abort can return silently on a small copy — enforce the
+    # deadline AFTER as the contract, and sanity-check the copy is real.
+    if time.monotonic() > deadline:
+        sys.exit("backup exceeded the deadline")
+    rows = dst.execute("SELECT count(*) FROM node_results").fetchone()[0]
+    if rows == 0:
+        sys.exit("snapshot copy has no node_results rows — refusing a stale/empty standby")
+    print(f"snapshot ok: {rows} rows in node_results")
+except sqlite3.OperationalError as e:
+    sys.exit(f"backup failed within the deadline: {e}")
+finally:
+    dst.close()
+    src.close()
+
+PY
 snapshot_ok=0
 for i in 1 2 3 4 5; do
-  if timeout 300 sqlite3 -cmd '.timeout 30000' "$ROOT/data/houses.db" ".backup '$ROOT/$SIDE-smoke.db'"; then
+  if "$ROOT/$SIDE/.venv/bin/python" "$BACKUP_PY" "$ROOT/data/houses.db" "$ROOT/$SIDE-smoke.db"; then
     snapshot_ok=1
     break
   fi
   mark "snapshot attempt $i failed or timed out (locked?) — retrying"
   sleep 10
 done
+rm -f "$BACKUP_PY"
 if [ "$snapshot_ok" != 1 ]; then
   mark "could not snapshot the live DB — writer evidence:"
   journalctl -u "houses-$ACTIVE" --since="20 minutes ago" --no-pager 2>/dev/null | tail -40 || true
@@ -147,5 +195,6 @@ if [ "$PENDING" -gt 0 ]; then
   echo "WARNING: $PENDING scrape job(s) pending — the LAN scrape worker may be down (journalctl -u houses-scrape-worker on the LAN machine)."
 fi
 
+prune_logs
 mark "release ready: smoke at http://localhost:$PORT (public: https://houses-smoke.blueumbrella.net)"
 echo "$SIDE" > "$ROOT/SMOKE_READY"
