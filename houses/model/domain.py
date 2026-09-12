@@ -233,6 +233,13 @@ class Commute:
     is_child: bool = False
     infeasible: bool = False
     no_route_reason: str = ""
+    # The origin the journey was planned from (the property's location
+    # at plan time). A route depends on origin + destination ADDRESS
+    # only: when a refresh finds the same address pair, the cached
+    # legs are reused with the live POI re-stamped — no route call.
+    # None means unplanned (legacy rows, infeasible results) — the
+    # caller plans normally.
+    origin: str = ""
 
     def to_provenance_value(self) -> str:
         """Human summary for provenance display — ONE canonical structure
