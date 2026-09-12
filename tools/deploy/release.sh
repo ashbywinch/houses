@@ -66,9 +66,34 @@ if [ "$0" != "$ROOT/$SIDE/tools/deploy/release.sh" ] && [ -f "$ROOT/$SIDE/tools/
   exec sh "$ROOT/$SIDE/tools/deploy/release.sh" "$REF"
 fi
 
+# R2 — the standby is EPHEMERAL: never leave a second stack running on the
+# box after a release (2026-09-07: a warm standby crash-looping on a stale
+# smoke DB is what OOM-killed the 953 MiB e2-micro). The switch starts the
+# new side cold, so nothing needs the standby warm.
+cleanup() {
+  if systemctl is-active --quiet "houses-$SIDE" 2>/dev/null; then
+    mark "stopping standby houses-$SIDE (ephemeral-standby policy)"
+    systemctl stop "houses-$SIDE" || mark "WARNING: could not stop houses-$SIDE"
+  fi
+}
+trap cleanup EXIT
+
 # uv is installed per-user for ubuntu, and the venv must be ubuntu-owned
 # (the app unit runs as ubuntu) — sync as ubuntu, not as the invoking root.
 sudo -u ubuntu -H /home/ubuntu/.local/bin/uv sync
+
+# R1 — CI builds the frontend and ships the tarball (HOUSES_DIST_TARBALL);
+# unpack it so the standby boots with node/npm NEVER running on the box
+# (a Vite build is node at ~1.3 GB total-vm — the 2026-09-07 OOM victim).
+if [ -n "${HOUSES_DIST_TARBALL:-}" ]; then
+  if [ ! -f "$HOUSES_DIST_TARBALL" ]; then
+    mark "HOUSES_DIST_TARBALL set but '$HOUSES_DIST_TARBALL' is missing"
+    exit 1
+  fi
+  mkdir -p "$ROOT/$SIDE/houses/frontend"
+  tar -xzf "$HOUSES_DIST_TARBALL" -C "$ROOT/$SIDE/houses/frontend"
+  mark "frontend dist unpacked into the standby (no on-box build)"
+fi
 
 # Snapshot the live DB into the standby's smoke copy — sqlite .backup is
 # consistent even with a live WAL writer. The standby then reads/writes its
@@ -144,13 +169,24 @@ chmod 600 "$ROOT/$SIDE-smoke.db"
 chown ubuntu:ubuntu "$ROOT/$SIDE-smoke.db"
 mark "snapshot ok ($(du -h "$ROOT/$SIDE-smoke.db" | cut -f1))"
 
+# R4 — pre-flight memory gate: never start the standby on a starved box
+# (the 2026-09-07 OOM was a second stack starting beside an already-busy
+# live side on 953 MiB). The standby needs ~300 MiB; demand 450 free.
+FREE_MB=$(awk '/MemAvailable/ { print int($2 / 1024) }' /proc/meminfo)
+if [ "$FREE_MB" -lt 450 ]; then
+  mark "refusing to start standby: only ${FREE_MB} MiB free (need >= 450)"
+  exit 1
+fi
+mark "memory pre-flight ok (${FREE_MB} MiB free)"
+
 mark "restarting houses-$SIDE"
 systemctl restart "houses-$SIDE"
 
+
 # Wait for health on the standby port.  A first boot recomputes every
-# code-stale node (minutes of cascade) and builds the frontend — the
-# wait must cover the slow cold start (PR #68 release bring-up).
-for i in $(seq 1 200); do
+# code-stale node (minutes of cascade); since R1 the frontend is NOT built
+# on the box, so the wait covers the cascade, not npm+Vite.
+for i in $(seq 1 120); do
   curl -fsS --max-time 5 "localhost:$PORT/health" >/dev/null 2>&1 && break
   sleep 3
 done
@@ -201,5 +237,5 @@ if [ "$PENDING" -gt 0 ]; then
 fi
 
 prune_logs
-mark "release ready: smoke at http://localhost:$PORT (public: https://houses-smoke.blueumbrella.net)"
+mark "release ready: smoke at http://localhost:$PORT (public: https://houses-smoke.blueumbrella.net) — standby stops on exit (the switch starts it cold)"
 echo "$SIDE" > "$ROOT/SMOKE_READY"

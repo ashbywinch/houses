@@ -97,6 +97,95 @@ pattern:
 4. The smoke copy is sanity-checked (`node_results` must contain rows) —
    a stale or empty standby refuses to pass.
 
+
+## A release must never OOM the box (2026-09-07 incident)
+
+### What happened (evidence)
+
+- 2026-09-05 16:13 switch to `efce41a`: healthy (public `/health` 200);
+  box CPU idle after the first hour. The roll-forward itself did NOT break
+  the box.
+- 2026-09-07 07:34 v1.2.0 deploy: the box's *stale* `/opt/houses/release.sh`
+  hung 90 minutes at the live-DB snapshot (the CLI `.backup` loop above);
+  CI killed the ssh at ~09:04, the standby was left running.
+- 20:01 the e2-micro (953 MiB) hit **global OOM**: `cron invoked
+  oom-killer … task_memcg=/system.slice/houses-green.service, task=node` →
+  `houses-green.service: Failed with result 'oom-kill'`. The standby had
+  crash-looped on a smoke DB overwritten mid-hang; every `Restart=always`
+  cycle re-ran `npm install` + the Vite build on the box — node at
+  1.31 GB total-vm / 350 MB anon.
+- 2026-09-08 23:45+ the guest's network died (`OSConfigAgent: … metadata
+  server … network is unreachable`, every 60 s). Nothing self-healed: prod
+  unreachable for 4 days while the VM reported RUNNING. The 2026-09-12
+  GCP stop/start restored networking; blue booted and served again.
+
+### Root causes (all in the process, none in the application code)
+
+1. A release starts a **second full stack** (uvicorn + npm install + Vite
+   build + static serve) beside the live one on a 953 MiB box.
+2. The standby **persists warm between releases** by design, and a failed
+   release leaves it running; `Restart=always` with no `MemoryMax` and no
+   cleanup turned one hung run into a 13-hour rebuild loop.
+3. **No memory containment**: a global OOM can reap anything — including
+   the guest's networking — and nothing reboots a limping guest.
+4. The deploy job runs the **box's own copy** of `release.sh`
+   (`sudo /opt/houses/release.sh $REF`), which is NOT versioned with the
+   repo — the Sep-7 run executed the old, unbounded snapshot path even
+   though main had already fixed it.
+
+### Rules (implemented 2026-09-12)
+
+**R1 — Build the frontend off the box.** CI runs `npm ci` + `npm run
+build` and ships the tarball; `release.sh` unpacks it into the standby
+(`HOUSES_DIST_TARBALL`), and `make run-prod`'s new `frontend-prod` target
+skips npm entirely when a dist is already present (or
+`HOUSES_SKIP_FRONTEND_BUILD=1`). npm never runs on the box — kills the
+node memory monster (the OOM victim). Fallback to an on-box build remains
+for bootstrap/manual bring-up.
+
+**R2 — The standby is ephemeral.** `release.sh` installs a `trap cleanup
+EXIT` that stops the standby at the end of a successful smoke AND on any
+error — no second stack ever persists. The switch starts the new side
+cold (`switch.sh` calls `systemctl restart` itself, which starts a stopped
+unit). Note: `houses-smoke.blueumbrella.net` 502s between release-ready
+and the switch — acceptable; the smoke already passed.
+
+**R3 — Contain memory per unit.** The systemd units get `MemoryMax=512M`,
+`MemoryHigh=384M`, `OOMScoreAdjust=-800`, `Restart=on-failure` and a
+`StartLimitIntervalSec/Burst` cap. An overrun kills ONE unit, never the
+guest; a crash-loop stops instead of rebuilding forever.
+
+**R4 — Pre-flight gate + envelope.** `release.sh` refuses to start the
+standby below 450 MiB free; the workflow wraps the run in `timeout 900`
+(the 2026-09-07 hang ran the full 90-minute CI budget); the snapshot
+carries its own 120 s deadline (PR 105).
+
+**R5 — Self-heal the guest.** `houses-network-watchdog.timer` runs every
+2 min; `network-watchdog.sh` retries the GCP metadata server 3× and then
+`systemctl reboot`s. Worst case is a ~6-minute downtime instead of a
+4-day silent outage. Enabled only on GCP guests (dmi product_name check).
+
+**R6 — The pipeline ships its own tooling.** `release.sh` already
+re-execs the ref's own copy after checkout, so it versions itself; what
+does NOT: `/opt/houses/switch.sh`, `run-instance.sh`, and
+`/etc/systemd/system/houses-*.service` — the box's copies are
+provision-time-frozen. The deploy job's "Ship box tooling" step
+(present in the rollback job too) installs the repo's current copies and
+`daemon-reload`s before every release/rollback.
+
+### Forward-release order
+
+1. Land R1–R6 in the repo (Makefile skip path, `release.sh` cleanup +
+   gate + envelope, unit/watchdog templates, workflow shipping) + tests.
+2. Verify locally: the skip-build boot path and a dry release against a
+   copy of the standby layout.
+3. Tag `v1.4.0` → the hardened pipeline does: ship tooling → bounded
+   snapshot → start standby (no build) → smoke → **stop standby**.
+4. Switch dispatch → prod on current main with the `/health` db/last-write
+   probe and release logs. Watch `/health` and box CPU until the
+   first-boot cascade converges (Sep-5 precedent: ~1 h).
+5. Record the outcome here.
+
 ## Release log retention
 
 `/opt/houses/logs/releases/` keeps the newest 32 runs of each of

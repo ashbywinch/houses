@@ -100,9 +100,21 @@ stop:
 	@rm -f .logs/backend.pid .logs/frontend.pid
 	@echo "Stopped."
 
-run-prod: sync-prod frontend-setup frontend-build
+run-prod: sync-prod frontend-prod
 	@echo "${YELLOW}Serving frontend build + backend on http://127.0.0.1:8765${NC}"
 	@$(UV) run python -c 'import uvicorn; from houses.settings import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path("houses/frontend/dist"); app.mount("/", StaticFiles(directory=str(build_dir), html=True), name="frontend") if build_dir.exists() else None; uvicorn.run(app, host=settings.host, port=settings.port, reload=False)'
+
+# Prod boot must not build the frontend on the box: CI ships houses/frontend/dist
+# with every release, and the Vite build (node ~1.3 GB VM) is what OOM-killed the
+# standby on 2026-09-07 (a 953 MiB e2-micro). Skip when a dist is already present
+# or the flag is set; fall back to an on-box build only for bootstrap/manual runs.
+frontend-prod:
+	@if [ "$${HOUSES_SKIP_FRONTEND_BUILD:-0}" = "1" ] || [ -f "$(FRONTEND)/dist/index.html" ]; then \
+		echo "${GREEN}✓ Frontend dist present (shipped by CI) — skipping install + build${NC}"; \
+	else \
+		cd $(FRONTEND) && $(NPM) install && $(NPM) run build; \
+		echo "${GREEN}✓ Frontend built on the box (no shipped dist)${NC}"; \
+	fi
 
 sync-prod:
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh

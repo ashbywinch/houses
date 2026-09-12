@@ -27,6 +27,18 @@ chown root:root "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
 chmod 755 "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
 cp "$ROOT/blue/tools/deploy/units/"*.service /etc/systemd/system/
 systemctl daemon-reload
+cp "$ROOT/blue/tools/deploy/units/"*.timer /etc/systemd/system/
+cp "$ROOT/blue/tools/deploy/network-watchdog.sh" /opt/houses/network-watchdog.sh
+chmod 755 /opt/houses/network-watchdog.sh
+# R5 — the guest network watchdog (reboot a guest whose network died, as on
+# 2026-09-08: four days unreachable with the VM running). Installed for all
+# boxes; the GCP metadata check on a non-GCP box would fail and reboot it —
+# SKIP unless this is a GCP guest.
+if [ -d /sys/devices/virtual/dmi/id ] && grep -qi google /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
+  systemctl enable --now houses-network-watchdog.timer
+else
+  echo "box-setup: not a GCP guest — network watchdog NOT enabled"
+fi
 mkdir -p /var/lib/houses-chrome && chown ubuntu:ubuntu /var/lib/houses-chrome
 # The scraper lives on the LAN; the box has no Chrome. Enable the shared
 # chrome unit only when a browser binary is actually installed (the LAN

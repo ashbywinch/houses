@@ -1,0 +1,14 @@
+# /etc/systemd/system/houses-network-watchdog.timer — check the guest network
+# every 2 minutes; the check itself retries 3x (~60 s) before rebooting, so
+# the worst-case outage from a dead guest network is a few minutes, not the
+# four days of 2026-09-08.
+[Unit]
+Description=Houses network watchdog timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=2min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
