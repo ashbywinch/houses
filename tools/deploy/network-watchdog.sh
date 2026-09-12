@@ -25,5 +25,8 @@ while [ "$i" -lt "$TRIES" ]; do
 done
 
 logger -t houses-watchdog "metadata server unreachable ${TRIES}x — rebooting to restore networking"
-systemctl reboot
+if ! systemctl reboot; then
+  logger -t houses-watchdog "ERROR: systemctl reboot failed — trapped with no network"
+  exit 1
+fi
 exit 0

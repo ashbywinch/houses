@@ -71,7 +71,10 @@ fi
 # smoke DB is what OOM-killed the 953 MiB e2-micro). The switch starts the
 # new side cold, so nothing needs the standby warm.
 cleanup() {
-  if systemctl is-active --quiet "houses-$SIDE" 2>/dev/null; then
+  # Review (PR #106): guard a bad/empty ACTIVE marker — under set -u an
+  # unbound $SIDE would error inside the trap. A failed unit is inactive,
+  # so is-active already covers the "nothing to stop" case.
+  if [ -n "$SIDE" ] && systemctl is-active --quiet "houses-$SIDE" 2>/dev/null; then
     mark "stopping standby houses-$SIDE (ephemeral-standby policy)"
     systemctl stop "houses-$SIDE" || mark "WARNING: could not stop houses-$SIDE"
   fi
