@@ -93,19 +93,61 @@ self._price_node + self._stamp_duty_node - self._equity_node
 
 Expression-based nodes **do not override `build_provenance()`** — the base default walks active deps and calls `expression.to_formula()`.
 
-### Stable dependencies by default
+### Narrow deps to what `compute` reads
 
-`_get_active_deps()` should return the same deps in most cases. **Conditional deps are for shortcutting — skipping computation entirely.** If you want all alternatives computed then compared, keep deps stable. For trivial local computation (reading a cached value, geocoding a coordinate), stable deps avoid unnecessary conditional complexity:
+`_get_active_deps()` answers "what does THIS evaluation depend on" —
+staleness, refresh, and provenance all flow through it. The default
+is the full dep tuple; override it to exclude deps whose changes
+cannot change the value. A refresh the node doesn't need is pure
+waste (and on a trips-only edit, a needless API call) — narrowing
+the dep skips the refresh entirely, not just the computation.
+
+This is different from early-return in `compute` (which still
+refreshes, persists, and rebuilds provenance) and from `IfThenElse`
+branch selection (which picks one live branch). Narrowing says the
+excluded dep is irrelevant to this evaluation at all.
 
 ```python
-# Correct: stable deps, early-return in compute when dep isn't needed
-def __init__(self, ..., transit_result, best_location):
-    super().__init__(node_id, Commute, (transit_result, best_location))
-
+# stable deps + early return: still refreshes on every dep change
 def compute(self, transit, location):
     if transit.value_or_none().daily_cost.amount > 0:
-        return transit  # early return, NR lookup not needed
-    return await self._enrich_rail_fare(commute, location)
+        return transit  # NR lookup not needed — but the refresh already happened
+# narrowed deps: an irrelevant dep change never schedules the node
+def _get_active_deps(self):
+    deps = [self.transit_node]
+    if self._fare_matters():
+        deps.append(self.fare_node)
+    return tuple(deps)
+```
+
+Precedents in the tree: `MergeRailFareNode` drops the fare dep for
+drive/walk selections; `ParkAndRideAugmentNode` drops a pending
+postcode; `IfThenElseNode` drops the unchosen branch. In each case
+the excluded dep's changes correctly do nothing.
+
+#### A dep object holding both used and unused fields is NOT both-or-neither
+
+The trap (PR #114, three rounds of apparatus): a planner depending
+on the whole POI when `compute` reads only its address. Trips-only
+edits then re-plan routes — and the "fix" becomes provenance
+string-patching, manual scheduling, side memory, extra value fields,
+each duplicating DAG state outside the DAG.
+
+The fix is never to work around the refresh. Either:
+
+1. **Project, then depend on the projection** — a pure
+   `DestinationAddressNode(place) -> str`; the planner deps
+   `(best_location, address_node)`. The full-POI stamp flows through
+   the nodes that render it (selector → merge → fuel → breakdown),
+   which keep the full dep. Trips-only pushes stop marking the
+   planner stale at all.
+2. **Delete an unread dep** — `compute` never reads it
+   (`TownDescNode.best_location`, `NearestSchoolNode.best_address`):
+   remove it from the tuple. No projection needed.
+
+If neither fits — `compute` genuinely reads the whole object — the
+refresh is real and any API call inside needs its own reuse guard at
+the call site, not a scheduling workaround.
 
 ### Dynamic dependency sets: compose a provider, never read `self` during construction
 
@@ -141,7 +183,7 @@ Every financial setting has its own `UserInputNode`, created by `Services.__post
 | Rule | Detail |
 |---|---|
 | **One concept per node** | `compute()` does one thing; split otherwise — signal chain tracks real deps, downstream depends on just what it needs |
-| **Stable dependencies** | `_get_active_deps()` always returns the same tuple; if a dep is sometimes unnecessary, keep it and early-return in `compute()` |
+| **Narrow dependencies** | `_get_active_deps()` excludes deps whose changes cannot change the value (→ Narrow deps section); early-return in `compute()` still refreshes — narrowing skips the refresh |
 | **No side effects in compute** | Never push into other nodes — use a dependency chain |
 | **Typed values, not dicts** | Frozen dataclasses / Pydantic models so the value type is self-documenting and the TypeAdapter round-trips safely |
 | **Service results wrapped in Attempt** | `School | None` → `Attempt.succeeded(school)` or `Attempt.impossible("not found")` |
