@@ -74,6 +74,7 @@ class PMT(Expression):
             + [FormulaLine(label=tl.label + " × 12", value=tl.value) for tl in self.term_years.to_formula_lines()]
         )
 
+
 class StampDutyFn(Expression):
     """Calculate UK Stamp Duty Land Tax from a property price."""
 
@@ -84,6 +85,7 @@ class StampDutyFn(Expression):
     ):
         self.price: Expression = price
         self.description: str = description
+
     # lucidlint: ignore duplicate same evaluate/operand-guard skeleton as the dag.expression operands — the body is UK
     @override
     def evaluate(self) -> Attempt:
@@ -100,10 +102,11 @@ class StampDutyFn(Expression):
         except Exception as e:
             return Attempt.impossible(f"Stamp duty calculation failed: {e}")
 
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
+    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return self.price.to_formula_lines()
+
 
 @dataclass(frozen=True)
 class TaxTier:
@@ -147,7 +150,8 @@ class TieredRate(Expression):
         self.value: Expression = (
             value
             if isinstance(value, Expression)
-            else Ref(value) if hasattr(value, "latest_attempt")
+            else Ref(value)
+            if hasattr(value, "latest_attempt")
             else Literal(value)
         )
         self.tiers: list[TaxTier] = tiers
@@ -171,9 +175,7 @@ class TieredRate(Expression):
         for i in range(tier_idx):
             prev = self.tiers[i]
             pwidth = (
-                Decimal(str(prev.rate_to)) - Decimal(str(prev.rate_from))
-                if prev.rate_to is not None
-                else Decimal("0")
+                Decimal(str(prev.rate_to)) - Decimal(str(prev.rate_from)) if prev.rate_to is not None else Decimal("0")
             )
             prev_tax += pwidth * Decimal(str(prev.rate))
 
@@ -248,8 +250,7 @@ class TieredRate(Expression):
                         lines.append(
                             FormulaLine(
                                 label=(
-                                    f"  £{prev.rate_from:,.0f} to £{prev.rate_to:,.0f}"
-                                    f" at {float(prev.rate) * 100:.0f}%"
+                                    f"  £{prev.rate_from:,.0f} to £{prev.rate_to:,.0f} at {float(prev.rate) * 100:.0f}%"
                                 ),
                                 value=self._format_value(Money(str(prev_total), "GBP")),
                             )

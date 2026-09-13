@@ -591,3 +591,44 @@ class Provenance:
     def composite(cls, label: str, sources: dict[str, Provenance], url: str = "") -> Provenance:
         """Create a Provenance with dependency sub-sources."""
         return cls(label=label, sources=sources, url=url)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Provenance:
+        """Rebuild a Provenance from its ``to_dict`` shape (stored row).
+
+        The serve path recurses dep subtrees from each dep's OWN stored
+        row — every level shows the inputs it calculated from, never a
+        live re-read. Unknown keys are ignored; malformed shapes raise
+        so the caller falls back to the envelope display.
+        """
+        formula = None
+        raw_formula = d.get("formula")
+        if isinstance(raw_formula, dict):
+            formula = Formula(
+                lines=[
+                    FormulaLine(label=ln.get("label", ""), value=ln.get("value", ""))
+                    for ln in raw_formula.get("lines", [])
+                    if isinstance(ln, dict)
+                ],
+                result=str(raw_formula.get("result", "")),
+            )
+        source_type = None
+        if d.get("sourceType"):
+            source_type = SourceType(d["sourceType"])
+        freshness = None
+        if d.get("freshness"):
+            from datetime import datetime as _dt
+
+            freshness = _dt.fromisoformat(d["freshness"])
+        return cls(
+            label=d.get("label", ""),
+            description=d.get("description"),
+            value=d.get("value"),
+            url=d.get("url", ""),
+            source_type=source_type,
+            freshness=freshness,
+            formula=formula,
+            status=d.get("status", ""),
+            error=d.get("error", ""),
+            sources={k: cls.from_dict(v) for k, v in (d.get("sources") or {}).items() if isinstance(v, dict)},
+        )

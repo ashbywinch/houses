@@ -83,7 +83,7 @@ class _PetrolAugmentJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        
+
         return {**self.base, "is_child": self.is_child}
 
 
@@ -118,29 +118,65 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
     @override
     @property
     def provenance_formula(self):
-
+        # Render from the STORED calculating inputs — never live dep
+        # attempts, which may have moved on since this value was
+        # produced. A missing key means the dep never persisted:
+        # fall back to the value's own legs, never a re-read.
         commute = self._attempt.value_or_none()
         if not self._attempt.succeeded or commute is None:
             return None
         lines: list[FormulaLine] = []
-        drive_legs = [leg for cg in commute.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
-        if drive_legs:
-            actual = sum(leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0)
-            if actual > 0:
-                round_trip_km = actual * 2
-                lines.append(FormulaLine(label="Drive distance (round trip)", value=f"{round_trip_km:.1f} km"))
-            else:
-                total_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
-                round_trip_km = (total_min / 60.0) * 48.0 * 2
-                lines.append(FormulaLine(label="Drive time → distance estimate", value=f"{round_trip_km:.1f} km"))
-            mpg = int(self._mpg_node.latest_attempt().value_or_none() or 45)
-            cost = float(self._cost_node.latest_attempt().value_or_none() or 1.45)
-            fuel = _fuel_cost_for(drive_legs, mpg, cost)
-            if fuel is not None:
-                lines.append(FormulaLine(label=f"Fuel: ÷ {mpg} mpg × £{cost}/litre", value=str(fuel)))
+        stored = self._stored_dep_inputs().inputs
+        mpg_raw = (stored.get(self._mpg_node._id) or {}).get("value")
+        cost_raw = (stored.get(self._cost_node._id) or {}).get("value")
+        mpg = int(mpg_raw) if isinstance(mpg_raw, (int, float)) else 45
+        cost = float(cost_raw) if isinstance(cost_raw, (int, float)) else 1.45
+        lines.extend(self._fuel_lines(commute, mpg, cost))
         if not lines:
             return None
         return Formula(lines=lines, result=str(commute.daily_cost))
+
+    @override
+    def provenance_formula_for(
+        self, dep_attempts: list[Attempt] | None, active_deps: tuple[Node, ...] | None
+    ) -> Formula | None:
+        if dep_attempts is None:
+            return self.provenance_formula
+        # Persist path: render from the BOUND calculating attempts —
+        # the exact inputs to this evaluation. Stored state lags by
+        # one persist; live deps may already have moved on.
+        commute = self._attempt.value_or_none()
+        if not self._attempt.succeeded or commute is None:
+            return None
+        by_id = {d._id: a for d, a in zip(active_deps or (), dep_attempts or [], strict=False)}
+        mpg_att = by_id.get(self._mpg_node._id)
+        cost_att = by_id.get(self._cost_node._id)
+        mpg_raw = mpg_att.value_or_none() if mpg_att is not None and mpg_att.succeeded else None
+        cost_raw = cost_att.value_or_none() if cost_att is not None and cost_att.succeeded else None
+        mpg = int(mpg_raw) if isinstance(mpg_raw, (int, float)) else 45
+        cost = float(cost_raw) if isinstance(cost_raw, (int, float)) else 1.45
+        lines = self._fuel_lines(commute, mpg, cost)
+        if not lines:
+            return None
+        return Formula(lines=lines, result=str(commute.daily_cost))
+
+    @staticmethod
+    def _fuel_lines(commute: Commute, mpg: int, cost: float) -> list[FormulaLine]:
+        drive_legs = [leg for cg in commute.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
+        if not drive_legs:
+            return []
+        actual = sum(leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0)
+        if actual > 0:
+            round_trip_km = actual * 2
+            out = [FormulaLine(label="Drive distance (round trip)", value=f"{round_trip_km:.1f} km")]
+        else:
+            total_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
+            round_trip_km = (total_min / 60.0) * 48.0 * 2
+            out = [FormulaLine(label="Drive time → distance estimate", value=f"{round_trip_km:.1f} km")]
+        fuel = _fuel_cost_for(drive_legs, mpg, cost)
+        if fuel is not None:
+            out.append(FormulaLine(label=f"Fuel: ÷ {mpg} mpg × £{cost}/litre", value=str(fuel)))
+        return out
 
     @override
     @staticmethod
@@ -186,7 +222,6 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         )
         return Attempt.succeeded(new_commute)
 
-    
     async def _attach_is_child(self, base: dict) -> _PetrolAugmentJson:
         """Annotate a serialized payload with the entry-level ``is_child`` flag."""
         attempt = await self.attempt()
@@ -198,8 +233,8 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
 
     @override
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json(self) -> dict:
-        return (await self._attach_is_child(await super().to_json())).to_dict()
+    async def to_json(self, dep_attempts=None, active_deps=None) -> dict:
+        return (await self._attach_is_child(await super().to_json(dep_attempts, active_deps))).to_dict()
 
     @override
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)

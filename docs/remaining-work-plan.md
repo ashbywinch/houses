@@ -741,3 +741,69 @@ missing piece on pyrefly instead — and it works:
   (participant confusions gone / downgraded).
 - PR: all work lands on `feat/settings-screen` (PR #53) and goes through
   the pr-review loop until findings add little value.
+
+## Part F — DAG dep correctness (2026-09-13, PR #114 review fallout)
+
+Status: plan. Audience: the next agent executing it. Rule for all
+waves: **a node depends only on what its `compute` reads; `compute`
+reads only its dep attempts; derived state lives on the value**
+(`docs/dag-library.md` → Wiring rules, rules 7–8). Working around the
+DAG (string-patching provenance, manual scheduling, side memory) is
+an antipattern — fix the deps. No `node_results` surgery, no manual
+scheduling, no side memory in any wave.
+
+### Wave 0 — revert the workarounds (first, same branch)
+
+Delete `Commute.origin` (`houses/model/domain.py`), `_origin_key` +
+`_reusable_journey` + the three `cached = …` early-returns
+(`houses/nodes/transit.py`), verify no `_restamp_*`/fan-out remnants
+in `dag/derived_node.py` / `houses/nodes/property_nodes.py`, retire
+the tripwire test. Verify: `ruff`, `pyrefly`,
+`test_zero_day_provenance.py` FAILS again (live repro back on),
+everything else green.
+
+### Wave 1 — narrow the planner deps (the actual fix)
+
+New `DestinationAddressNode(place) -> str` (pure address projection;
+impossible when empty). Builder wires `WalkNode`, `DriveNode`,
+`TflTransitNode`, `BusRouteNode` as `(best_location, address_node)`;
+their `compute(location, address)` plans the address string and the
+stamp flows downstream (selector → merge → fuel → breakdown hold the
+full-POI dep and project frequency). Trips-only pushes stop marking
+planners stale — no refresh, no call, nothing to count. Rewrite
+`test_trips_change_no_recalc` as a non-refresh test; update
+`TestCongestionZoneAndProvenanceFrequency` wiring. Files:
+`houses/nodes/transit.py`, `houses/nodes/bus.py`,
+`houses/nodes/commute_pipeline_builder.py`, `houses/nodes/commute.py`
+(options types), the two test files.
+
+### Wave 2 — HIGH build-time copies
+
+2.1 Always wire `DriveNode`; gate no-car feasibility in `compute`
+(`commute_pipeline_builder.py:104-114`). 2.2 `acceptable` becomes a
+persons-sourced dep, not a constructor snapshot
+(`property_nodes.py:395-404`, `schools.py:57-71`). 2.3 Bind the
+`max_walk` attempt into the selector choose instead of the
+`self._max_walk` write-then-read (`commute.py:353`). Tests: car-flip
+re-scores without key churn; filter edits recompute; tolerance
+survives restart.
+
+### Wave 3 — stale `latest_attempt` in formulas (follow-up)
+
+`commute.py:439,444` (merge), `petrol.py:136-137` (mpg/price),
+`total_monthly_housing_cost_node.py:279-289` (payer splits): render
+from bound dep attempts / `self._attempt`, never `latest_attempt()`,
+each with a two-write test.
+
+### Wave 4 — unread-dep removal (follow-up)
+
+Delete `TownDescNode.best_location` (`area.py:80-81,89`),
+`NearestSchoolNode.best_address` (`schools.py:57-63`); use the bound
+`max_walk` attempt in `BusLegAugment._walk_too_long` (`bus.py:317`).
+Each with a two-write non-recompute test.
+
+### Verification (every wave)
+
+`ruff`, `pyrefly`, `vue-tsc -b` clean; targeted suites green;
+`test_zero_day_provenance.py` green from Wave 1 on; full `make test`
+before merge.

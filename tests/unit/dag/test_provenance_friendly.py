@@ -163,7 +163,7 @@ class TestLoadReconstructsStructuredError:
                 return self._attempt
 
             @override
-            async def build_provenance(self):
+            async def build_provenance(self, dep_attempts=None, active_deps=None):
                 return Provenance(label="x")
 
         n = _Node()
@@ -194,7 +194,7 @@ class TestLoadReconstructsStructuredError:
                 return self._attempt
 
             @override
-            async def build_provenance(self):
+            async def build_provenance(self, dep_attempts=None, active_deps=None):
                 return Provenance(label="y")
 
         n = _Node()

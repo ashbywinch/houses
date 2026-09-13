@@ -28,7 +28,9 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         val = self._attempt.value_or_none()
         if not self._attempt.succeeded or val is None:
             return None
-        yearly = self._yearly_node.latest_attempt().value_or_none()
+        stored = self._stored_dep_inputs().inputs
+        yearly_raw = (stored.get(self._yearly_node._id) or {}).get("value")
+        yearly = yearly_raw.get("amount") if isinstance(yearly_raw, dict) else yearly_raw
         lines: list[FormulaLine] = [
             FormulaLine(label="Yearly sinking fund", value=str(yearly) if yearly is not None else "—"),
             FormulaLine(label="÷ 12 (monthly)", value=str(val)),

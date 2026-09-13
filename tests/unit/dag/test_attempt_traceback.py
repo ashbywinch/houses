@@ -74,7 +74,7 @@ class _ImpossibleNode(Node[str]):
         return self._test_attempt
 
     @override
-    async def build_provenance(self):
+    async def build_provenance(self, dep_attempts=None, active_deps=None):
         return Provenance(label=self._id)
 
 
@@ -209,7 +209,7 @@ class TestCausesChain:
                 return self._a
 
             @override
-            async def build_provenance(self):
+            async def build_provenance(self, dep_attempts=None, active_deps=None):
                 from dag.attempt import Provenance
 
                 return Provenance(label="leaf")

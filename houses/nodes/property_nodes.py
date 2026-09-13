@@ -581,7 +581,6 @@ class PropertyNodes:
         # Re-price the aggregate (idempotent if already queued).
         get_scheduler().schedule(self.commute_breakdown)
 
-
     def _on_node_changed(self) -> None:
         self.changed.emit()
 
@@ -631,7 +630,6 @@ class PropertyNodes:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""
         return await self.commute_breakdown.to_json()
-
 
     def _commuted_destinations(self) -> set[str]:
         """Selector keys whose destination is actually commuted (trips
@@ -741,9 +739,7 @@ class PropertyNodes:
             epc=await self.epc.to_json(),
             location=location.to_dict(),
             commutes={
-                k: await v.to_json()
-                for k, v in self.commute_selectors.items()
-                if k in self._commuted_destinations()
+                k: await v.to_json() for k, v in self.commute_selectors.items() if k in self._commuted_destinations()
             },
             schools=schools.to_dict(),
             affordability=affordability.to_dict(),

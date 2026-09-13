@@ -33,7 +33,7 @@ def _with_destination(
     if poi is None or not result.succeeded or isinstance(poi, str):
         return result
     val = result.value_or_none()
-# lucidlint: ignore special-case sentinel handling is the contract here
+    # lucidlint: ignore special-case sentinel handling is the contract here
     if val is None:
         return result
     return Attempt.succeeded(replace(val, destination=poi))
@@ -96,8 +96,6 @@ class CommuteResult:
     destination_url: str = ""
 
 
-
-
 @dataclass(frozen=True)
 class RouteOptions:
     """Wiring for the single-mode route nodes (``WalkNode``, ``DriveNode``).
@@ -127,6 +125,9 @@ class TransitOptions:
 
     best_location: Node
     poi: Node
+    # Display label for the TfL client (station names): a plain string,
+    # not a dep — labels don't change routes.
+    poi_label: str = ""
     has_car: bool = False
     allow_bus: bool = False
     client_factory: Callable[..., Any] | None = None
@@ -170,23 +171,33 @@ class PersonMaxWalkNode(DerivedNode[int]):
 
 
 class WalkLegCheckNode(DerivedNode[bool]):
-    def __init__(self, node_id: str, *, transit_node, max_walk: int = 30):
-        super().__init__(node_id, bool, (transit_node,))
-        self._max_walk: int = max_walk
+    def __init__(self, node_id: str, *, transit_node, max_walk: int | Node = 30):
+        if isinstance(max_walk, Node):
+            super().__init__(node_id, bool, (transit_node, max_walk))
+            self._max_walk_node: Node | None = max_walk
+            self._max_walk: int = 30
+        else:
+            super().__init__(node_id, bool, (transit_node,))
+            self._max_walk_node = None
+            self._max_walk = max_walk
 
     @override
-    def compute(self, transit: Attempt[Commute]) -> Attempt[bool]:
+    def compute(self, transit: Attempt[Commute], max_walk: Attempt[int] | None = None) -> Attempt[bool]:
         if not transit.succeeded:
             return Attempt.succeeded(value=False)
         val = transit.value_or_none()
         if val is None:
             return Attempt.succeeded(value=False)
+        limit = self._max_walk
+        mw = max_walk.value_or_none() if max_walk is not None and max_walk.succeeded else None
+        if mw is not None:
+            limit = int(mw)
         if val.details and val.details[0].legs:
             first_leg = val.details[0].legs[0]
             walk_time = int(first_leg.duration.magnitude) if first_leg.mode == LegMode.WALK else 0
         else:
             walk_time = 0
-        return Attempt.succeeded(walk_time > self._max_walk)
+        return Attempt.succeeded(walk_time > limit)
 
 
 class WalkNode(DerivedNode[Commute]):
@@ -207,20 +218,42 @@ class WalkNode(DerivedNode[Commute]):
         # the destination without this patch.
 
     @override
-    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
+    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[str]) -> Attempt[Commute]:
         loc = location.value_or_none()
-        poi_val = poi.value_or_none()
-        if loc is None or not poi_val:
+        dest = poi.value_or_none() or ""
+        if loc is None or not dest:
             return Attempt.impossible("missing location or destination")
-        dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
-        if not dest:
-            return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest, self._max_walk)
         else:
-
             result = await get_services().route_planner.walk_route(loc, dest, self._max_walk)
-        return _with_destination(result, poi_val)
+        # The planner values the ADDRESS only; the full-POI stamp is
+        # applied downstream by the selector from its own place dep.
+        return result
+
+
+class DestinationAddressNode(DerivedNode[str]):
+    """The destination's CURRENT address string, projected from its place.
+
+    Route planners depend on THIS, not the whole POI: a trips-only edit
+    changes the POI but not its address, so planners are never marked
+    stale and never re-plan. The full-POI stamp flows through the nodes
+    that render it (selector → merge → fuel → breakdown), which keep
+    the full dep.
+    """
+
+    def __init__(self, node_id: str, *, place: Node):
+        super().__init__(node_id, str, (place,))
+        self.display_name: str = "Destination address"
+
+    @override
+    def compute(self, place: Attempt[PlaceOfInterest]) -> Attempt[str]:
+        if not place.succeeded:
+            return Attempt.impossible(place.error or "destination unavailable")
+        val = place.value_or_none()
+        if val is None or not val.address:
+            return Attempt.impossible("destination has no address")
+        return Attempt.succeeded(val.address)
 
 
 class DestinationPlaceNode(DerivedNode[PlaceOfInterest]):
@@ -240,9 +273,8 @@ class DestinationPlaceNode(DerivedNode[PlaceOfInterest]):
         self._label: str = label
 
     @override
-    def compute(self, *dep_attempts: Attempt) -> Attempt[PlaceOfInterest]:
-        persons = self._persons_source.latest_attempt().value_or_none() or []
-        for p in persons:
+    def compute(self, persons: Attempt[list]) -> Attempt[PlaceOfInterest]:
+        for p in persons.value_or_none() or []:
             if getattr(p, "name", None) != self._person_name:
                 continue
             for q in getattr(p, "places_of_interest", None) or ():
@@ -266,17 +298,13 @@ class DriveNode(DerivedNode[Commute]):
         self._route_fn: Callable | None = options.route_fn
 
     @override
-    
-    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
+    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[str]) -> Attempt[Commute]:
         if not self._has_car:
             return _infeasible_commute(label="no car available", reason="no car available")
         loc = location.value_or_none()
-        poi_val = poi.value_or_none()
-        if loc is None or not poi_val:
+        dest = poi.value_or_none() or ""
+        if loc is None or not dest:
             return Attempt.impossible("missing location or destination")
-        dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
-        if not dest:
-            return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
         # Congestion-charge gate (DAG-owned): resolve the destination's
         # outcode — from the address when it carries a postcode, else by
         # geocoding and reverse-looking-up the nearest postcode — and
@@ -290,16 +318,14 @@ class DriveNode(DerivedNode[Commute]):
             gp = geo.value_or_none() if geo.succeeded else None
             if gp is None:
                 return Attempt.impossible(
-                    f"destination address {dest!r} does not geocode — cannot "
-                    "verify the congestion-charge rule"
+                    f"destination address {dest!r} does not geocode — cannot verify the congestion-charge rule"
                 )
             resolved_attempt = await get_services().geocoder.reverse_geocode_postcode(gp.lat, gp.lon)
             resolved = resolved_attempt.value_or_none() if resolved_attempt.succeeded else ""
             outcode = _CommuteRouter._extract_outcode(resolved) if resolved else None
             if outcode is None:
                 return Attempt.impossible(
-                    f"no postcode resolves for {dest!r} — cannot verify the "
-                    "congestion-charge rule"
+                    f"no postcode resolves for {dest!r} — cannot verify the congestion-charge rule"
                 )
         if outcode in _CommuteRouter._CONGESTION_OUTCODES:
             return _infeasible_commute(
@@ -309,11 +335,9 @@ class DriveNode(DerivedNode[Commute]):
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest)
         else:
-
             result = await get_services().route_planner.drive_route(loc, dest)
-        # The destination is read from the LIVE poi dep, so the label and
-        # frequency in provenance follow the current destination.
-        return _with_destination(result, poi_val)
+        # Address-only value; the stamp is applied downstream.
+        return result
 
 
 class TflTransitNode(DerivedNode[Commute]):
@@ -334,6 +358,7 @@ class TflTransitNode(DerivedNode[Commute]):
         self._allow_bus: bool = options.allow_bus
         self._client_factory: Callable[..., Any] | None = options.client_factory
         self._last_no_route_detail: str = ""
+        self._poi_label: str = options.poi_label
         # Two of these nodes plan every destination — one avoiding buses, one
         # allowing them — and the comparison node keeps the bus plan only when
         # it saves the person's bus-walk penalty.  Both appear in the
@@ -342,18 +367,14 @@ class TflTransitNode(DerivedNode[Commute]):
         self.display_name: str = "TfL (with bus)" if options.allow_bus else "TfL (no bus)"
 
     @override
-    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
+    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[str]) -> Attempt[Commute]:
         # Reset first: a raising plan() (409/5xx) must not leave the
         # previous run's 404 detail to mislabel the provenance.
         self._last_no_route_detail = ""
         loc = location.value_or_none()
-        poi_val = poi.value_or_none()
-        if loc is None or not poi_val:
+        dest = poi.value_or_none() or ""
+        if loc is None or not dest:
             return Attempt.impossible("missing location or destination")
-        dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
-        if not dest:
-            return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
-
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
 
@@ -361,7 +382,7 @@ class TflTransitNode(DerivedNode[Commute]):
         client = client_factory(
             origin_str,
             dest_str,
-            poi_val.label if isinstance(poi_val, PlaceOfInterest) else "",
+            self._poi_label,
             TflRouteOptions(
                 park_and_ride=self._has_car,
                 allow_bus=self._allow_bus,
@@ -374,10 +395,13 @@ class TflTransitNode(DerivedNode[Commute]):
         else:
             result = await client.plan()
         self._last_no_route_detail = client._no_route_detail
-        return _with_destination(result, poi_val)
+        # Address-only value; the stamp is applied downstream.
+        return result
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
         p = await super().build_provenance()
         v = self._attempt.value_or_none()
         # Only a succeeded-infeasible result carries the no-route note —
@@ -547,7 +571,9 @@ class TransitNode(DerivedNode[Commute]):
         return fallback
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
         p = await super().build_provenance()
         if self._last_fallback_detail is not None:
             p.description = self._last_fallback_detail

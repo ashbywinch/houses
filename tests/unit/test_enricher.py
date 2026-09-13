@@ -75,30 +75,37 @@ class TestTransitCommute:
 
     @pytest.fixture
     def _tfl_deps(self):
-        from houses.nodes.transit import TflTransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitOptions
 
-        return lambda loc, poi, has_car=False, prefix="t": (
-            TflTransitNode(
-                f"{prefix}_nb", options=TransitOptions(best_location=loc, poi=poi, has_car=has_car, allow_bus=False)
-            ),
-            TflTransitNode(
-                f"{prefix}_wb", options=TransitOptions(best_location=loc, poi=poi, has_car=has_car, allow_bus=True)
-            ),
-        )
+        def _deps(loc, poi, has_car=False, prefix="t"):
+            address = DestinationAddressNode(f"{prefix}_address", place=poi)
+            return (
+                TflTransitNode(
+                    f"{prefix}_nb",
+                    options=TransitOptions(best_location=loc, poi=address, has_car=has_car, allow_bus=False),
+                ),
+                TflTransitNode(
+                    f"{prefix}_wb",
+                    options=TransitOptions(best_location=loc, poi=address, has_car=has_car, allow_bus=True),
+                ),
+            )
+
+        return _deps
 
     @pytest.mark.asyncio
     async def test_pending_without_location(self):
         """No location → node stays pending."""
-        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitNode, TransitOptions
 
         loc = UserInputNode[GeoPoint]("tr_loc1", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi1", PlaceOfInterest)
 
+        address = DestinationAddressNode("tr_poi1_address", place=poi)
         no_bus = TflTransitNode(
-            "tr1_nb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=False)
+            "tr1_nb", options=TransitOptions(best_location=loc, poi=address, has_car=False, allow_bus=False)
         )
         with_bus = TflTransitNode(
-            "tr1_wb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=True)
+            "tr1_wb", options=TransitOptions(best_location=loc, poi=address, has_car=False, allow_bus=True)
         )
         node = TransitNode(
             "tr1",
@@ -112,18 +119,19 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_pending_without_poi(self):
         """No POI → node stays pending even with location set."""
-        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitNode, TransitOptions
 
         loc = UserInputNode[GeoPoint]("tr_loc2", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi2", PlaceOfInterest)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         await flush_processor()
+        address = DestinationAddressNode("tr_poi2_address", place=poi)
         no_bus = TflTransitNode(
-            "tr2_nb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=False)
+            "tr2_nb", options=TransitOptions(best_location=loc, poi=address, has_car=False, allow_bus=False)
         )
         with_bus = TflTransitNode(
-            "tr2_wb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=True)
+            "tr2_wb", options=TransitOptions(best_location=loc, poi=address, has_car=False, allow_bus=True)
         )
         node = TransitNode(
             "tr2",
@@ -137,7 +145,7 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_returns_commute_from_router(self):
         """With all deps, TransitNode picks best from TflTransitNode deps."""
-        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitNode, TransitOptions
 
         loc = UserInputNode[GeoPoint]("tr_loc3", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi3", PlaceOfInterest)
@@ -156,16 +164,17 @@ class TestTransitCommute:
             async def plan(self):
                 return Attempt.succeeded(commute)
 
+        address = DestinationAddressNode("tr_poi3_address", place=poi)
         no_bus = TflTransitNode(
             "tr3_nb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=False, allow_bus=False, client_factory=_FakeClient
+                best_location=loc, poi=address, has_car=False, allow_bus=False, client_factory=_FakeClient
             ),
         )
         with_bus = TflTransitNode(
             "tr3_wb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=False, allow_bus=True, client_factory=_FakeClient
+                best_location=loc, poi=address, has_car=False, allow_bus=True, client_factory=_FakeClient
             ),
         )
         node = TransitNode(
@@ -189,7 +198,7 @@ class TestTransitCommute:
 
     async def test_impossible_when_router_fails(self):
         """Router returning impossible → TransitNode is impossible."""
-        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitNode, TransitOptions
 
         loc = UserInputNode[GeoPoint]("tr_loc4", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi4", PlaceOfInterest)
@@ -205,16 +214,17 @@ class TestTransitCommute:
             async def plan(self):
                 return Attempt.impossible("API down")
 
+        address = DestinationAddressNode("tr_poi4_address", place=poi)
         no_bus = TflTransitNode(
             "tr4_nb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=False, allow_bus=False, client_factory=_FakeClient
+                best_location=loc, poi=address, has_car=False, allow_bus=False, client_factory=_FakeClient
             ),
         )
         with_bus = TflTransitNode(
             "tr4_wb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=False, allow_bus=True, client_factory=_FakeClient
+                best_location=loc, poi=address, has_car=False, allow_bus=True, client_factory=_FakeClient
             ),
         )
         node = TransitNode(
@@ -235,16 +245,17 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_to_json_has_boolean_fields(self):
         """TransitNode.to_json() must include succeeded/pending/impossible booleans."""
-        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitNode, TransitOptions
 
         loc = UserInputNode[GeoPoint]("tr_loc5", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi5", PlaceOfInterest)
 
+        address = DestinationAddressNode("tr_poi5_address", place=poi)
         no_bus = TflTransitNode(
-            "tr5_nb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=False)
+            "tr5_nb", options=TransitOptions(best_location=loc, poi=address, has_car=False, allow_bus=False)
         )
         with_bus = TflTransitNode(
-            "tr5_wb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=True)
+            "tr5_wb", options=TransitOptions(best_location=loc, poi=address, has_car=False, allow_bus=True)
         )
         node = TransitNode(
             "tr5",
@@ -263,7 +274,7 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_uses_has_car_and_max_walk_params(self):
         """Uses has_car and max_walk from constructor params for the commute request."""
-        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitNode, TransitOptions
         from houses.tfl_client import TflRouteOptions
 
         loc = UserInputNode[GeoPoint]("tr_loc6", GeoPoint)
@@ -285,16 +296,17 @@ class TestTransitCommute:
             async def plan(self):
                 return Attempt.succeeded(_make_commute())
 
+        address = DestinationAddressNode("tr_poi6_address", place=poi)
         no_bus = TflTransitNode(
             "tr6_nb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=True, allow_bus=False, client_factory=_CaptureClient
+                best_location=loc, poi=address, has_car=True, allow_bus=False, client_factory=_CaptureClient
             ),
         )
         with_bus = TflTransitNode(
             "tr6_wb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=True, allow_bus=True, client_factory=_CaptureClient
+                best_location=loc, poi=address, has_car=True, allow_bus=True, client_factory=_CaptureClient
             ),
         )
         node = TransitNode(
@@ -316,7 +328,7 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_transit_is_not_child(self):
         """Transit result is_child is always False (child handling done upstream)."""
-        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.nodes.transit import DestinationAddressNode, TflTransitNode, TransitNode, TransitOptions
 
         loc = UserInputNode[GeoPoint]("tr_loc7", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi7", PlaceOfInterest)
@@ -332,16 +344,17 @@ class TestTransitCommute:
             async def plan(self):
                 return Attempt.succeeded(_make_commute(duration_min=20, cost_gbp="0"))
 
+        address = DestinationAddressNode("tr_poi7_address", place=poi)
         no_bus = TflTransitNode(
             "tr7_nb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=False, allow_bus=False, client_factory=_FakeClient
+                best_location=loc, poi=address, has_car=False, allow_bus=False, client_factory=_FakeClient
             ),
         )
         with_bus = TflTransitNode(
             "tr7_wb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=False, allow_bus=True, client_factory=_FakeClient
+                best_location=loc, poi=address, has_car=False, allow_bus=True, client_factory=_FakeClient
             ),
         )
         node = TransitNode(

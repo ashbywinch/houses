@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import override
 
 from money import Money
@@ -22,12 +23,14 @@ class TotalWorksNode(DerivedNode[Money]):
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
         lines = []
-        wd = self._works_estimates_node.latest_attempt().value_or_none() or {}
+        stored = self._stored_dep_inputs().inputs
+        wd = (stored.get(self._works_estimates_node._id) or {}).get("value") or {}
         for name, val in wd.items():
             if val is None:
                 continue
-            amt = val.amount if isinstance(val, Money) else str(val)
-            lines.append(FormulaLine(label=f"{name}’s renovation estimate", value=f"£{amt:,.2f}"))
+            # Stored inputs are serialized: Money is {"amount","currency"}.
+            amt = val.get("amount") if isinstance(val, dict) else (val.amount if isinstance(val, Money) else val)
+            lines.append(FormulaLine(label=f"{name}’s renovation estimate", value=f"£{Decimal(str(amt)):,.2f}"))
         if not lines:
             lines.append(FormulaLine(label="Total Works", value=str(self._attempt.value)))
         return Formula(lines=lines, result=str(self._attempt.value))

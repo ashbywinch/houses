@@ -112,7 +112,7 @@ const homeShortAddress = computed(() => (props.monthlyBaseline?.address ?? '').s
 
 const deltaVsHome = computed(() => props.affordability?.group_monthly_cost?.value?.delta_vs_home ?? null)
 
-function vsRow(side: 'couple' | 'others'): { label: string; value: string; title: string } | null {
+function vsRow(side: 'couple' | 'others'): { label: string; value: string; title: string; provenance?: Provenance } | null {
   const d = deltaVsHome.value?.[side]
   if (props.isCurrentHome || !d || !homeShortAddress.value) return null
   const total = props.affordability?.group_monthly_cost?.value?.[side]?.value
@@ -121,6 +121,7 @@ function vsRow(side: 'couple' | 'others'): { label: string; value: string; title
     label: `vs your home (${homeShortAddress.value})`,
     value: `${d.approx ? '≈ ' : ''}${signedPounds(d.value)}/mo`,
     title: `£${total} − £${base} = ${d.value}. ≈ = council tax estimated.`,
+    provenance: (d as { provenance?: Provenance }).provenance,
   }
 }
 const coupleVsRow = computed(() => vsRow('couple'))
@@ -335,6 +336,11 @@ function canEdit(personName: string): boolean {
         <div v-if="coupleVsRow" class="costs-row costs-row--sub costs-row--vs" :title="coupleVsRow.title">
           <span class="costs-label">{{ coupleVsRow.label }}</span>
           <span class="costs-value">{{ coupleVsRow.value }}</span>
+          <ProvenanceToggle
+            v-if="coupleVsRow.provenance"
+            :provenance="coupleVsRow.provenance"
+            title="Monthly difference vs your home"
+          />
         </div>
         <div v-if="affordability.group_monthly_cost.value.couple_breakdown" class="costs-group-breakdown">
           <div v-for="(row, key) in coupleRows()" :key="key" class="costs-row costs-row--sub">
@@ -359,6 +365,11 @@ function canEdit(personName: string): boolean {
         <div v-if="othersVsRow" class="costs-row costs-row--sub costs-row--vs" :title="othersVsRow.title">
           <span class="costs-label">{{ othersVsRow.label }}</span>
           <span class="costs-value">{{ othersVsRow.value }}</span>
+          <ProvenanceToggle
+            v-if="othersVsRow.provenance"
+            :provenance="othersVsRow.provenance"
+            title="Monthly difference vs your home"
+          />
         </div>
         <div v-if="affordability.group_monthly_cost.value.others_breakdown" class="costs-group-breakdown">
           <div v-for="(row, key) in othersRows()" :key="key" class="costs-row costs-row--sub">

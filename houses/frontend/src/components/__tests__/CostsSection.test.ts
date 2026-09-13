@@ -458,3 +458,103 @@ describe('CostsSection — vs your home rows', () => {
     expect(wrapper.findAll('.costs-row--vs')).toHaveLength(0)
   })
 })
+
+describe('CostsSection — vs-row provenance widget (defect 1)', () => {
+  const homeBaseline: MonthlyBaseline = {
+    rid: 'home',
+    address: '31 Isambard Road, Southall, UB2 4GN',
+    couple: { value: '1783.61', approx: false },
+    others: { value: '652.92', approx: false },
+    others_rent_paid: 600,
+  }
+
+  const deltaProvenance = {
+    label: 'Monthly difference vs your home',
+    description: 'Candidate monthly total minus your home (31 Isambard Road).',
+    sourceType: 'calc',
+    formula: {
+      lines: [
+        { label: 'This property (S+L)', value: '£3091.67/mo' },
+        { label: 'Your home (31 Isambard Road)', value: '£1783.61/mo' },
+      ],
+      result: '+1308.06/mo',
+    },
+    sources: {},
+  }
+
+  function mountWithDelta() {
+    return mountCosts({
+      affordability: {
+        group_monthly_cost: {
+          succeeded: true,
+          value: {
+            couple: { value: '3091.67', stddev: 0 },
+            others: { value: '241.64', stddev: 0 },
+            couple_label: 'S+L',
+            others_label: 'Ashby',
+            delta_vs_home: {
+              couple: { value: '+1308.06', approx: true, provenance: deltaProvenance },
+              others: { value: '-411.28', approx: false, provenance: deltaProvenance },
+            },
+          },
+          error: null,
+          provenance: {},
+        },
+      },
+      monthlyBaseline: homeBaseline,
+    })
+  }
+
+  it('renders the standard ⓘ on each vs row, opening the delta derivation', async () => {
+    const wrapper = mountWithDelta()
+    const rows = wrapper.findAll('.costs-row--vs')
+    expect(rows).toHaveLength(2)
+    const toggles = wrapper.findAllComponents({ name: 'ProvenanceToggle' })
+    const vsToggles = toggles.filter((t) => t.props('title') === 'Monthly difference vs your home')
+    expect(vsToggles).toHaveLength(2)
+    await vsToggles[0].find('button.provenance-toggle__trigger').trigger('click')
+    expect(wrapper.text()).toContain('Monthly difference vs your home')
+    expect(wrapper.text()).toContain('+1308.06/mo')
+  })
+
+  it('shows the delta derivation values from the wire (candidate − baseline)', async () => {
+    const wrapper = mountWithDelta()
+    const toggles = wrapper.findAllComponents({ name: 'ProvenanceToggle' })
+    const vsToggles = toggles.filter((t) => t.props('title') === 'Monthly difference vs your home')
+    await vsToggles[1].find('button.provenance-toggle__trigger').trigger('click')
+    const text = wrapper.text()
+    expect(text).toContain('This property (S+L)')
+    expect(text).toContain('£3091.67/mo')
+    expect(text).toContain('Your home (31 Isambard Road)')
+    expect(text).toContain('£1783.61/mo')
+  })
+
+  it('renders no vs-row ⓘ when the delta carries no provenance', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        group_monthly_cost: {
+          succeeded: true,
+          value: {
+            couple: { value: '3091.67', stddev: 0 },
+            others: { value: '241.64', stddev: 0 },
+            couple_label: 'S+L',
+            others_label: 'Ashby',
+            delta_vs_home: {
+              couple: { value: '+1308.06', approx: true },
+              others: { value: '-411.28', approx: false },
+            },
+          },
+          error: null,
+          provenance: {},
+        },
+      },
+      monthlyBaseline: homeBaseline,
+    })
+    expect(wrapper.findAll('.costs-row--vs')).toHaveLength(2)
+    // The group totals still carry their own ⓘ toggles (provenance: {} is
+    // truthy in the template's v-if) — but no vs-row delta toggle: the
+    // delta derivation title must be absent.
+    const toggles = wrapper.findAllComponents({ name: 'ProvenanceToggle' })
+    expect(toggles.filter((t) => t.props('title') === 'Monthly difference vs your home')).toHaveLength(0)
+  })
+})

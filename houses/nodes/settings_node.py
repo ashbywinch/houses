@@ -7,6 +7,7 @@ SettingsNode aggregates them into the same dict shape the API expects.
 Services creates the individual nodes; this module defines the IDs,
 defaults, the SettingsNode class, and the API-key mapping.
 """
+
 from collections.abc import Callable
 from decimal import Decimal
 from typing import override
@@ -71,8 +72,6 @@ def _serialize_for_api(val):
     return val
 
 
-
-
 # lucidlint: ignore record-shape keyed collection — API-key → value map (variable keys), not a fixed record shape
 def aggregate_dict(setting_nodes: dict[str, UserInputNode]) -> dict:
     """Build the API-key financial dict from the individual setting
@@ -92,8 +91,8 @@ def aggregate_dict(setting_nodes: dict[str, UserInputNode]) -> dict:
             result[api_key] = _serialize_for_api(val)
     return result
 
-# ── SettingsNode Aggregate ───────────────────────────────
 
+# ── SettingsNode Aggregate ───────────────────────────────
 
 
 class SettingsNode(DerivedNode[dict]):

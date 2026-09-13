@@ -64,7 +64,6 @@ class TestTransitNode:
         a = await node.attempt()
         assert a.pending
 
-
     async def test_route_failure_has_friendly_user_message(self):
         """A raw TfL error must never reach the UI: the internal message
         keeps it for logs, display_message is the friendly leaf (walkthrough
@@ -426,10 +425,13 @@ class TestTflClientNoRoute:
                 return Attempt.succeeded(_feasible(55))
             return Attempt.succeeded(_infeasible())
 
+        from houses.nodes.transit import DestinationAddressNode
+
         loc = UserInputNode[GeoPoint]("t404_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("t404_poi", PlaceOfInterest)
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest(label="Bracknell", address="RG12 8YA"), "test")
+        address = DestinationAddressNode("t404_address", place=poi)
 
         def make_client(origin, dest, label, options=None):
             opts = options or TflRouteOptions()
@@ -447,13 +449,13 @@ class TestTflClientNoRoute:
         no_bus = TflTransitNode(
             "t404_nb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=True, allow_bus=False, client_factory=make_client
+                best_location=loc, poi=address, has_car=True, allow_bus=False, client_factory=make_client
             ),
         )
         with_bus = TflTransitNode(
             "t404_wb",
             options=TransitOptions(
-                best_location=loc, poi=poi, has_car=True, allow_bus=True, client_factory=make_client
+                best_location=loc, poi=address, has_car=True, allow_bus=True, client_factory=make_client
             ),
         )
         node = TransitNode(
@@ -477,6 +479,7 @@ class TestTflClientNoRoute:
         # no_bus probe — a plain description, not a log side-channel.
         nb_prov = await no_bus.build_provenance()
         assert "HTTP 404" in (nb_prov.description or "")
+
 
 class TestNationalRailFallback:
     """TransitNode's National Rail fallback — routes origins beyond TfL
@@ -558,6 +561,7 @@ class TestNationalRailFallback:
     async def test_tfl_infeasible_falls_back_to_national_rail(self):
         """Both TfL variants succeeded-infeasible + a wired fallback →
         the National Rail journey wins (regression: Hungerford)."""
+
         async def fake_route(loc, dest):
             return self._commute()
 
@@ -573,6 +577,7 @@ class TestNationalRailFallback:
     async def test_fallback_returning_none_keeps_infeasible(self):
         """The router said 'no route' → the node keeps the
         succeeded-infeasible result so the selector can try drive/walk."""
+
         async def fake_route(loc, dest):
             return None
 
@@ -585,6 +590,7 @@ class TestNationalRailFallback:
     async def test_fallback_failure_keeps_infeasible(self):
         """A Google failure must never crash the node nor mask the
         drive/walk fallback."""
+
         async def fake_route(loc, dest):
             raise RuntimeError("google down")
 
@@ -791,8 +797,7 @@ class TestTheTwoTfLPlanNodesSayWhichPlanTheyAre:
         with_bus = self._node("name_wb", allow_bus=True)
 
         assert no_bus.display_name != with_bus.display_name, (
-            "both plan nodes are called "
-            f"{no_bus.display_name!r}: the reader cannot tell which plan they are looking at"
+            f"both plan nodes are called {no_bus.display_name!r}: the reader cannot tell which plan they are looking at"
         )
         assert "bus" in no_bus.display_name.lower()
         assert "bus" in with_bus.display_name.lower()

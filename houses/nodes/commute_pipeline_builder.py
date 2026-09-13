@@ -10,6 +10,7 @@ from houses.nodes.petrol import PersonPetrolMpgNode, PetrolCostAugmentNode
 from houses.nodes.rail_fare_node import RailFareNode
 from houses.nodes.schools import SchoolLocationNode
 from houses.nodes.transit import (
+    DestinationAddressNode,
     DestinationPlaceNode,
     DriveNode,
     PersonMaxWalkNode,
@@ -56,7 +57,6 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
             # gate re-evaluates when the address or trips change — no
             # rebuild, no rewiring, nothing frozen.  For children the
             # school node resolves the school's real location instead
-            # (the POI carries no address for schools).
             if is_child:
                 school_node = (
                     prop.primary_school
@@ -67,11 +67,13 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
                 )
                 if school_node is None:
                     continue
-                poi_src = SchoolLocationNode(
+                place = SchoolLocationNode(
                     f"{prop.rid}/{key}/poi",
                     school_node=school_node,
                 )
-                place = poi_src
+                # Schools already resolve to an address string — the
+                # planners take it directly, no projection needed.
+                address_node = place
             else:
                 place = DestinationPlaceNode(
                     f"{prop.rid}/{key}/place",
@@ -79,12 +81,20 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
                     person_name=p_name,
                     label=label,
                 )
+                # The ADDRESS projection planners depend on: trips-only
+                # edits change place but not its address, so planners are
+                # never marked stale. The full-POI stamp flows downstream
+                # through the nodes that render it.
+                address_node = DestinationAddressNode(
+                    f"{prop.rid}/{key}/address",
+                    place=place,
+                )
 
             walk_node = WalkNode(
                 f"{prop.rid}/{key}/walk",
                 options=RouteOptions(
                     best_location=prop.best_location,
-                    poi=place,
+                    poi=address_node,
                     max_walk=int(p_info.bus_walk_penalty.magnitude),
                 ),
             )
@@ -101,22 +111,19 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
             # Only create a DriveNode for persons who have a car. The
             # congestion-charge rule is enforced inside DriveNode against
             # the destination's current address.
-            if p_info.has_car:
-                drive_node = DriveNode(
-                    f"{prop.rid}/{key}/drive",
-                    options=RouteOptions(
-                        best_location=prop.best_location,
-                        poi=place,
-                        has_car=True,
-                        ),
-                )
-            else:
-                drive_node = None
+            drive_node = DriveNode(
+                f"{prop.rid}/{key}/drive",
+                options=RouteOptions(
+                    best_location=prop.best_location,
+                    poi=address_node,
+                    has_car=True,
+                ),
+            )
             no_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_no_bus",
                 options=TransitOptions(
                     best_location=prop.best_location,
-                    poi=place,
+                    poi=address_node,
                     has_car=p_info.has_car,
                     allow_bus=False,
                 ),
@@ -125,7 +132,7 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
                 f"{prop.rid}/{key}/tfl_with_bus",
                 options=TransitOptions(
                     best_location=prop.best_location,
-                    poi=place,
+                    poi=address_node,
                     has_car=p_info.has_car,
                     allow_bus=True,
                 ),
@@ -159,7 +166,7 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
             bus_route_node = BusRouteNode(
                 f"{prop.rid}/{key}/bus_route",
                 best_location=prop.best_location,
-                poi=place,
+                poi=address_node,
                 _google_routes_post=_commute_router().google_routes_post,
             )
 
