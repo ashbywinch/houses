@@ -127,13 +127,12 @@ the excluded dep's changes correctly do nothing.
 
 #### A dep object holding both used and unused fields is NOT both-or-neither
 
-The trap (PR #114, three rounds of apparatus): a planner depending
-on the whole POI when `compute` reads only its address. Trips-only
-edits then re-plan routes — and the "fix" becomes provenance
-string-patching, manual scheduling, side memory, extra value fields,
-each duplicating DAG state outside the DAG.
-
-The fix is never to work around the refresh. Either:
+Example: a route planner depending on the whole POI when `compute`
+reads only its address. Trips-only edits then re-plan routes — and
+the temptation is apparatus around the refresh (patching provenance
+strings, scheduling by hand, stashing side memory, widening the
+value). Each workaround duplicates DAG state outside the DAG; fix
+the dep instead. Either:
 
 1. **Project, then depend on the projection** — a pure
    `DestinationAddressNode(place) -> str`; the planner deps
@@ -141,9 +140,8 @@ The fix is never to work around the refresh. Either:
    the nodes that render it (selector → merge → fuel → breakdown),
    which keep the full dep. Trips-only pushes stop marking the
    planner stale at all.
-2. **Delete an unread dep** — `compute` never reads it
-   (`TownDescNode.best_location`, `NearestSchoolNode.best_address`):
-   remove it from the tuple. No projection needed.
+2. **Delete an unread dep** — `compute` never reads it: remove it
+   from the tuple. No projection needed.
 
 If neither fits — `compute` genuinely reads the whole object — the
 refresh is real and any API call inside needs its own reuse guard at
@@ -172,7 +170,8 @@ Rules that make this safe for every future node:
   signals of their own.
 - Never override `_get_active_deps()` to read subclass state assigned after
   `super().__init__()`: registration runs `_is_stale()` → `_get_active_deps()` inside the
-  base constructor, and that ordering killed the live server on 2026-09-09.
+  base constructor, before the subclass fields exist — the override reads
+  uninitialised state.
 
 ## Settings Nodes
 
@@ -346,11 +345,11 @@ the tell.
 
 ### Never depend on more than `compute` reads
 
-A planner that uses only the destination address but depends on the
+A planner using only the destination address but depending on the
 whole POI (label + trips/weeks) re-plans on every trips-only edit —
-then the fix becomes apparatus: provenance string-patching, manual
-scheduling, side memory, extra value fields. Each workaround
-duplicated DAG state outside the DAG (PR #114, three rounds).
+then the temptation is apparatus around the refresh (provenance
+string-patching, manual scheduling, side memory, extra value
+fields), each duplicating DAG state outside the DAG.
 
 ```python
 # ✗ over-broad dep: trips-only edits re-plan the route
