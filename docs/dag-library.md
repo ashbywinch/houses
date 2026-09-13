@@ -155,7 +155,7 @@ When `compute()` changes such that old persisted results are semantically invali
 
 ## Wiring rules
 
-Seven ways to wire a calculation into the graph so that it stops working. Each
+Eight ways to wire a calculation into the graph so that it stops working. Each
 rule is a prohibition; the check beside it catches a regression.
 
 | Never | What it causes | Check |
@@ -167,6 +167,7 @@ rule is a prohibition; the check beside it catches a regression.
 | Show implementation names to the user | the reader cannot act on the message | no node id, class name or Python identifier in a user-facing payload |
 | Write the calculation twice, in code and in prose | a second, untested implementation that drifts | review finding |
 | Store derived state outside the value | restarts lose it, persistence cannot see it, a second source of truth | the value carries everything `compute` needs beyond its dep attempts |
+| Depend on more than `compute` reads | trips-only edits re-plan routes; the fix becomes apparatus (string patches, manual scheduling, side memory) | narrow the dep; a refresh the node doesn't need is the tell |
 
 ### Never copy a dependency's value into a node
 
@@ -300,6 +301,30 @@ replace(val, destination=poi, origin=_origin_key(loc))
 **Check:** restart the process mid-scenario — the second run must not
 re-plan. A field set in `compute` and read in the next `compute` is
 the tell.
+
+### Never depend on more than `compute` reads
+
+A planner that uses only the destination address but depends on the
+whole POI (label + trips/weeks) re-plans on every trips-only edit —
+then the fix becomes apparatus: provenance string-patching, manual
+scheduling, side memory, extra value fields. Each workaround
+duplicated DAG state outside the DAG (PR #114, three rounds).
+
+```python
+# ✗ over-broad dep: trips-only edits re-plan the route
+super().__init__(node_id, Commute, (options.best_location, options.poi))
+# ✓ the address projection is the dep; the stamp flows downstream
+super().__init__(node_id, Commute, (options.best_location, address_node))
+```
+
+Project first (`DestinationAddressNode(place) -> str`), depend on the
+projection; the full-POI stamp flows through the nodes that render it
+(selector → merge → fuel → breakdown). An unread dep is the same bug
+without the apparatus — delete it (`TownDescNode.best_location`,
+`NearestSchoolNode.best_address`).
+
+**Check:** a refresh the node doesn't need is the tell — a trips-only
+push must not schedule the planner at all.
 
 ## Thread rules
 
