@@ -128,11 +128,24 @@ the excluded dep's changes correctly do nothing.
 #### A dep object holding both used and unused fields is NOT both-or-neither
 
 Example: a route planner depending on the whole POI when `compute`
-reads only its address. Trips-only edits then re-plan routes — and
-the temptation is apparatus around the refresh (patching provenance
-strings, scheduling by hand, stashing side memory, widening the
-value). Each workaround duplicates DAG state outside the DAG; fix
-the dep instead. Either:
+reads only its address. Trips-only edits then re-plan routes. The
+wrong fixes all work around the refresh instead of narrowing the
+dep — each duplicates DAG state outside the DAG:
+
+```python
+# ✗ patch the persisted provenance strings after the fact
+node.value = _FREQ_RE.sub(fresh, node.value)
+# ✗ schedule nodes by hand instead of letting signals do it
+for nid, node in list(get_scheduler().registered_nodes().items()):
+    if nid.endswith(("/walk", "/drive")):
+        get_scheduler().schedule(node)
+# ✗ stash planning inputs in node memory
+self._planned_origin = loc
+# ✗ widen the value to carry planning inputs
+replace(val, destination=poi, origin=_origin_key(loc))
+```
+
+Fix the dep instead. Either:
 
 1. **Project, then depend on the projection** — a pure
    `DestinationAddressNode(place) -> str`; the planner deps
@@ -208,7 +221,7 @@ rule is a prohibition; the check beside it catches a regression.
 | Show implementation names to the user | the reader cannot act on the message | no node id, class name or Python identifier in a user-facing payload |
 | Write the calculation twice, in code and in prose | a second, untested implementation that drifts | review finding |
 | Store derived state outside the value | restarts lose it, persistence cannot see it, a second source of truth | the value carries everything `compute` needs beyond its dep attempts |
-| Depend on more than `compute` reads | trips-only edits re-plan routes; the fix becomes apparatus (string patches, manual scheduling, side memory) | narrow the dep; a refresh the node doesn't need is the tell |
+| Depend on more than `compute` reads | trips-only edits re-plan routes; the workarounds below duplicate DAG state outside the DAG | narrow the dep; a refresh the node doesn't need is the tell |
 
 ### Never copy a dependency's value into a node
 
@@ -264,8 +277,7 @@ user sees it where the value would be and somebody can fix it. Infeasibility
 **succeeded** value carrying its reason: it flows as a value, and the totals
 stay computable.
 
-**The tell:** if you are building apparatus to compensate for a dependency
-you removed, the removal is the bug.
+**The tell:** if you are writing a sweep, retry loop, or reconciliation pass to find and re-run nodes the graph should have scheduled, the missing dep (or the wrongly narrowed one) is the bug — fix the wiring, not the scheduler.
 
 **Check:** `tests/unit/nodes/test_commute_failure_surfaces.py`.
 
@@ -343,13 +355,13 @@ replace(val, destination=poi, origin=_origin_key(loc))
 re-plan. A field set in `compute` and read in the next `compute` is
 the tell.
 
-### Never depend on more than `compute` reads
-
 A planner using only the destination address but depending on the
-whole POI (label + trips/weeks) re-plans on every trips-only edit —
-then the temptation is apparatus around the refresh (provenance
-string-patching, manual scheduling, side memory, extra value
-fields), each duplicating DAG state outside the DAG.
+whole POI (label + trips/weeks) re-plans on every trips-only edit.
+The wrong fixes work around the refresh instead of narrowing the
+dep: patching persisted provenance strings with a regex, scheduling
+nodes by hand over the registry, stashing planning inputs in
+`self._*` memory, widening the value to carry planning inputs —
+each duplicates DAG state outside the DAG.
 
 ```python
 # ✗ over-broad dep: trips-only edits re-plan the route
@@ -361,7 +373,7 @@ super().__init__(node_id, Commute, (options.best_location, address_node))
 Project first (`DestinationAddressNode(place) -> str`), depend on the
 projection; the full-POI stamp flows through the nodes that render it
 (selector → merge → fuel → breakdown). An unread dep is the same bug
-without the apparatus — delete it (`TownDescNode.best_location`,
+with no workaround to tempt — delete it (`TownDescNode.best_location`,
 `NearestSchoolNode.best_address`).
 
 **Check:** a refresh the node doesn't need is the tell — a trips-only
