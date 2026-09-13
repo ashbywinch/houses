@@ -275,6 +275,13 @@ class Commute:
             parts.append(cost)
         if poi.trips_per_week and poi.weeks_per_year:
             parts.append(f"{poi.trips_per_week}x/wk · {poi.weeks_per_year} wks/yr")
+        else:
+            # A 0-days destination is NOT commuted — the breakdown
+            # prices it at £0 by the multiplication. The projection
+            # must say so: a bare "… to Pimlico" with no frequency
+            # reads as a live destination and contradicts the £0
+            # total. Non-zero frequencies stay as above.
+            parts.append(f"{poi.trips_per_week or 0}x/wk · {poi.weeks_per_year or 0} wks/yr")
         return " · ".join(parts)
 
     @property

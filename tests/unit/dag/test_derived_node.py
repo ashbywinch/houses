@@ -130,7 +130,7 @@ class TestDerivedNode:
                 return Attempt.succeeded((args[0].value_or_none() or 0) + 1)
 
             @override
-            async def build_provenance(self):
+            async def build_provenance(self, dep_attempts=None, active_deps=None):
                 return Provenance(label="crash_test")
 
         src = _FailingNode()

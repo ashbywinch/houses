@@ -93,6 +93,27 @@ self._price_node + self._stamp_duty_node - self._equity_node
 
 Expression-based nodes **do not override `build_provenance()`** — the base default walks active deps and calls `expression.to_formula()`.
 
+### Provenance renders stored inputs, never live re-reads
+
+`refresh()` persists `DepInputs` — the exact dep attempts the value was
+calculated from, projected JSON-safe (`{"display", "value"}` per dep;
+`{status, error}` for failures) — alongside the result row. Both the
+serve path (`build_provenance()` with no bound attempts) and the
+persist path (bound attempts + `provenance_formula_for()`) render from
+those stored inputs: each dep subtree recurses from the dep's OWN
+stored row, and formulas read the bound `value` envelopes. Nothing on
+the provenance path recomputes. A dep with no stored row (never
+persisted, test fixed node) degrades to the envelope display — never
+a re-read signal.
+
+Consequence for formulas: a `provenance_formula` property that reads
+dep values must read `self._stored_dep_inputs()`, and a node whose
+formula needs dep values at persist time overrides
+`provenance_formula_for(dep_attempts, active_deps)` to read the bound
+attempts (stored state lags the current evaluation by one persist).
+The base `provenance_formula_for` delegates to `provenance_formula`,
+so nodes with no dep-dependent formula do nothing.
+
 ### Narrow deps to what `compute` reads
 
 `_get_active_deps()` answers "what does THIS evaluation depend on" —

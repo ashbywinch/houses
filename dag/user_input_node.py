@@ -270,7 +270,9 @@ class UserInputNode(Node[T], Generic[T]):
         return Attempt.pending()
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
         # Fall back to persistence timestamp for data that predates freshness tracking
         freshness = self._push_timestamp or self._persisted_at
         return Provenance(

@@ -58,7 +58,7 @@ class StampDutyNode(DerivedNode[Money]):
         return (self._price_node, self._status_node) if self._status_node is not None else (self._price_node,)
 
     @override
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
+    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def compute(
         self,
         price: Attempt[Money],

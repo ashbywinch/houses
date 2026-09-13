@@ -71,7 +71,6 @@ class _CommuteAggregateJson:
 class CommuteBreakdownNode(DerivedNode[dict]):
     """Aggregates commute costs across all persons and POIs."""
 
-    
     def __init__(self, node_id: str, *, commute_selectors: Mapping[str, Node], persons_source: Node):
         # Live selectors dict — also captured by the deps closure below;
         # compute reads the attribute, the provider re-reads the dict on
@@ -105,9 +104,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 trips = c.get("trips_per_week", 0)
                 weeks = c.get("weeks_per_year", 0)
                 freq = f"{trips}x/wk · {weeks} wks/yr"
-                lines.append(
-                    FormulaLine(label=f"{name} → {c['label']} · {freq}", value=f"£{yearly:,.2f}/yr")
-                )
+                lines.append(FormulaLine(label=f"{name} → {c['label']} · {freq}", value=f"£{yearly:,.2f}/yr"))
         if not lines:
             return None
         return Formula(lines=lines, result=f"£{Decimal(str(v.get('yearly_total_gbp', '0'))):,.2f}/yr")
@@ -186,7 +183,9 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         )
 
     @override
-    async def build_provenance(self):
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ):
         """The aggregate as a human total, never the dict dump.
 
         The node VALUE stays the breakdown dict (the expression system

@@ -151,7 +151,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         return self._deps
 
     @override
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
+    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def compute(self, **kwargs) -> Attempt[Measurement[Money]]:
         return self.expression.evaluate()
 
@@ -231,7 +231,9 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         return _compute_group_costs(GroupCostInputs(**kwargs))
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
         """The monthly figures as a human summary, never the raw dict.
 
         The node VALUE is the breakdown dict (the UI renders the rows
@@ -255,9 +257,16 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             allocated = (val.get("couple_breakdown") or {}).get("annexe_council_tax") or (
                 val.get("others_breakdown") or {}
             ).get("annexe_council_tax")
+            stored = self._stored_dep_inputs().inputs
+
+            def _stored_list(node: Node | None) -> list[str]:
+                if node is None:
+                    return []
+                raw = (stored.get(node._id) or {}).get("value")
+                return [str(n) for n in raw] if isinstance(raw, list) else []
+
             if allocated and self._annexe_payers_node is not None:
-                payer_att = self._annexe_payers_node.latest_attempt()
-                payers = payer_att.value_or_none() if payer_att is not None else None
+                payers = _stored_list(self._annexe_payers_node)
                 if payers:
                     annexe_note = "includes annexe council tax (second dwelling) split between: " + ", ".join(payers)
                     if prov.description is None:
@@ -265,43 +274,59 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                     else:
                         prov.description = f"{prov.description} — {annexe_note}"
             # THE APPORTIONMENT, stated for the reader: which bills, and
-            # who pays them (P2 — explainable one step away).
-            council_node = self._council_tax_node
-            council_att = council_node.latest_attempt() if council_node is not None else None
-            council_val = council_att.value_or_none() if council_att is not None else None
-            persons_source = self._config.persons_source
-            persons_att = persons_source.latest_attempt() if persons_source is not None else None
-            persons_value = persons_att.value_or_none() if persons_att is not None else []
-            adults = [
-                p.name for p in (persons_value or [])
-                if not getattr(p, "is_child", False)
+            # who pays them (P2 — explainable one step away). Rendered
+            # from the STORED calculating inputs — never live dep
+            # attempts, which may have moved on since this value was
+            # produced.
+            council_raw = (
+                (stored.get(self._council_tax_node._id) or {}).get("value")
+                if self._council_tax_node is not None
+                else None
+            )
+            council_val = council_raw if isinstance(council_raw, dict) else None
+            persons_raw = (
+                (stored.get(self._config.persons_source._id) or {}).get("value")
+                if self._config.persons_source is not None
+                else []
+            )
+            adults: list[str] = [
+                str(p.get("name")) for p in (persons_raw or []) if isinstance(p, dict) and not p.get("is_child", False)
             ]
-            def _stored_names(node):
-                att = node.latest_attempt() if node is not None else None
-                return set(att.value_or_none() or []) if att is not None else set()
-
-            stored_main = _stored_names(self._config.council_tax_payers_node)
+            stored_main = set(_stored_list(self._config.council_tax_payers_node))
             main_payers = sorted((stored_main & set(adults)) or adults)
-            stored_annexe = _stored_names(self._annexe_payers_node)
+            stored_annexe = set(_stored_list(self._annexe_payers_node))
             annexe_payers = sorted((stored_annexe & set(adults)) or adults)
-            ignored = bool(
-                self._annexe_ignored_node.latest_attempt().value_or_none()
-            ) if self._annexe_ignored_node is not None else False
+            ignored_raw = (
+                (stored.get(self._annexe_ignored_node._id) or {}).get("value")
+                if self._annexe_ignored_node is not None
+                else None
+            )
+            ignored = bool(ignored_raw) if self._annexe_ignored_node is not None else False
             if council_val is not None:
                 parts = []
-                if council_val.yearly_cost is not None:
+                yearly = (council_val.get("yearly_cost") or {}).get("value") or {}
+                if yearly.get("amount") is not None:
                     parts.append(
                         _band_line(
-                            "main", council_val.band, council_val.yearly_cost.value.amount,
-                            ", ".join(main_payers) or "all adults", ignored=False,
+                            "main",
+                            council_val.get("band"),
+                            yearly.get("amount"),
+                            ", ".join(main_payers) or "all adults",
+                            ignored=False,
                         )
                     )
-                annexe = council_val.annexe
-                if annexe is not None and annexe.yearly_cost is not None:
+                annexe = council_val.get("annexe")
+                annexe_yearly = (
+                    ((annexe or {}).get("yearly_cost") or {}).get("value") or {} if isinstance(annexe, dict) else {}
+                )
+                if isinstance(annexe, dict) and annexe_yearly.get("amount") is not None:
                     parts.append(
                         _band_line(
-                            "annexe", annexe.band, annexe.yearly_cost.value.amount,
-                            ", ".join(annexe_payers) or "all adults", ignored=ignored,
+                            "annexe",
+                            annexe.get("band"),
+                            annexe_yearly.get("amount"),
+                            ", ".join(annexe_payers) or "all adults",
+                            ignored=ignored,
                         )
                     )
                 if parts:
@@ -314,13 +339,13 @@ MONTHS_PER_YEAR = 12
 SHARE_DECIMALS = 4
 
 
-
 def _band_line(label: str, band: str | None, amount: object, who: str, ignored: bool) -> str:
     """One council-tax provenance line — the main bill and the annexe
     share the shape; only the label and the ignored branch differ."""
     if ignored:
         return f"{label} excluded as unrelated"
     return f"{label} band {band or '?'}: £{amount}/yr, split across: {who}"
+
 
 class _GroupCostCalculator:
     """Per-group monthly figures for the GroupMonthlyCostNode.
@@ -381,9 +406,7 @@ class _GroupCostCalculator:
             main_payers = set(self.inputs.council_tax_payers.value_or_none() or []) & adult_names
         main_payer_total = len(main_payers) if main_payers else len(adults)
         alloc = self._annexe_allocation(council, adult_names, ignored)
-        return _PayerSplit(
-            frozenset(main_payers), main_payer_total, alloc.monthly, alloc.stddev, alloc.payers
-        )
+        return _PayerSplit(frozenset(main_payers), main_payer_total, alloc.monthly, alloc.stddev, alloc.payers)
 
     def _annexe_allocation(self, council, adult_names: set[str], ignored: bool) -> _AnnexeAllocation:
         """The annexe bill (if any): who pays it, monthly amount, stddev."""
@@ -630,9 +653,7 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
     owner_share = len(owners) / len(adults)
     others_share = len(others) / len(adults)
 
-    couple_fig = _group_figure_result(
-        calc, ctx, [p for p in adults if p.name in owners], owner_share, couple_rent_paid
-    )
+    couple_fig = _group_figure_result(calc, ctx, [p for p in adults if p.name in owners], owner_share, couple_rent_paid)
     couple_val = couple_fig.value + mortgage_val - rental_val
     couple_std, couple_breakdown = couple_fig.stddev, couple_fig.breakdown
     couple_breakdown.mortgage = round(float(mortgage_val), 2)
@@ -652,5 +673,3 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
             others_breakdown=others_breakdown,
         ).to_dict()
     )
-
-

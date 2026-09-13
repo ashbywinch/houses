@@ -16,6 +16,7 @@ Rules under test:
 - The annexe can be explicitly ignored.
 - The provenance names the annexe payers so the split is checkable.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -123,13 +124,18 @@ def _prime(
 
 def _client() -> TestClient:
     client = TestClient(app)
-    client.cookies.set("session", get_serializer().dumps({
-        "email": "simon@example.com",
-        "name": "Simon",
-        "picture": "",
-        "is_superuser": True,
-        "impersonating": None,
-    }))
+    client.cookies.set(
+        "session",
+        get_serializer().dumps(
+            {
+                "email": "simon@example.com",
+                "name": "Simon",
+                "picture": "",
+                "is_superuser": True,
+                "impersonating": None,
+            }
+        ),
+    )
     return client
 
 
@@ -153,12 +159,10 @@ def test_empty_payer_settings_split_both_bills_across_all_adults():
     expected_couple = (_BOTH_MONTHLY * 2 / 3).quantize(Decimal("0.01"))
     expected_others = (_BOTH_MONTHLY / 3).quantize(Decimal("0.01"))
     assert abs(couple - expected_couple) < Decimal("0.05"), (
-        f"the couple must carry 2/3 of both bills: got {couple}, "
-        f"expected about {expected_couple}"
+        f"the couple must carry 2/3 of both bills: got {couple}, expected about {expected_couple}"
     )
     assert abs(others - expected_others) < Decimal("0.05"), (
-        f"Ashby must carry 1/3 of both bills: got {others}, "
-        f"expected about {expected_others}"
+        f"Ashby must carry 1/3 of both bills: got {others}, expected about {expected_others}"
     )
 
     # THE PROVENANCE CONTRACT: the derivation must state the bills and
@@ -168,9 +172,7 @@ def test_empty_payer_settings_split_both_bills_across_all_adults():
     assert "council tax" in text.lower()
     for name in ("Simon", "Lorena", "Ashby"):
         assert name in text, f"the provenance must name the payer {name}"
-    assert "3618.33" in text and "1670.00" in text, (
-        "the provenance must state both bills"
-    )
+    assert "3618.33" in text and "1670.00" in text, "the provenance must state both bills"
 
 
 def test_all_three_paying_both_bills_split_equally():
@@ -202,9 +204,7 @@ def test_named_payers_split_their_bills():
     assert abs(couple - main_monthly) < Decimal("0.05"), (
         f"the couple carries the whole main bill split in half: {couple}"
     )
-    assert abs(others - annexe_monthly) < Decimal("0.05"), (
-        f"Ashby carries the whole annexe bill: {others}"
-    )
+    assert abs(others - annexe_monthly) < Decimal("0.05"), f"Ashby carries the whole annexe bill: {others}"
 
 
 def test_ignored_annexe_is_excluded():
@@ -259,6 +259,15 @@ def test_address_change_keeps_payer_settings_and_recomputes():
             yearly_cost=Measurement(Money(_ANNEXE_YEARLY, "GBP"), 0.0),
         ),
     )
+    # The endpoint writes corrected_address only — but the fixture
+    # seeds user_entered_address with the OLD address, which outranks
+    # corrected (best-address priority). Clear it so the new address
+    # actually lands, the way a real edit does.
+    from houses.property_registry import get_property
+
+    prop_42555556 = get_property("42555556")
+    assert prop_42555556 is not None
+    prop_42555556.user_entered_address.push("", "user")
     resp = client.patch(
         "/api/properties/42555556/address",
         json={"address": "24 Huntingdon Gardens, Newbury RG14 5TT"},

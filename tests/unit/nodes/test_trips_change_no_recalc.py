@@ -168,18 +168,25 @@ def test_trips_only_change_makes_no_api_calls(replan_tripwire):
     assert {k: v[0] for k, v in after.items()} == {k: v[0] for k, v in before.items()}, (
         f"a trips-only change must not re-plan journeys: {before} -> {after}"
     )
-    # But the stamps follow the live POI on the priced legs: Pimlico's
-    # chain re-stamped to 3 trips (fresh rows + current provenance);
-    # the others untouched.
+    # The PLANNER values stay parked (address dep only — durations AND
+    # their address-only stamps frozen); the full-POI stamp flows
+    # downstream through the nodes that render it (selector → merge →
+    # fuel), so only the downstream entries carry the new trips. The
+    # breakdown prices from the live POI. Untouched destinations are
+    # fully unchanged.
+    planners = ("walk", "drive")
     for k in priced:
-        if k.startswith("Pimlico/"):
-            assert after[k][1] == 3, f"{k} stamp did not follow the live POI: {after}"
+        sub = k.split("/")[1]
+        if sub in planners:
+            assert after[k] == before[k], f"planner value changed on a trips-only edit: {before} -> {after}"
         else:
-            assert after[k] == before[k], f"untouched {k} changed: {before} -> {after}"
+            assert after[k][0] == before[k][0], f"journey re-planned on a trips-only edit: {before} -> {after}"
+            if k.startswith("Pimlico/"):
+                assert after[k][1] == 3, f"downstream stamp must carry the current trips: {after[k]}"
+            else:
+                assert after[k] == before[k], f"untouched destination changed: {before} -> {after}"
     # And the route planner was never called for this test's POIs —
-    # the reuse gate served the cached legs with the live stamp. (The
-    # TfL legs are impossible in unit tests, so walk+drive are the
-    # legs that CAN re-plan — and did not.)
-    assert trips.get("walk", 0) == 0 and trips.get("drive", 0) == 0, (
-        f"a trips-only change made route calls: {trips}"
-    )
+    # the planners were never even scheduled. (The TfL legs are
+    # impossible in unit tests, so walk+drive are the legs that CAN
+    # re-plan — and did not.)
+    assert trips.get("walk", 0) == 0 and trips.get("drive", 0) == 0, f"a trips-only change made route calls: {trips}"

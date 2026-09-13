@@ -14,6 +14,7 @@ Approved semantics (user): a 0-days destination is NOT commuted — the
 breakdown value already prices it at £0 by the multiplication, and its
 provenance must show 0x/wk = £0, never 1 day a week.
 """
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -122,7 +123,15 @@ def _claims(prov: dict) -> list[str]:
     parts.extend(f"{fl.get('label', '')} {fl.get('value', '')}" for fl in formula.get("lines") or [])
     for child in (prov.get("sources") or {}).values():
         parts.extend(_claims(child))
-    return [p for p in parts if p]
+    out = [p for p in parts if p]
+    # The detail endpoint serves persisted rows: a node whose deps never
+    # changed since its 1x/wk row keeps serving that row (parked, by
+    # design) until it refreshes. Surface the staleness alongside the
+    # claims so a stale-row assertion failure names the parked node.
+    fresh = prov.get("freshness") or ""
+    if fresh:
+        out.append(f"__freshness__ {prov.get('label')}: {fresh}")
+    return out
 
 
 def test_zero_day_provenance_shows_0x_and_never_1x():
