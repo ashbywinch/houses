@@ -95,24 +95,56 @@ Expression-based nodes **do not override `build_provenance()`** — the base def
 
 ### Provenance renders stored inputs, never live re-reads
 
-`refresh()` persists `DepInputs` — the exact dep attempts the value was
-calculated from, projected JSON-safe (`{"display", "value"}` per dep;
-`{status, error}` for failures) — alongside the result row. Both the
-serve path (`build_provenance()` with no bound attempts) and the
-persist path (bound attempts + `provenance_formula_for()`) render from
-those stored inputs: each dep subtree recurses from the dep's OWN
-stored row, and formulas read the bound `value` envelopes. Nothing on
-the provenance path recomputes. A dep with no stored row (never
-persisted, test fixed node) degrades to the envelope display — never
-a re-read signal.
+Each derived row stores its provenance inputs inside the same
+zlib-compressed `result_json` blob (`dag/persistence.py:compress_result`),
+not a separate column. Two keys matter:
 
-Consequence for formulas: a `provenance_formula` property that reads
-dep values must read `self._stored_dep_inputs()`, and a node whose
-formula needs dep values at persist time overrides
-`provenance_formula_for(dep_attempts, active_deps)` to read the bound
-attempts (stored state lags the current evaluation by one persist).
+```python
+# result_json (decompressed) — what a row carries
+{
+    "provenance": {...},  # full tree, frozen at persist time
+    "dep_inputs": {  # flat map, one entry per active dep
+        "<dep_id>": {"display": ..., "value": ...},  # succeeded dep
+        "<dep_id>": {"status": ..., "error": ...},  # failed dep
+    },
+}
+```
+
+`DepInputs` (`dag/node.py`) is that flat map. `refresh()`
+(`dag/derived_node.py`) binds the exact attempts the value was
+calculated from — `dep_attempts = [await dep.attempt() for dep in
+active_deps]` — then persists in one `_persist` call: the tree built
+by `build_provenance(dep_attempts, active_deps)` plus
+`DepInputs(inputs=_project_dep_inputs(active_deps, dep_attempts))`.
+Formulas that need dep values override
+`provenance_formula_for(dep_attempts, active_deps)` and read the bound
+attempts. Stored state lags the current evaluation by one persist, so
+the bound attempts are the only correct persist-time input.
+
+Serve (`build_provenance()` with no args) reads committed rows only:
+own row via `latest_node_result(self._id)`, each dep subtree via
+`_stored_subtree` from the dep's OWN stored row. No recompute, no
+`latest_attempt()` on the happy path. A dep with no stored entry
+(never persisted, test fixed node) falls back to the live dep — a
+gap in coverage, never the contract: a missing key means the dep was
+never persisted and the test is at fault.
+
+Wrong fixes — each duplicates DAG state instead of reading what was stored:
+
+```python
+# ✗ render a formula from live deps (they may have moved on)
+mpg = self._mpg_node.latest_attempt().value_or_none()
+# ✓ read the bound attempt (persist) or the stored envelope (serve)
+mpg = by_id.get(self._mpg_node._id)  # in provenance_formula_for
+# ✗ rebuild a dep subtree live on serve
+sources[dep._id] = await dep.build_provenance()
+# ✓ recurse from the dep's committed row
+sources[dep._id] = _stored_subtree(dep, stored[dep._id])
+```
+
 The base `provenance_formula_for` delegates to `provenance_formula`,
 so nodes with no dep-dependent formula do nothing.
+
 
 ### Narrow deps to what `compute` reads
 
