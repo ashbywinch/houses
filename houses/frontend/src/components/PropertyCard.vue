@@ -365,21 +365,25 @@ async function toggleViewed() {
       </div>
     </div>
     <div v-else class="card__body">
-      <!-- The card's role in the list: its figures are the baseline every
-           other card's delta is measured against. A card-level flag above
-           the row, never a third item inside "address | figures" — as a row
-           item it measured 119px and collapsed the address to 0px. -->
-      <p v-if="data.is_current_home" class="card__home-flag">Your home · baseline</p>
-      <!-- Top row: Address | Monthly cost -->
+      <!-- The card's role in the list: this card's figures are the reference
+           the other cards' are relative to. A quiet label above the address —
+           as a chip inside the address row it measured 119px and collapsed
+           the address to 0px. The list legend names the same home. -->
+      <p v-if="data.is_current_home" class="card__home-flag">Your home</p>
+      <!-- Address row: the address, with the favourite heart at its right -->
       <div class="card__top">
+        <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
+          <h3 class="card__address-text">{{ address }}</h3>
+        </a>
         <span v-if="triage?.favourite" class="card__fav-icon" role="img" aria-label="Favourite">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
             <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
           </svg>
         </span>
-        <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
-          <h3 class="card__address-text">{{ address }}</h3>
-        </a>
+      </div>
+      <!-- Figures row: the two figures stack — two numbers on two lines are
+           compared at a glance — with the what-if chip beside them -->
+      <div class="card__numbers">
         <span v-if="store.whatIfActive" class="card__whatif">what-if</span>
         <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
           <template v-if="showDeltas">
@@ -530,11 +534,13 @@ async function toggleViewed() {
   gap: 8px;
 }
 
-/* Top row */
+/* Address row: the address, with the favourite heart at its right. The two
+   markers a card carries — the heart and the home label — describe the
+   property, so they belong here, not beside the money. */
 .card__top {
   display: flex;
   align-items: flex-start;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 /* Favourite heart — the visible marker on favourited cards (no hover needed) */
 .card__fav-icon {
@@ -574,10 +580,11 @@ async function toggleViewed() {
   font-weight: var(--fw-bold);
   color: var(--green);
   white-space: nowrap;
+  /* Both figures flush right, so the shorter one reads against the longer. */
+  text-align: right;
 }
 .card__whatif {
   display: inline-block;
-  margin-left: 0.3rem;
   font-size: 0.65rem;
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
@@ -586,12 +593,20 @@ async function toggleViewed() {
   border: 1px solid var(--blue);
   border-radius: var(--radius-full);
   padding: 0.05rem 0.4rem;
-  vertical-align: middle;
+  white-space: nowrap;
 }
-/* The current home's marker. It labels the card, not its address row: the
-   top row means "address | the figures", and this card's figures are the
-   reference the other cards' deltas are measured against. The list legend
-   above the cards names the same home. */
+/* Figures row: the two figures stack — two numbers on two lines are compared
+   at a glance — with the what-if chip beside the figures it qualifies. */
+.card__numbers {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+/* The current home's marker: a quiet label saying which card this is. Not a
+   chip — a chip competed with the address for the same line — and not
+   "baseline", which describes the OTHER cards' figures, the ones measured
+   against this home. The list legend names the same home. */
 .card__home-flag {
   align-self: flex-start;
   margin: 0;
@@ -599,10 +614,7 @@ async function toggleViewed() {
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--blue);
-  border: 1px solid var(--blue);
-  border-radius: var(--radius-full);
-  padding: 0.05rem 0.4rem;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 

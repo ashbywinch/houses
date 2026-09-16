@@ -249,3 +249,27 @@ PR "fix: what-if persists through the DAG — apply/restore/state". The
 requirement is recorded as B7 in usability-requirements.md. Deltas on
 cards (vs the current home) are unchanged — they simply always reflect
 whatever the DAG currently holds, what-if or not.
+
+## 2026-09-16 — The card header splits by what each thing describes
+
+The current-home chip was wrong twice over. It sat inside the address row,
+where its content is "address | the figures": nowrap and unshrinkable at
+119px, it took the row and collapsed the address to 0px. And "baseline"
+described the *other* cards' figures — the ones measured against this home —
+while this card's own figures are the absolute ones.
+
+The header is now three rows, each holding one kind of thing:
+
+- the home label, quiet and mute (`Your home`, no chip border) — which card
+  this is;
+- the address, full width, favourite heart at its right — the markers that
+  describe the property;
+- the figures, stacked and flush right with the what-if chip beside them —
+  two numbers on two lines are compared at a glance, and the chip qualifies
+  the figures it sits with.
+
+Measured on the current home card: at a 390px viewport the address went from
+94px over 4 lines to 312px on one line; at 320px the old header gave a
+13-line address in a 337px-tall block, the new one 2 lines in 168px. The
+list legend keeps the one place where "baseline" earns its keep: the figures
+on every other card are relative to this home.

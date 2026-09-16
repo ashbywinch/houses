@@ -521,6 +521,10 @@ describe('PropertyCard triage markers', () => {
     const icon = wrapper.find('.card__fav-icon')
     expect(icon.exists()).toBe(true)
     expect(icon.attributes('aria-label')).toBe('Favourite')
+    // the heart is a marker on the property: at the right of the address,
+    // after it in the row, not in front of the address
+    const row = wrapper.find('.card__top')
+    expect(row.element.lastElementChild?.className).toContain('card__fav-icon')
   })
 
   it('shows a Seen tag on viewed cards only', async () => {
@@ -641,10 +645,12 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     store.summaries['123'] = { ...card, monthly_baseline: homeBaseline }
     expect(wrapper.text()).toContain('£2,100/mo')
     expect(wrapper.text()).toContain('£400/mo')
-    // The flag labels the CARD. Inside the top row it competed with the
-    // address for the same line (and crushed it to 0px on a narrow card).
-    expect(wrapper.find('.card__home-flag').text()).toBe('Your home · baseline')
+    // The marker labels the CARD — which card this is — so it sits outside
+    // both the address row and the figures row. "baseline" is deliberately
+    // gone: the baseline is what the OTHER cards' figures are relative to.
+    expect(wrapper.find('.card__home-flag').text()).toBe('Your home')
     expect(wrapper.find('.card__top .card__home-flag').exists()).toBe(false)
+    expect(wrapper.find('.card__numbers .card__home-flag').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('1,308')
   })
 
@@ -666,9 +672,9 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     const b = mount(PropertyCard, { props: { rid: '456', data: makeSummary({ rid: '456' }) }, global: { plugins: [pinia] } })
     expect(a.find('.card__whatif').text()).toBe('what-if')
     expect(b.find('.card__whatif').text()).toBe('what-if')
-    // the chip marks the MODE — it renders next to the address, not
-    // attached to a particular card's money block
-    expect(a.find('.card__top .card__whatif').exists()).toBe(true)
+    // the chip qualifies the figures, so it rides in the figures row
+    expect(a.find('.card__numbers .card__whatif').exists()).toBe(true)
+    expect(a.find('.card__top .card__whatif').exists()).toBe(false)
   })
 
   it('shows no what-if chip when the mode is off', () => {
