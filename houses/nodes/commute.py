@@ -12,7 +12,7 @@ from dag.expression import Choose, Expression, Ref
 from dag.node import Node
 from houses.commute import CostGroup, LegMode
 from houses.geopoint import GeoPoint
-from houses.model.domain import Commute
+from houses.model.domain import Commute, PlaceOfInterest
 
 logger = logging.getLogger(__name__)
 MINUTES_PER_HOUR = 60
@@ -354,6 +354,14 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         result = self.expression.evaluate()
         if result.succeeded and result.value is not None:
             val = replace(result.value, is_child=self.is_child)
+            # The planners value the ADDRESS only — their Commutes carry
+            # a label-only destination. Stamp the CURRENT full POI from
+            # our own place dep so provenance shows where and how often
+            # without re-planning. compute() owns the value; provenance
+            # renders it — never the reverse.
+            poi_val = inputs.poi.value_or_none()
+            if isinstance(poi_val, PlaceOfInterest):
+                val = replace(val, destination=poi_val)
             return Attempt.succeeded(val)
         # Build detailed error from all alternatives
         errors = []

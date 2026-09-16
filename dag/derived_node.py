@@ -746,6 +746,15 @@ class DerivedNode(Node[T], Generic[T]):
         await asyncio.sleep(0)
 
         # lucidlint: ignore duplicate-block the computed-path bookkeeping intentionally mirrors the impossible-path
+        if result.succeeded and self._attempt.succeeded and result.value_or_none() == self._attempt.value_or_none():
+            # Value-identical refresh: keep the original row, attempt,
+            # and clocks (freshness stays at the original calculation;
+            # unchanged _db_created_at keeps downstream parked). Only
+            # the code-version stamp advances — otherwise a code-stale
+            # node recomputing an identical value stays code-stale
+            # forever and never clears.
+            self._persisted_code_version = self._current_code_version()
+            return
         self._attempt = result
         self._computed_at = datetime.now(UTC)
         self._persisted_code_version = self._current_code_version()
