@@ -49,7 +49,7 @@ def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
         Commute(
             person=Person(name="", has_car=False),
             label=label,
-            destination=None,
+            destination=PlaceOfInterest(label="", address=""),
             duration=Quantity(0, "minute"),
             daily_cost=Money(amount="0", currency="GBP"),
             mode="",
@@ -464,7 +464,7 @@ class TransitNode(DerivedNode[Commute]):
             empty = Commute(
                 person=Person(name="", has_car=self._has_car),
                 label="",
-                destination=None,
+                destination=PlaceOfInterest(label="", address=""),
                 duration=Quantity(0, "minute"),
                 daily_cost=Money(amount="0", currency="GBP"),
             )
@@ -504,7 +504,7 @@ class TransitNode(DerivedNode[Commute]):
         result = Commute(
             person=Person(name="", has_car=self._has_car),
             label=label,
-            destination=PlaceOfInterest(label=label, address=val.destination.address if val.destination else ""),
+            destination=PlaceOfInterest(label=label, address=val.destination.address),
             duration=val.duration,
             daily_cost=daily_cost,
             mode=mode,

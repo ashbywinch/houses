@@ -148,12 +148,6 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 val = attempt.value_or_none()
                 if val is None:
                     return Attempt.impossible(f"commute {key} produced no value")
-                if poi.trips_per_week is None or poi.weeks_per_year is None:
-                    # The person's destination must declare its frequency —
-                    # pricing an unknown one would invent a number, and
-                    # skipping it would publish a total quietly missing a
-                    # cost. Name the defect.
-                    return Attempt.impossible(f"commute {key}: destination has no frequency declared")
                 daily = getattr(val, "daily_cost", None)
                 if daily is not None:
                     daily_amount = daily

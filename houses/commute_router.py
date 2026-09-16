@@ -72,7 +72,6 @@ class _Waypoint:
             return {"location": {"latLng": self.location.to_dict()}}
         return {"address": self.address}
 
-
 @dataclass(frozen=True)
 class _RoutesBody:
     """A Google Routes directions POST body (request wire shape)."""
@@ -191,6 +190,7 @@ class _RouteAgencyJson:
 class RoutesPostClient(Protocol):
     """Structural type for the transport seam tests stub out."""
 
+    
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self, body: WirePayload, field_mask: str, *, options: GoogleRoutesOptions | None = None
@@ -236,6 +236,7 @@ class GoogleRoutesClient:
             body = resp.text[:1000]
             raise httpx.HTTPStatusError(f"{e} — {body}", request=e.request, response=e.response) from e
 
+    
     # payload and the response is Google's (coding-standards.md)
     async def post(  # lucidlint: ignore record-shape the response body is Google's wire payload (coding-standards.md)
         self,
@@ -259,7 +260,7 @@ class GoogleRoutesClient:
             "X-Goog-Api-Key": google_key,
             "X-Goog-FieldMask": field_mask,
         }
-
+        
         # transport edge; legacy raw-dict callers pass through unchanged (coding-standards.md)
         payload = body.to_dict() if hasattr(body, "to_dict") else body
         key = json.dumps(payload, sort_keys=True)
@@ -276,6 +277,7 @@ class GoogleRoutesClient:
             data = resp.json()
             (options.set_cached_fn or set_cached)("POST", self.GOOGLE_ROUTES_URL, None, key, data)
             return data
+
 
 
 class CommuteRouter:
@@ -449,6 +451,7 @@ class CommuteRouter:
         except (ValueError, TypeError):
             return None
 
+
     @staticmethod
     def _address_waypoint(loc: str | GeoPoint) -> _Waypoint:
         """Build a Google Routes waypoint from a postcode string or GeoPoint."""
@@ -477,7 +480,7 @@ class CommuteRouter:
             Commute(
                 person=Person(name="", has_car=False),
                 label=label,
-                destination=None,
+                destination=PlaceOfInterest(label="", address=""),
                 duration=Quantity(0, "minute"),
                 daily_cost=Money(amount="0", currency="GBP"),
                 mode="",
@@ -560,7 +563,7 @@ class CommuteRouter:
             Commute(
                 person=Person(name="", has_car=False),
                 label="",
-                destination=None,
+                destination=PlaceOfInterest(label="", address=dest_str),
                 duration=Quantity(duration_min, "minute"),
                 daily_cost=daily or Money(amount="0", currency="GBP"),
                 mode="walk" if mode == "WALK" else "drive",
@@ -573,7 +576,6 @@ class CommuteRouter:
             ),
             error=f"google_routes_{mode.lower()}: duration={duration_min}min distance={distance_meters}m",
         )
-
     # National Rail operators that serve London → their London terminus.
     # The Google Routes TRANSIT response omits stop names, so the
     # fallback journey names its last rail leg from this map — RailFareNode
@@ -623,7 +625,9 @@ class CommuteRouter:
             "routes.legs.steps.staticDuration,routes.legs.steps.transitDetails"
         )
         try:
-            data = await self._google_routes_client.post(body, mask, options=GoogleRoutesOptions(timeout=15.0))
+            data = await self._google_routes_client.post(
+                body, mask, options=GoogleRoutesOptions(timeout=15.0)
+            )
         # lucidlint: ignore broad-except Google Routes failure → None, caller keeps infeasible
         except Exception as e:
             logger.warning("Google transit fallback failed for %s: %s", origin, e)
@@ -642,7 +646,7 @@ class CommuteRouter:
         return Commute(
             person=Person(name="", has_car=False),
             label=dest.label,
-            destination=None,
+            destination=dest,
             duration=Quantity(total_min, "minute"),
             daily_cost=Money(amount="0", currency="GBP"),
             mode="transit",
@@ -691,6 +695,7 @@ class CommuteRouter:
     # Transit — TfL via TflClient (London area)
     # ------------------------------------------------------------------
 
+
     async def _tfl_transit_commute(
         self,
         origin_postcode: str,
@@ -731,7 +736,7 @@ class CommuteRouter:
         empty = Commute(
             person=Person(name="", has_car=has_car),
             label=label,
-            destination=None,
+            destination=PlaceOfInterest(label=label, address=dest_postcode),
             duration=Quantity(0, "minute"),
             daily_cost=Money(amount="0", currency="GBP"),
         )
@@ -778,6 +783,7 @@ class CommuteRouter:
         # lucidlint: ignore broad-except TfL transit failure → Attempt.impossible; HTTP-class errors re-raise above
         except Exception as e:
             return Attempt.impossible(f"tfl_transit: {e}")
+
 
     # ------------------------------------------------------------------
     # Public API
@@ -836,7 +842,7 @@ class CommuteRouter:
             errors = [a.error for a in candidates if a.error]
             return Attempt.impossible("; ".join(errors) if errors else "no route available")
 
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
         def _tiebreak(c: Commute) -> tuple[int, float]:
             no_cost = 1 if c.daily_cost == Money(amount="0", currency="GBP") else 0
             return (no_cost, c.duration.magnitude or 0)
@@ -844,3 +850,5 @@ class CommuteRouter:
         best = min(valid_values, key=_tiebreak)
         errors = [a.error for a in candidates if not a.succeeded and a.error]
         return Attempt.succeeded(best, error="; ".join(errors) if errors else "")
+
+
