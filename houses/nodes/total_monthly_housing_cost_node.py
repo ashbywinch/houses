@@ -84,28 +84,32 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         self._status_node: Node = config.status_node
         self._sinking_node: Node = config.yearly_sinking_fund_node
         self._life_insurance_node: Node = config.life_insurance_node
-        super().__init__(
-            node_id,
-            Measurement[Money],
-            (
-                config.monthly_mortgage_node,
-                config.rental_income_node,
-                config.status_node,
-                config.commute_breakdown_node,
-                config.council_tax_node,
-                config.yearly_sinking_fund_node,
-                config.life_insurance_node,
-            ),
-            dep_names=(
-                "mortgage",
-                "rental_income",
-                "status",
-                "commute",
-                "council_tax",
-                "sinking",
-                "life_insurance",
-            ),
+        # Deps are exactly what the node reads: the value expression
+        # reads the first seven; build_provenance's apportionment text
+        # reads the payers/ignored/persons nodes beyond them — every
+        # read must be a dep edge, never a parent member. The
+        # apportionment inputs are conditional (present only when the
+        # group aggregates them).
+        value_deps = (
+            config.monthly_mortgage_node,
+            config.rental_income_node,
+            config.status_node,
+            config.commute_breakdown_node,
+            config.council_tax_node,
+            config.yearly_sinking_fund_node,
+            config.life_insurance_node,
         )
+        value_names = ("mortgage", "rental_income", "status", "commute", "council_tax", "sinking", "life_insurance")
+        provenance_deps: tuple[Node | None, ...] = (
+            config.annexe_payers_node,
+            config.annexe_ignored_node,
+            config.persons_source,
+            config.council_tax_payers_node,
+        )
+        provenance_names = ("annexe_payers", "annexe_ignored", "persons", "council_tax_payers")
+        deps = value_deps + tuple(d for d in provenance_deps if d is not None)
+        names = value_names + tuple(n for n, d in zip(provenance_names, provenance_deps, strict=True) if d is not None)
+        super().__init__(node_id, Measurement[Money], deps, dep_names=names)
 
     @property
     @override
