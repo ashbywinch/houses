@@ -224,6 +224,11 @@ class Commute:
     is_child: bool = False
     infeasible: bool = False
     no_route_reason: str = ""
+    # The origin the journey was planned from (the property's location
+    # at plan time), stamped by the route planners. A display fact:
+    # provenance can show where the journey was planned from. Empty
+    # means unplanned/legacy — the caller plans normally.
+    origin: str = ""
 
     def to_provenance_value(self) -> str:
         """Human summary for provenance display — ONE canonical structure

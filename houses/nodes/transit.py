@@ -21,6 +21,19 @@ from houses.services_provider import get_services
 from houses.tfl_client import TflRouteOptions
 
 
+def _origin_key(loc: GeoPoint | str) -> str:
+    """The plan origin as the route planners see it — coordinates or address."""
+    return loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
+
+
+def _stamp_origin(result: Attempt[Commute], loc: GeoPoint | str) -> Attempt[Commute]:
+    """Patch the planned-from origin onto a route result (display fact)."""
+    val = result.value_or_none() if result.succeeded else None
+    if val is None:
+        return result
+    return Attempt.succeeded(replace(val, origin=_origin_key(loc)))
+
+
 def _with_poi_destination(commute: Commute, poi: PlaceOfInterest | None) -> Commute:
     """Patch the full destination POI onto a plain Commute."""
     if poi is None:
@@ -198,7 +211,8 @@ class WalkNode(DerivedNode[Commute]):
             result = await get_services().route_planner.walk_route(loc, dest, self._max_walk)
         # The planner values the ADDRESS only; the full-POI stamp is
         # applied downstream by the selector from its own place dep.
-        return result
+        # The origin is stamped here — a display fact, not a reuse input.
+        return _stamp_origin(result, loc)
 
 
 class DestinationAddressNode(DerivedNode[str]):
@@ -304,8 +318,9 @@ class DriveNode(DerivedNode[Commute]):
             result = await self._route_fn(loc, dest)
         else:
             result = await get_services().route_planner.drive_route(loc, dest)
-        # Address-only value; the stamp is applied downstream.
-        return result
+        # Address-only value; the stamp is applied downstream. The
+        # origin is stamped here — a display fact, not a reuse input.
+        return _stamp_origin(result, loc)
 
 
 class TflTransitNode(DerivedNode[Commute]):
@@ -364,8 +379,9 @@ class TflTransitNode(DerivedNode[Commute]):
         else:
             result = await client.plan()
         self._last_no_route_detail = client._no_route_detail
-        # Address-only value; the stamp is applied downstream.
-        return result
+        # Address-only value; the stamp is applied downstream. The
+        # origin is stamped here — a display fact, not a reuse input.
+        return _stamp_origin(result, loc)
 
     @override
     async def build_provenance(self) -> Provenance:
