@@ -28,10 +28,7 @@ def _origin_key(loc: GeoPoint | str) -> str:
 
 def _stamp_origin(result: Attempt[Commute], loc: GeoPoint | str) -> Attempt[Commute]:
     """Patch the planned-from origin onto a route result (display fact)."""
-    val = result.value_or_none() if result.succeeded else None
-    if val is None:
-        return result
-    return Attempt.succeeded(replace(val, origin=_origin_key(loc)))
+    return result.map(lambda val: replace(val, origin=_origin_key(loc)))
 
 
 def _with_poi_destination(commute: Commute, poi: PlaceOfInterest | None) -> Commute:

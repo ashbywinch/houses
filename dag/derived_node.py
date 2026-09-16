@@ -724,19 +724,8 @@ class DerivedNode(Node[T], Generic[T]):
                 )
             else:
                 result = Attempt.impossible(message)
-            self._attempt = result
-            self._computed_at = datetime.now(UTC)
-            self._persisted_code_version = self._current_code_version()
-            # _db_created_at may be None for deps never persisted (e.g. a
-            # freshly-created node).  Storing None means the next staleness
-            # check skips this dep — the _computed_at comparison still works.
-            dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
-            self._retry_at = None
             self._retry_count = 0
-            result_dict = await self._safe_result_dict("impossible", dep_attempts, active_deps)
-            self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
-            self.changed.emit()
-            get_scheduler().after_refresh(self)
+            await self._complete_refresh(result, dep_attempts, active_deps)
             return
         # A dep still QUEUED in this drain has not settled: computing now
         # would freeze this node from its pre-refresh attempt. Defer —
@@ -751,12 +740,7 @@ class DerivedNode(Node[T], Generic[T]):
             for dep in active_deps
         ):
             dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
-            result_dict = await self._safe_result_dict("pending", dep_attempts, active_deps)
-            self._persist(
-                result_dict,
-                dep_timestamps,
-                code_version=self._current_code_version(),
-            )
+            await self._persist_status("pending", dep_timestamps, dep_attempts, active_deps)
             return
         if any(a.pending for a in dep_attempts):
             return
@@ -787,35 +771,16 @@ class DerivedNode(Node[T], Generic[T]):
         # value is the same, so dependents have nothing to recalculate
         # (and a planner must not re-plan because a stamp moved).
         bound_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
-        inputs_unchanged = bound_timestamps == dict(self._loaded_dep_timestamps or {})
-        if result.succeeded and self._attempt.succeeded and result.value_or_none() == self._attempt.value_or_none():
+        identical = (
+            result.succeeded and self._attempt.succeeded and result.value_or_none() == self._attempt.value_or_none()
+        )
+        if identical:
             self._persisted_code_version = self._current_code_version()
-            if inputs_unchanged:
+            if bound_timestamps == dict(self._loaded_dep_timestamps or {}):
                 return
-            result_dict = await self._safe_result_dict("succeeded", dep_attempts, active_deps)
-            self._persist(result_dict, bound_timestamps, code_version=self._current_code_version())
+            await self._persist_status("succeeded", bound_timestamps, dep_attempts, active_deps)
             return
-        self._attempt = result
-        self._computed_at = datetime.now(UTC)
-        self._persisted_code_version = self._current_code_version()
-
-        # _db_created_at may be None for deps never persisted (e.g. a
-        # freshly-created node).  Storing None means the next staleness
-        # check skips this dep — the _computed_at comparison still works.
-        dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
-
-        if result.pending:
-            result_dict = await self._safe_result_dict("pending", dep_attempts, active_deps)
-            self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
-            return
-
-        self._retry_at = None
-        self._retry_count = 0 if result.succeeded else self._retry_count
-
-        result_dict = await self._safe_result_dict("impossible", dep_attempts, active_deps)
-        self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
-        self.changed.emit()
-        get_scheduler().after_refresh(self)
+        await self._complete_refresh(result, dep_attempts, active_deps)
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _build_provenance_dict(
@@ -838,18 +803,9 @@ class DerivedNode(Node[T], Generic[T]):
             # Serve path: return the frozen row verbatim. The tree was
             # built and stored at persist time from the calculating
             # inputs — no dep-row walk, no live re-read, no recompute.
-            row = latest_node_result(self._id)
-            prov_dict = (row or {}).get("provenance")
-            if isinstance(prov_dict, dict) and prov_dict.get("label"):
-                try:
-                    return Provenance.from_dict(prov_dict)
-                # A stored tree that will not rebuild is a data defect: the
-                # warning names the node and the reason, and the read still
-                # answers (live leaf) rather than failing the whole tree.
-                # lucidlint: ignore swallow read boundary — the warning names the node and reason;
-                # the read still answers
-                except (KeyError, TypeError, ValueError) as e:
-                    logger.warning("%s: stored provenance is unreadable (%s); serving the live leaf", self._id, e)
+            stored = self._stored_provenance(self._id)
+            if stored is not None:
+                return stored
             # No stored row yet (never persisted): render the live
             # attempt's own status without touching any dep.
             return self._live_attempt_provenance()
@@ -909,6 +865,40 @@ class DerivedNode(Node[T], Generic[T]):
             formula=self.provenance_formula,
         )
 
+    async def _complete_refresh(
+        self, result: Attempt, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]
+    ) -> None:
+        """Store the attempt, stamp its inputs, persist — the shared tail.
+
+        One path for every outcome, so the bookkeeping exists once.
+        """
+        self._attempt = result
+        self._computed_at = datetime.now(UTC)
+        self._persisted_code_version = self._current_code_version()
+        # _db_created_at may be None for deps never persisted (e.g. a
+        # freshly-created node). Storing None means the next staleness
+        # check skips this dep — the _computed_at comparison still works.
+        dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
+        if result.pending:
+            await self._persist_status("pending", dep_timestamps, dep_attempts, active_deps)
+            return
+        self._retry_at = None
+        self._retry_count = 0 if result.succeeded else self._retry_count
+        await self._persist_status("impossible", dep_timestamps, dep_attempts, active_deps)
+        self.changed.emit()
+        get_scheduler().after_refresh(self)
+
+    async def _persist_status(
+        self,
+        status: str,
+        dep_timestamps: dict[str, str],
+        dep_attempts: list[Attempt],
+        active_deps: tuple[Node, ...],
+    ) -> None:
+        """Serialize for *status* and write the row with its input stamps."""
+        result_dict = await self._safe_result_dict(status, dep_attempts, active_deps)
+        self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
+
     async def _dep_provenance(self, dep: Node, att: Attempt | None = None) -> Provenance:
         """One dependency's subtree, degraded on failure.
 
@@ -934,21 +924,32 @@ class DerivedNode(Node[T], Generic[T]):
                 description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
             )
 
-    async def _dep_recorded_subtree(self, dep: Node, att: Attempt | None) -> Provenance:
+    @staticmethod
+    def _stored_provenance(node_id: str) -> Provenance | None:
+        """A node's recorded tree, or None when it has none to serve.
+
+        A tree that will not rebuild is a data defect: the warning names
+        the node and the reason, and the read still answers (the live
+        leaf) rather than failing the whole tree.
+        """
+        prov_dict = (latest_node_result(node_id) or {}).get("provenance")
+        if not (isinstance(prov_dict, dict) and prov_dict.get("label")):
+            return None
+        try:
+            return Provenance.from_dict(prov_dict)
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning("%s: stored provenance is unreadable (%s); serving the live leaf", node_id, e)
+            return None
+
+    @staticmethod
+    async def _dep_recorded_subtree(dep: Node, att: Attempt | None) -> Provenance:
         """The dep's recorded subtree, patched with the bound attempt.
 
         Serve-from-record for the nesting (each level shows what it
         calculated from) plus the parent's own bound attempt for the
         value — the two together are the exact inputs of this evaluation.
         """
-        sub: Provenance | None = None
-        row = latest_node_result(dep._id)
-        prov_dict = (row or {}).get("provenance")
-        if isinstance(prov_dict, dict) and prov_dict.get("label"):
-            try:
-                sub = Provenance.from_dict(prov_dict)
-            except Exception:
-                sub = None
+        sub = DerivedNode._stored_provenance(dep._id)
         if sub is None:
             # No recorded derivation for the dep: state ONLY the attempt
             # this evaluation bound. Reading the dep's live state here
