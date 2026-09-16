@@ -1,5 +1,6 @@
 """Provenance must be user-friendly: no node-id/dep chains, no repr dumps,
 no internal source labels ('db', 'migration')."""
+
 from __future__ import annotations
 
 import asyncio
@@ -163,7 +164,7 @@ class TestLoadReconstructsStructuredError:
                 return self._attempt
 
             @override
-            async def build_provenance(self):
+            async def build_provenance(self, dep_attempts=None, active_deps=None):
                 return Provenance(label="x")
 
         n = _Node()
@@ -194,7 +195,7 @@ class TestLoadReconstructsStructuredError:
                 return self._attempt
 
             @override
-            async def build_provenance(self):
+            async def build_provenance(self, dep_attempts=None, active_deps=None):
                 return Provenance(label="y")
 
         n = _Node()

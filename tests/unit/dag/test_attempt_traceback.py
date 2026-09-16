@@ -6,6 +6,7 @@ debugging (observability-before-corrective-action). It is captured from
 sys.exc_info() at construction time and serialised separately as
 error_traceback, never mixed into the frontend-facing error string.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -74,7 +75,7 @@ class _ImpossibleNode(Node[str]):
         return self._test_attempt
 
     @override
-    async def build_provenance(self):
+    async def build_provenance(self, dep_attempts=None, active_deps=None):
         return Provenance(label=self._id)
 
 
@@ -209,7 +210,7 @@ class TestCausesChain:
                 return self._a
 
             @override
-            async def build_provenance(self):
+            async def build_provenance(self, dep_attempts=None, active_deps=None):
                 from dag.attempt import Provenance
 
                 return Provenance(label="leaf")
@@ -303,7 +304,9 @@ class TestUserFacingMessages:
         from dag.attempt import AttemptError
         from dag.http_error import HttpError
 
-        raw_body = "{'$type': 'Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities', 'httpStatusCode': 404}"  # noqa: E501
+        raw_body = (
+            "{'$type': 'Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities', 'httpStatusCode': 404}"  # noqa: E501
+        )
         exc = HttpError(
             404,
             message=raw_body,

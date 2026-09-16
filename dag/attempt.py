@@ -591,3 +591,39 @@ class Provenance:
     def composite(cls, label: str, sources: dict[str, Provenance], url: str = "") -> Provenance:
         """Create a Provenance with dependency sub-sources."""
         return cls(label=label, sources=sources, url=url)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Provenance:
+        """Reconstruct a Provenance from a ``to_dict()`` wire dict.
+
+        The persistence round-trip for the frozen row. Tolerant of
+        older rows (missing fields default; a malformed freshness is
+        dropped, never a load failure).
+        """
+        freshness = data.get("freshness")
+        if isinstance(freshness, str):
+            try:
+                freshness = datetime.fromisoformat(freshness)
+            except ValueError:
+                freshness = None
+        formula = data.get("formula")
+        formula_obj = None
+        if isinstance(formula, dict):
+            lines = [
+                FormulaLine(label=str(line.get("label", "")), value=str(line.get("value", "")))
+                for line in formula.get("lines", [])
+            ]
+            formula_obj = Formula(lines=lines, result=str(formula.get("result", "")))
+        source_type = data.get("sourceType")
+        return cls(
+            label=str(data.get("label", "")),
+            description=data.get("description"),
+            value=data.get("value"),
+            url=str(data.get("url", "")),
+            source_type=SourceType(source_type) if source_type else None,
+            freshness=freshness,
+            formula=formula_obj,
+            status=str(data.get("status", "")),
+            error=str(data.get("error", "")),
+            sources={k: cls.from_dict(v) for k, v in (data.get("sources") or {}).items()},
+        )

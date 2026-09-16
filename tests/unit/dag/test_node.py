@@ -122,7 +122,7 @@ class _ConcreteNode(Node[str]):
         return self._test_attempt
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(self, dep_attempts=None, active_deps=None) -> Provenance:
         return self._test_provenance
 
     def call_impossible(self, dep_attempts, extra=""):

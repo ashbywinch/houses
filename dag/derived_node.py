@@ -627,15 +627,17 @@ class DerivedNode(Node[T], Generic[T]):
         )
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _safe_result_dict(self, status: str) -> dict:
+    async def _safe_result_dict(
+        self, status: str, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> dict:
         """Serialize for persistence, degrading to an error result on failure.
 
-        ``to_json`` can raise when a value lacks a provenance projection
-        (e.g. during a failed recompute). The degraded error result still
-        records the failure so the persisted row explains itself.
+        Passing the bound attempts makes this the PERSIST path: the
+        provenance tree is built fresh from this evaluation (never the
+        frozen serve of the previous row).
         """
         try:
-            return await self.to_json()
+            return await self.to_json(dep_attempts=dep_attempts, active_deps=active_deps)
         # lucidlint: ignore broad-except to_json failure degrades to an error-result dict so the attempt still persists
         except Exception as e:
             logger.debug(
@@ -730,10 +732,34 @@ class DerivedNode(Node[T], Generic[T]):
             dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
             self._retry_at = None
             self._retry_count = 0
-            result_dict = await self._safe_result_dict("impossible")
+            result_dict = await self._safe_result_dict("impossible", dep_attempts, active_deps)
             self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
             self.changed.emit()
             get_scheduler().after_refresh(self)
+            return
+        # A dep still QUEUED in this drain has not settled: computing now
+        # would freeze this node from its pre-refresh attempt. Defer —
+        # reschedule after the dep completes — instead of running
+        # compute. Only queued deps qualify: a dep that merely reads
+        # stale (older stored timestamps) but has no pending refresh will
+        # never re-run, and deferring on it would strand this node
+        # pending forever. (Pending deps stay the no-persist return.)
+        from dag.scheduler import get_scheduler as _get_scheduler
+
+        _sched = _get_scheduler()
+        if not force and any(
+            isinstance(dep, DerivedNode)
+            and dep is not self
+            and dep._id in getattr(_sched, "_scheduled", {})
+            for dep in active_deps
+        ):
+            dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
+            result_dict = await self._safe_result_dict("pending", dep_attempts, active_deps)
+            self._persist(
+                result_dict,
+                dep_timestamps,
+                code_version=self._current_code_version(),
+            )
             return
         if any(a.pending for a in dep_attempts):
             return
@@ -755,15 +781,23 @@ class DerivedNode(Node[T], Generic[T]):
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 
+        # The row records the value AND the inputs it was calculated
+        # from. An identical value from the SAME inputs is not a new
+        # record — keep the original row and clocks (unchanged
+        # _db_created_at keeps downstream parked). An identical value
+        # from DIFFERENT inputs is: re-record the row so it states the
+        # inputs this evaluation actually used, but emit NO change — the
+        # value is the same, so dependents have nothing to recalculate
+        # (and a planner must not re-plan because a stamp moved).
+        bound_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
+        inputs_unchanged = bound_timestamps == dict(self._loaded_dep_timestamps or {})
         # lucidlint: ignore duplicate-block the computed-path bookkeeping intentionally mirrors the impossible-path
         if result.succeeded and self._attempt.succeeded and result.value_or_none() == self._attempt.value_or_none():
-            # Value-identical refresh: keep the original row, attempt,
-            # and clocks (freshness stays at the original calculation;
-            # unchanged _db_created_at keeps downstream parked). Only
-            # the code-version stamp advances — otherwise a code-stale
-            # node recomputing an identical value stays code-stale
-            # forever and never clears.
             self._persisted_code_version = self._current_code_version()
+            if inputs_unchanged:
+                return
+            result_dict = await self._safe_result_dict("succeeded", dep_attempts, active_deps)
+            self._persist(result_dict, bound_timestamps, code_version=self._current_code_version())
             return
         self._attempt = result
         self._computed_at = datetime.now(UTC)
@@ -775,33 +809,75 @@ class DerivedNode(Node[T], Generic[T]):
         dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
 
         if result.pending:
-            result_dict = await self._safe_result_dict("pending")
+            result_dict = await self._safe_result_dict("pending", dep_attempts, active_deps)
             self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
             return
 
         self._retry_at = None
         self._retry_count = 0 if result.succeeded else self._retry_count
 
-        result_dict = await self._safe_result_dict("impossible")
+        result_dict = await self._safe_result_dict("impossible", dep_attempts, active_deps)
         self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
         self.changed.emit()
         get_scheduler().after_refresh(self)
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _build_provenance_dict(self) -> dict:
+    async def _build_provenance_dict(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> dict:
         """Build provenance dict for persistence, with a fallback if build_provenance() fails."""
         try:
-            prov = await self.build_provenance()
+            prov = await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
             return prov.to_dict()
         # lucidlint: ignore broad-except deliberate degrade — provenance build failure falls back to an empty label
         except Exception:
             return {"label": ""}
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        deps = tuple(active_deps) if active_deps is not None else self._get_active_deps()
+        if dep_attempts is None:
+            # Serve path: return the frozen row verbatim. The tree was
+            # built and stored at persist time from the calculating
+            # inputs — no dep-row walk, no live re-read, no recompute.
+            from dag.persistence import latest_node_result as _latest
+
+            row = _latest(self._id)
+            prov_dict = (row or {}).get("provenance")
+            if isinstance(prov_dict, dict) and prov_dict.get("label"):
+                try:
+                    return Provenance.from_dict(prov_dict)
+                except Exception:
+                    pass
+            # No stored row yet (never persisted): render the live
+            # attempt's own status without touching any dep.
+            return self._live_attempt_provenance()
+        # Persist path: the tree records THIS evaluation. Each dep
+        # subtree is the dep's own recorded derivation, patched with the
+        # attempt this node actually bound — the exact values the
+        # compute used, never a fresh read.
+        return await self.live_provenance(active_deps=deps, bound=dep_attempts)
+
+    @override
+    async def live_provenance(
+        self, active_deps: tuple[Node, ...] | None = None, bound: list[Attempt] | None = None
+    ) -> Provenance:
+        """Render this node's tree (persist path).
+
+        With ``bound`` (the attempts this evaluation computed from), each
+        dep subtree is the dep's own recorded derivation — what IT
+        calculated from — with its value/status replaced by the attempt
+        this node actually bound. That is the only thing provenance may
+        show: the values the compute used. Without ``bound`` the render
+        is a plain walk (used by leaves and by direct callers).
+        """
+        deps = tuple(active_deps) if active_deps is not None else self._get_active_deps()
         sources: dict[str, Provenance] = {}
-        for dep in self._get_active_deps():
-            sources[dep._id] = await self._dep_provenance(dep)
+        for i, dep in enumerate(deps):
+            att = bound[i] if bound is not None and i < len(bound) else None
+            sources[dep._id] = await self._dep_provenance(dep, att)
 
         # Use expression system for formula if available
         formula = self.provenance_formula
@@ -835,14 +911,36 @@ class DerivedNode(Node[T], Generic[T]):
             sources=sources,
         )
 
-    async def _dep_provenance(self, dep: Node) -> Provenance:
-        """Provenance for one dependency, degrading on failure.
+    def _live_attempt_provenance(self) -> Provenance:
+        """The never-persisted node's own status — no deps touched."""
+        att = self._attempt
+        status = "impossible" if att.impossible else ("pending" if att.pending else "")
+        error_info = att.error_info
+        user_error = error_info.display_message if error_info is not None else att.error
+        return Provenance(
+            label=self.display_name,
+            description=user_error if att.impossible else None,
+            value=project_value(att.value),
+            url=self._source_url,
+            source_type=self.provenance_source_type,
+            formula=self.provenance_formula,
+            status=status,
+            error=user_error if att.impossible else "",
+            sources={},
+        )
 
-        One failing dep must not break the whole provenance tree — the
-        error is captured in the placeholder's description instead.
+    async def _dep_provenance(self, dep: Node, att: Attempt | None = None) -> Provenance:
+        """One dependency's subtree, degraded on failure.
+
+        ``att`` is the attempt the parent bound: the subtree comes from
+        the dep's own recorded row (what the dep calculated from) and is
+        patched with that attempt, so the tree states exactly the inputs
+        this evaluation used. A dep with no recorded row falls back to a
+        leaf rendered from its own state.
         """
         try:
-            return await dep.build_provenance()
+            sub = await self._dep_recorded_subtree(dep, att)
+            return sub
         # lucidlint: ignore broad-except deliberate degrade — one failing dep degrades to a placeholder provenance
         except Exception as e:
             logger.debug(
@@ -855,6 +953,41 @@ class DerivedNode(Node[T], Generic[T]):
                 label=getattr(dep, "display_name", dep._id),
                 description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
             )
+
+    async def _dep_recorded_subtree(self, dep: Node, att: Attempt | None) -> Provenance:
+        """The dep's recorded subtree, patched with the bound attempt.
+
+        Serve-from-record for the nesting (each level shows what it
+        calculated from) plus the parent's own bound attempt for the
+        value — the two together are the exact inputs of this evaluation.
+        """
+        from dag.persistence import latest_node_result as _latest
+
+        sub: Provenance | None = None
+        row = _latest(dep._id)
+        prov_dict = (row or {}).get("provenance")
+        if isinstance(prov_dict, dict) and prov_dict.get("label"):
+            try:
+                sub = Provenance.from_dict(prov_dict)
+            except Exception:
+                sub = None
+        if sub is None:
+            # No recorded derivation for the dep: state ONLY the attempt
+            # this evaluation bound. Reading the dep's live state here
+            # would report a value the compute never saw.
+            if att is None:
+                return await dep.live_provenance()
+            return Provenance(
+                label=getattr(dep, "display_name", dep._id),
+                value=project_value(att.value) if att.succeeded else None,
+                status="impossible" if att.impossible else ("pending" if att.pending else ""),
+                error=att.error or "",
+            )
+        if att is not None:
+            sub.value = project_value(att.value) if att.succeeded else None
+            sub.status = "impossible" if att.impossible else ("pending" if att.pending else "")
+            sub.error = att.error or ""
+        return sub
 
     provenance_source_type: SourceType = SourceType.CALC
     """Subclass declares its data source category.
@@ -876,8 +1009,10 @@ class DerivedNode(Node[T], Generic[T]):
 
     @override
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def to_json(self) -> dict:
-        result = await super().to_json()
+    async def to_json(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> dict:
+        result = await super().to_json(dep_attempts=dep_attempts, active_deps=active_deps)
         self._enrich_json(result)
         return result
 

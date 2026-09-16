@@ -4,6 +4,7 @@ The frontend renders provenance JSON directly. When a node is impossible,
 the provenance must carry status="impossible" and the error message so the
 UI can show an error state (matching the designer's four prototype datasets).
 """
+
 from __future__ import annotations
 
 from typing import override
@@ -12,6 +13,7 @@ import pytest
 
 from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 
 
@@ -117,6 +119,9 @@ class TestBuildProvenanceErrorState:
                 return Attempt.succeeded(10)
 
         parent = _Parent()
+        # Serve returns the row this node persisted, so let it persist
+        # one — the child's failure must survive into the row.
+        await flush_processor()
         p = await parent.build_provenance()
         assert p.sources["child/transit"].status == "impossible"
         assert p.sources["child/transit"].error == "TfL API returned 409 Conflict"
