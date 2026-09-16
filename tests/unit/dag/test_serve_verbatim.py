@@ -30,7 +30,9 @@ async def test_serve_returns_frozen_row_without_dep_walk():
     async def _boom(self, *args, **kwargs):
         raise AssertionError("serve must not walk dep rows")
 
-    a.build_provenance = _boom  # type: ignore[method-assign]
+    # Shadow the bound method for this one assertion: the point is that
+    # serve must not call it at all.
+    a.build_provenance = _boom  # type: ignore[method-assign]  # the assertion is that serve never calls it
     try:
         prov = await s.build_provenance()
     finally:

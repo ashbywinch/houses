@@ -16,7 +16,7 @@ import json as _json
 import logging
 import sys
 import traceback as _traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
@@ -408,6 +408,35 @@ class Attempt[T](metaclass=_AttemptMeta):
             return fn(self._value)  # type: ignore[arg-type]  # fn expects T, but _value is typed T | None and pyrefly can't narrow it via the `succeeded` property; this branch is only reached when a value exists
         return self  # type: ignore[return-value]  # Attempt[T] vs Attempt[U]: T is an invariant TypeVar, but this branch is only reached when not succeeded — no T or U value is present, which the checker can't express
 
+    def to_provenance(
+        self,
+        *,
+        label: str,
+        url: str = "",
+        source_type: SourceType | None = None,
+        formula: Formula | None = None,
+        sources: dict[str, Provenance] | None = None,
+    ) -> Provenance:
+        """This attempt's provenance: its own status, error and value.
+
+        The Attempt owns those fields, so the mapping lives here; a node
+        supplies only what it knows — its label, source category, formula
+        and the dep subtrees it read.
+        """
+        info = self._error_info
+        user_error = info.display_message if info is not None else self._error
+        return Provenance(
+            label=label,
+            description=user_error if self.impossible else None,
+            value=project_value(self._value),
+            url=url,
+            source_type=source_type,
+            formula=formula,
+            status=self.status if self.impossible or self.pending else "",
+            error=user_error if self.impossible else "",
+            sources=sources or {},
+        )
+
     # ── Exhaustive match ──────────────────────────────────────────────
     def match(
         self,
@@ -593,7 +622,7 @@ class Provenance:
         return cls(label=label, sources=sources, url=url)
 
     @classmethod
-    def from_dict(cls, data: dict) -> Provenance:
+    def from_dict(cls, data: Mapping[str, Any]) -> Provenance:
         """Reconstruct a Provenance from a ``to_dict()`` wire dict.
 
         The persistence round-trip for the frozen row. Tolerant of
@@ -604,7 +633,9 @@ class Provenance:
         if isinstance(freshness, str):
             try:
                 freshness = datetime.fromisoformat(freshness)
-            except ValueError:
+            # lucidlint: ignore swallow terminal parse — a malformed timestamp drops freshness only; the warning says so
+            except ValueError as e:
+                logger.warning("provenance has an unparseable freshness %r: %s", freshness, e)
                 freshness = None
         formula = data.get("formula")
         formula_obj = None

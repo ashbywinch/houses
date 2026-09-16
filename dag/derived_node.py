@@ -20,6 +20,7 @@ from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, 
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
 from dag.node import Node, NodeJson
+from dag.persistence import latest_node_result
 from dag.scheduler import assert_mutation_allowed, get_scheduler
 from dag.signals import Connection, Slot
 
@@ -744,13 +745,9 @@ class DerivedNode(Node[T], Generic[T]):
         # stale (older stored timestamps) but has no pending refresh will
         # never re-run, and deferring on it would strand this node
         # pending forever. (Pending deps stay the no-persist return.)
-        from dag.scheduler import get_scheduler as _get_scheduler
-
-        _sched = _get_scheduler()
+        _sched = get_scheduler()
         if not force and any(
-            isinstance(dep, DerivedNode)
-            and dep is not self
-            and dep._id in getattr(_sched, "_scheduled", {})
+            isinstance(dep, DerivedNode) and dep is not self and dep._id in getattr(_sched, "_scheduled", {})
             for dep in active_deps
         ):
             dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
@@ -791,7 +788,6 @@ class DerivedNode(Node[T], Generic[T]):
         # (and a planner must not re-plan because a stamp moved).
         bound_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
         inputs_unchanged = bound_timestamps == dict(self._loaded_dep_timestamps or {})
-        # lucidlint: ignore duplicate-block the computed-path bookkeeping intentionally mirrors the impossible-path
         if result.succeeded and self._attempt.succeeded and result.value_or_none() == self._attempt.value_or_none():
             self._persisted_code_version = self._current_code_version()
             if inputs_unchanged:
@@ -842,15 +838,18 @@ class DerivedNode(Node[T], Generic[T]):
             # Serve path: return the frozen row verbatim. The tree was
             # built and stored at persist time from the calculating
             # inputs — no dep-row walk, no live re-read, no recompute.
-            from dag.persistence import latest_node_result as _latest
-
-            row = _latest(self._id)
+            row = latest_node_result(self._id)
             prov_dict = (row or {}).get("provenance")
             if isinstance(prov_dict, dict) and prov_dict.get("label"):
                 try:
                     return Provenance.from_dict(prov_dict)
-                except Exception:
-                    pass
+                # A stored tree that will not rebuild is a data defect: the
+                # warning names the node and the reason, and the read still
+                # answers (live leaf) rather than failing the whole tree.
+                # lucidlint: ignore swallow read boundary — the warning names the node and reason;
+                # the read still answers
+                except (KeyError, TypeError, ValueError) as e:
+                    logger.warning("%s: stored provenance is unreadable (%s); serving the live leaf", self._id, e)
             # No stored row yet (never persisted): render the live
             # attempt's own status without touching any dep.
             return self._live_attempt_provenance()
@@ -884,49 +883,30 @@ class DerivedNode(Node[T], Generic[T]):
         if formula is None:
             formula = self._build_formula_from_expression()
 
-        status = "impossible" if self._attempt.impossible else ("pending" if self._attempt.pending else "")
-        error_info = self._attempt.error_info
-        # The provenance error/description feed the UI — use the friendly
-        # user_message, never the internal node-id/dep chain.
-        user_error = error_info.display_message if error_info is not None else self._attempt.error
+        prov = self._attempt.to_provenance(
+            label=self.display_name,
+            url=self._source_url,
+            source_type=self.provenance_source_type,
+            formula=formula,
+            sources=sources,
+        )
+        prov.freshness = self._attempt.created_at
         # A succeeded-infeasible commute (TfL 404 "no route", missing
         # destination, no car) carries its reason on the value — surface
         # it as the description so the provenance explains WHY there is no
         # route.  Duck-typed: only values with both attributes contribute.
         val = self._attempt.value_or_none()
-        no_route_reason = ""
         if self._attempt.succeeded and val is not None and getattr(val, "infeasible", False):
-            no_route_reason = getattr(val, "no_route_reason", "") or ""
-        description = user_error if self._attempt.impossible else (no_route_reason or None)
-        return Provenance(
-            label=self.display_name,
-            description=description,
-            value=project_value(self._attempt.value),
-            url=self._source_url,
-            source_type=self.provenance_source_type,
-            freshness=self._attempt.created_at,
-            formula=formula,
-            status=status,
-            error=user_error if self._attempt.impossible else "",
-            sources=sources,
-        )
+            prov.description = getattr(val, "no_route_reason", "") or None
+        return prov
 
     def _live_attempt_provenance(self) -> Provenance:
         """The never-persisted node's own status — no deps touched."""
-        att = self._attempt
-        status = "impossible" if att.impossible else ("pending" if att.pending else "")
-        error_info = att.error_info
-        user_error = error_info.display_message if error_info is not None else att.error
-        return Provenance(
+        return self._attempt.to_provenance(
             label=self.display_name,
-            description=user_error if att.impossible else None,
-            value=project_value(att.value),
             url=self._source_url,
             source_type=self.provenance_source_type,
             formula=self.provenance_formula,
-            status=status,
-            error=user_error if att.impossible else "",
-            sources={},
         )
 
     async def _dep_provenance(self, dep: Node, att: Attempt | None = None) -> Provenance:
@@ -961,10 +941,8 @@ class DerivedNode(Node[T], Generic[T]):
         calculated from) plus the parent's own bound attempt for the
         value — the two together are the exact inputs of this evaluation.
         """
-        from dag.persistence import latest_node_result as _latest
-
         sub: Provenance | None = None
-        row = _latest(dep._id)
+        row = latest_node_result(dep._id)
         prov_dict = (row or {}).get("provenance")
         if isinstance(prov_dict, dict) and prov_dict.get("label"):
             try:
@@ -1018,7 +996,6 @@ class DerivedNode(Node[T], Generic[T]):
 
     @override
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    # lucidlint: ignore duplicate to_json and to_json_value override two distinct base serialization surfaces (full vs
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
         self._enrich_json(result)

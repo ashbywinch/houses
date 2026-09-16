@@ -1,6 +1,5 @@
 {
   "actions": [
-    "latent-class:dag/derived_node.py:335:DerivedNode",
     "latent-class:houses/epc.py:216:_filter_candidates",
     "latent-class:houses/rightmove_scraper.py:266:_page_model_address",
     "latent-class:houses/web/api_router.py:194:what_if_apply",
