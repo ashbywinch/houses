@@ -365,6 +365,11 @@ async function toggleViewed() {
       </div>
     </div>
     <div v-else class="card__body">
+      <!-- The card's role in the list: its figures are the baseline every
+           other card's delta is measured against. A card-level flag above
+           the row, never a third item inside "address | figures" — as a row
+           item it measured 119px and collapsed the address to 0px. -->
+      <p v-if="data.is_current_home" class="card__home-flag">Your home · baseline</p>
       <!-- Top row: Address | Monthly cost -->
       <div class="card__top">
         <span v-if="triage?.favourite" class="card__fav-icon" role="img" aria-label="Favourite">
@@ -376,7 +381,6 @@ async function toggleViewed() {
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
         <span v-if="store.whatIfActive" class="card__whatif">what-if</span>
-        <span v-if="data.is_current_home" class="card__baseline-chip">Your home · baseline</span>
         <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
           <template v-if="showDeltas">
             <span class="card__cost-line" :title="coupleLineTitle">
@@ -584,10 +588,17 @@ async function toggleViewed() {
   padding: 0.05rem 0.4rem;
   vertical-align: middle;
 }
-.card__baseline-chip {
-  flex-shrink: 0;
+/* The current home's marker. It labels the card, not its address row: the
+   top row means "address | the figures", and this card's figures are the
+   reference the other cards' deltas are measured against. The list legend
+   above the cards names the same home. */
+.card__home-flag {
+  align-self: flex-start;
+  margin: 0;
   font-size: 0.65rem;
   font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   color: var(--blue);
   border: 1px solid var(--blue);
   border-radius: var(--radius-full);

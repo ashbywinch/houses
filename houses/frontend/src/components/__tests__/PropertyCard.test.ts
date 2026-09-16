@@ -633,7 +633,7 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     expect(lines[0].attributes('title')).toBe('Council tax lookup failed')
   })
 
-  it('keeps totals and adds the baseline chip on the current home', () => {
+  it('keeps totals and marks the card as your home', () => {
     const card = makeSummary({ is_current_home: true })
     const pinia = createPinia()
     const wrapper = mount(PropertyCard, { props: { rid: '123', data: card }, global: { plugins: [pinia] } })
@@ -641,7 +641,10 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     store.summaries['123'] = { ...card, monthly_baseline: homeBaseline }
     expect(wrapper.text()).toContain('£2,100/mo')
     expect(wrapper.text()).toContain('£400/mo')
-    expect(wrapper.find('.card__baseline-chip').text()).toBe('Your home · baseline')
+    // The flag labels the CARD. Inside the top row it competed with the
+    // address for the same line (and crushed it to 0px on a narrow card).
+    expect(wrapper.find('.card__home-flag').text()).toBe('Your home · baseline')
+    expect(wrapper.find('.card__top .card__home-flag').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('1,308')
   })
 
@@ -651,7 +654,7 @@ describe('PropertyCard — extra vs your home (deltas)', () => {
     const lines = wrapper.findAll('.card__cost-line')
     expect(lines[0].text()).toContain('£2,100/mo')
     expect(lines[1].text()).toContain('£400/mo')
-    expect(wrapper.find('.card__baseline-chip').exists()).toBe(false)
+    expect(wrapper.find('.card__home-flag').exists()).toBe(false)
   })
 
   it('shows the what-if chip on every card when the mode is active', async () => {
