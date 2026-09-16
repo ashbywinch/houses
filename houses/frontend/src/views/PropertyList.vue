@@ -543,7 +543,17 @@ const ceilingLimitText = computed(() => {
 .search-input { flex: 1; border: none; background: none; font-size: 0.9375rem; color: var(--text); outline: none; }
 .search-input::placeholder { color: var(--text-muted); }
 
-.controls-row { display: flex; align-items: center; gap: 8px; padding: 12px 0 0; }
+.controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 0;
+  /* Narrow screens: the sort pill label ('Weekly Commute (all)') +
+     Filter pill (+badge) + count pushed the row past 360px with every
+     child nowrap — the count clipped off-screen. Wrap instead, and let
+     the pills shrink with ellipsis so the count stays visible. */
+  flex-wrap: wrap;
+}
 .pill {
   display: inline-flex;
   align-items: center;
@@ -559,6 +569,16 @@ const ceilingLimitText = computed(() => {
   transition: all 0.15s;
   white-space: nowrap;
   min-height: 40px;
+  /* Pills may shrink on narrow rows; the label ellipsises instead of
+     forcing the row off-screen. */
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+.pill__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .pill:hover { border-color: var(--text-muted); }
 .pill--active { background: var(--blue); color: #fff; border-color: var(--blue); }
@@ -567,9 +587,17 @@ const ceilingLimitText = computed(() => {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
   font-size: 0.6875rem; font-weight: var(--fw-semibold); background: var(--blue); color: #fff;
+  flex-shrink: 0;
 }
 .pill--active .pill-badge { background: rgba(255, 255, 255, 0.3); }
-.count-text { margin-left: auto; font-size: 0.8125rem; color: var(--text-muted); white-space: nowrap; }
+.count-text {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  /* The count is the row's status — never clip it off-screen. */
+  flex-shrink: 0;
+}
 
 .commute-status {
   display: flex; align-items: center; gap: 8px;
