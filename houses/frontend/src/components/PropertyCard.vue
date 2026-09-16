@@ -370,48 +370,52 @@ async function toggleViewed() {
            as a chip inside the address row it measured 119px and collapsed
            the address to 0px. The list legend names the same home. -->
       <p v-if="data.is_current_home" class="card__home-flag">Your home</p>
-      <!-- Address row: the address, with the favourite heart at its right -->
-      <div class="card__top">
-        <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
-          <h3 class="card__address-text">{{ address }}</h3>
-        </a>
-        <span v-if="triage?.favourite" class="card__fav-icon" role="img" aria-label="Favourite">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
-            <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-          </svg>
-        </span>
-      </div>
-      <!-- Figures row: the two figures stack — two numbers on two lines are
-           compared at a glance — with the what-if chip beside them -->
-      <div class="card__numbers">
-        <span v-if="store.whatIfActive" class="card__whatif">what-if</span>
-        <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
-          <template v-if="showDeltas">
-            <span class="card__cost-line" :title="coupleLineTitle">
-              <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
-              {{ deltaLineText(coupleDelta) }}
-            </span>
-            <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others" :title="othersLineTitle">
-              <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
-              {{ deltaLineText(othersDelta) }}
-            </span>
-          </template>
-          <template v-else>
-            <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
-              <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
-              {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
-            </span>
-            <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
-              <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
-              {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
-            </span>
-          </template>
-        </span>
-        <span
-          v-else
-          class="card__monthly-cost card__monthly-cost--unknown"
-          :title="uncomputableReason(data.group_monthly_cost) || 'Not computed yet'"
-        >£—/mo</span>
+      <!-- The header: these two rows share one line when the card is wide
+           enough (see .card__head) and stack when it is not. -->
+      <div class="card__head">
+        <!-- Address row: the address, with the favourite heart at its right -->
+        <div class="card__top">
+          <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
+            <h3 class="card__address-text">{{ address }}</h3>
+          </a>
+          <span v-if="triage?.favourite" class="card__fav-icon" role="img" aria-label="Favourite">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+            </svg>
+          </span>
+        </div>
+        <!-- Figures row: the two figures stack — two numbers on two lines are
+             compared at a glance — with the what-if chip beside them -->
+        <div class="card__numbers">
+          <span v-if="store.whatIfActive" class="card__whatif">what-if</span>
+          <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
+            <template v-if="showDeltas">
+              <span class="card__cost-line" :title="coupleLineTitle">
+                <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
+                {{ deltaLineText(coupleDelta) }}
+              </span>
+              <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others" :title="othersLineTitle">
+                <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
+                {{ deltaLineText(othersDelta) }}
+              </span>
+            </template>
+            <template v-else>
+              <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
+                <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
+                {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
+              </span>
+              <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
+                <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
+                {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
+              </span>
+            </template>
+          </span>
+          <span
+            v-else
+            class="card__monthly-cost card__monthly-cost--unknown"
+            :title="uncomputableReason(data.group_monthly_cost) || 'Not computed yet'"
+          >£—/mo</span>
+        </div>
       </div>
 
       <!-- Why the figure is unknown: the DAG's reason, never a generic excuse -->
@@ -596,12 +600,39 @@ async function toggleViewed() {
   white-space: nowrap;
 }
 /* Figures row: the two figures stack — two numbers on two lines are compared
-   at a glance — with the what-if chip beside the figures it qualifies. */
+   at a glance — with the what-if chip beside the figures it qualifies. The
+   chip aligns to the TOP of the figures, not to their middle. */
 .card__numbers {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
   gap: var(--sp-2);
+}
+/* The header: the address row and the figures row stack on a phone-width
+   card and share one line once the card is wide enough. The threshold is a
+   CONTAINER query, not a viewport one, because the grid — not the viewport —
+   decides the card's width: phones give 296-366px, the desktop three-column
+   grid 381px, and the two-column band on a tablet up to ~458px.
+
+   430px is where the row stops damaging the address: the right-hand cluster
+   (what-if chip + two figures) measures ~200px, so below 430 the address is
+   left ~120px — three lines of two or three words. Measured at 381px (the
+   desktop card) the row gives the address 122px/3 lines, against 336px/1
+   line stacked. */
+.card { container: card / inline-size; }
+.card__head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+@container card (min-width: 430px) {
+  .card__head {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--sp-3);
+  }
+  .card__head .card__top { flex: 1; min-width: 0; }
+  .card__head .card__numbers { flex: 0 0 auto; }
 }
 /* The current home's marker: a quiet label saying which card this is. Not a
    chip — a chip competed with the address for the same line — and not

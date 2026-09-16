@@ -273,3 +273,14 @@ Measured on the current home card: at a 390px viewport the address went from
 13-line address in a 337px-tall block, the new one 2 lines in 168px. The
 list legend keeps the one place where "baseline" earns its keep: the figures
 on every other card are relative to this home.
+
+**One line when the card is wide enough.** The address row and the figures
+row are one row above 430px of card width and stack below it — a *container*
+query, because the grid, not the viewport, decides the card's width (phones
+296–366px, the desktop three-column grid 381px, the two-column band up to
+~458px). The threshold is set by measurement: the what-if chip plus two
+figures measure ~200px, so at the desktop card's 381px a one-row header left
+the address 122px over 3 lines, against 327px on one line stacked. Above
+430px the home card's address reads 199px over 2 lines and a normal card's
+300px on one line. In the figures row the chip top-aligns with the figures
+it qualifies, in both layouts.
