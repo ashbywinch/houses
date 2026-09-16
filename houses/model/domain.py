@@ -225,7 +225,12 @@ class Commute:
 
     person: Person
     label: str
-    destination: PlaceOfInterest
+    # A value carries a destination only when its producer DEPENDS on
+    # one. Route planners take the address, never the place, so their
+    # results leave this None and their provenance states no
+    # destination — a node can only report what it read. The selector
+    # depends on the place node and stamps the place onto the winner.
+    destination: PlaceOfInterest | None
     duration: _Quantity
     daily_cost: Money
     mode: str = "transit"
@@ -263,16 +268,16 @@ class Commute:
         poi = self.destination
         fare_unknown = not self.daily_cost.amount and self.mode != "walk"
         if fare_unknown:
-            cost = f"to {poi.label}" if poi.label else ""
+            cost = f"to {poi.label}" if poi is not None and poi.label else ""
         else:
             cost = f"£{self.daily_cost.amount:,.2f}/day"
-            if poi.label:
+            if poi is not None and poi.label:
                 cost += f" to {poi.label}"
         duration = self.duration.to("minute")
         parts = [mode_label, f"{duration.magnitude:g} min"]
         if cost:
             parts.append(cost)
-        if poi.trips_per_week and poi.weeks_per_year:
+        if poi is not None and poi.trips_per_week and poi.weeks_per_year:
             parts.append(f"{poi.trips_per_week}x/wk · {poi.weeks_per_year} wks/yr")
         return " · ".join(parts)
 

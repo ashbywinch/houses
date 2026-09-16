@@ -117,6 +117,20 @@ dep values override `provenance_formula_for(dep_attempts, active_deps)`
 and read the bound attempts. Nodes whose formula ignores deps keep the
 default, which delegates to `provenance_formula`.
 
+**The record is the value AND the inputs that produced it.** A dep
+subtree is the dep's own recorded derivation (what IT calculated from)
+patched with the attempt this node actually bound; a dep with no
+recorded row renders a leaf from the bound attempt — never a read of
+the dep's current state, which may hold a value the compute never saw.
+Formulas read the bound attempts too.
+
+Refreshing to an identical value from the SAME inputs keeps the
+original row and clocks (downstream stays parked). An identical value
+from DIFFERENT inputs re-records the row — it states the inputs this
+evaluation used — and emits **no** change: the value is unchanged, so
+dependents have nothing to recalculate (and a planner must not re-plan
+because a stamp moved).
+
 Serve (`build_provenance()` with no args) returns the frozen row
 verbatim — `Provenance.from_dict(row["provenance"])`. No join, no
 recursion into dep rows, no live build, no `latest_attempt()`. A node
@@ -129,12 +143,38 @@ Wrong fixes — each reintroduces a re-read instead of serving the row:
 ```python
 # ✗ render a formula from live deps (they may have moved on)
 mpg = self._mpg_node.latest_attempt().value_or_none()
-# ✓ read the bound attempt on the persist path
-mpg = by_id.get(self._mpg_node._id)  # in provenance_formula_for
-# ✗ rebuild a dep subtree live on serve
-sources[dep._id] = await dep.build_provenance()
+# ✓ read the attempt the compute bound
+mpg = bound[active_deps.index(self._mpg_node)]
+# ✗ render a dep subtree from its live state at persist time
+sources[dep._id] = await dep.live_provenance()
+# ✓ its recorded derivation, patched with the bound attempt
+sources[dep._id] = recorded_subtree(dep, bound_attempt)
 # ✓ serve returns the frozen row verbatim
 return Provenance.from_dict(row["provenance"])
+```
+
+### A node states only what it depends on
+
+A node's provenance is the record of its own calculation, so it can
+report only what its deps gave it. If `compute` never saw a fact, the
+value and the tree must not claim it — not as a default, not as a
+carried-over copy.
+
+The route planners are the worked example: a route from A to B depends
+on the origin and the destination ADDRESS. Frequency does not change
+the route, so the planner does not depend on it, so its value carries
+no frequency (`Commute.destination` stays `None`) and its provenance
+states none. The node that DOES depend on the place owns that claim —
+the selector stamps the place onto the winner it picks, and everything
+downstream carries it.
+
+```python
+# ✗ the planner invents a frequency it never read (dataclass default)
+destination=PlaceOfInterest(label="", address=dest_str)   # trips_per_week=1
+# ✓ the planner reports the journey it planned; no destination claim
+destination=None
+# ✓ the node with the place dep makes the claim
+val = replace(val, destination=inputs.poi.value_or_none())
 ```
 
 ### Narrow deps to what `compute` reads

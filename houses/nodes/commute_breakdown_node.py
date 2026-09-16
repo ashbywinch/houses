@@ -148,6 +148,12 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 val = attempt.value_or_none()
                 if val is None:
                     return Attempt.impossible(f"commute {key} produced no value")
+                if poi.trips_per_week is None or poi.weeks_per_year is None:
+                    # The person's destination must declare its frequency —
+                    # pricing an unknown one would invent a number, and
+                    # skipping it would publish a total quietly missing a
+                    # cost. Name the defect.
+                    return Attempt.impossible(f"commute {key}: destination has no frequency declared")
                 daily = getattr(val, "daily_cost", None)
                 if daily is not None:
                     daily_amount = daily
@@ -176,14 +182,16 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         )
 
     @override
-    async def build_provenance(self):
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ):
         """The aggregate as a human total, never the dict dump.
 
         The node VALUE stays the breakdown dict (the expression system
         reads yearly_total_gbp); only the provenance display value is
         swapped for the human figure.
         """
-        prov = await super().build_provenance()
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         v = self._attempt.value_or_none()
         if self._attempt.succeeded and isinstance(v, dict) and v.get("yearly_total_gbp") is not None:
             prov.value = f"£{Decimal(str(v['yearly_total_gbp'])):,.2f}/yr"

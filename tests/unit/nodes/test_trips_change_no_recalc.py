@@ -62,7 +62,14 @@ def _persons(pimlico_trips: int) -> list[Person]:
     return [simon, lorena]
 
 
-JOURNEY_SUBS = ("walk", "tfl_no_bus", "tfl_with_bus", "drive", "commute", "merge", "final_fuel")
+# The route planners own the journeys. They depend on the destination
+# ADDRESS, so a trips-only edit must leave them untouched — no recompute,
+# no new row, no route call.
+PLANNER_SUBS = ("walk", "tfl_no_bus", "tfl_with_bus", "drive")
+# Everything downstream carries the destination stamp, which follows the
+# edit: those rows re-persist, but the journey they describe is unchanged.
+DOWNSTREAM_SUBS = ("commute", "merge", "final_fuel")
+JOURNEY_SUBS = PLANNER_SUBS + DOWNSTREAM_SUBS
 
 
 def _journey_snapshot(rid: str) -> dict:
@@ -101,4 +108,11 @@ def test_trips_only_change_does_not_recalculate_journeys():
 
     after = _journey_snapshot(rid)
 
-    assert after == before, f"a trips-only change must not recalculate journeys: {before} -> {after}"
+    for key in ("Pimlico", "Bracknell", "Dad"):
+        for sub in PLANNER_SUBS:
+            assert after[f"{key}/{sub}"] == before[f"{key}/{sub}"], (
+                f"a trips-only change must not recompute {key}/{sub}: "
+                f"{before[f'{key}/{sub}']} -> {after[f'{key}/{sub}']}"
+            )
+        for sub in DOWNSTREAM_SUBS:
+            assert after[f"{key}/{sub}"][0] == before[f"{key}/{sub}"][0], f"{key}/{sub} re-planned: the journey changed"

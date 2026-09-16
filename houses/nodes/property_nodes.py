@@ -639,7 +639,7 @@ class PropertyNodes:
             f"{p.name}/{q.label}"
             for p in (self._svc.persons_source._value or [])
             for q in (p.places_of_interest or [])
-            if q.trips_per_week > 0 and q.weeks_per_year > 0
+            if (q.trips_per_week or 0) > 0 and (q.weeks_per_year or 0) > 0
         }
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)

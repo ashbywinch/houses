@@ -20,7 +20,7 @@ from houses.api_cache import CacheEnvelope, cached_async_client, evict_cached, g
 from houses.car_park import ApcoaCarParkLookup, CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.location import geocode, geocode_address
-from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.model.domain import Commute, Person
 from houses.settings import settings
 from houses.stations import Station
 from houses.stations import find as find_station
@@ -28,6 +28,7 @@ from houses.transit_route import apply_park_and_ride_to_journeys
 from houses.web.json_utils import WirePayload
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class _TravelDate:
@@ -55,21 +56,26 @@ class _JourneyParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        
+
         # The API key is AUTH, not request identity: it is appended at the
         # httpx edge, so the cache key stays key-free (same shape the seam
         # previously derived by stripping app_key).
         # Omit falsy params: httpx drops empty values from the wire query,
         # so to_dict must mirror the wire — the cache identity (derived from
         # the URL query) would otherwise disagree with the record.
-        return {k: v for k, v in {
-            "nationalSearch": self.national_search,
-            "timeIs": self.time_is,
-            "journeyPreference": self.journey_preference,
-            "mode": self.mode,
-            "date": self.date,
-            "time": self.time,
-        }.items() if v}
+        return {
+            k: v
+            for k, v in {
+                "nationalSearch": self.national_search,
+                "timeIs": self.time_is,
+                "journeyPreference": self.journey_preference,
+                "mode": self.mode,
+                "date": self.date,
+                "time": self.time,
+            }.items()
+            if v
+        }
+
 
 @dataclass(frozen=True)
 class _TubeFareParams:
@@ -81,14 +87,18 @@ class _TubeFareParams:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        
+
         # Falsy params are dropped — httpx drops them from the wire query, and
         # to_dict must mirror the wire so cache identities agree.
-        return {k: v for k, v in {
-            "date": self.date,
-            "time": self.time,
-            "nationalSearch": self.national_search,
-        }.items() if v}
+        return {
+            k: v
+            for k, v in {
+                "date": self.date,
+                "time": self.time,
+                "nationalSearch": self.national_search,
+            }.items()
+            if v
+        }
 
 
 @dataclass(frozen=True)
@@ -234,9 +244,7 @@ class _TflDisambiguation:
 
     @classmethod
     def from_dict(cls, raw: dict) -> _TflDisambiguation:
-        return cls(
-            options=tuple(_TflDisambiguationOption.from_dict(o) for o in raw.get("disambiguationOptions", []))
-        )
+        return cls(options=tuple(_TflDisambiguationOption.from_dict(o) for o in raw.get("disambiguationOptions", [])))
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
@@ -320,6 +328,7 @@ def _friendly_tfl_message(status: int) -> str:
         return "TfL's route planner is unavailable right now"
     return "TfL couldn't plan this route"
 
+
 # lucidlint: ignore data-clump the arrival text and leg minutes travel together through every formatter by
 # lucidlint: ignore data-clump (clean_arr, duration, instr) is the dispatch-table formatter signature shared by seven
 def _tube_leg_label(clean_arr: str, duration: int, instr: str) -> str:  # lucidlint: ignore data-clump (duration,
@@ -371,6 +380,7 @@ _LEG_LABEL_FORMATTERS: dict[str, Callable[[str, int, str], str]] = {
     "tram": _tram_leg_label,
 }
 
+
 @dataclass(frozen=True)
 class JourneySummary:
     """(duration_min, cost, route_summary) verdict from a TfL journey set —
@@ -379,7 +389,6 @@ class JourneySummary:
     duration: int | None
     cost: float | None
     route_summary: str
-
 
 
 @dataclass(frozen=True)
@@ -391,7 +400,6 @@ class TflRouteOptions:
     allow_bus: bool = False
     cached_call: Callable | None = None
     plan_override: Callable | None = None
-
 
 
 @dataclass(frozen=True)
@@ -491,7 +499,7 @@ class TflClient:
         )
         fetch = fetch or TflClient._cached_with_retry
         data = await fetch(url, request)
-# lucidlint: ignore special-case sentinel handling is the contract here
+        # lucidlint: ignore special-case sentinel handling is the contract here
         if data is None:
             return None
         # A 300 disambiguation means the name matched multiple places (usually
@@ -509,7 +517,7 @@ class TflClient:
         return duration
 
     @staticmethod
-# lucidlint: ignore record-shape ingests the TfL API response via from_dict — legacy raw dicts (coding-standards.md)
+    # lucidlint: ignore record-shape ingests the TfL API response via from_dict — legacy raw dicts (coding-standards.md)
     def _disambiguate_national_rail(data: _TflJourneyResponse | dict) -> str | None:
         """Extract the national-rail StopPoint id from a 300 disambiguation body.
 
@@ -527,6 +535,7 @@ class TflClient:
             if option.place.place_type == "StopPoint" and "national-rail" in option.place.modes:
                 return option.parameter_value
         return None
+
     # ── TfL helper functions ─────────────────────────────────────────
 
     @staticmethod
@@ -605,7 +614,7 @@ class TflClient:
         return params
 
     @staticmethod
-# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
+    # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     def _format_route_summary(journey: _TflJourney | dict) -> str:
         if not isinstance(journey, _TflJourney):
             journey = _TflJourney.from_dict(journey)
@@ -671,7 +680,7 @@ class TflClient:
         return JourneySummary(duration, cost, route_summary)
 
     @staticmethod
-# lucidlint: ignore record-shape the (JourneyLeg, mode-name) parse pairs are a keyed collection (review-log)
+    # lucidlint: ignore record-shape the (JourneyLeg, mode-name) parse pairs are a keyed collection (review-log)
     def _parse_tfl_legs(tfl_legs: tuple[_TflLeg, ...]) -> list[tuple[JourneyLeg, str]]:
         """Parse TfL API legs into (JourneyLeg, mode_name) pairs.
 
@@ -710,7 +719,7 @@ class TflClient:
 
     @staticmethod
 
-# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
+    # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_with_retry(
         url: str, request: WirePayload, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
     ) -> dict | None:
@@ -743,7 +752,6 @@ class TflClient:
         return None
 
     @staticmethod
-
     def _is_transient_error_body(entry: CacheEnvelope | _TflApiError) -> bool:
         """True for cached entries that are TRANSIENT error responses.
 
@@ -766,7 +774,7 @@ class TflClient:
 
     @staticmethod
 
-# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
+    # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _cached_api_call(
         url: str, request: WirePayload, *, _client_factory: Callable | None = None
     ) -> dict | None:
@@ -834,7 +842,10 @@ class TflClient:
                 set_cached("GET", url, request, None, data)
             elif 300 <= resp.status_code < 400:
                 set_cached(
-                    "GET", url, request, None,
+                    "GET",
+                    url,
+                    request,
+                    None,
                     CacheEnvelope(status=resp.status_code, body=data).to_dict(),
                 )
             elif resp.status_code == 404:
@@ -843,7 +854,10 @@ class TflClient:
                 # wastes calls. Every OTHER 4xx is transient-ish (401/403 key
                 # expiry, 409 planner outage) and must not poison the cache.
                 set_cached(
-                    "GET", url, request, None,
+                    "GET",
+                    url,
+                    request,
+                    None,
                     CacheEnvelope(status=404, body=data).to_dict(),
                 )
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
@@ -866,6 +880,7 @@ class TflClient:
                     user_message=_friendly_tfl_message(resp.status_code),
                 )
             return data
+
     async def _fetch_data(self) -> _TflJourneyResponse | None:
         """Call TfL API and return the parsed journey response, or None on failure.
 
@@ -914,7 +929,7 @@ class TflClient:
             return None
         return response
 
-# lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
+    # lucidlint: ignore record-shape parses/consumes the TfL API response — provider wire payload (coding-standards.md)
     async def _process_data(self, data: _TflJourneyResponse | dict | None) -> Attempt[Commute]:
         """Turn raw TfL API data into a Commute.  Pure logic — no HTTP.
 
@@ -948,7 +963,7 @@ class TflClient:
         result = Commute(
             person=Person(name="", has_car=False),
             label=self._label,
-            destination=PlaceOfInterest(label=self._label, address=self._destination),
+            destination=None,
             duration=Quantity(duration_minutes, "minute") if duration_minutes is not None else None,
             daily_cost=daily_cost_gbp,
             mode="transit",
@@ -964,7 +979,7 @@ class TflClient:
             Commute(
                 person=Person(name="", has_car=False),
                 label=self._label,
-                destination=PlaceOfInterest(label=self._label, address=self._destination),
+                destination=None,
                 duration=Quantity(0, "minute"),  # type: ignore[arg-type]  # pint's stub types Quantity(0, "minute") as PlainQuantity, which basedpyright won't assign to the field's bare Quantity[Unknown] (pint's generic is invariant); at runtime PlainQuantity IS a pint Quantity and valid here
                 daily_cost=Money(amount="0", currency="GBP"),
                 mode="transit",
@@ -974,8 +989,7 @@ class TflClient:
             )
         )
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _geocode_fallback(self, request: WirePayload) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""
         pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", self._origin)
@@ -1079,9 +1093,7 @@ class TflClient:
         fare = best.fare
         fare_fares: tuple[_TflFareEntry, ...] = fare.fares if fare else ()
         # Per-mode single fares in pence (e.g. national-rail + tube).
-        mode_single_pence: dict[str, int] = {
-            f.mode: int(f.cost) for f in fare_fares if f.cost is not None and f.mode
-        }
+        mode_single_pence: dict[str, int] = {f.mode: int(f.cost) for f in fare_fares if f.cost is not None and f.mode}
         # Whole-journey single fare in pence — the fallback when the API
         # gives one totalCost instead of per-mode fares.
         total_single_pence = fare.total_cost if fare else None

@@ -52,7 +52,7 @@ def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
         Commute(
             person=Person(name="", has_car=False),
             label=label,
-            destination=PlaceOfInterest(label="", address=""),
+            destination=None,
             duration=Quantity(0, "minute"),
             daily_cost=Money(amount="0", currency="GBP"),
             mode="",
@@ -384,8 +384,10 @@ class TflTransitNode(DerivedNode[Commute]):
         return _stamp_origin(result, loc)
 
     @override
-    async def build_provenance(self) -> Provenance:
-        p = await super().build_provenance()
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        p = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         v = self._attempt.value_or_none()
         # Only a succeeded-infeasible result carries the no-route note —
         # an impossible attempt (outage/retry-exhausted) must show its
@@ -465,7 +467,7 @@ class TransitNode(DerivedNode[Commute]):
             empty = Commute(
                 person=Person(name="", has_car=self._has_car),
                 label="",
-                destination=PlaceOfInterest(label="", address=""),
+                destination=None,
                 duration=Quantity(0, "minute"),
                 daily_cost=Money(amount="0", currency="GBP"),
             )
@@ -488,14 +490,14 @@ class TransitNode(DerivedNode[Commute]):
                 # router only knows the address; the summary/provenance
                 # must show the POI label + trips (PR #68 review).
                 parts = self._id.split("/")
-                label = parts[2] if len(parts) >= 3 else (fallback.destination.label or "")
+                label = parts[2] if len(parts) >= 3 else (fallback.destination.label if fallback.destination else "")
                 fallback = replace(fallback, label=label)
                 fallback = _with_poi_destination(fallback, poi_val)
                 return Attempt.succeeded(fallback)
             return Attempt.succeeded(val)
 
         parts = self._id.split("/")
-        label = parts[2] if len(parts) >= 3 else (val.destination.label or "")
+        label = parts[2] if len(parts) >= 3 else (val.destination.label if val.destination else "")
         raw_mode = val.mode if hasattr(val, "mode") else "transit"
         mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
         if val.details and all(leg.mode.name.lower() == "walk" for cg in val.details for leg in cg.legs):
@@ -505,7 +507,7 @@ class TransitNode(DerivedNode[Commute]):
         result = Commute(
             person=Person(name="", has_car=self._has_car),
             label=label,
-            destination=PlaceOfInterest(label=label, address=val.destination.address),
+            destination=PlaceOfInterest(label=label, address=val.destination.address if val.destination else ""),
             duration=val.duration,
             daily_cost=daily_cost,
             mode=mode,
@@ -554,8 +556,10 @@ class TransitNode(DerivedNode[Commute]):
         return fallback
 
     @override
-    async def build_provenance(self) -> Provenance:
-        p = await super().build_provenance()
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        p = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         if self._last_fallback_detail is not None:
             p.description = self._last_fallback_detail
         return p

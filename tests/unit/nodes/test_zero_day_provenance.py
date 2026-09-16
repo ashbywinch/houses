@@ -186,11 +186,16 @@ def test_zero_day_persons_projection_names_the_zero():
     )
     flush_all()
     mcc = client.get("/api/properties/42ZZ0002/detail").json()["affordability"]["monthly_commute_cost"]
-    claims = _claims(mcc["provenance"])
-    pimlico_places = [s for s in claims if "Pimlico —" in s]
-    assert pimlico_places, "fixture must carry a Pimlico persons-projection for the check to mean anything"
-    assert all("0x/wk" in s or "0 days" in s for s in pimlico_places), (
-        f"the persons projection lists Pimlico with no hint it is zeroed: {pimlico_places[:3]}"
+    # THE CONTRACT: the persons projection — the one place a reader sees
+    # their destinations listed — names the zero. Read it from the
+    # breakdown's own `persons` source (subtrees nested inside a planner
+    # record the state that planner used; it takes the address, never the
+    # place, so a trips-only edit never re-plans it).
+    persons_src = (mcc["provenance"].get("sources") or {}).get("persons") or {}
+    persons_text = str(persons_src.get("value") or "")
+    assert "Pimlico" in persons_text, "fixture must carry the persons projection"
+    assert "Pimlico — Pimlico Rd, London · 0 days/week (not commuted)" in persons_text, (
+        f"the persons projection lists Pimlico with no hint it is zeroed: {persons_text[:160]}"
     )
 
 

@@ -83,7 +83,7 @@ class _PetrolAugmentJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        
+
         return {**self.base, "is_child": self.is_child}
 
 
@@ -186,7 +186,6 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         )
         return Attempt.succeeded(new_commute)
 
-    
     async def _attach_is_child(self, base: dict) -> _PetrolAugmentJson:
         """Annotate a serialized payload with the entry-level ``is_child`` flag."""
         attempt = await self.attempt()
@@ -198,8 +197,10 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
 
     @override
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json(self) -> dict:
-        return (await self._attach_is_child(await super().to_json())).to_dict()
+    async def to_json(self, dep_attempts=None, active_deps=None) -> dict:
+        return (
+            await self._attach_is_child(await super().to_json(dep_attempts=dep_attempts, active_deps=active_deps))
+        ).to_dict()
 
     @override
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)

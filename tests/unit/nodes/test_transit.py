@@ -771,6 +771,7 @@ class TestNationalRailFallback:
         v = a.value_or_none()
         assert v is not None and not v.infeasible
         assert v.label == "Pimlico", "the fallback label must come from the node id"
+        assert v.destination is not None, "the fallback stamps the place it was given"
         assert v.destination.label == "Pimlico"
         assert v.destination.trips_per_week == 5
 

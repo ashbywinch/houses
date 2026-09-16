@@ -961,10 +961,6 @@ class TestDerivedNodeProvenance:
             def compute(self, val):
                 return val
 
-            @override
-            def to_json(self):
-                return {"status": "succeeded", "value": self._attempt.value_or_none()}
-
         node = TestNode("rid/person/poi/test_node", float, (dep,))
         await flush_processor()
 

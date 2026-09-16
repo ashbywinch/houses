@@ -8,6 +8,7 @@ from money import Money
 from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.measurement import Measurement
+from dag.node import Node
 from houses.council_tax_info import CouncilTaxInfo
 from houses.services_provider import get_services
 
@@ -55,8 +56,10 @@ class EpcNode(DerivedNode[dict]):
 
     @override
     # lucidlint: ignore duplicate the difference IS the node identity (band vs description extraction) (review-log)
-    async def build_provenance(self) -> Provenance:
-        prov = await super().build_provenance()
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         val = self._attempt.value_or_none()
         if self._attempt.succeeded and isinstance(val, dict) and val.get("band"):
             prov.value = f"Band {val['band']}"
@@ -102,8 +105,10 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
     provenance_source_type = SourceType.API
 
     @override
-    async def build_provenance(self) -> Provenance:
-        p = await super().build_provenance()
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        p = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         v = self._attempt.value_or_none()
         if self._attempt.succeeded and v is not None and v.lookup_error:
             p.description = f"Council tax estimated — {v.lookup_error}."

@@ -220,7 +220,9 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         return Attempt.succeeded(new_commute)
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():
             sources[dep._id] = await dep.build_provenance()
