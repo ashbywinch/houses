@@ -410,18 +410,17 @@ class PropertyNodes:
             acceptable=_school_acceptable,
         )
         # ── Commute Pipeline ────────────────────────────────────────────
-        # Pipelines are materialized for the initial destination set, and
-        # the breakdown node is created ONCE, wired to the live selectors
-        # dict via its deps provider. _on_persons_changed then only adds
-        # or removes individual pipelines — the dict and the breakdown
-        # object are stable for the property's lifetime, so nothing that
-        # wired itself to them at construction can be orphaned.
+        # Pipelines are materialized for the initial destination set,
+        # and the breakdown node is created ONCE with the live selectors
+        # as its deps (nodes, never a provider closure). _on_persons_changed
+        # adds/removes pipelines and rewires via set_deps; the breakdown
+        # object is stable for the property's lifetime.
         self.commute_selectors: dict[str, DerivedNode] = {}
         self.commute_pois: dict[str, UserInputNode[str]] = {}
         self._build_commute_pipeline()
         self.commute_breakdown: CommuteBreakdownNode = CommuteBreakdownNode(
             f"{rid}/commute_breakdown",
-            commute_selectors=self.commute_selectors,
+            selectors=tuple(self.commute_selectors.values()),
             persons_source=self._svc.persons_source,
         )
         self._svc.persons_source.changed.connect(self._on_persons_changed)
@@ -572,15 +571,13 @@ class PropertyNodes:
                     node.disconnect()
             self.commute_selectors.pop(key, None)
 
-        # Materialize pipelines for newly added destinations. Existing
-        # pipelines and the breakdown are untouched; the breakdown's
-        # deps provider reads the live selectors dict, so the new
-        # pipelines are its deps the moment they exist.
+        # Materialize pipelines for newly added destinations, then
+        # rewire the breakdown's deps to the live selector entries
+        # plus persons_source — deps are nodes, so each selector write
+        # signals the breakdown through its own dep slot. No manual
+        # scheduling: the deps define who gets updated when.
         build_commute_pipeline(self, keys=set(wanted) - current)
-
-        # Re-price the aggregate (idempotent if already queued).
-        get_scheduler().schedule(self.commute_breakdown)
-
+        self.commute_breakdown.set_deps((*self.commute_selectors.values(), self._svc.persons_source))
 
     def _on_node_changed(self) -> None:
         self.changed.emit()
@@ -631,7 +628,6 @@ class PropertyNodes:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""
         return await self.commute_breakdown.to_json()
-
 
     def _commuted_destinations(self) -> set[str]:
         """Selector keys whose destination is actually commuted (trips
@@ -741,9 +737,7 @@ class PropertyNodes:
             epc=await self.epc.to_json(),
             location=location.to_dict(),
             commutes={
-                k: await v.to_json()
-                for k, v in self.commute_selectors.items()
-                if k in self._commuted_destinations()
+                k: await v.to_json() for k, v in self.commute_selectors.items() if k in self._commuted_destinations()
             },
             schools=schools.to_dict(),
             affordability=affordability.to_dict(),

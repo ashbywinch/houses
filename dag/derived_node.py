@@ -10,7 +10,6 @@ import logging
 import textwrap
 import traceback
 from abc import abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
@@ -361,33 +360,25 @@ class DerivedNode(Node[T], Generic[T]):
         self,
         node_id: str,
         value_type: type[T],
-        deps: tuple[Node, ...] | Callable[[], tuple[Node, ...]],
+        deps: tuple[Node, ...],
         source_url: str = "",
         dep_names: tuple[str, ...] | None = None,
     ) -> None:
-        """``deps`` may be a static tuple of nodes, or a zero-arg callable
-        re-evaluated on every staleness/refresh check — the composition
-        form for dynamic dependency sets (a node whose inputs appear and
-        disappear at runtime, e.g. destinations added in Settings).
-
-        The callable must close over its own data, never over ``self``:
-        the base class may consult it at any point in the node's life,
-        and a provider that reads not-yet-assigned subclass state would
-        reintroduce the construction-ordering hazard this exists to
-        remove (2026-09-09: base register() → _is_stale() →
-        _get_active_deps() ran before the subclass finished __init__).
+        """``deps`` are nodes, always. A callable raises TypeError: deps
+        define who gets updated when, and a provider closure carries no
+        signal wiring. A node whose dep SET changes at runtime is
+        rewired with ``set_deps(...)`` by its owner.
         """
         super().__init__(node_id, value_type, source_url)
-        self._deps_provider: Callable[[], tuple[Node, ...]] | None = (
-            deps if callable(deps) else None
-        )
-        self._deps: tuple[Node, ...] = () if callable(deps) else deps
-        # A provider's deps are re-read per staleness/refresh check —
-        # static wiring (signals) covers explicitly listed deps only.
-        static_deps: tuple[Node, ...] = self._deps
+        if callable(deps):
+            raise TypeError(
+                f"{node_id}: deps must be nodes, not a callable. Deps define "
+                "who gets updated when — a provider closure carries no signal "
+                "wiring. Rewire at runtime with set_deps(...) instead."
+            )
+        static_deps: tuple[Node, ...] = deps
+        self._deps: tuple[Node, ...] = deps
         self._dep_names: tuple[str, ...] | None = dep_names
-        if dep_names is not None and len(dep_names) != len(static_deps):
-            raise ValueError(f"{self._id}: dep_names ({len(dep_names)}) must match deps ({len(static_deps)})")
         self._attempt: Attempt[T] = Attempt.pending()
         self._connections: list[Connection] = []
         self._slots: list[Slot] = []
@@ -487,9 +478,33 @@ class DerivedNode(Node[T], Generic[T]):
         get_scheduler().unregister(self)
 
     def _get_active_deps(self) -> tuple[Node, ...]:
-        if self._deps_provider is not None:
-            return self._deps_provider()
+        """The deps for THIS evaluation — the full static set by default,
+        narrowed by subclasses whose compute reads a subset."""
         return self._deps
+
+    def set_deps(self, deps: tuple[Node, ...]) -> None:
+        """Replace the dep set and rewire the signals — deps stay nodes.
+
+        The owner that mutates the input set (added/removed
+        destinations) calls this: every existing dep slot is
+        disconnected, the tuple is swapped, and each new dep gets a
+        fresh slot, so a dep write signals this node through its own
+        edge. Never schedule the node after rewiring — the deps define
+        who gets updated when.
+        """
+        for conn in self._connections:
+            conn.disconnect()
+        self._connections.clear()
+        self._slots.clear()
+        self._deps = deps
+        for i, dep in enumerate(deps):
+            if dep is None:
+                raise ValueError(
+                    f"{self._id}: dependency at index {i} is None — DAG nodes must not have None dependencies"
+                )
+            slot = Slot(self._on_dep_changed)
+            self._slots.append(slot)
+            self._connections.append(dep.changed.connect(slot))
 
     def deps_for_traversal(self) -> tuple[Node, ...]:
         """Every dependency, including the ones the active set hides.
@@ -501,12 +516,7 @@ class DerivedNode(Node[T], Generic[T]):
         hidden behind a failed or unchosen dependency would otherwise keep
         its persisted result forever (see ``dag.regenerate.schedule_code_stale_nodes``).
         """
-        # The two methods READ the same base fields; their divergence is the
-        # subclass OVERRIDE of _get_active_deps (11 nodes narrow there), which
-        # a traversal must NOT inherit — expressed here in the base's own terms
-        # so the walk never picks up a conditional node's narrowing.
-        provider, static = self._deps_provider, self._deps
-        return provider() if provider is not None else static
+        return self._deps
 
     @override
     def latest_attempt(self) -> Attempt:

@@ -1870,11 +1870,9 @@ class TestCommuteChainProvenanceFormula:
             ],
             "test",
         )
-        commute_src = FixedCommuteNode("bf_commute")
+        commute_src = FixedCommuteNode("Simon/Bracknell")
         commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
-        node = CommuteBreakdownNode(
-            "bf_node", commute_selectors={"Simon/Bracknell": commute_src}, persons_source=persons_src
-        )
+        node = CommuteBreakdownNode("bf_node", selectors=(commute_src,), persons_source=persons_src)
         await flush_processor()
         prov = await node.build_provenance()
         assert prov.formula is not None
@@ -1898,11 +1896,9 @@ class TestCommuteChainProvenanceFormula:
             ],
             "test",
         )
-        commute_src = FixedCommuteNode("bf_commute2")
+        commute_src = FixedCommuteNode("Simon/Bracknell")
         commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
-        node = CommuteBreakdownNode(
-            "bf_node2", commute_selectors={"Simon/Bracknell": commute_src}, persons_source=persons_src
-        )
+        node = CommuteBreakdownNode("bf_node2", selectors=(commute_src,), persons_source=persons_src)
         await flush_processor()
         prov = await node.build_provenance()
         # 46wk × 1 trip/wk × £5.00 = £230.00
