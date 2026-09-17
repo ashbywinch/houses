@@ -143,7 +143,10 @@ class TestMe:
         resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["impersonating"] == "Ashby"
+        # The /me report is the canonical person_id, never the display name
+        assert data["impersonating"] == "3"
+        # the defaults carry no email → no linked person → no person_id
+        assert data["person_id"] is None
 
     def test_returns_impersonating_null_when_not_impersonating(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
@@ -266,7 +269,8 @@ class TestImpersonate:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["impersonating"] == "Ashby"
+        # The cookie claim is the canonical person_id (legacy names resolve)
+        assert data["impersonating"] == "3"
         # Cookie should be updated (new set-cookie header)
         set_cookie = resp.headers.get("set-cookie", "")
         assert "session=" in set_cookie

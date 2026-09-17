@@ -29,13 +29,21 @@ from houses.model.domain import (
     HomeCoOwner,
     Person,
     PlaceOfInterest,
+    person_id_of,
 )
 from houses.nodes.commute import commute_band
 from houses.nodes.property_nodes import PropertyJson, PropertyNodes, SummaryJson
 from houses.nodes.settings_node import API_KEY_TO_NODE
 from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
-from houses.web.auth import SESSION_MAX_AGE, SessionClaims, effective_session_user, get_serializer
+from houses.web.auth import (
+    SESSION_MAX_AGE,
+    SessionClaims,
+    _person_key,
+    _resolve_person_identity,
+    effective_session_user,
+    get_serializer,
+)
 from houses.web.broadcaster import register_client
 from houses.web.monthly_delta import attach as attach_monthly_delta
 from houses.web.settings_payload import SessionPersons, settings_payload
@@ -146,21 +154,27 @@ def _merge_what_if_persons(updates: list, current: list) -> list:
     Unmentioned persons keep their current values — the what-if only
     changes what the client edited.  Malformed input raises (→ 4xx).
     """
-    by_name = {p.name: p for p in current}
+    by_key: dict[str, Person] = {}
+    for p in current:
+        by_key[_person_key(p)] = p
+        by_key[getattr(p, "name", "")] = p
     merged: list = []
-    merged_names: set[str] = set()
+    merged_keys: set[str] = set()
     for d in updates:
-        if not isinstance(d, dict) or not d.get("name"):
+        if not isinstance(d, dict):
             raise HTTPException(status_code=422, detail="each person update needs a name")
-        target = by_name.get(d["name"])
+        key = d.get("person_id") or d.get("name")
+        if not key:
+            raise HTTPException(status_code=422, detail="each person update needs a person_id")
+        target = by_key.get(key)
         if target is None:
-            raise HTTPException(status_code=422, detail=f"unknown person {d['name']!r}")
+            raise HTTPException(status_code=422, detail=f"unknown person {key!r}")
         try:
             merged.append(_person_from_dict(d, target, merge_destinations=True))
         except (ValueError, TypeError) as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-        merged_names.add(d["name"])
-    merged.extend(p for p in current if p.name not in merged_names)
+        merged_keys.add(_person_key(target))
+    merged.extend(p for p in current if _person_key(p) not in merged_keys)
     return merged
 
 
@@ -584,14 +598,26 @@ class CommentBody(BaseModel):
 
 def _comment_person(request: Request, session_user: SessionClaims, svc) -> str:
     """Resolve the comment author — impersonation header for superusers,
-    else the session email's linked person in settings."""
+    else the session email's linked person in settings.
+
+    The header carries the canonical person_id (legacy names resolve);
+    the comment record stays keyed by display name.
+    """
     impersonate = request.headers.get("X-Impersonate-Person", "")
     if impersonate:
         if not session_user.is_superuser:
             raise HTTPException(status_code=403, detail="Only superusers can impersonate")
-        if not impersonate.strip():
-            raise HTTPException(status_code=400, detail="Impersonation person name must not be empty")
-        return impersonate
+        persons_value = svc.persons_source.latest_attempt().value_or_none()
+        target_id = _resolve_person_identity(persons_value, impersonate)
+        if target_id is None:
+            raise HTTPException(status_code=400, detail=f"Unknown person {impersonate!r}")
+        for p in persons_value or []:
+            if _person_key(p) == target_id:
+                name = p.get("name") if isinstance(p, dict) else p.name
+                if isinstance(name, str) and name:
+                    return name
+                break
+        raise HTTPException(status_code=400, detail=f"Unknown person {impersonate!r}")
     folded_email = session_user.email.casefold()
     persons_attempt = svc.persons_source.latest_attempt()
     if persons_attempt.succeeded:
@@ -818,9 +844,12 @@ async def patch_person(name: str, body: dict, request: Request):
 
     svc = get_services()
     persons = list(svc.persons_source.latest_attempt().value_or_none() or [])
-    target = next((p for p in persons if getattr(p, "name", "") == name), None)
+    target = next(
+        (p for p in persons if _person_key(p) == name or getattr(p, "name", "") == name),
+        None,
+    )
     if target is None:
-        raise HTTPException(status_code=404, detail=f"No person named {name!r}")
+        raise HTTPException(status_code=404, detail=f"No person {name!r}")
 
     view = SessionPersons(persons=persons, session_user=session_user)
     session_name = view.session_name()
@@ -838,6 +867,7 @@ async def patch_person(name: str, body: dict, request: Request):
         body = {
             **body,
             "name": target.name,
+            "person_id": target.person_id,
             "is_child": target.is_child,
             "is_superuser": target.is_superuser,
             "email": target.email,
@@ -903,19 +933,27 @@ async def patch_rental_income(
     return {"status": "ok"}
 
 
-def _validate_works_person(person_name: str) -> None:
-    """400 guard: the person must exist in the current persons config."""
-    if not person_name:
+def _validate_works_person(person_key: str):
+    """400 guard + resolution: the person must exist; returns the
+    canonical Person so the estimate is stored under its id."""
+    if not person_key:
         raise HTTPException(status_code=400, detail="person is required")
     _pa = get_services().persons_source.latest_attempt()
     _pa_value = _pa.value_or_none()
     if _pa.succeeded and _pa_value:
-        _names = {getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None) for p in _pa_value}
-        if person_name not in _names:
+        pid = _resolve_person_identity(_pa_value, person_key)
+        if pid is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown person: {person_name}",
+                detail=f"Unknown person: {person_key}",
             )
+        for p in _pa_value:
+            if _person_key(p) == pid:
+                return p
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unknown person: {person_key}",
+    )
 
 
 def _validate_works_value(value: object) -> None:
@@ -938,21 +976,23 @@ async def patch_works_estimate(
 ):
     """Update the works estimate for a person on this property.
 
-    Body: {"person": "Ashby", "value": 15000}
+    Body: {"person": "p_ashby", "value": 15000} — the key is the
+    canonical person_id (legacy names resolve); the estimate is stored
+    under the id so a rename never orphans it.
     """
     prop = _require_property(rid)
 
-    person_name = body.get("person", "")
-    _validate_works_person(person_name)
+    target = _validate_works_person(body.get("person", ""))
+    person_id = person_id_of(target)
     value = body.get("value")
     _validate_works_value(value)
 
     def _apply() -> None:
         estimates = dict(prop.works_estimates.latest_attempt().value_or_none() or {})
         if value is None:
-            estimates.pop(person_name, None)  # emptied field: drop the estimate
+            estimates.pop(person_id, None)  # emptied field: drop the estimate
         else:
-            estimates[person_name] = Money(str(value), "GBP")
+            estimates[person_id] = Money(str(value), "GBP")
         prop.works_estimates.push(estimates, "user")
 
     # Thread rule 7, no exceptions: enqueue and return. The drain runs in
@@ -967,13 +1007,14 @@ class _PersonSummary:
     """One person as serialized to the /persons response."""
 
     name: str
+    person_id: str
     email: str
     is_child: bool
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(name=self.name, email=self.email, is_child=self.is_child)
+        return dict(name=self.name, person_id=self.person_id, email=self.email, is_child=self.is_child)
 
 
 @api_router.get("/persons")
@@ -993,12 +1034,14 @@ async def list_persons():
             (
                 _PersonSummary(
                     name=p.get("name", ""),
+                    person_id=p.get("person_id") or person_id_of(p),
                     email=p.get("email", ""),
                     is_child=bool(p.get("is_child")),
                 )
                 if isinstance(p, dict)
                 else _PersonSummary(
                     name=getattr(p, "name", ""),
+                    person_id=person_id_of(p),
                     email=getattr(p, "email", ""),
                     is_child=bool(getattr(p, "is_child", False)),
                 )

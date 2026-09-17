@@ -16,7 +16,9 @@ const router = useRouter()
 const store = usePropertiesStore()
 const auth = useAuthStore()
 
-const currentPerson = computed(() => auth.user?.person ?? null)
+// The session's acting identity — owned by the auth store
+// (impersonation first), never re-derived per view.
+const currentPerson = computed(() => auth.actingAs)
 
 const rid = computed(() => route.params.rid as string)
 const detail = computed(() => store.details[rid.value])

@@ -217,6 +217,22 @@ class TestPMT:
         assert any("price" in _l.label.lower() for _l in formula.lines)
         assert "415,000" in formula.lines[0].value
 
+    def test_formula_shows_converted_rate_and_term(self):
+        """The ÷12 / ×12 lines must show the CONVERTED values — a label
+        claiming '÷ 12' over the raw annual rate is how monthly-payment
+        provenance misleads the reader."""
+        expr = PMT(
+            principal=_ref(Money("415000", "GBP")),
+            annual_rate=_ref(Decimal("0.0495")),
+            term_years=_ref(27),
+        )
+        expr.evaluate()
+        lines = expr.to_formula_lines()
+        rate = next((ln for ln in lines if "÷ 12" in ln.label), None)
+        term = next((ln for ln in lines if "× 12" in ln.label), None)
+        assert rate is not None and "0.0495 ÷ 12" in rate.value, f"got: {[ln.value for ln in lines]}"
+        assert term is not None and "27 × 12" in term.value, f"got: {[ln.value for ln in lines]}"
+
     def test_failure_propagates(self):
         expr = PMT(
             principal=_ref(Money("415000", "GBP")),

@@ -20,7 +20,7 @@ function mountCosts(overrides?: Record<string, unknown>, pinia?: ReturnType<type
         monthly_sinking_fund: { succeeded: false, value: null, error: null, provenance: {} },
         monthly_commute_cost: { succeeded: false, value: null, error: null, provenance: {} },
         group_monthly_cost: { succeeded: false, value: null, error: null, provenance: {} },
-        works_estimates: { succeeded: true, value: { Ashby: 20000 }, error: null, provenance: {} },
+        works_estimates: { succeeded: true, value: { 3: 20000 }, error: null, provenance: {} },
         total_works: { succeeded: true, value: { amount: '20000', currency: 'GBP' }, error: null, provenance: {} },
         rental_income: { succeeded: true, value: { amount: '500', currency: 'GBP' }, error: null, provenance: { label: 'user' } },
         ...(overrides?.affordability as Record<string, unknown> ?? {}),
@@ -29,16 +29,16 @@ function mountCosts(overrides?: Record<string, unknown>, pinia?: ReturnType<type
       persons: {
         succeeded: true,
         value: [
-          { name: 'Simon', has_car: true, is_child: false },
-          { name: 'Lorena', has_car: false, is_child: false },
-          { name: 'Ashby', has_car: true, is_child: false },
-          { name: 'George', has_car: false, is_child: true },
+          { name: 'Simon', person_id: '1', has_car: true, is_child: false },
+          { name: 'Lorena', person_id: '2', has_car: false, is_child: false },
+          { name: 'Ashby', person_id: '3', has_car: true, is_child: false },
+          { name: 'George', person_id: '4', has_car: false, is_child: true },
         ],
         error: null,
         provenance: {},
       },
       rid: 'test123',
-      currentPerson: 'Ashby',
+      currentPerson: '3',
       ...overrides,
     },
     global: { plugins: [activePinia] },
@@ -71,7 +71,7 @@ describe('CostsSection works estimates', () => {
   it('shows £? for person without estimate', () => {
     const wrapper = mountCosts({
       affordability: {
-        works_estimates: { succeeded: true, value: { Ashby: 20000 }, error: null, provenance: {} },
+        works_estimates: { succeeded: true, value: { 3: 20000 }, error: null, provenance: {} },
         total_works: { succeeded: true, value: { amount: '20000', currency: 'GBP' }, error: null, provenance: {} },
       },
     })
@@ -109,7 +109,7 @@ describe('CostsSection works estimates', () => {
     const input = wrapper.find('input')
     await input.setValue('25000')
     await input.trigger('blur')
-    expect(api.patchWorksEstimate).toHaveBeenCalledWith('test123', 'Ashby', 25000)
+    expect(api.patchWorksEstimate).toHaveBeenCalledWith('test123', '3', 25000)
   })
 
   it('shows visual affordance on editable values', () => {

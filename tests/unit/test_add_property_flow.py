@@ -162,7 +162,7 @@ class TestCommuteComputesAfterDetails:
         conn = get_connection()
         row = conn.execute(
             "SELECT result_json FROM node_results WHERE node_id=? ORDER BY rowid DESC LIMIT 1",
-            (f"{RID}/Simon/Pimlico/computed_transit",),
+            (f"{RID}/1/Pimlico/computed_transit",),
         ).fetchone()
         assert row is not None, (
             "the transit commute must be computed once the address arrives — "
@@ -415,4 +415,5 @@ class TestAddFlowWorksEditing:
         # It persists and shows in the detail
         detail_after = client.get(f"/api/properties/{rid}/detail").json()
         stored = detail_after["affordability"]["works_estimates"]["value"]
-        assert stored.get("Ashby", {}).get("amount") == "25000.00"
+        # stored under the canonical person id (legacy-name patch resolves)
+        assert stored.get("ashby", {}).get("amount") == "25000.00"

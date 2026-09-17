@@ -68,11 +68,18 @@ class PMT(Expression):
 
     @override
     def to_formula_lines(self) -> list[FormulaLine]:
-        return (
-            self.principal.to_formula_lines()
-            + [FormulaLine(label=rl.label + " ÷ 12", value=rl.value) for rl in self.annual_rate.to_formula_lines()]
-            + [FormulaLine(label=tl.label + " × 12", value=tl.value) for tl in self.term_years.to_formula_lines()]
-        )
+        rate_attempt = self.annual_rate.evaluate()
+        term_attempt = self.term_years.evaluate()
+        lines = list(self.principal.to_formula_lines())
+        for rl in self.annual_rate.to_formula_lines():
+            r = rate_attempt.value_or_none()
+            value = f"{r} ÷ 12 = {float(r) / 12:.4f}" if rate_attempt.succeeded and r is not None else rl.value
+            lines.append(FormulaLine(label=rl.label + " ÷ 12", value=value))
+        for tl in self.term_years.to_formula_lines():
+            t = term_attempt.value_or_none()
+            value = f"{t} × 12 = {int(t) * 12}" if term_attempt.succeeded and t is not None else tl.value
+            lines.append(FormulaLine(label=tl.label + " × 12", value=value))
+        return lines
 
 class StampDutyFn(Expression):
     """Calculate UK Stamp Duty Land Tax from a property price."""

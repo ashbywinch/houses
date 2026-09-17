@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
 from dag.user_input_node import UserInputNode
-from houses.model.domain import Commute, effective_acceptable_modes
+from houses.model.domain import Commute, effective_acceptable_modes, person_id_of
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
 from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode, needs_rail_fare
 from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
@@ -43,11 +43,11 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
     """
 
     for p_info in prop._svc.persons_source._value or []:
-        p_name = p_info.name
+        p_id = person_id_of(p_info)
         pois = p_info.places_of_interest
         for poi in pois:
             label = poi.label
-            key = f"{p_name}/{label}"
+            key = f"{p_id}/{label}"
             if keys is not None and key not in keys:
                 continue
             is_child = p_info.is_child
@@ -77,7 +77,7 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
                 place = DestinationPlaceNode(
                     f"{prop.rid}/{key}/place",
                     persons_source=prop._svc.persons_source,
-                    person_name=p_name,
+                    person_id=p_id,
                     label=label,
                 )
                 # The ADDRESS projection planners depend on: trips-only
@@ -104,7 +104,7 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
             max_walk_node = PersonMaxWalkNode(
                 f"{prop.rid}/{key}/max_walk",
                 persons_source=prop._svc.persons_source,
-                person_name=p_info.name,
+                person_id=p_id,
             )
 
             # Only create a DriveNode for persons who have a car. The
@@ -250,7 +250,7 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
             mpg_node = PersonPetrolMpgNode(
                 f"{prop.rid}/{key}/petrol_mpg",
                 persons_source=prop._svc.persons_source,
-                person_name=p_info.name,
+                person_id=p_id,
             )
             final_fuel = PetrolCostAugmentNode(
                 f"{prop.rid}/{key}/final_fuel",

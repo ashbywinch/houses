@@ -3,6 +3,7 @@ and the restructured MonthlyMortgagePaymentNode."""
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal
 
 import pytest
@@ -650,6 +651,154 @@ class TestMonthlyMortgagePaymentNode:
         assert a.impossible
         assert "Ashby" in a.error
 
+
+# ── EquityTotalNode provenance ───────────────────────────────────────
+
+
+class TestEquityTotalNodeProvenance:
+    @pytest.mark.asyncio
+    async def test_formula_shows_each_persons_equity_inputs(self):
+        """The equity provenance must show EVERY input: each person's
+        sale price − mortgage and cash — a bare 'Total Equity' line
+        hides the price inputs the mortgage chain was calculated from."""
+        from houses.nodes.equity_total_node import EquityTotalNode
+
+        persons = UserInputNode[list]("eqp_ps", list)
+        status = UserInputNode[str]("eqp_status", str)
+        node = EquityTotalNode("eqp", persons_source=persons, status_node=status)
+        persons.push(
+            [
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    home_sale_price=Money("550000", "GBP"),
+                    outstanding_mortgage=Money("373000", "GBP"),
+                ),
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    cash_contribution=Money("300000", "GBP"),
+                ),
+            ],
+            "test",
+        )
+        status.push("", "test")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        formula = node.provenance_formula
+        assert formula is not None
+        values = {line.label: line.value for line in formula.lines}
+        assert values.get("Simon", "").startswith("£550,000.00 sale − £373,000.00 mortgage")
+        assert "£177,000.00" in values["Simon"]
+        assert values.get("Ashby") == "£0 home + £300,000.00 cash = £300,000.00"
+
+    @pytest.mark.asyncio
+    async def test_formula_excludes_cash_when_current_home(self):
+        """Status 'current' means owner-occupied: cash contributions are
+        not inputs to this calculation, so the provenance must not show
+        them."""
+        from houses.nodes.equity_total_node import EquityTotalNode
+
+        persons = UserInputNode[list]("eqc_ps", list)
+        status = UserInputNode[str]("eqc_status", str)
+        node = EquityTotalNode("eqc", persons_source=persons, status_node=status)
+        persons.push(
+            [
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    home_sale_price=Money("550000", "GBP"),
+                    outstanding_mortgage=Money("373000", "GBP"),
+                    cash_contribution=Money("100000", "GBP"),
+                ),
+            ],
+            "test",
+        )
+        status.push("current", "test")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == Money("177000", "GBP")
+        formula = node.provenance_formula
+        assert formula is not None
+        values = {line.label: line.value for line in formula.lines}
+        simon = values.get("Simon", "")
+        assert "£100,000.00 cash" not in simon
+        assert simon == "£550,000.00 sale − £373,000.00 mortgage = £177,000.00"
+
+
+
+# ── Person-id attribution (rename must not orphan money) ─────────────
+
+
+class TestPersonIdAttribution:
+    @pytest.mark.asyncio
+    async def test_works_estimate_keyed_by_person_id_survives_rename(self):
+        """Attribution keys are person_id, never the mutable name: a
+        rename must not orphan the person's works estimate (encrypted
+        money silently vanishing from Cost of Works)."""
+        from houses.nodes.total_works_node import TotalWorksNode
+
+        persons = UserInputNode[list]("pid_ps", list)
+        works = UserInputNode[dict]("pid_ws", dict)
+        node = TotalWorksNode("pid_tw", persons_source=persons, works_estimates_node=works)
+        simon = Person(
+            name="Simon",
+            person_id="1",
+            has_car=True,
+            works_estimate_required=True,
+        )
+        persons.push([simon], "test")
+        works.push({"1": Money("15000", "GBP")}, "test")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == Money("15000", "GBP")
+
+        renamed = dataclasses.replace(simon, name="Simon & Ashby")
+        persons.push([renamed], "test")
+        await flush_processor()
+
+        a2 = await node.attempt()
+        assert a2.succeeded
+        assert a2.value_or_none() == Money("15000", "GBP"), (
+            f"renaming a person must not orphan their works estimate: {a2.value_or_none()}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_equity_attribution_survives_a_rename(self):
+        """Equity attribution is keyed by person_id: renaming the person
+        must not re-attribute or orphan their home equity (the name-keyed
+        contributions dict would silently drop Simon's £177,000)."""
+        from houses.nodes.equity_total_node import EquityTotalNode
+
+        persons = UserInputNode[list]("eqr_ps", list)
+        status = UserInputNode[str]("eqr_status", str)
+        node = EquityTotalNode("eqr", persons_source=persons, status_node=status)
+        simon = Person(
+            name="Simon",
+            person_id="1",
+            has_car=True,
+            home_sale_price=Money("550000", "GBP"),
+            outstanding_mortgage=Money("373000", "GBP"),
+        )
+        persons.push([simon], "test")
+        status.push("", "test")
+        await flush_processor()
+        before = await node.attempt()
+        assert before.succeeded
+        assert before.value_or_none() == Money("177000", "GBP")
+
+        renamed = dataclasses.replace(simon, name="Simon & Ashby")
+        persons.push([renamed], "test")
+        await flush_processor()
+
+        after = await node.attempt()
+        assert after.succeeded
+        assert after.value_or_none() == Money("177000", "GBP"), (
+            f"a rename must not orphan the home equity: {after.value_or_none()}"
+        )
 
 # ── TotalMonthlyHousingCostNode (impossible propagation) ──────────────
 

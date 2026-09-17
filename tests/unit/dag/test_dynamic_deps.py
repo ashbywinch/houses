@@ -75,7 +75,7 @@ def test_breakdown_construction_with_zero_post_super_attributes():
     nodes); the node is fully registered and staleness-checkable
     immediately after construction."""
     persons = UserInputNode("cb_persons2", list)
-    pimlico = UserInputNode("Simon/Pimlico", PlaceOfInterest)
+    pimlico = UserInputNode("simon/Pimlico", PlaceOfInterest)
     node = CommuteBreakdownNode(
         "cb_breakdown2",
         selectors=(pimlico,),
@@ -83,7 +83,7 @@ def test_breakdown_construction_with_zero_post_super_attributes():
     )
     assert node._is_stale() in (True, False)
     deps = node._get_active_deps()
-    assert any(getattr(d, "_id", "") == "Simon/Pimlico" for d in deps)
+    assert any(getattr(d, "_id", "") == "simon/Pimlico" for d in deps)
 
 
 def test_breakdown_total_is_the_plain_multiplication():
@@ -127,8 +127,8 @@ def test_breakdown_total_is_the_plain_multiplication():
         )
         return node
 
-    pimlico = _canned(node_id="Simon/Pimlico", label="Pimlico", daily_gbp="18.03")
-    bracknell = _canned(node_id="Simon/Bracknell", label="Bracknell", daily_gbp="10.00")
+    pimlico = _canned(node_id="simon/Pimlico", label="Pimlico", daily_gbp="18.03")
+    bracknell = _canned(node_id="simon/Bracknell", label="Bracknell", daily_gbp="10.00")
     node = CommuteBreakdownNode(
         "mp_breakdown",
         selectors=(pimlico, bracknell),

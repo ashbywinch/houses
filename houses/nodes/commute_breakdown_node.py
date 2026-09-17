@@ -9,6 +9,7 @@ from money import Money
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from houses.model.domain import person_id_of, slugify
 
 
 @dataclass(frozen=True)
@@ -127,9 +128,10 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             if not isinstance(name, str):
                 # A person entry without a usable name still needs a stable dict key.
                 name = "?"
+            pid = p.get("person_id") or slugify(name) if isinstance(p, dict) else person_id_of(p)
             commutes: list[_CommuteEntryJson] = []
             for poi in pois or ():
-                key = f"{name}/{poi.label}"
+                key = f"{pid}/{poi.label}"
                 commute_node = next(
                     (d for d in selector_deps if d._id == key or d._id.endswith(f"/{key}/final_fuel")),
                     None,

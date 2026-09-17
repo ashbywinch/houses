@@ -387,6 +387,88 @@ def test_scenario_reprices_the_monthly_figures(whatif_world):
     # The untouched member's own figure must not move.
     assert after["ashby_monthly"] == before["ashby_monthly"]
 
+def _mortgage_chain(client, rid: str) -> dict:
+    """The mortgage chain the detail page renders: total equity, the
+    required principal, and the monthly payment."""
+    drain_recompute()
+    aff = client.get(f"/api/properties/{rid}/detail").json()["affordability"]
+    for key in ("total_equity", "mortgage_required", "monthly_mortgage"):
+        assert aff[key]["succeeded"], f"{key}: {aff[key].get('error')}"
+    return {
+        key: Decimal(aff[key]["value"]["amount"])
+        for key in ("total_equity", "mortgage_required", "monthly_mortgage")
+    }
+
+
+def test_scenario_lower_selling_price_reprices_the_mortgage_chain(whatif_world):
+    """A what-if that lowers Simon's selling price must re-price the
+    mortgage chain (equity → required principal → monthly payment).
+
+    The sale price is a DAG input: the scenario's lower price must reach
+    monthly_mortgage in one drain — otherwise the headline monthly
+    payment a buyer reads is the pre-scenario one.
+    """
+    client, rid = whatif_world
+    before = _mortgage_chain(client, rid)
+    assert before["total_equity"] > 0, "premise: Simon's home equity counts"
+
+    resp = client.post(
+        "/api/what-if/apply",
+        json={"persons": [{"name": "Simon", "home_sale_price": 500000}]},
+    )
+    assert resp.status_code == 200, resp.text[:300]
+    flush_all()
+
+    after = _mortgage_chain(client, rid)
+
+    assert after["total_equity"] < before["total_equity"], (
+        f"lowering the sale price must reduce total equity: "
+        f"{before['total_equity']} -> {after['total_equity']}"
+    )
+    assert after["mortgage_required"] > before["mortgage_required"], (
+        f"less equity must raise the mortgage principal: "
+        f"{before['mortgage_required']} -> {after['mortgage_required']}"
+    )
+    assert after["monthly_mortgage"] > before["monthly_mortgage"], (
+        f"the monthly payment must follow the mortgage principal: "
+        f"{before['monthly_mortgage']} -> {after['monthly_mortgage']}"
+    )
+
+
+def _provenance_claims(prov: dict) -> list[str]:
+    """Every claim in a provenance tree: formula lines and results of the
+    node and each of its sources, flattened."""
+    parts: list[str] = []
+    formula = prov.get("formula") or {}
+    parts.append(str(formula.get("result") or ""))
+    parts.extend(
+        f"{fl.get('label', '')} {fl.get('value', '')}"
+        for fl in formula.get("lines") or []
+    )
+    for child in (prov.get("sources") or {}).values():
+        parts.extend(_provenance_claims(child))
+    return [p for p in parts if p]
+
+
+def test_monthly_mortgage_provenance_shows_the_price_chain(whatif_world):
+    """The monthly payment's provenance must expose every input it was
+    calculated from: the house price, stamp duty, works, each person's
+    equity inputs, and the converted rate/term — the 'easier to debug
+    these things' contract (2026-09-17)."""
+    client, rid = whatif_world
+    drain_recompute()
+    detail = client.get(f"/api/properties/{rid}/detail").json()
+    prov = detail["affordability"]["monthly_mortgage"]["provenance"]
+    claims = " | ".join(_provenance_claims(prov))
+
+    assert "£500,000.00" in claims, f"the house price must appear: {claims}"
+    assert "sale − £373,000.00 mortgage" in claims, (
+        f"Simon's equity inputs must appear: {claims}"
+    )
+    assert "÷ 12" in claims and "× 12" in claims, (
+        f"the rate/term conversions must appear: {claims}"
+    )
+
 def test_group_total_tracks_breakdown_after_destination_set_change(whatif_world):
     """The destination-set rebuild path: ADDING a destination rebuilds the
     commute pipeline and its breakdown node — the GROUP TOTAL's commute

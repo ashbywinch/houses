@@ -15,6 +15,7 @@ from dag.scheduler import get_scheduler
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
+from houses.model.domain import person_id_of
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.commute_pipeline_builder import build_commute_pipeline
@@ -555,7 +556,9 @@ class PropertyNodes:
         all. Runs on the DAG processor thread (persons pushes land
         there)."""
         wanted = {
-            f"{p.name}/{q.label}" for p in (self._svc.persons_source._value or []) for q in (p.places_of_interest or [])
+            f"{person_id_of(p)}/{q.label}"
+            for p in (self._svc.persons_source._value or [])
+            for q in (p.places_of_interest or [])
         }
         current = set(self.commute_selectors)
 
@@ -636,10 +639,23 @@ class PropertyNodes:
         entry. The cost calculation itself just multiplies; this filter
         is presentational (the index card's pills)."""
         return {
-            f"{p.name}/{q.label}"
+            f"{person_id_of(p)}/{q.label}"
             for p in (self._svc.persons_source._value or [])
             for q in (p.places_of_interest or [])
             if (q.trips_per_week or 0) > 0 and (q.weeks_per_year or 0) > 0
+        }
+
+    def _commute_wire_key(self, key: str, name_by_id: dict) -> str:
+        """Selector keys are id/label; the WIRE keys stay name/label —
+        names are display, ids never leak to the frontend."""
+        pid, _, label = key.partition("/")
+        return f"{name_by_id.get(pid, pid)}/{label}"
+
+    def _commute_wire_map(self) -> dict:
+        """pid → display name for the serialization key projection."""
+        return {
+            person_id_of(p): getattr(p, "name", "?")
+            for p in (self._svc.persons_source._value or [])
         }
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
@@ -664,7 +680,7 @@ class PropertyNodes:
             group_monthly_cost=await self.group_monthly_cost.to_json_value(),
             town_name=await self.town_name.to_json_value(),
             commutes={
-                k: {"commute": await v.to_json_value()}
+                self._commute_wire_key(k, self._commute_wire_map()): {"commute": await v.to_json_value()}
                 for k, v in self.commute_selectors.items()
                 if k in self._commuted_destinations()
             },
@@ -737,7 +753,9 @@ class PropertyNodes:
             epc=await self.epc.to_json(),
             location=location.to_dict(),
             commutes={
-                k: await v.to_json() for k, v in self.commute_selectors.items() if k in self._commuted_destinations()
+                self._commute_wire_key(k, self._commute_wire_map()): await v.to_json()
+                for k, v in self.commute_selectors.items()
+                if k in self._commuted_destinations()
             },
             schools=schools.to_dict(),
             affordability=affordability.to_dict(),

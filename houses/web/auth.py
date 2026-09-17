@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.exceptions import TransportError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from houses.model.domain import person_id_of, slugify
 from houses.services import GoogleUserInfo
 from houses.services_provider import get_services
 from houses.settings import settings
@@ -87,6 +88,7 @@ class _SessionStatus:
     name: str
     picture: str
     person: str | None
+    person_id: str | None
     is_superuser: bool
     impersonating: str | None
 
@@ -99,10 +101,10 @@ class _SessionStatus:
             "name": self.name,
             "picture": self.picture,
             "person": self.person,
+            "person_id": self.person_id,
             "is_superuser": self.is_superuser,
             "impersonating": self.impersonating,
         }
-
 
 @dataclass(frozen=True)
 class _ImpersonateRequest:
@@ -236,6 +238,26 @@ def _current_person_name(session: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _current_person_id(session: Mapping[str, Any]) -> str | None:
+    """The canonical person_id for the session email's linked person."""
+    name = _current_person_name(session)
+    if name is None:
+        return None
+    try:
+        persons_attempt = get_services().persons_source.latest_attempt()
+        if persons_attempt.succeeded:
+            for p in persons_attempt.value_or_none() or []:
+                if isinstance(p, dict):
+                    if p.get("name") == name:
+                        return _person_key(p)
+                elif getattr(p, "name", None) == name:
+                    return _person_key(p)
+    # lucidlint: ignore broad-except deliberate degrade — person-id lookup failure returns None
+    except Exception:
+        logger.exception("Failed to look up person id")
+    return None
+
+
 def _make_session_cookie(
     email: str,
     name: str,
@@ -307,6 +329,30 @@ def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | Non
                 return p.get("name")
         elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded:
             return getattr(p, "name", None)
+    return None
+
+
+def _person_key(p) -> str:
+    """The person's canonical identity key, tolerant of legacy dict
+    shapes: explicit person_id, else the name-slug fallback."""
+    if isinstance(p, dict):
+        return p.get("person_id") or slugify(p.get("name") or "")
+    return person_id_of(p)
+
+
+def _resolve_person_identity(persons_value: Any, key: str) -> str | None:
+    """Resolve an id-or-legacy-name key to the person's canonical
+    person_id, or None when unknown. Old cookies/headers carry names;
+    every NEW write stores the id."""
+    key = (key or "").strip()
+    if not key:
+        return None
+    for p in persons_value or []:
+        if _person_key(p) == key:
+            return _person_key(p)
+        name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "")
+        if name == key:
+            return _person_key(p)
     return None
 
 
@@ -516,14 +562,25 @@ async def me(request: Request):
 
     # Look up associated Person by email
     person_name = _current_person_name(session)
+    person_id = _current_person_id(session)
+
+    # The cookie claim may be a legacy NAME — report the canonical id
+    # so the frontend never has to resolve names itself.
+    impersonating = None
+    raw = session.get("impersonating")
+    if raw:
+        persons_attempt = get_services().persons_source.latest_attempt()
+        value = persons_attempt.value_or_none() if persons_attempt.succeeded else None
+        impersonating = _resolve_person_identity(value, raw)
 
     return _SessionStatus(
         email=session["email"],
         name=session["name"],
         picture=session.get("picture", ""),
         person=person_name,
+        person_id=person_id,
         is_superuser=session.get("is_superuser", False),
-        impersonating=session.get("impersonating"),
+        impersonating=impersonating,
     ).to_dict()
 
 
@@ -541,10 +598,9 @@ async def logout(request: Request):
 async def impersonate(request: Request, body: dict):
     """Set or clear impersonation for a superuser.
 
-    Body::
-
-        { "person": "Simon" }   # start impersonating
-        { "person": null }      # stop impersonating
+        { "person": "p_ashby" }  # start impersonating (canonical id)
+        { "person": "Ashby" }    # legacy name still accepted, stored as id
+        { "person": null }       # stop impersonating
 
     Returns a new session cookie with the ``impersonating`` field updated.
     Survives server restarts.
@@ -560,13 +616,17 @@ async def impersonate(request: Request, body: dict):
         raise HTTPException(status_code=400, detail="person must be a string or null")
     if person is not None:
         persons_attempt = get_services().persons_source.latest_attempt()
-        for p in persons_attempt.value_or_none() or []:
-            name = getattr(p, "name", None) if not isinstance(p, dict) else p.get("name")
-            if name == person:
-                is_child = bool(p.get("is_child")) if isinstance(p, dict) else bool(getattr(p, "is_child", False))
-                if is_child:
-                    raise HTTPException(status_code=400, detail="Cannot impersonate a child")
-                break
+        persons_value = persons_attempt.value_or_none() if persons_attempt.succeeded else None
+        target_id = _resolve_person_identity(persons_value, person)
+        if target_id is None:
+            raise HTTPException(status_code=400, detail=f"Unknown person {person!r}")
+        target = next((p for p in persons_value or [] if _person_key(p) == target_id), None)
+        is_child = (
+            bool(target.get("is_child")) if isinstance(target, dict) else bool(getattr(target, "is_child", False))
+        )
+        if is_child:
+            raise HTTPException(status_code=400, detail="Cannot impersonate a child")
+        person = target_id  # the cookie claim is the canonical id
 
     new_cookie = _make_session_cookie(
         email=session["email"],
