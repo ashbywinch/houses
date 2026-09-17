@@ -152,8 +152,20 @@ class TestTotalWorksNode:
         assert a.succeeded
         assert a.value_or_none() == Money("0", "GBP")
 
+    @pytest.mark.asyncio
+    async def test_works_dependency_failure_does_not_silently_zero(self):
+        """An impossible works dependency must propagate, never become a
+        silent £0 total (the removed assert swallowed the failure)."""
+        from dag.attempt import Attempt
+        from houses.nodes.total_works_node import TotalWorksNode
 
-# ── EquityTotalNode ─────────────────────────────────────────────────────
+        persons = UserInputNode[list]("twg_ps", list)
+        works = UserInputNode[dict]("twg_ws", dict)
+        node = TotalWorksNode("twg", persons_source=persons, works_estimates_node=works)
+        with pytest.raises(AssertionError):
+            node.compute(Attempt.succeeded([]), Attempt.impossible("broken"))
+        with pytest.raises(AssertionError):
+            node.compute(Attempt.impossible("persons broke"), Attempt.succeeded({}))
 
 
 class TestEquityTotalNode:
