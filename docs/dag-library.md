@@ -93,44 +93,219 @@ self._price_node + self._stamp_duty_node - self._equity_node
 
 Expression-based nodes **do not override `build_provenance()`** — the base default walks active deps and calls `expression.to_formula()`.
 
-### Stable dependencies by default
+### Provenance serves the frozen row, never a re-read
 
-`_get_active_deps()` should return the same deps in most cases. **Conditional deps are for shortcutting — skipping computation entirely.** If you want all alternatives computed then compared, keep deps stable. For trivial local computation (reading a cached value, geocoding a coordinate), stable deps avoid unnecessary conditional complexity:
+Each derived row stores its provenance tree inside the same
+zlib-compressed `result_json` blob (`dag/persistence.py:compress_result`),
+frozen at persist time:
 
 ```python
-# Correct: stable deps, early-return in compute when dep isn't needed
-def __init__(self, ..., transit_result, best_location):
-    super().__init__(node_id, Commute, (transit_result, best_location))
+# result_json (decompressed) — what a row carries
+{
+    "provenance": {...},  # full tree, frozen at persist time
+}
+```
 
+The row carries ONLY that tree — no parallel flat map. `refresh()`
+(`dag/derived_node.py`) binds the exact attempts the value was
+calculated from — `dep_attempts = [await dep.attempt() for dep in
+active_deps]` — and persists the tree built by
+`build_provenance(dep_attempts, active_deps)` in the same `_persist`
+call. Dep subtrees render from those bound attempts
+(`_attempt_provenance`), never from the dep nodes. Formulas that need
+dep values override `provenance_formula_for(dep_attempts, active_deps)`
+and read the bound attempts. Nodes whose formula ignores deps keep the
+default, which delegates to `provenance_formula`.
+
+**The record is the value AND the inputs that produced it.** A dep
+subtree is the dep's own recorded derivation (what IT calculated from)
+patched with the attempt this node actually bound; a dep with no
+recorded row renders a leaf from the bound attempt — never a read of
+the dep's current state, which may hold a value the compute never saw.
+Formulas read the bound attempts too.
+
+Refreshing to an identical value from the SAME inputs keeps the
+original row and clocks (downstream stays parked). An identical value
+from DIFFERENT inputs re-records the row — it states the inputs this
+evaluation used — and emits **no** change: the value is unchanged, so
+dependents have nothing to recalculate (and a planner must not re-plan
+because a stamp moved).
+
+Serve (`build_provenance()` with no args) returns the frozen row
+verbatim — `Provenance.from_dict(row["provenance"])`. No join, no
+recursion into dep rows, no live build, no `latest_attempt()`. A node
+with no stored row yet (constructed but never flushed) renders its
+own live status with an empty source set — a test-setup gap, never
+the contract.
+
+Wrong fixes — each reintroduces a re-read instead of serving the row:
+
+```python
+# ✗ render a formula from live deps (they may have moved on)
+mpg = self._mpg_node.latest_attempt().value_or_none()
+# ✓ read the attempt the compute bound
+mpg = bound[active_deps.index(self._mpg_node)]
+# ✗ render a dep subtree from its live state at persist time
+sources[dep._id] = await dep.live_provenance()
+# ✓ its recorded derivation, patched with the bound attempt
+sources[dep._id] = recorded_subtree(dep, bound_attempt)
+# ✓ serve returns the frozen row verbatim
+return Provenance.from_dict(row["provenance"])
+```
+
+### A node states only what it depends on
+
+A node's provenance is the record of its own calculation, so it can
+report only what its deps gave it. If `compute` never saw a fact, the
+value and the tree must not claim it — not as a default, not as a
+carried-over copy.
+
+The route planners are the worked example: a route from A to B depends
+on the origin and the destination ADDRESS. Frequency does not change
+the route, so the planner does not depend on it, so its value carries
+no frequency (`Commute.destination` stays `None`) and its provenance
+states none. The node that DOES depend on the place owns that claim —
+the selector stamps the place onto the winner it picks, and everything
+downstream carries it.
+
+```python
+# ✗ the planner invents a frequency it never read (dataclass default)
+destination=PlaceOfInterest(label="", address=dest_str)   # trips_per_week=1
+# ✓ the planner reports the journey it planned; no destination claim
+destination=None
+# ✓ the node with the place dep makes the claim
+val = replace(val, destination=inputs.poi.value_or_none())
+```
+
+### Narrow deps to what `compute` reads
+
+`_get_active_deps()` answers "what does THIS evaluation depend on" —
+staleness, refresh, and provenance all flow through it. The default
+is the full dep tuple; override it to exclude deps whose changes
+cannot change the value. A refresh the node doesn't need is pure
+waste (and on a trips-only edit, a needless API call) — narrowing
+the dep skips the refresh entirely, not just the computation.
+
+This is different from early-return in `compute` (which still
+refreshes, persists, and rebuilds provenance) and from `IfThenElse`
+branch selection (which picks one live branch). Narrowing says the
+excluded dep is irrelevant to this evaluation at all.
+
+```python
+# stable deps + early return: still refreshes on every dep change
 def compute(self, transit, location):
     if transit.value_or_none().daily_cost.amount > 0:
-        return transit  # early return, NR lookup not needed
-    return await self._enrich_rail_fare(commute, location)
+        return transit  # NR lookup not needed — but the refresh already happened
+# narrowed deps: an irrelevant dep change never schedules the node
+def _get_active_deps(self):
+    deps = [self.transit_node]
+    if self._fare_matters():
+        deps.append(self.fare_node)
+    return tuple(deps)
+```
 
-### Dynamic dependency sets: compose a provider, never read `self` during construction
+Precedents in the tree: `MergeRailFareNode` drops the fare dep for
+drive/walk selections; `ParkAndRideAugmentNode` drops a pending
+postcode; `IfThenElseNode` drops the unchosen branch. In each case
+the excluded dep's changes correctly do nothing.
 
-A node whose dep SET changes at runtime (destinations added/removed in Settings) passes a
-zero-arg callable instead of a tuple:
+#### A dep object holding both used and unused fields is NOT both-or-neither
+
+Example: a route planner depending on the whole POI when `compute`
+reads only its address. Trips-only edits then re-plan routes. The
+wrong fixes all work around the refresh instead of narrowing the
+dep — each duplicates DAG state outside the DAG:
 
 ```python
-# The closure captures CONSTRUCTOR ARGUMENTS, never `self` — the base
-# evaluates it lazily (staleness, refresh, provenance), never during __init__,
-# so there is no construction-ordering hazard to misuse.
-def __init__(self, node_id, *, selectors: dict[str, Node], persons_source: Node):
-    self._selectors = selectors  # the LIVE dict, mutated in place by the owner
-    super().__init__(node_id, dict, deps=lambda: (*selectors.values(), persons_source))
+# ✗ patch the persisted provenance strings after the fact
+node.value = _FREQ_RE.sub(fresh, node.value)
+# ✗ schedule nodes by hand instead of letting signals do it
+for nid, node in list(get_scheduler().registered_nodes().items()):
+    if nid.endswith(("/walk", "/drive")):
+        get_scheduler().schedule(node)
+# ✗ stash planning inputs in node memory
+self._planned_origin = loc
+# ✗ widen the value to carry planning inputs
+replace(val, destination=poi, origin=_origin_key(loc))
+```
+
+Fix the dep instead. In this order:
+
+1. **Depend on the node that already produces the value.** The tree
+   already has fine-grained projections of the fat aggregate —
+   `PersonMaxWalkNode` and `PersonPetrolMpgNode` (one person's value
+   out of the whole persons list), `DestinationPlaceNode` (one
+   person/POI), `best_location`. Depending on one of those IS the
+   narrowing; nothing new to build. If `compute` reads a field and a
+   node already yields exactly that field, this is the answer.
+2. **Project, then depend on the projection** — only when no such
+   node exists. A pure `DestinationAddressNode(place) -> str`; the
+   planner deps `(best_location, address_node)`. The full-POI stamp
+   flows through the nodes that render it (selector → merge → fuel →
+   breakdown), which keep the full dep. Trips-only pushes stop
+   marking the planner stale at all.
+3. **Delete an unread dep** — `compute` never reads it: remove it
+   from the tuple. No projection needed.
+
+If none fits — `compute` genuinely reads the whole object — the
+refresh is real and any API call inside needs its own reuse guard at
+the call site, not a scheduling workaround.
+
+### Dynamic dependency sets: deps are nodes, rewired with `set_deps`
+
+A node whose dep SET changes at runtime (destinations added/removed in
+Settings) still takes NODES as its deps — never a lambda, never a dict,
+never a provider closure. When the set changes, the owner rewires:
+
+```python
+def __init__(self, node_id, *, selectors: tuple[Node, ...], persons_source: Node):
+    super().__init__(node_id, dict, (*selectors, persons_source))
+
+def _on_persons_changed(self) -> None:
+    build_commute_pipeline(self, keys=...)          # materialize new pipelines
+    self.commute_breakdown.set_deps(                # then rewire the deps
+        (*self.commute_selectors.values(), self._svc.persons_source)
+    )
 ```
 
 Rules that make this safe for every future node:
 
-- The provider closes over its **arguments**, never over `self` — the base may consult it at
-  any point in the node's life.
-- Whoever owns the underlying dict **mutates it in place** (never reassigns) and **schedules
-  the node explicitly** after structural changes — a provider's dynamic deps carry no change
-  signals of their own.
+- **Deps are nodes.** A callable passed as `deps` raises `TypeError`. A
+  closure's deps carry no change signals of their own, so a node built
+  on one has no wiring — nothing signals it when its inputs change.
+- **The owner calls `set_deps`** when the set changes: it disconnects
+  every existing dep slot, swaps the deps, and connects the new ones, so
+  each dep write signals the node through its own dep slot.
+- Never schedule around a dep signal. If a node needs recomputing on a
+  data change, that data must BE one of its deps — fix the dep list, not
+  the scheduling. A manual `get_scheduler().schedule(node)` beside a dep
+  that already signals does the scheduler's job for it and hides the
+  wiring bug. Exception: the startup sweep. The in-memory queue is gone
+  after a crash or deploy — no signal will ever fire for work queued
+  before it died, and a deploy's code-stale fingerprints mismatch
+  nothing any dep could observe. `dag/regenerate.py:
+  schedule_code_stale_nodes` re-queues exactly that lost work and stays.
+  Rule of thumb: a data change must arrive through a dep; a dead queue
+  cannot signal, so the sweep recreates it.
+
+```python
+# ✗ the breakdown needs selector updates but holds no selector dep —
+#   scheduling past the missing edge instead of adding it
+get_scheduler().schedule(self.commute_breakdown)
+# ✓ the missing edge, added: each selector write now signals the
+#   breakdown through its own dep slot — nothing to schedule by hand
+self.commute_breakdown.set_deps(
+    (*self.commute_selectors.values(), self._svc.persons_source)
+)
+# ✓ the sweep re-queues work the dead queue lost (crash) or work no dep
+#   can observe (code-stale fingerprints after a deploy) — the one
+#   scheduling call no signal could replace
+schedule_code_stale_nodes(n for n in vars(self).values() if isinstance(n, Node))
+```
 - Never override `_get_active_deps()` to read subclass state assigned after
   `super().__init__()`: registration runs `_is_stale()` → `_get_active_deps()` inside the
-  base constructor, and that ordering killed the live server on 2026-09-09.
+  base constructor, before the subclass fields exist — the override reads
+  uninitialised state.
 
 ## Settings Nodes
 
@@ -141,7 +316,7 @@ Every financial setting has its own `UserInputNode`, created by `Services.__post
 | Rule | Detail |
 |---|---|
 | **One concept per node** | `compute()` does one thing; split otherwise — signal chain tracks real deps, downstream depends on just what it needs |
-| **Stable dependencies** | `_get_active_deps()` always returns the same tuple; if a dep is sometimes unnecessary, keep it and early-return in `compute()` |
+| **Narrow dependencies** | `_get_active_deps()` excludes deps whose changes cannot change the value (→ Narrow deps section); early-return in `compute()` still refreshes — narrowing skips the refresh |
 | **No side effects in compute** | Never push into other nodes — use a dependency chain |
 | **Typed values, not dicts** | Frozen dataclasses / Pydantic models so the value type is self-documenting and the TypeAdapter round-trips safely |
 | **Service results wrapped in Attempt** | `School | None` → `Attempt.succeeded(school)` or `Attempt.impossible("not found")` |
@@ -155,7 +330,7 @@ When `compute()` changes such that old persisted results are semantically invali
 
 ## Wiring rules
 
-Six ways to wire a calculation into the graph so that it stops working. Each
+Ten ways to wire a calculation into the graph so that it stops working. Each
 rule is a prohibition; the check beside it catches a regression.
 
 | Never | What it causes | Check |
@@ -166,6 +341,10 @@ rule is a prohibition; the check beside it catches a regression.
 | Explain a value outside its provenance | debugging by guesswork, and no evidence for the next reader | a failed value's provenance names the failure |
 | Show implementation names to the user | the reader cannot act on the message | no node id, class name or Python identifier in a user-facing payload |
 | Write the calculation twice, in code and in prose | a second, untested implementation that drifts | review finding |
+| Store derived state outside the value | restarts lose it, persistence cannot see it, a second source of truth | the value carries everything `compute` needs beyond its dep attempts |
+| Depend on more than `compute` reads | trips-only edits re-plan routes; the workarounds below duplicate DAG state outside the DAG | narrow the dep; a refresh the node doesn't need is the tell |
+| Read a dep's current attempt instead of the bound one | the frozen tree carries inputs the value was not calculated from | `compute` and formulas receive dep attempts as arguments; no `latest_attempt()` in node code |
+| Schedule a node by hand | hides the missing dep edge, and the signal path can never reach the node | no `get_scheduler().schedule(...)` in node owners (the startup sweep is the sole exception) |
 
 ### Never copy a dependency's value into a node
 
@@ -221,8 +400,7 @@ user sees it where the value would be and somebody can fix it. Infeasibility
 **succeeded** value carrying its reason: it flows as a value, and the totals
 stay computable.
 
-**The tell:** if you are building apparatus to compensate for a dependency
-you removed, the removal is the bug.
+**The tell:** if you are writing a sweep, retry loop, or reconciliation pass to find and re-run nodes the graph should have scheduled, the missing dep (or the wrongly narrowed one) is the bug — fix the wiring, not the scheduler.
 
 **Check:** `tests/unit/nodes/test_commute_failure_surfaces.py`.
 
@@ -279,6 +457,50 @@ it into one node per calculation.
 
 **Check:** review — a provenance description encoding thresholds or branches
 that also exist in `compute()` is a finding.
+
+### Never store derived state outside the value
+
+`compute` reads its dep attempts and returns a value; anything else it
+needs (which origin it planned from, which revision it saw) lives ON
+the value, never in node-instance memory (`self._last_*`,
+`self._planned_*`, module caches). Instance memory is lost on
+restart, invisible to persistence, and unreadable to provenance —
+a second source of truth beside the DAG.
+
+```python
+# ✗ the origin lives beside the DAG: restarts re-plan, tests cannot see it
+self._planned_origin = loc
+# ✓ the origin rides the value: attempts, persistence and provenance carry it
+replace(val, destination=poi, origin=_origin_key(loc))
+```
+
+**Check:** restart the process mid-scenario — the second run must not
+re-plan. A field set in `compute` and read in the next `compute` is
+the tell.
+
+A planner using only the destination address but depending on the
+whole POI (label + trips/weeks) re-plans on every trips-only edit.
+The wrong fixes work around the refresh instead of narrowing the
+dep: patching persisted provenance strings with a regex, scheduling
+nodes by hand over the registry, stashing planning inputs in
+`self._*` memory, widening the value to carry planning inputs —
+each duplicates DAG state outside the DAG.
+
+```python
+# ✗ over-broad dep: trips-only edits re-plan the route
+super().__init__(node_id, Commute, (options.best_location, options.poi))
+# ✓ the address projection is the dep; the stamp flows downstream
+super().__init__(node_id, Commute, (options.best_location, address_node))
+```
+
+Project first (`DestinationAddressNode(place) -> str`), depend on the
+projection; the full-POI stamp flows through the nodes that render it
+(selector → merge → fuel → breakdown). An unread dep is the same bug
+with no workaround to tempt — delete it (`TownDescNode.best_location`,
+`NearestSchoolNode.best_address`).
+
+**Check:** a refresh the node doesn't need is the tell — a trips-only
+push must not schedule the planner at all.
 
 ## Thread rules
 

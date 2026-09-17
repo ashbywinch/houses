@@ -12,7 +12,7 @@ from dag.expression import Choose, Expression, Ref
 from dag.node import Node
 from houses.commute import CostGroup, LegMode
 from houses.geopoint import GeoPoint
-from houses.model.domain import Commute
+from houses.model.domain import Commute, PlaceOfInterest
 
 logger = logging.getLogger(__name__)
 MINUTES_PER_HOUR = 60
@@ -20,6 +20,7 @@ GOOD_COMMUTE_MIN = 30
 BRACKNELL_WARN_COMMUTE_MIN = 60
 STANDARD_GOOD_COMMUTE_MIN = 45
 STANDARD_WARN_COMMUTE_MIN = 75
+
 
 def transit_legs(commute: Commute | None) -> bool:
     """True when the commute contains train/tube/DLR/Overground legs.
@@ -88,6 +89,7 @@ def format_duration(minutes: int | None) -> str:
     h = minutes // MINUTES_PER_HOUR
     r = minutes % MINUTES_PER_HOUR
     return f"{h}h{r}" if r else f"{h}h"
+
 
 def commute_band(minutes: int | None, bracknell: bool = False) -> str:
     """'good'/'warn'/'bad' band of a commute ('unknown' for None) — the
@@ -209,7 +211,7 @@ class _CommuteValueJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        
+
         return {**self.base, "is_child": self.is_child}
 
 
@@ -354,6 +356,14 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         result = self.expression.evaluate()
         if result.succeeded and result.value is not None:
             val = replace(result.value, is_child=self.is_child)
+            # The planners value the ADDRESS only — their Commutes carry
+            # a label-only destination. Stamp the CURRENT full POI from
+            # our own place dep so provenance shows where and how often
+            # without re-planning. compute() owns the value; provenance
+            # renders it — never the reverse.
+            poi_val = inputs.poi.value_or_none()
+            if isinstance(poi_val, PlaceOfInterest):
+                val = replace(val, destination=poi_val)
             return Attempt.succeeded(val)
         # Build detailed error from all alternatives
         errors = []
@@ -367,7 +377,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
 
     @override
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json(self) -> dict:
+    async def to_json(self, dep_attempts=None, active_deps=None) -> dict:
         attempt = await self.attempt()
         value = None
         if attempt.succeeded and attempt.value_or_none() is not None:
@@ -376,7 +386,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                 # Rename private _details field back to details for the frontend
                 if isinstance(value, dict) and "_details" in value:
                     value["details"] = value.pop("_details")
-            
+
             # lucidlint: ignore swallow serialization failure is surfaced by the logger and degrades to None —
             # a broken custom node must not kill the whole to_json
             except Exception:
@@ -394,7 +404,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             pending=attempt.pending,
             impossible=attempt.impossible,
             error=error,
-            provenance=(await self.build_provenance()).to_dict(),
+            provenance=(await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict(),
         ).to_dict()
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)

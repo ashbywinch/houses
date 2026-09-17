@@ -84,28 +84,32 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         self._status_node: Node = config.status_node
         self._sinking_node: Node = config.yearly_sinking_fund_node
         self._life_insurance_node: Node = config.life_insurance_node
-        super().__init__(
-            node_id,
-            Measurement[Money],
-            (
-                config.monthly_mortgage_node,
-                config.rental_income_node,
-                config.status_node,
-                config.commute_breakdown_node,
-                config.council_tax_node,
-                config.yearly_sinking_fund_node,
-                config.life_insurance_node,
-            ),
-            dep_names=(
-                "mortgage",
-                "rental_income",
-                "status",
-                "commute",
-                "council_tax",
-                "sinking",
-                "life_insurance",
-            ),
+        # Deps are exactly what the node reads: the value expression
+        # reads the first seven; build_provenance's apportionment text
+        # reads the payers/ignored/persons nodes beyond them — every
+        # read must be a dep edge, never a parent member. The
+        # apportionment inputs are conditional (present only when the
+        # group aggregates them).
+        value_deps = (
+            config.monthly_mortgage_node,
+            config.rental_income_node,
+            config.status_node,
+            config.commute_breakdown_node,
+            config.council_tax_node,
+            config.yearly_sinking_fund_node,
+            config.life_insurance_node,
         )
+        value_names = ("mortgage", "rental_income", "status", "commute", "council_tax", "sinking", "life_insurance")
+        provenance_deps: tuple[Node | None, ...] = (
+            config.annexe_payers_node,
+            config.annexe_ignored_node,
+            config.persons_source,
+            config.council_tax_payers_node,
+        )
+        provenance_names = ("annexe_payers", "annexe_ignored", "persons", "council_tax_payers")
+        deps = value_deps + tuple(d for d in provenance_deps if d is not None)
+        names = value_names + tuple(n for n, d in zip(provenance_names, provenance_deps, strict=True) if d is not None)
+        super().__init__(node_id, Measurement[Money], deps, dep_names=names)
 
     @property
     @override
@@ -151,7 +155,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         return self._deps
 
     @override
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
+    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def compute(self, **kwargs) -> Attempt[Measurement[Money]]:
         return self.expression.evaluate()
 
@@ -231,14 +235,16 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         return _compute_group_costs(GroupCostInputs(**kwargs))
 
     @override
-    async def build_provenance(self) -> Provenance:
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
         """The monthly figures as a human summary, never the raw dict.
 
         The node VALUE is the breakdown dict (the UI renders the rows
         from it), but the provenance trust bar leads with the value —
         dumping the dict read "couple: value: 3753.21, stddev: …".
         """
-        prov = await super().build_provenance()
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         val = self._attempt.value_or_none()
         if isinstance(val, dict):
             couple = val.get("couple") or {}
@@ -272,10 +278,8 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             persons_source = self._config.persons_source
             persons_att = persons_source.latest_attempt() if persons_source is not None else None
             persons_value = persons_att.value_or_none() if persons_att is not None else []
-            adults = [
-                p.name for p in (persons_value or [])
-                if not getattr(p, "is_child", False)
-            ]
+            adults = [p.name for p in (persons_value or []) if not getattr(p, "is_child", False)]
+
             def _stored_names(node):
                 att = node.latest_attempt() if node is not None else None
                 return set(att.value_or_none() or []) if att is not None else set()
@@ -284,24 +288,32 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             main_payers = sorted((stored_main & set(adults)) or adults)
             stored_annexe = _stored_names(self._annexe_payers_node)
             annexe_payers = sorted((stored_annexe & set(adults)) or adults)
-            ignored = bool(
-                self._annexe_ignored_node.latest_attempt().value_or_none()
-            ) if self._annexe_ignored_node is not None else False
+            ignored = (
+                bool(self._annexe_ignored_node.latest_attempt().value_or_none())
+                if self._annexe_ignored_node is not None
+                else False
+            )
             if council_val is not None:
                 parts = []
                 if council_val.yearly_cost is not None:
                     parts.append(
                         _band_line(
-                            "main", council_val.band, council_val.yearly_cost.value.amount,
-                            ", ".join(main_payers) or "all adults", ignored=False,
+                            "main",
+                            council_val.band,
+                            council_val.yearly_cost.value.amount,
+                            ", ".join(main_payers) or "all adults",
+                            ignored=False,
                         )
                     )
                 annexe = council_val.annexe
                 if annexe is not None and annexe.yearly_cost is not None:
                     parts.append(
                         _band_line(
-                            "annexe", annexe.band, annexe.yearly_cost.value.amount,
-                            ", ".join(annexe_payers) or "all adults", ignored=ignored,
+                            "annexe",
+                            annexe.band,
+                            annexe.yearly_cost.value.amount,
+                            ", ".join(annexe_payers) or "all adults",
+                            ignored=ignored,
                         )
                     )
                 if parts:
@@ -314,13 +326,13 @@ MONTHS_PER_YEAR = 12
 SHARE_DECIMALS = 4
 
 
-
 def _band_line(label: str, band: str | None, amount: object, who: str, ignored: bool) -> str:
     """One council-tax provenance line — the main bill and the annexe
     share the shape; only the label and the ignored branch differ."""
     if ignored:
         return f"{label} excluded as unrelated"
     return f"{label} band {band or '?'}: £{amount}/yr, split across: {who}"
+
 
 class _GroupCostCalculator:
     """Per-group monthly figures for the GroupMonthlyCostNode.
@@ -381,9 +393,7 @@ class _GroupCostCalculator:
             main_payers = set(self.inputs.council_tax_payers.value_or_none() or []) & adult_names
         main_payer_total = len(main_payers) if main_payers else len(adults)
         alloc = self._annexe_allocation(council, adult_names, ignored)
-        return _PayerSplit(
-            frozenset(main_payers), main_payer_total, alloc.monthly, alloc.stddev, alloc.payers
-        )
+        return _PayerSplit(frozenset(main_payers), main_payer_total, alloc.monthly, alloc.stddev, alloc.payers)
 
     def _annexe_allocation(self, council, adult_names: set[str], ignored: bool) -> _AnnexeAllocation:
         """The annexe bill (if any): who pays it, monthly amount, stddev."""
@@ -630,9 +640,7 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
     owner_share = len(owners) / len(adults)
     others_share = len(others) / len(adults)
 
-    couple_fig = _group_figure_result(
-        calc, ctx, [p for p in adults if p.name in owners], owner_share, couple_rent_paid
-    )
+    couple_fig = _group_figure_result(calc, ctx, [p for p in adults if p.name in owners], owner_share, couple_rent_paid)
     couple_val = couple_fig.value + mortgage_val - rental_val
     couple_std, couple_breakdown = couple_fig.stddev, couple_fig.breakdown
     couple_breakdown.mortgage = round(float(mortgage_val), 2)
@@ -652,5 +660,3 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
             others_breakdown=others_breakdown,
         ).to_dict()
     )
-
-

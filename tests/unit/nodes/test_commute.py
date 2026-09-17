@@ -28,7 +28,6 @@ def _mw(value: int):
     return node
 
 
-
 def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     """Build a minimal walk-check node whose ``_attempt`` is already resolved."""
     from houses.nodes.transit import WalkLegCheckNode
@@ -37,6 +36,7 @@ def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     w = WalkLegCheckNode("_wc", transit_node=t)
     w._attempt = Attempt.succeeded(val)
     return w
+
 
 class TestCommuteSelectorNode:
     @pytest.mark.asyncio
@@ -529,6 +529,7 @@ class TestCommuteSelectorNode:
             f"hardcoded is_child=False."
         )
 
+
 class TestMergeRailFareNode:
     """MergeRailFareNode — applies NR fare to transit CostGroup."""
 
@@ -632,7 +633,6 @@ class TestMergeRailFareNode:
             label="Office",
             destination=office,
             duration=Quantity(60, "minute"),
-
             daily_cost=Money("10.90", "GBP"),  # parking cost only
             mode="transit",
             _details=(
@@ -677,7 +677,6 @@ class TestMergeRailFareNode:
             label=walk_commute.label,
             destination=walk_commute.destination,
             duration=Quantity(20, "minute"),
-
             daily_cost=Money("0", "GBP"),
             mode="walk",
             _details=(
@@ -699,6 +698,7 @@ class TestMergeRailFareNode:
         assert val is not None
         # Walk cost should remain £0 (no transit legs to replace)
         assert float(val.daily_cost.amount) == 0, f"Expected £0, got £{val.daily_cost.amount}"
+
 
 class TestWalkLegCheckNode:
     """Direct WalkLegCheckNode tests."""
@@ -753,12 +753,15 @@ class TestWalkLegCheckNode:
         assert a.succeeded
         assert a.value is True
 
+
 # ── helpers ────────────────────────────────────────────────────────────────
+
 
 def _make_person(bus_walk_penalty: int = 30, name: str = "Simon"):
     """Create a minimal Person-like object with the attributes WalkLegCheckNode reads."""
     office = PlaceOfInterest("Office", "SW1P 1AA")
     return Person(name, True, places_of_interest=(office,), bus_walk_penalty=Quantity(bus_walk_penalty, "minute"))
+
 
 def _make_commute(duration_min=32, cost_gbp=4.50):
     from pint import Quantity
@@ -773,10 +776,10 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
         label=office.label,
         destination=office,
         duration=Quantity(duration_min, "minute"),
-
         daily_cost=Money(str(cost_gbp), "GBP"),
         _details=(CostGroup(legs=(leg,), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
     )
+
 
 def _drive_commute(duration_min=16, cost_gbp=5.0) -> Commute:
     """A real driving commute — no transit legs, so NR fares never apply."""
@@ -788,14 +791,15 @@ def _drive_commute(duration_min=16, cost_gbp=5.0) -> Commute:
         label=office.label,
         destination=office,
         duration=Quantity(duration_min, "minute"),
-
         daily_cost=Money(str(cost_gbp), "GBP"),
         mode="drive",
         _details=(CostGroup(legs=(leg,), cost=Money(str(cost_gbp), "GBP")),),
     )
 
+
 def _bus_condition(walk_check):
     return walk_check.succeeded and bool(walk_check.value)
+
 
 def _bus_if(walk_check: DerivedNode, bus_node: Node) -> IfThenElseNode:
     """Wrap a bus node in IfThenElseNode activated when walk check is True."""
@@ -808,6 +812,7 @@ def _bus_if(walk_check: DerivedNode, bus_node: Node) -> IfThenElseNode:
             then_branch=bus_node,
         ),
     )
+
 
 def _rail_fare_if(transit_node: Node, rail_fare_node: Node) -> IfThenElseNode:
     """Wrap a rail_fare node in IfThenElseNode activated when NR fare is needed."""
@@ -823,6 +828,7 @@ def _rail_fare_if(transit_node: Node, rail_fare_node: Node) -> IfThenElseNode:
         ),
     )
 
+
 class _ImpossibleCommuteNode(DerivedNode[Commute]):
     """A node that always returns Attempt.impossible for Commute."""
 
@@ -833,9 +839,11 @@ class _ImpossibleCommuteNode(DerivedNode[Commute]):
     def compute(self):
         return Attempt.impossible("not available")
 
+
 def _impossible_commute(name: str = "walk") -> DerivedNode[Commute]:
     """Return a DerivedNode that always returns Attempt.impossible for Commute."""
     return _ImpossibleCommuteNode(f"_impl_{name}")
+
 
 @pytest.mark.asyncio
 async def test_commute_selector_init_with_persisted_result():
@@ -879,6 +887,7 @@ async def test_commute_selector_init_with_persisted_result():
         ),
     )
     node.disconnect()
+
 
 class TestFareBetween:
     """RailFareRegistry.fare_between — exact pair lookup."""
@@ -934,6 +943,7 @@ class TestFareBetween:
         assert fare is not None
         assert float(fare.amount) == 16.40
 
+
 class TestDerivedNodeProvenance:
     """DerivedNode.build_provenance uses last path segment as label."""
 
@@ -951,16 +961,13 @@ class TestDerivedNodeProvenance:
             def compute(self, val):
                 return val
 
-            @override
-            def to_json(self):
-                return {"status": "succeeded", "value": self._attempt.value_or_none()}
-
         node = TestNode("rid/person/poi/test_node", float, (dep,))
         await flush_processor()
 
         prov = await node.build_provenance()
         assert prov.label == "Test Node", f"Expected 'Test Node', got '{prov.label}'"
         assert "dep" in prov.sources
+
 
 class TestRailFareNode:
     """RailFareNode — fare enrichment, pass-through, and missing-dependency behavior."""
@@ -1044,9 +1051,7 @@ class TestRailFareNode:
         location.push(GeoPoint(51.5, -0.1), "test")
 
         selected = _FixedSel(_drive_commute(duration_min=16, cost_gbp=5.0))
-        node = RailFareNode(
-            "rf_dr_sel_test", transit_result=transit, best_location=location, selector=selected
-        )
+        node = RailFareNode("rf_dr_sel_test", transit_result=transit, best_location=location, selector=selected)
         await flush_processor()
 
         a = await node.attempt()
@@ -1123,7 +1128,6 @@ class TestRailFareNode:
             label=office.label,
             destination=office,
             duration=Quantity(78, "minute"),
-
             daily_cost=Money("0", "GBP"),
             _details=(
                 CostGroup(
@@ -1131,7 +1135,6 @@ class TestRailFareNode:
                         JourneyLeg(
                             mode=LegMode.BUS,
                             duration=Quantity(10, "minute"),
-
                             start_station="",
                             end_station="",
                             line_name="",
@@ -1139,7 +1142,6 @@ class TestRailFareNode:
                         JourneyLeg(
                             mode=LegMode.TRAIN,
                             duration=Quantity(30, "minute"),
-
                             start_station="WOK",
                             end_station="Fenchurch Street",
                             line_name="Great Western Railway",
@@ -1272,6 +1274,7 @@ class TestRailFareNode:
         # (17.00 NR fare + 2.80 fallback tube single) × 2 = 39.60
         assert float(val.daily_cost.amount) == 39.60
 
+
 @pytest.mark.asyncio
 async def test_commute_selector_impossible_without_bus():
     """When transit fails and bus_result is not an active dep
@@ -1306,6 +1309,7 @@ async def test_commute_selector_impossible_without_bus():
 
     a = await node.attempt()
     assert a.pending, f"Expected pending, got {a.status}: {a.error}"
+
 
 @pytest.mark.asyncio
 async def test_walk_selected_when_fastest():
@@ -1354,6 +1358,7 @@ async def test_walk_selected_when_fastest():
     assert val.duration.magnitude == 10, f"Expected 10 min (walk), got {val.duration}"
     assert float(val.daily_cost.amount) == 0, f"Expected £0, got £{val.daily_cost.amount}"
 
+
 class TestRailFareNodeErrorPropagation:
     """RailFareNode.compute must propagate the transit error reason.
 
@@ -1398,6 +1403,7 @@ class TestRailFareNodeErrorPropagation:
         )
         assert result.impossible
         assert "409" in result.error, f"Expected 409 in error, got: {result.error}"
+
 
 class TestNoRouteCommuteChain:
     """Drive-only destinations: a transit "no route" answer is a
@@ -1553,6 +1559,7 @@ class TestNoRouteCommuteChain:
         val = a.value_or_none()
         assert val is not None and val.duration.magnitude == 35
 
+
 class TestFareConditionalDependency:
     """The rail-fare input of MergeRailFareNode is a CONDITIONAL dependency:
     a drive/walk selection never activates it — the fare node stays
@@ -1568,7 +1575,6 @@ class TestFareConditionalDependency:
             label="Bracknell",
             destination=office,
             duration=Quantity(duration_min, "minute"),
-
             daily_cost=Money("0", "GBP"),  # unpriced → needs NR fare
             _details=(CostGroup(legs=(leg,), operator="TfL", cost=None),),
         )
@@ -1612,7 +1618,6 @@ class TestFareConditionalDependency:
                     label="walk",
                     destination=PlaceOfInterest(label="walk", address=""),
                     duration=Quantity(0, "minute"),
-
                     daily_cost=Money("0", "GBP"),
                     mode="walk",
                     _details=(),
@@ -1635,6 +1640,7 @@ class TestFareConditionalDependency:
                 max_walk_node=_mw(30),
             ),
         )
+
         class _WouldFailFare(DerivedNode[Commute]):
             def __init__(self, node_id: str):
                 super().__init__(node_id, Commute, ())
@@ -1716,7 +1722,6 @@ class TestFareConditionalDependency:
                     label="walk",
                     destination=PlaceOfInterest(label="walk", address=""),
                     duration=Quantity(0, "minute"),
-
                     daily_cost=Money("0", "GBP"),
                     mode="walk",
                     _details=(),
@@ -1757,7 +1762,6 @@ class TestFareConditionalDependency:
                             label="fare",
                             destination=PlaceOfInterest(label="", address=""),
                             duration=Quantity(90, "minute"),
-
                             daily_cost=Money("9.90", "GBP"),
                             mode="transit",
                             _details=(CostGroup(legs=(fare_leg,), operator="NR", cost=Money("9.90", "GBP")),),
@@ -1796,6 +1800,7 @@ class TestFareConditionalDependency:
         _v = a.value_or_none()
         assert _v is not None
         assert _v.daily_cost == Money("9.90", "GBP")
+
 
 class TestCommuteChainProvenanceFormula:
     """The merge and breakdown calc cards must carry formula visualisations."""
@@ -1861,11 +1866,9 @@ class TestCommuteChainProvenanceFormula:
             ],
             "test",
         )
-        commute_src = FixedCommuteNode("bf_commute")
+        commute_src = FixedCommuteNode("Simon/Bracknell")
         commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
-        node = CommuteBreakdownNode(
-            "bf_node", commute_selectors={"Simon/Bracknell": commute_src}, persons_source=persons_src
-        )
+        node = CommuteBreakdownNode("bf_node", selectors=(commute_src,), persons_source=persons_src)
         await flush_processor()
         prov = await node.build_provenance()
         assert prov.formula is not None
@@ -1889,15 +1892,14 @@ class TestCommuteChainProvenanceFormula:
             ],
             "test",
         )
-        commute_src = FixedCommuteNode("bf_commute2")
+        commute_src = FixedCommuteNode("Simon/Bracknell")
         commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
-        node = CommuteBreakdownNode(
-            "bf_node2", commute_selectors={"Simon/Bracknell": commute_src}, persons_source=persons_src
-        )
+        node = CommuteBreakdownNode("bf_node2", selectors=(commute_src,), persons_source=persons_src)
         await flush_processor()
         prov = await node.build_provenance()
         # 46wk × 1 trip/wk × £5.00 = £230.00
         assert prov.value == "£230.00/yr", f"human total expected, got {prov.value!r}"
+
 
 class _CountingWalkNode(DerivedNode[Commute]):
     """A stand-in route-planning node: counts how many times it
@@ -1912,6 +1914,7 @@ class _CountingWalkNode(DerivedNode[Commute]):
     def compute(self, *dep_attempts: Attempt) -> Attempt[Commute]:
         self.calls += 1
         return Attempt.succeeded(self._value)
+
 
 async def test_max_walk_what_if_rescores_without_replanning():
     """A what-if max-walk change must re-score the commute SELECTION
@@ -2033,7 +2036,6 @@ class TestZeroTripsNotCommuted:
         assert prop._commuted_destinations() == {"Simon/Bracknell"}
 
 
-
 class TestCongestionZoneAndProvenanceFrequency:
     """Two requirements pinned together by the Pimlico live incident:
 
@@ -2077,41 +2079,88 @@ class TestCongestionZoneAndProvenanceFrequency:
 
     @pytest.mark.asyncio
     async def test_commute_provenance_shows_current_trips(self):
-        from houses.nodes.transit import DriveNode, RouteOptions
+        # The planner values the address only: a trips-only edit must
+        # NOT re-plan (zero route calls), while the pipeline's STAMP
+        # (selector from its place dep) carries the current frequency
+        # into provenance. Both halves asserted here through the real
+        # pipeline nodes: DriveNode (planner) + CommuteSelectorNode.
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
+        from houses.nodes.transit import DestinationAddressNode, DestinationPlaceNode, DriveNode, RouteOptions
+        from houses.services_provider import get_services
 
-        poi = UserInputNode("czf_poi", PlaceOfInterest)
-        poi.push(
-            PlaceOfInterest(label="Bracknell", address="RG12 8YA", trips_per_week=1, weeks_per_year=46),
+        persons = get_services().persons_source
+        persons.push(
+            [
+                __import__("houses.model.domain", fromlist=["Person"]).Person(
+                    name="Test",
+                    has_car=True,
+                    places_of_interest=[
+                        PlaceOfInterest(label="Bracknell", address="RG12 8YA", trips_per_week=1, weeks_per_year=46)
+                    ],
+                )
+            ],
             "test",
         )
         location = UserInputNode("czf_loc", GeoPoint)
         location.push(GeoPoint(51.45, -0.99), "test")
-        drive = DriveNode(
-            "czf_drive",
-            options=RouteOptions(
-                best_location=location,
-                poi=poi,
-                has_car=True,
-                max_walk=30,
-            ),
-        )
-        await flush_processor()
-        commute = drive.latest_attempt().value_or_none()
-        assert commute is not None, drive.latest_attempt().error
-        assert "1x/wk" in commute.to_provenance_value(), (
-            f"provenance must show the frequency: {commute.to_provenance_value()!r}"
-        )
+        place = DestinationPlaceNode("czf_place", persons_source=persons, person_name="Test", label="Bracknell")
+        address = DestinationAddressNode("czf_address", place=place)
+        planner_calls: list = []
+        planner = get_services().route_planner
+        real_drive = type(planner).drive_route
 
-        poi.push(
-            PlaceOfInterest(label="Bracknell", address="RG12 8YA", trips_per_week=3, weeks_per_year=46),
-            "test",
-        )
-        await flush_processor()
-        commute = drive.latest_attempt().value_or_none()
-        assert commute is not None
-        assert "3x/wk" in commute.to_provenance_value(), (
-            f"provenance frequency must follow the current trips: {commute.to_provenance_value()!r}"
-        )
+        async def _drive(self, loc, dest, *a, **k):
+            planner_calls.append(dest)
+            return await real_drive(self, loc, dest, *a, **k)
+
+        from unittest.mock import patch
+
+        with patch.object(type(planner), "drive_route", _drive):
+            drive = DriveNode(
+                "czf_drive",
+                options=RouteOptions(best_location=location, poi=address, has_car=True, max_walk=30),
+            )
+            transit_src = UserInputNode("czf_transit", __import__("houses.model.domain", fromlist=["Commute"]).Commute)
+            transit_src.push(
+                __import__("tests.unit.nodes.test_commute", fromlist=["_make_commute"])._make_commute(
+                    duration_min=60, cost_gbp=5.0
+                ),
+                "test",
+            )
+            selector = CommuteSelectorNode(
+                "czf_selector",
+                options=CommuteSelectorOptions(
+                    origin=location, poi=place, transit_result=transit_src, drive_result=drive
+                ),
+            )
+            await flush_processor()
+            first_calls = len(planner_calls)
+            assert first_calls == 1, planner_calls
+            commute = selector.latest_attempt().value_or_none()
+            assert commute is not None, selector.latest_attempt().error
+            assert "1x/wk" in commute.to_provenance_value(), (
+                f"provenance must show the frequency: {commute.to_provenance_value()!r}"
+            )
+
+            persons.push(
+                [
+                    __import__("houses.model.domain", fromlist=["Person"]).Person(
+                        name="Test",
+                        has_car=True,
+                        places_of_interest=[
+                            PlaceOfInterest(label="Bracknell", address="RG12 8YA", trips_per_week=3, weeks_per_year=46)
+                        ],
+                    )
+                ],
+                "test",
+            )
+            await flush_processor()
+            assert len(planner_calls) == first_calls, f"trips-only edit re-planned: {planner_calls}"
+            commute = selector.latest_attempt().value_or_none()
+            assert commute is not None
+            assert "3x/wk" in commute.to_provenance_value(), (
+                f"provenance frequency must follow the current trips: {commute.to_provenance_value()!r}"
+            )
 
 
 class TestAFareNobodyKnowsIsNotShownAsFree:
@@ -2130,9 +2179,7 @@ class TestAFareNobodyKnowsIsNotShownAsFree:
         return Commute(
             person=Person(name="Simon", has_car=False),
             label="Pimlico",
-            destination=PlaceOfInterest(
-                label="Pimlico", address="SW1V 2QQ", trips_per_week=1, weeks_per_year=46
-            ),
+            destination=PlaceOfInterest(label="Pimlico", address="SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
             duration=Quantity(125, "minute"),
             daily_cost=Money(amount=amount, currency="GBP"),
             mode=mode,

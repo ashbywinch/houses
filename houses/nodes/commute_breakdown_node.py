@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import override
@@ -71,25 +70,13 @@ class _CommuteAggregateJson:
 class CommuteBreakdownNode(DerivedNode[dict]):
     """Aggregates commute costs across all persons and POIs."""
 
-    
-    def __init__(self, node_id: str, *, commute_selectors: Mapping[str, Node], persons_source: Node):
-        # Live selectors dict — also captured by the deps closure below;
-        # compute reads the attribute, the provider re-reads the dict on
-        # every staleness/refresh check.  Mapping (read-only view) so
-        # concrete node-typed dicts pass the type check.
-        self._commute_selectors: Mapping[str, Node] = commute_selectors
-        # Composition: the dep policy is a closure over the CONSTRUCTOR
-        # ARGUMENTS — never over `self` state — so the base class can
-        # evaluate it at any point in the node's life without touching
-        # derived state. The dict is held by reference and mutated in
-        # place by _on_persons_changed, so the dep set tracks the live
-        # destination set (added/removed in Settings) with no rebuild
-        # and no rewiring.
-        super().__init__(
-            node_id,
-            dict,
-            deps=lambda: (*commute_selectors.values(), persons_source),
-        )
+    def __init__(self, node_id: str, *, selectors: tuple[Node, ...], persons_source: Node):
+        # Deps are nodes: the selector entries plus persons_source. No
+        # lambda, no dict, no provider closure. Each selector write
+        # signals this node through its own dep slot; the owner rewires
+        # with set_deps(...) when the destination set changes.
+        self._persons_source: Node = persons_source
+        super().__init__(node_id, dict, (*selectors, persons_source))
 
     @override
     @property
@@ -105,16 +92,17 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 trips = c.get("trips_per_week", 0)
                 weeks = c.get("weeks_per_year", 0)
                 freq = f"{trips}x/wk · {weeks} wks/yr"
-                lines.append(
-                    FormulaLine(label=f"{name} → {c['label']} · {freq}", value=f"£{yearly:,.2f}/yr")
-                )
+                lines.append(FormulaLine(label=f"{name} → {c['label']} · {freq}", value=f"£{yearly:,.2f}/yr"))
         if not lines:
             return None
         return Formula(lines=lines, result=f"£{Decimal(str(v.get('yearly_total_gbp', '0'))):,.2f}/yr")
 
     @override
     def compute(self, *args: Attempt[dict]) -> Attempt[dict]:
-        # Last arg is always persons_source, the rest are commute selectors
+        # Persons is always last (the constructor puts persons_source
+        # last); the rest are the selector entries. Match each POI to
+        # its selector by key: selector ids carry the key
+        # (<rid>/<person>/<label>/final_fuel) or equal it (tests).
         if not args:
             return Attempt.succeeded(
                 {
@@ -123,13 +111,14 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                     "formula_explanation": "No commute data",
                 }
             )
-        persons_attempt = args[-1]
-        commute_attempts = args[:-1]
-
-        persons_list = persons_attempt.value_or_none() if persons_attempt.succeeded else []
+        *selector_attempts, persons = args
+        if not persons.succeeded:
+            return persons
+        persons_list = persons.value_or_none() or []
+        selector_deps = list(self._deps[:-1])
+        by_id = {d._id: a for d, a in zip(selector_deps, selector_attempts, strict=False)}
         yearly_total = Money(amount="0", currency="GBP")
         per_person: dict[str, dict] = {}
-        selector_values = list(self._commute_selectors.values())
         for p in persons_list or []:
             person_yearly = Money(amount="0", currency="GBP")
             daily_amount: Money | None = None
@@ -141,19 +130,20 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             commutes: list[_CommuteEntryJson] = []
             for poi in pois or ():
                 key = f"{name}/{poi.label}"
-                commute_node = self._commute_selectors.get(key)
+                commute_node = next(
+                    (d for d in selector_deps if d._id == key or d._id.endswith(f"/{key}/final_fuel")),
+                    None,
+                )
                 if commute_node is None:
                     continue
-                idx = selector_values.index(commute_node) if commute_node in selector_values else -1
-                attempt = (
-                    commute_attempts[idx] if idx >= 0 and idx < len(commute_attempts) else commute_node.latest_attempt()
-                )
-                if not attempt.succeeded:
-                    # A commute that cannot be computed propagates and this
-                    # node never runs.  Reaching here means the selector map
-                    # and the dependency set disagree — a defect.  Name it
-                    # loudly: skipping the entry would publish a total that is
-                    # quietly missing a person's cost (2026-09-10).
+                attempt = by_id.get(commute_node._id)
+                if attempt is None or not attempt.succeeded:
+                    # A commute that cannot be computed propagates and
+                    # this node never runs. Reaching here means the
+                    # selector deps and the live persons disagree — a
+                    # defect. Name it loudly: skipping the entry would
+                    # publish a total that is quietly missing a
+                    # person's cost.
                     return Attempt.impossible(f"commute {key} has no computable result")
                 val = attempt.value_or_none()
                 if val is None:
@@ -186,14 +176,16 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         )
 
     @override
-    async def build_provenance(self):
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ):
         """The aggregate as a human total, never the dict dump.
 
         The node VALUE stays the breakdown dict (the expression system
         reads yearly_total_gbp); only the provenance display value is
         swapped for the human figure.
         """
-        prov = await super().build_provenance()
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         v = self._attempt.value_or_none()
         if self._attempt.succeeded and isinstance(v, dict) and v.get("yearly_total_gbp") is not None:
             prov.value = f"£{Decimal(str(v['yearly_total_gbp'])):,.2f}/yr"

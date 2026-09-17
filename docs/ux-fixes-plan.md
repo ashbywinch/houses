@@ -249,3 +249,38 @@ PR "fix: what-if persists through the DAG — apply/restore/state". The
 requirement is recorded as B7 in usability-requirements.md. Deltas on
 cards (vs the current home) are unchanged — they simply always reflect
 whatever the DAG currently holds, what-if or not.
+
+## 2026-09-16 — The card header splits by what each thing describes
+
+The current-home chip was wrong twice over. It sat inside the address row,
+where its content is "address | the figures": nowrap and unshrinkable at
+119px, it took the row and collapsed the address to 0px. And "baseline"
+described the *other* cards' figures — the ones measured against this home —
+while this card's own figures are the absolute ones.
+
+The header is now three rows, each holding one kind of thing:
+
+- the home label, quiet and mute (`Your home`, no chip border) — which card
+  this is;
+- the address, full width, favourite heart at its right — the markers that
+  describe the property;
+- the figures, stacked and flush right with the what-if chip beside them —
+  two numbers on two lines are compared at a glance, and the chip qualifies
+  the figures it sits with.
+
+Measured on the current home card: at a 390px viewport the address went from
+94px over 4 lines to 312px on one line; at 320px the old header gave a
+13-line address in a 337px-tall block, the new one 2 lines in 168px. The
+list legend keeps the one place where "baseline" earns its keep: the figures
+on every other card are relative to this home.
+
+**One line when the card is wide enough.** The address row and the figures
+row are one row above 430px of card width and stack below it — a *container*
+query, because the grid, not the viewport, decides the card's width (phones
+296–366px, the desktop three-column grid 381px, the two-column band up to
+~458px). The threshold is set by measurement: the what-if chip plus two
+figures measure ~200px, so at the desktop card's 381px a one-row header left
+the address 122px over 3 lines, against 327px on one line stacked. Above
+430px the home card's address reads 199px over 2 lines and a normal card's
+300px on one line. In the figures row the chip top-aligns with the figures
+it qualifies, in both layouts.

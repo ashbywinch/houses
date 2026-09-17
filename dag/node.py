@@ -212,7 +212,6 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
     #: parsing the node id. ``None`` = not a property view.
     property_rid: str | None = None
 
-
     def __init__(self, node_id: str, value_type: type[T], source_url: str = "") -> None:
         self._id: str = node_id
         self._value_type: type[T] = value_type
@@ -234,16 +233,30 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         """Compute or retrieve the current value."""
         ...
 
+    async def live_provenance(self) -> Provenance:
+        """The node's live provenance (persist-path rendering).
+
+        Leaf nodes have no frozen tree of their own beyond this — the
+        default renders the node's own provenance directly."""
+        return await self.build_provenance()
+
     @staticmethod
     @abstractmethod
-    async def build_provenance() -> Provenance:
-        """Build provenance by walking dependency nodes.
-        Subclasses override this to return a Provenance describing
-        how this node's value was derived."""
+    async def build_provenance(
+        dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        """The provenance for this node.
+
+        ``dep_attempts=None`` is the SERVE path — return the frozen
+        stored tree verbatim. With bound attempts it is the PERSIST
+        path — build fresh from this evaluation.
+        """
         ...
 
     # lucidlint: ignore record-shape to_json returns the serialized node record (coding-standards.md)
-    async def to_json(self) -> dict:
+    async def to_json(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> dict:
         attempt = await self.attempt()
         rec = NodeJson(
             status=attempt.status,
@@ -260,7 +273,7 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         if self._source_url:
             rec.source_url = self._source_url
         if not attempt.pending:
-            rec.provenance = (await self.build_provenance()).to_dict()
+            rec.provenance = (await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
         return rec.to_dict()
 
     # lucidlint: ignore record-shape returns the serialized node record (coding-standards.md)

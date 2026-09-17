@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from dag.attempt import Formula, FormulaLine, Provenance, SourceType
+
 CURRENT_STATUS = "current"
 
 
@@ -34,7 +36,7 @@ class _RawFigure:
     stddev: float
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RawFigure:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _RawFigure:
         return cls(value=raw.get("value"), stddev=float(raw.get("stddev") or 0))
 
 
@@ -61,6 +63,43 @@ class _FigureWire:
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return {"value": self.value, "approx": self.approx}
+
+
+# lucidlint: ignore record-shape Provenance.to_dict() IS the boundary for this wire dict
+def _delta_provenance(
+    *,
+    own: _RawFigure | None,
+    base: _RawFigure | None,
+    delta: str,
+    candidate_label: str,
+    baseline_address: str,
+) -> dict:
+    """The delta's derivation as a provenance dict — candidate − baseline.
+
+    A hand-written arithmetic tooltip (the old title=) is not provenance:
+    every other number explains itself through the standard ⓘ, and the
+    monthly difference must too. The formula names both input figures
+    (candidate total, baseline home total) and the signed result; the
+    description names the baseline home so the reader knows WHAT was
+    subtracted.
+    """
+    own_str = str(own.value) if own is not None and own.value is not None else "?"
+    base_str = str(base.value) if base is not None and base.value is not None else "?"
+    approx_note = " (≈ = council tax estimated)" if _is_approx(own) or _is_approx(base) else ""
+    short = (baseline_address.split(",")[0] or baseline_address).strip()
+    # The provenance IS the DAG's own record — build it, do not re-spell it.
+    return Provenance(
+        label="Monthly difference vs your home",
+        description=f"Candidate monthly total minus your home ({short}).{approx_note}",
+        source_type=SourceType.CALC,
+        formula=Formula(
+            lines=[
+                FormulaLine(label=f"This property ({candidate_label})", value=f"£{own_str}/mo"),
+                FormulaLine(label=f"Your home ({short})", value=f"£{base_str}/mo"),
+            ],
+            result=f"{delta}/mo",
+        ),
+    ).to_dict()
 
 
 @dataclass(frozen=True)
@@ -95,6 +134,7 @@ def _figure_value(figure: object) -> object:
     """A group figure's amount — None when the figure is uncomputable."""
     return figure.get("value") if isinstance(figure, dict) else None
 
+
 def _wire_figure(figure: _RawFigure) -> _FigureWire:
     return _FigureWire(value=str(figure.value), approx=_is_approx(figure))
 
@@ -108,12 +148,9 @@ def _wire_figure_or_none(figure: _RawFigure | None) -> dict | None:
     return _wire_figure(figure).to_dict()
 
 
-
-
-
-def _is_approx(figure: _RawFigure) -> bool:
+def _is_approx(figure: _RawFigure | None) -> bool:
     """The figure carries uncertainty (nonzero stddev)."""
-    return figure.stddev > 0
+    return figure is not None and figure.stddev > 0
 
 
 def _status_is_current(prop) -> bool:
@@ -163,7 +200,13 @@ def resolve_baseline(registry) -> MonthlyBaseline | None:
     )
 
 
-def _group_delta(own: _RawFigure | None, base: _RawFigure | None) -> _FigureWire | None:
+def _group_delta(
+    own: _RawFigure | None,
+    base: _RawFigure | None,
+    *,
+    candidate_label: str,
+    baseline_address: str,
+) -> _FigureWire | None:
     """One group's delta — null when EITHER side's figure is uncomputable."""
     if own is None or base is None or own.value is None or base.value is None:
         return None
@@ -189,19 +232,53 @@ class _GroupDeltasJson:
 
 # lucidlint: ignore record-shape the per-group delta dict IS the wire shape — owned by _GroupDeltasJson; tests pin the
 # dict-returning signature (delta["couple"] indexing), so the record serializes at the boundary (coding-standards.md)
-def delta_vs_home(group_value: Mapping[str, object], baseline: MonthlyBaseline) -> dict:
+def delta_vs_home(
+    group_value: Mapping[str, object],
+    baseline: MonthlyBaseline,
+    *,
+    candidate_label: str = "",
+    candidate_address: str = "",
+) -> dict:
     """The per-group delta shape for one candidate's group figures.
 
     ``group_value`` is the raw group-monthly-cost DAG value dict (couple and
     others figures; the degenerate no-adults shapes omit the labels) — tests
     pin the dict signature; the figures are ingested via ``_as_figure`` at
-    this edge.
+    this edge. Each side's delta carries its derivation as ``provenance``
+    (candidate − baseline, both figures named) for the standard ⓘ.
     """
     base = baseline.group_value
-    return _GroupDeltasJson(
-        couple=_group_delta(_as_figure(group_value.get("couple")), _as_figure(base.get("couple"))),
-        others=_group_delta(_as_figure(group_value.get("others")), _as_figure(base.get("others"))),
+    label = candidate_label or candidate_address or "this property"
+    deltas = _GroupDeltasJson(
+        couple=_group_delta(
+            _as_figure(group_value.get("couple")),
+            _as_figure(base.get("couple")),
+            candidate_label=label,
+            baseline_address=baseline.address,
+        ),
+        others=_group_delta(
+            _as_figure(group_value.get("others")),
+            _as_figure(base.get("others")),
+            candidate_label=label,
+            baseline_address=baseline.address,
+        ),
     ).to_dict()
+    for side in ("couple", "others"):
+        wire = deltas.get(side)
+        if not isinstance(wire, dict):
+            continue
+        own = _as_figure(group_value.get(side))
+        base_fig = _as_figure(base.get(side))
+        if own is None or base_fig is None or own.value is None or base_fig.value is None:
+            continue
+        wire["provenance"] = _delta_provenance(
+            own=own,
+            base=base_fig,
+            delta=wire["value"],
+            candidate_label=label,
+            baseline_address=baseline.address,
+        )
+    return deltas
 
 
 # lucidlint: ignore record-shape the extracted group block IS part of the variable-keyed property payload — passthrough
@@ -233,6 +310,17 @@ async def attach(summary: MutableMapping[str, Any], rid: str, registry) -> Mutab
     group = _group_block(summary)
     value = group.get("value") if group is not None else None
     if group is not None and isinstance(value, dict):
-        delta = None if baseline is None or is_current else delta_vs_home(value, baseline)
+        if baseline is None or is_current:
+            delta = None
+        else:
+            labels = value.get("couple_label"), value.get("others_label")
+            candidate_label = str(labels[0] or labels[1] or "")
+            candidate_address = _address_of(prop) if prop is not None else rid
+            delta = delta_vs_home(
+                value,
+                baseline,
+                candidate_label=candidate_label,
+                candidate_address=candidate_address,
+            )
         group["value"] = {**value, "delta_vs_home": delta}
     return summary

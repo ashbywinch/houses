@@ -270,8 +270,12 @@ class UserInputNode(Node[T], Generic[T]):
         return Attempt.pending()
 
     @override
-    async def build_provenance(self) -> Provenance:
-        # Fall back to persistence timestamp for data that predates freshness tracking
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        # A leaf fact: the value IS the current pushed input, so live is
+        # the whole story — there is no frozen tree to serve. (Args are
+        # accepted for the base signature; a user input has no deps.)
         freshness = self._push_timestamp or self._persisted_at
         return Provenance(
             label=self.display_label,
