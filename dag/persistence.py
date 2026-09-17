@@ -318,8 +318,13 @@ def property_created_at(rid: str) -> str | None:
         return None
     conn = _get_db()
     row = conn.execute(
-        "SELECT MIN(created_at) FROM node_results WHERE node_id LIKE ?",
-        (f"{rid}/%",),
+        # GLOB, not LIKE: LIKE is case-insensitive, so SQLite cannot use
+        # idx_nr_node's node_id prefix for the pattern and scans the whole
+        # 1M+ row table per property — measured 127ms x 46 properties on
+        # every /api/properties/all load. GLOB is case-sensitive and its
+        # prefix optimization hits the index: 2.7ms.
+        "SELECT MIN(created_at) FROM node_results WHERE node_id GLOB ?",
+        (f"{rid}/*",),
     ).fetchone()
     return row[0] if row and row[0] else None
 
