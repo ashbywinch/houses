@@ -45,17 +45,16 @@ class EquityTotalNode(DerivedNode[Money]):
                 if is_current
                 else getattr(p, "cash_contribution", Money(amount="0", currency="GBP")).amount
             )
-            value = contributions.get(person_id_of(p), _ZERO) + cash
-            if value <= 0:
-                continue
+            # Every adult gets a line — even a £0 contribution — so the
+            # unpack never collapses to a bare total (a current home with
+            # cash-only people, or zero equity, must still show each
+            # person's inputs; that is the point of the unpack).
             lines.append(
                 FormulaLine(
                     label=p.name,
                     value=equity_line(p.name, p, contributions, ps, cash=cash, show_cash=not is_current),
                 )
             )
-        if not lines:
-            lines.append(FormulaLine(label="Total Equity", value=str(self._attempt.value)))
         return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, persons_source, status_node=None):

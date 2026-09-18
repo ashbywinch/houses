@@ -854,3 +854,37 @@ monthly_mortgage_node=mg,
 
         a = await node.attempt()
         assert a.succeeded
+
+
+    @pytest.mark.asyncio
+    async def test_zero_contribution_person_still_appears_in_the_unpack(self):
+        """No special case may collapse the equity unpack: a current home
+        whose only adult is cash-only (cash excluded, no home equity)
+        still lists the person with their inputs instead of a bare
+        'Total Equity' fallback line."""
+        from houses.nodes.equity_total_node import EquityTotalNode
+
+        persons = UserInputNode[list]("eqz_ps", list)
+        status = UserInputNode[str]("eqz_status", str)
+        node = EquityTotalNode("eqz", persons_source=persons, status_node=status)
+        persons.push(
+            [
+                Person(
+                    name="Ashby",
+                    person_id="p_eqz_ashby",
+                    has_car=True,
+                    cash_contribution=Money("300000", "GBP"),
+                ),
+            ],
+            "test",
+        )
+        status.push("current", "test")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == Money("0", "GBP")
+        formula = node.provenance_formula
+        assert formula is not None
+        labels = [line.label for line in formula.lines]
+        assert "Ashby" in labels, f"the person must appear in the unpack, got {labels}"
+        assert "Total Equity" not in labels, "the fallback collapse must not fire"
