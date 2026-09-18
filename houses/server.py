@@ -42,7 +42,7 @@ from houses.property import EnrichedProperty, Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.services import Services
 from houses.settings import settings
-from houses.web.api_router import api_router
+from houses.web.api_router import _reset_listing_cache, api_router
 from houses.web.auth import auth_router, effective_session_user, get_session_user
 from houses.web.json_utils import asdict_serializable
 
@@ -81,6 +81,9 @@ def _on_node_refreshed(node):
         )
         return
     if kind == "settings":
+        # Settings change re-prices EVERY property — the front page's
+        # refetch must see the new totals immediately.
+        _reset_listing_cache()
         asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
         return
     # An unknown or undeclared kind is dropped on purpose — but loudly:
@@ -180,6 +183,7 @@ async def lifespan(_app: FastAPI):
     _property_registry._reset()
     _broadcaster_mod._reset()
     _town_desc._reset()
+    _reset_listing_cache()
 
     load_property_nodes_from_db()
     # THE DAG PROCESSOR: one thread, one queue. It owns recompute AND

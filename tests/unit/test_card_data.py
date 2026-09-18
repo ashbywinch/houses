@@ -177,14 +177,16 @@ class TestOfstedColour:
 
     @staticmethod
     def _summary_with_ofsted(ofsted: str) -> SummaryJson:
-        return SummaryJson(**{
-            "commutes": {},
-            "schools": {
-                "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk": None}}},
-                "secondary": {"school": {"status": "impossible", "value": None}},
-            },
-            "walkability": {"value": None},
-        })
+        return SummaryJson(
+            **{
+                "commutes": {},
+                "schools": {
+                    "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk": None}}},
+                    "secondary": {"school": {"status": "impossible", "value": None}},
+                },
+                "walkability": {"value": None},
+            }
+        )
 
     def test_outstanding_is_good(self):
         """Outstanding → score 2 (was colour 'good')."""
@@ -217,13 +219,15 @@ class TestScoringSurvivesAnUnpricedCommute:
 
     @staticmethod
     def _summary_with_a_null_commute() -> SummaryJson:
-        return SummaryJson(**{
-            "commutes": {
-                "Simon/Pimlico": {"commute": {"status": "succeeded", "value": None}},
-            },
-            "schools": {},
-            "walkability": {"value": None},
-        })
+        return SummaryJson(
+            **{
+                "commutes": {
+                    "Simon/Pimlico": {"commute": {"status": "succeeded", "value": None}},
+                },
+                "schools": {},
+                "walkability": {"value": None},
+            }
+        )
 
     def test_null_commute_value_scores_without_crashing(self):
         assert _score_from_summary(self._summary_with_a_null_commute()) == 0
@@ -250,14 +254,16 @@ class TestWalkColour:
 
     @staticmethod
     def _summary_with_walk(minutes: int | None) -> SummaryJson:
-        return SummaryJson(**{
-            "commutes": {},
-            "schools": {
-                "primary": {"school": {"status": "impossible", "value": None}},
-                "secondary": {"school": {"status": "impossible", "value": None}},
-            },
-            "walkability": {"value": {"walk_to_town": {"value": minutes, "unit": "minute"}}},
-        })
+        return SummaryJson(
+            **{
+                "commutes": {},
+                "schools": {
+                    "primary": {"school": {"status": "impossible", "value": None}},
+                    "secondary": {"school": {"status": "impossible", "value": None}},
+                },
+                "walkability": {"value": {"walk_to_town": {"value": minutes, "unit": "minute"}}},
+            }
+        )
 
     def test_good_under_15(self):
         """walk < 15 → score 2 (was colour 'good')."""
@@ -442,122 +448,132 @@ class TestScoring:
         assert score == 16
 
     def test_all_green_returns_max(self):
-        summary = SummaryJson(**{
-            "commutes": {
-                "Simon/Pimlico": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+        summary = SummaryJson(
+            **{
+                "commutes": {
+                    "Simon/Pimlico": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                    },
+                    "Lorena/Aldgate": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                    },
+                    "Simon/Bracknell": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
+                    },
                 },
-                "Lorena/Aldgate": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                "schools": {
+                    "primary": {
+                        "school": {
+                            "status": "succeeded",
+                            "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                        }
+                    },
+                    "secondary": {
+                        "school": {
+                            "status": "succeeded",
+                            "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                        }
+                    },
                 },
-                "Simon/Bracknell": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
-                },
-            },
-            "schools": {
-                "primary": {
-                    "school": {
-                        "status": "succeeded",
-                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
-                    }
-                },
-                "secondary": {
-                    "school": {
-                        "status": "succeeded",
-                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
-                    }
-                },
-            },
-            "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
-        })
+                "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
+            }
+        )
         score = _score_from_summary(summary)
         assert score == 16  # 8 metrics × 2
 
     def test_greens_and_warns_mixed(self):
-        summary = SummaryJson(**{
-            "commutes": {
-                "Simon/Pimlico": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+        summary = SummaryJson(
+            **{
+                "commutes": {
+                    "Simon/Pimlico": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                    },
+                    "Lorena/Aldgate": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 50, "unit": "minute"}}}
+                    },
+                    "Simon/Bracknell": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
+                    },
                 },
-                "Lorena/Aldgate": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 50, "unit": "minute"}}}
+                "schools": {
+                    "primary": {
+                        "school": {
+                            "status": "succeeded",
+                            "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                        }
+                    },
+                    "secondary": {
+                        "school": {
+                            "status": "succeeded",
+                            "value": {"ofsted": "Good", "walk": {"value": 5, "unit": "minute"}},
+                        }
+                    },
                 },
-                "Simon/Bracknell": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
-                },
-            },
-            "schools": {
-                "primary": {
-                    "school": {
-                        "status": "succeeded",
-                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
-                    }
-                },
-                "secondary": {
-                    "school": {
-                        "status": "succeeded",
-                        "value": {"ofsted": "Good", "walk": {"value": 5, "unit": "minute"}},
-                    }
-                },
-            },
-            "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
-        })
+                "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
+            }
+        )
         score = _score_from_summary(summary)
         assert score == 14  # 2×3 + 1 + 2×3 + 2 + 1 + 2
 
     def test_bad_values_subtract(self):
-        summary = SummaryJson(**{
-            "commutes": {
-                "Simon/Pimlico": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+        summary = SummaryJson(
+            **{
+                "commutes": {
+                    "Simon/Pimlico": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+                    },
+                    "Lorena/Aldgate": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 80, "unit": "minute"}}}
+                    },
+                    "Simon/Bracknell": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 70, "unit": "minute"}}}
+                    },
                 },
-                "Lorena/Aldgate": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 80, "unit": "minute"}}}
+                "schools": {
+                    "primary": {
+                        "school": {
+                            "status": "succeeded",
+                            "value": {"ofsted": "Inadequate", "walk": {"value": 50, "unit": "minute"}},
+                        }
+                    },
+                    "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "", "walk": None}}},
                 },
-                "Simon/Bracknell": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 70, "unit": "minute"}}}
-                },
-            },
-            "schools": {
-                "primary": {
-                    "school": {
-                        "status": "succeeded",
-                        "value": {"ofsted": "Inadequate", "walk": {"value": 50, "unit": "minute"}},
-                    }
-                },
-                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "", "walk": None}}},
-            },
-            "walkability": {"value": {"walk_to_town": None}},
-        })
+                "walkability": {"value": {"walk_to_town": None}},
+            }
+        )
         score = _score_from_summary(summary)
         assert score == -5  # 3 red commutes (-1 each) + red ofsted (-1) + bad walk (-1)
 
     def test_muted_contributes_zero(self):
-        summary = SummaryJson(**{
-            "commutes": {},
-            "schools": {
-                "primary": {"school": {"status": "impossible", "value": None}},
-                "secondary": {"school": {"status": "impossible", "value": None}},
-            },
-            "walkability": {"value": None},
-        })
+        summary = SummaryJson(
+            **{
+                "commutes": {},
+                "schools": {
+                    "primary": {"school": {"status": "impossible", "value": None}},
+                    "secondary": {"school": {"status": "impossible", "value": None}},
+                },
+                "walkability": {"value": None},
+            }
+        )
         score = _score_from_summary(summary)
         assert score == 0
 
     def test_bracknell_thresholds(self):
         """Bracknell commutes use 30/60 thresholds instead of 45/75."""
-        summary = SummaryJson(**{
-            "commutes": {
-                "Simon/Bracknell": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 25, "unit": "minute"}}}
+        summary = SummaryJson(
+            **{
+                "commutes": {
+                    "Simon/Bracknell": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 25, "unit": "minute"}}}
+                    },
                 },
-            },
-            "schools": {
-                "primary": {"school": {"status": "impossible", "value": None}},
-                "secondary": {"school": {"status": "impossible", "value": None}},
-            },
-            "walkability": {"value": None},
-        })
+                "schools": {
+                    "primary": {"school": {"status": "impossible", "value": None}},
+                    "secondary": {"school": {"status": "impossible", "value": None}},
+                },
+                "walkability": {"value": None},
+            }
+        )
         assert _score_from_summary(summary) == 2  # green = 2
         summary.commutes["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 35
         assert _score_from_summary(summary) == 1  # warn = 1
@@ -570,44 +586,146 @@ class TestCardSorting:
 
     def test_sorted_by_score_descending(self):
         """Verify the sorting logic used by get_all_properties()."""
-        high = SummaryJson(**{
-            "commutes": {},
-            "schools": {
-                "primary": {"school": {"status": "impossible", "value": None}},
-                "secondary": {"school": {"status": "impossible", "value": None}},
-            },
-            "walkability": {"value": None},
-        })
-        mid = SummaryJson(**{
-            "commutes": {},
-            "schools": {
-                "primary": {
-                    "school": {
-                        "status": "succeeded",
-                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
-                    }
+        high = SummaryJson(
+            **{
+                "commutes": {},
+                "schools": {
+                    "primary": {"school": {"status": "impossible", "value": None}},
+                    "secondary": {"school": {"status": "impossible", "value": None}},
                 },
-                "secondary": {
-                    "school": {
-                        "status": "succeeded",
-                        "value": {"ofsted": "Good", "walk": {"value": 5, "unit": "minute"}},
-                    }
+                "walkability": {"value": None},
+            }
+        )
+        mid = SummaryJson(
+            **{
+                "commutes": {},
+                "schools": {
+                    "primary": {
+                        "school": {
+                            "status": "succeeded",
+                            "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                        }
+                    },
+                    "secondary": {
+                        "school": {
+                            "status": "succeeded",
+                            "value": {"ofsted": "Good", "walk": {"value": 5, "unit": "minute"}},
+                        }
+                    },
                 },
-            },
-            "walkability": {"value": None},
-        })
-        low = SummaryJson(**{
-            "commutes": {
-                "Simon/Pimlico": {
-                    "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+                "walkability": {"value": None},
+            }
+        )
+        low = SummaryJson(
+            **{
+                "commutes": {
+                    "Simon/Pimlico": {
+                        "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+                    },
                 },
-            },
-            "schools": {
-                "primary": {"school": {"status": "impossible", "value": None}},
-                "secondary": {"school": {"status": "impossible", "value": None}},
-            },
-            "walkability": {"value": None},
-        })
+                "schools": {
+                    "primary": {"school": {"status": "impossible", "value": None}},
+                    "secondary": {"school": {"status": "impossible", "value": None}},
+                },
+                "walkability": {"value": None},
+            }
+        )
         results = {"low": low, "high": high, "mid": mid}
         scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
         assert [r[0] for r in scored] == ["mid", "high", "low"]
+
+
+class TestListingCache:
+    """The front-page listing cache isolates within a TTL window — the
+    page must not block behind DAG writer churn (scrapes hold the sqlite
+    write lock)."""
+
+    def test_second_call_within_ttl_serves_the_cached_listing(self, monkeypatch):
+        import houses.web.api_router as ar
+
+        calls = {"n": 0}
+
+        class _FakeProp:
+            def __init__(self, rid):
+                self.rid = rid
+
+            async def to_json_summary(self):
+                return {
+                    "rid": self.rid,
+                    "commutes": {},
+                    "schools": {
+                        "primary": {"school": {"status": "impossible", "value": None}},
+                        "secondary": {"school": {"status": "impossible", "value": None}},
+                    },
+                    "walkability": {"value": None},
+                }
+
+        def fake_registered():
+            calls["n"] += 1
+            return [_FakeProp("111")]
+
+        from houses.web.api_router import get_all_properties
+
+        monkeypatch.setattr(ar, "_registered_properties", fake_registered)
+        monkeypatch.setattr(
+            ar, "_attach_scrape_state", lambda s, rid: s.to_dict() if hasattr(s, "to_dict") else dict(s)
+        )
+
+        async def fake_delta(wire, rid, registry):
+            return wire
+
+        monkeypatch.setattr(ar, "attach_monthly_delta", fake_delta)
+
+        import asyncio
+
+        first = asyncio.run(get_all_properties())
+        assert "111" in first
+        second = asyncio.run(get_all_properties())
+        assert calls["n"] == 1, "the second call must serve the cached listing, not rebuild"
+        assert second["111"]["rid"] == "111"
+
+    def test_ttl_expiry_rebuilds(self, monkeypatch):
+        import houses.web.api_router as ar
+
+        calls = {"n": 0}
+
+        class _FakeProp:
+            def __init__(self, rid):
+                self.rid = rid
+
+            async def to_json_summary(self):
+                return {
+                    "rid": self.rid,
+                    "commutes": {},
+                    "schools": {
+                        "primary": {"school": {"status": "impossible", "value": None}},
+                        "secondary": {"school": {"status": "impossible", "value": None}},
+                    },
+                    "walkability": {"value": None},
+                }
+
+        def fake_registered():
+            calls["n"] += 1
+            return [_FakeProp("222")]
+
+        monkeypatch.setattr(ar, "_registered_properties", fake_registered)
+        monkeypatch.setattr(
+            ar, "_attach_scrape_state", lambda s, rid: s.to_dict() if hasattr(s, "to_dict") else dict(s)
+        )
+
+        async def fake_delta(wire, rid, registry):
+            return wire
+
+        monkeypatch.setattr(ar, "attach_monthly_delta", fake_delta)
+        import asyncio
+
+        from houses.web.api_router import get_all_properties
+
+        first = asyncio.run(get_all_properties())
+        assert "222" in first
+        # Age the cache past the TTL: the next call rebuilds.
+        if ar._all_cache is not None:
+            ar._all_cache = (ar._all_cache[0] - 10.0, ar._all_cache[1])
+        again = asyncio.run(get_all_properties())
+        assert calls["n"] == 2
+        assert "222" in again

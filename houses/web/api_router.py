@@ -411,10 +411,28 @@ def _attach_scrape_state(summary: SummaryJson | PropertyJson, rid: str) -> dict:
         d["scrape"] = status.to_dict()
     return d
 
+_ALL_TTL_S = 2.0
+"""Listing TTL — the front page must not block behind DAG writer churn
+(scrapes/recomputes hold the sqlite write lock; ~1000 node serializations
+per request contend). Serves ≤2s-stale data from memory instead."""
+_all_cache: tuple[float, dict[str, dict]] | None = None
+
+
+
+def _reset_listing_cache() -> None:
+    """Clear the listing cache — per-test isolation and app startup."""
+    global _all_cache
+    _all_cache = None
+
+
 @api_router.get("/properties/all")
-
-
 async def get_all_properties():
+    import time as _t
+
+    global _all_cache
+    _now = _t.monotonic()
+    if _all_cache is not None and _now - _all_cache[0] < _ALL_TTL_S:
+        return _all_cache[1]
     results: dict[str, dict] = {}
     scores: dict[str, int] = {}
     for prop in _registered_properties():
@@ -428,7 +446,8 @@ async def get_all_properties():
         results[rid] = wire
         scores[rid] = _score_from_summary(summary)
     scored = sorted(results.items(), key=lambda kv: scores[kv[0]], reverse=True)
-    return dict(scored)
+    _all_cache = (_now, dict(scored))
+    return _all_cache[1]
 
 
 @dataclass(frozen=True)
@@ -887,6 +906,11 @@ async def patch_person(name: str, body: dict, request: Request):
         current[name] = thresholds
         svc.commute_thresholds_source.push(current, "user")
 
+    # Settings re-price every property — the front page's next listing
+    # refetch must see the new totals immediately (no TTL staleness on a
+    # deliberate user edit).
+    _reset_listing_cache()
+
     return {"status": "ok"}
 
 
@@ -902,6 +926,10 @@ async def patch_financial(body: dict):
                 svc.setting_nodes[node_id].push(value, "user")
 
     _apply_financial()
+    # Settings re-price every property — the front page's next listing
+    # refetch must see the new totals immediately (no TTL staleness on a
+    # deliberate user edit).
+    _reset_listing_cache()
     return {"status": "ok"}
 
 
