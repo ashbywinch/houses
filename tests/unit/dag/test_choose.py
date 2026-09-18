@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+import pytest
 from money import Money
 
 from dag.attempt import Attempt
@@ -168,3 +169,48 @@ class TestChoose:
         assert "b" in expr.last_results
         assert expr.last_results["a"].succeeded
         assert expr.last_results["a"].value_or_none() == Decimal("100")
+
+
+class _HumanValued:
+    """A value with a canonical provenance projection (like Commute)."""
+
+    def __init__(self, summary: str):
+        self._summary = summary
+
+    def to_provenance_value(self) -> str:
+        return self._summary
+
+
+class _Unprojectable:
+    """A value with NO provenance projection — the expression layer must
+    fail loudly rather than ship an object repr to the UI."""
+
+
+class TestChooseNoReprs:
+    def test_choose_lines_project_values_never_str_reprs(self):
+        """Formula lines for object values carry the canonical projection
+        (mode · duration · £/day …), never dataclass reprs."""
+        a = _ref(_HumanValued("drive · 42 min · £9.02/day"), "drive")
+        b = _ref(_HumanValued("transit · 35 min · £8.20/day"), "transit")
+
+        expr = Choose(
+            alternatives={"drive": a, "transit": b},
+            selector=lambda results: "drive",
+        )
+        expr.evaluate()
+        lines = expr.to_formula_lines()
+        values = [line.value for line in lines]
+        assert "drive · 42 min · £9.02/day" in values
+        assert all("_" not in v and "<" not in v and "(" not in v for v in values)
+
+    def test_unprojectable_value_raises_instead_of_repr(self):
+        """An object with no to_provenance_value must raise, not str()."""
+        a = _ref(_Unprojectable(), "drive")
+
+        expr = Choose(
+            alternatives={"drive": a},
+            selector=lambda results: "drive",
+        )
+        expr.evaluate()
+        with pytest.raises(TypeError, match="no provenance projection"):
+            expr.to_formula_lines()
