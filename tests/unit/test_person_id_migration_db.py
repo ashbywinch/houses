@@ -13,7 +13,7 @@ import json
 import sqlite3
 import zlib
 
-from scripts.backfill_person_ids import backfill_persons, collect_mapping, rows_to_remap
+from scripts.backfill_person_ids import apply_migration, collect_mapping, rows_to_remap
 
 SCHEMA = """
 CREATE TABLE node_results (
@@ -68,19 +68,15 @@ def _connect() -> sqlite3.Connection:
 
 
 def _apply(conn):
+    """Drive the REAL migration harness (apply_migration), not a replica."""
     persons = conn.execute(
         "SELECT id, result_json FROM node_results WHERE node_id='persons' ORDER BY created_at DESC LIMIT 1"
     ).fetchone()
     data = json.loads(zlib.decompress(persons["result_json"]).decode())
     mapping = collect_mapping(data["value"])
     remaps = rows_to_remap(conn, mapping)
-    for row_id, node_id, dep_json, blob in remaps:
-        conn.execute(
-            "UPDATE node_results SET node_id=?, dep_timestamps=?, result_json=? WHERE id=?",
-            (node_id, dep_json, blob, row_id),
-        )
-    backfill_persons(conn, persons["id"], data, mapping)
-    conn.commit()
+    ok = apply_migration(conn, "unused.db", persons["id"], data, mapping, remaps, use_backup=False, verify=False)
+    assert ok
     return mapping, remaps
 
 
@@ -131,3 +127,25 @@ def test_apply_is_idempotent_and_preserves_existing_ids():
 
     second = rows_to_remap(conn, collect_mapping(data["value"]))
     assert second == [], "a second pass must find zero remappable rows"
+
+
+def test_apply_advances_source_freshness_only():
+    """The data-staleness contract: rows the migration REWROTE as inputs
+    (persons, person-keyed works) must carry a NEW created_at so the
+    boot sweep's dep-timestamp check sees consumers as stale; re-keyed
+    DERIVED rows keep their clock — their values did not change, and
+    planners must not be marked."""
+    conn = _connect()
+    _seed(conn)
+    _, _ = _apply(conn)
+
+    rows = {r["node_id"]: r for r in conn.execute(
+        "SELECT node_id, created_at FROM node_results")}
+
+    persons_ts = rows["persons"]["created_at"]
+    works_ts = rows["111/works_estimates"]["created_at"]
+    assert persons_ts > "2026-01-01T00:00:00", "the persons source must be stamped newer"
+    assert works_ts > "2026-01-01T00:00:00", "the rewritten works source must be stamped newer"
+    # derived rows keep their original clocks (no fake staleness on unchanged values)
+    assert rows["111/1/Pimlico/walk"]["created_at"] == "2026-01-01T00:00:01"
+    assert rows["111/works_estimates"]["created_at"] == works_ts

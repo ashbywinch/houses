@@ -32,6 +32,7 @@ import sqlite3
 import sys
 import zlib
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 from houses.model.domain import slugify
 
@@ -189,9 +190,36 @@ def backfill_persons(conn, persons_row_id: int, data, mapping) -> None:
     )
 
 
+def _mark_changed_sources(conn) -> None:
+    """Advance the freshness stamp (created_at) of the SOURCE rows whose
+    content this migration rewrote: the persons row and every
+    person-keyed works_estimates row.
+
+    created_at IS the DAG's data-staleness contract (derived_node._is_stale
+    compares each dep row's _db_created_at against the stored
+    dep_timestamps). Rewriting source content without advancing the stamp
+    leaves consumers looking fresh while their inputs changed — exactly
+    the boot-sweep blind spot this migration hit. Derived rows are NOT
+    marked: their values didn't change; the sweep will re-price them
+    through the sources' new stamps, and route planners (address-keyed)
+    stay untouched.
+    """
+    now = datetime.now(UTC).isoformat()
+    conn.execute("UPDATE node_results SET created_at=? WHERE node_id='persons'", (now,))
+    for row in conn.execute(
+        "SELECT id, result_json FROM node_results WHERE node_id LIKE '%/works_estimates'"
+    ).fetchall():
+        try:
+            value = json.loads(zlib.decompress(row["result_json"]).decode()).get("value")
+        except Exception:
+            continue
+        if isinstance(value, dict) and value:
+            conn.execute("UPDATE node_results SET created_at=? WHERE id=?", (now, row["id"]))
+
+
 # lucidlint: ignore long-param-list one-shot migration step — the signature IS its IO boundary;
 # an Options object would be a facade over nothing
-def _apply_remaps(conn, db_path: str, persons_id: int, data, mapping, remaps, *, use_backup: bool, verify: bool) -> bool:  # noqa: E501
+def apply_migration(conn, db_path: str, persons_id: int, data, mapping, remaps, *, use_backup: bool, verify: bool) -> bool:  # noqa: E501  # noqa: E501 split-style: ruff line-length on a call signature the engine splits at call sites
     """Write the transform, checkpoint first, and prove it exhausted the
     work. True on success; False means the run must fail loudly."""
     if use_backup:
@@ -203,6 +231,7 @@ def _apply_remaps(conn, db_path: str, persons_id: int, data, mapping, remaps, *,
             "UPDATE node_results SET node_id=?, dep_timestamps=?, result_json=? WHERE id=?",
             (node_id, dep_json, blob, row_id),
         )
+    _mark_changed_sources(conn)
     backfill_persons(conn, persons_id, data, mapping)
     conn.commit()
     if verify:
@@ -243,7 +272,7 @@ def main() -> int:
         return 1
     remaps = rows_to_remap(conn, mapping)
     if args.apply:
-        ok = _apply_remaps(
+        ok = apply_migration(
             conn,
             args.db,
             persons,
