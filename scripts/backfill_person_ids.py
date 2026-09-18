@@ -27,15 +27,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import zlib
 from collections.abc import Mapping
 
+from houses.model.domain import slugify
+
 DB_PATH = "data/houses.db"
 
-
-_NUMERIC_ID_RE = __import__("re").compile(r"^[0-9]+$")
+_NUMERIC_ID_RE = re.compile(r"^[0-9]+$")
 
 
 def _rekey_node_id(node_id: str, mapping) -> str:
@@ -44,12 +46,18 @@ def _rekey_node_id(node_id: str, mapping) -> str:
 
     Never a whole-string replace: a POI label or step name that equals a
     person name (a destination literally called ``Dad``, a person named
-    ``walk``) would otherwise be re-keyed too.
+    ``walk``) would otherwise be re-keyed too. Both the display name and
+    its slug resolve — the running app may have written slug-segment ids
+    between the code cutover and this migration.
     """
     parts = node_id.split("/")
-    if len(parts) >= 3 and parts[1] in mapping:
-        parts[1] = mapping[parts[1]]
-        return "/".join(parts)
+    if len(parts) >= 3 and parts[0]:
+        pid = mapping.get(parts[1])
+        if pid is None:
+            pid = next((mid for name, mid in mapping.items() if slugify(name) == parts[1]), None)
+        if pid:
+            parts[1] = pid
+            return "/".join(parts)
     return node_id
 
 
@@ -69,13 +77,24 @@ def remap_row(node_id: str, dep_timestamps: Mapping[str, str], result_json_blob:
         try:
             payload = json.loads(zlib.decompress(result_json_blob).decode())
             value = payload.get("value")
+            if isinstance(value, str):
+                # legacy sheet-migration rows store the dict as a JSON STRING
+                nested = json.loads(value)
+                if isinstance(nested, dict):
+                    value = nested
+                    payload["value"] = nested
             if isinstance(value, dict):
-                renamed = {mapping.get(k, k): v for k, v in value.items()}
+                # keys may be the display name (pre-migration) OR the slug
+                # fallback (writes between the code cutover and this run)
+                renamed = {_works_key(k, mapping): v for k, v in value.items()}
                 if renamed != value:
                     payload["value"] = renamed
                 else:
                     payload = None  # already remapped — nothing to write (idempotence)
-        # lucidlint: ignore swallow a corrupt blob stays completely untouched — malparse keeps the row bytes as-is
+            else:
+                payload = None  # not a person-keyed dict — nothing to remap
+        # lucidlint: ignore swallow a corrupt blob stays completely untouched —
+        # malparse keeps the row bytes as-is
         except Exception:
             payload = None
 
@@ -86,6 +105,18 @@ def remap_row(node_id: str, dep_timestamps: Mapping[str, str], result_json_blob:
         json.dumps(dep),
         zlib.compress(json.dumps(payload).encode()) if payload is not None else result_json_blob,
     )
+
+
+def _works_key(key: str, mapping) -> str:
+    """Works-estimate key → person id: the display name or its slug both
+    resolve (writes between the code cutover and this migration store
+    the slug fallback — a rename must not orphan them)."""
+    if key in mapping:
+        return mapping[key]
+    for name, pid in mapping.items():
+        if slugify(name) == key:
+            return pid
+    return key
 # lucidlint: ignore record-shape the mapping is a derived rename table feeding a pure
 # string transform — not a wire record
 def collect_mapping(persons_value) -> dict:
@@ -117,6 +148,8 @@ def collect_mapping(persons_value) -> dict:
     return mapping
 
 
+# lucidlint: ignore latent-class one-shot migration threads one connection through IO steps by design —
+# a class wrapper adds ceremony without a reuse axis; tests pin the transform
 def rows_to_remap(conn, mapping):
     """Scan every row and produce the remapped (id, node_id, dep_timestamps, result_json) entries."""
     out = []
@@ -156,6 +189,35 @@ def backfill_persons(conn, persons_row_id: int, data, mapping) -> None:
     )
 
 
+# lucidlint: ignore long-param-list one-shot migration step — the signature IS its IO boundary;
+# an Options object would be a facade over nothing
+def _apply_remaps(conn, db_path: str, persons_id: int, data, mapping, remaps, *, use_backup: bool, verify: bool) -> bool:  # noqa: E501
+    """Write the transform, checkpoint first, and prove it exhausted the
+    work. True on success; False means the run must fail loudly."""
+    if use_backup:
+        backup_path = db_path + ".pre-person-id-migration"
+        conn.backup(sqlite3.connect(backup_path))
+        print(f"backup written: {backup_path}")
+    for row_id, node_id, dep_json, blob in remaps:
+        conn.execute(
+            "UPDATE node_results SET node_id=?, dep_timestamps=?, result_json=? WHERE id=?",
+            (node_id, dep_json, blob, row_id),
+        )
+    backfill_persons(conn, persons_id, data, mapping)
+    conn.commit()
+    if verify:
+        second_persons = _read_persons(conn)
+        if second_persons is None:
+            print("VERIFY FAILED: persons row missing after apply", file=sys.stderr)
+            return False
+        second = rows_to_remap(conn, collect_mapping(second_persons[1].get("value")))
+        if second:
+            print(f"VERIFY FAILED: {len(second)} rows still remappable", file=sys.stderr)
+            return False
+        print("verify: zero rows remappable after apply")
+    return True
+
+# lucidlint: ignore latent-class main is the thin CLI shell over the same one-shot IO steps (see rows_to_remap)
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="write the changes (dry-run default)")
@@ -181,28 +243,18 @@ def main() -> int:
         return 1
     remaps = rows_to_remap(conn, mapping)
     if args.apply:
-        if args.backup:
-            backup_path = args.db + ".pre-person-id-migration"
-            conn.backup(sqlite3.connect(backup_path))
-            print(f"backup written: {backup_path}")
-        for row_id, node_id, dep_json, blob in remaps:
-            conn.execute(
-                "UPDATE node_results SET node_id=?, dep_timestamps=?, result_json=? WHERE id=?",
-                (node_id, dep_json, blob, row_id),
-            )
-        backfill_persons(conn, persons["id"], data, mapping)
-        conn.commit()
-        if args.verify:
-            second_persons = _read_persons(conn)
-            if second_persons is None:
-                print("VERIFY FAILED: persons row missing after apply", file=sys.stderr)
-                return 2
-            second = rows_to_remap(conn, collect_mapping(second_persons[1].get("value")))
-            if second:
-                print(f"VERIFY FAILED: {len(second)} rows still remappable", file=sys.stderr)
-                return 2
-            print("verify: zero rows remappable after apply")
-
+        ok = _apply_remaps(
+            conn,
+            args.db,
+            persons,
+            data,
+            mapping,
+            remaps,
+            use_backup=args.backup,
+            verify=args.verify,
+        )
+        if not ok:
+            return 2
     print(f"persons: {len(mapping)} | rows remapped: {len(remaps)} (applied)" if args.apply
           else f"persons: {len(mapping)} | rows remapped: {len(remaps)} (dry-run)")
     if remaps:

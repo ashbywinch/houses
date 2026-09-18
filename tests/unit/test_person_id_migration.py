@@ -104,3 +104,41 @@ def test_collect_mapping_keeps_pre_migration_and_numbered_ids():
     assert mapping["Simon"] == "p_simon"
     assert mapping["Lorena"] == "1"
     assert mapping["George"] == "2"
+
+
+def test_works_slug_keyed_row_remaps_to_the_id():
+    """Writes between the code cutover and the migration store the slug
+    fallback key (``ashby``) — the remap must resolve it to the numeric
+    id, never orphan it."""
+    row = blob({"status": "succeeded", "value": {"ashby": {"amount": "25000.00", "currency": "GBP"}}})
+    out = remap_row("42345678/works_estimates", {}, row, {"Ashby": "3"})
+    assert out is not None
+    payload = json.loads(zlib.decompress(out[2]).decode())
+    assert payload["value"]["3"]["amount"] == "25000.00"
+    assert "ashby" not in payload["value"]
+
+def test_slug_segment_node_id_resolves():
+    """Rows written by the running app between the code cutover and the
+    migration carry the slug in the person segment (``simon``) — the
+    re-key must resolve it to the numeric id, not leave it remappable."""
+    out = remap_row("1234/simon/Pimlico/walk", {}, b"", MAPPING)
+    assert out is not None
+    assert out[0] == "1234/1/Pimlico/walk", out[0]
+    dep = {"1234/simon/Pimlico/poi": "2026-01-01"}
+    out2 = remap_row("1234/simon/Pimlico/final_fuel", dep, b"", MAPPING)
+    assert out2 is not None
+    assert json.loads(out2[1]) == {"1234/1/Pimlico/poi": "2026-01-01"}
+
+def test_legacy_string_value_dict_is_healed():
+    """A sheet-migration row stores the works dict as a JSON STRING —
+    the migration parses it, remaps the keys to ids, and a second pass
+    finds nothing left (idempotent)."""
+    row = blob({"status": "succeeded", "value": '{"Ashby": 25000}'})
+    out = remap_row("42345678/works_estimates", {}, row, {"Ashby": "3"})
+    assert out is not None
+    payload = json.loads(zlib.decompress(out[2]).decode())
+    assert payload["value"] == {"3": 25000}
+    # second pass: nothing remappable
+    assert remap_row("42345678/works_estimates", {}, out[2], {"Ashby": "3"}) is None
+
+
