@@ -64,7 +64,15 @@ class Expression(ABC, Generic[T]):
             return str(v)
         if isinstance(v, float):
             return f"{v:,.2f}"
-        return str(v.to_provenance_value())
+        if isinstance(v, str):
+            return v
+        projected = v.to_provenance_value()
+        if not isinstance(projected, str):
+            raise TypeError(
+                f"{type(v).__name__}.to_provenance_value() must return str for formula "
+                f"display, got {type(projected).__name__}"
+            )
+        return projected
 
     @staticmethod
     def to_formula_lines() -> list[FormulaLine]:

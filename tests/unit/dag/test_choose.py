@@ -203,6 +203,19 @@ class TestChooseNoReprs:
         assert "drive · 42 min · £9.02/day" in values
         assert all("_" not in v and "<" not in v and "(" not in v for v in values)
 
+
+    def test_plain_string_values_pass_through(self):
+        """Refs over string-valued nodes (addresses, labels) must not be
+        treated as objects needing a projection."""
+        a = _ref("31 Isambard Road", "address")
+
+        expr = Choose(
+            alternatives={"address": a},
+            selector=lambda results: "address",
+        )
+        expr.evaluate()
+        lines = expr.to_formula_lines()
+        assert any(line.value == "31 Isambard Road" for line in lines)
     def test_unprojectable_value_raises_instead_of_repr(self):
         """An object with no to_provenance_value must raise, not str()."""
         a = _ref(_Unprojectable(), "drive")
