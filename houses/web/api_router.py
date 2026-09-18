@@ -426,33 +426,27 @@ only the properties the DAG rewrote since the last build (the refresh
 seam marks them dirty), never all ~1000 nodes again."""
 
 _dirty_rids: set[str] = set()
-_all_dirty = False
 
 
 def mark_property_dirty(rid: str) -> None:
-    """One property's DAG rows changed — its summary re-serializes."""
+    """One property's DAG rows changed — its summary re-serializes.
+
+    The refresh seam already emits this for every property node the
+    processor rewrites (settings-driven recomputes included) — no
+    coarser 'everything dirty' flag needed."""
     _dirty_rids.add(rid)
-
-
-def mark_all_properties_dirty() -> None:
-    """Settings change re-prices every property."""
-    global _all_dirty
-    _all_dirty = True
 
 
 def _reset_listing_cache() -> None:
     """Clear the listing caches — per-test isolation and app startup."""
-    global _summary_memo, _dirty_rids, _all_dirty
+    global _summary_memo, _dirty_rids
     _summary_memo = {}
     _dirty_rids = set()
-    _all_dirty = False
 
 
 @api_router.get("/properties/all")
 async def get_all_properties():
     import time as _t
-
-    global _all_dirty
 
     _now = _t.monotonic()
     results: dict[str, dict] = {}
@@ -460,7 +454,7 @@ async def get_all_properties():
     for prop in _registered_properties():
         rid = prop.rid
         cached = _summary_memo.get(rid)
-        if cached is not None and not _all_dirty and rid not in _dirty_rids and _now - cached[0] < _ALL_TTL_S:
+        if cached is not None and rid not in _dirty_rids and _now - cached[0] < _ALL_TTL_S:
             wire, score = cached[1], cached[2]
         else:
             # property_nodes.to_json_summary still returns the wire dict (its
@@ -474,7 +468,6 @@ async def get_all_properties():
             _dirty_rids.discard(rid)
         results[rid] = wire
         scores[rid] = score
-    _all_dirty = False
     scored = sorted(results.items(), key=lambda kv: scores[kv[0]], reverse=True)
     return dict(scored)
 

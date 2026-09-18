@@ -81,12 +81,11 @@ def _on_node_refreshed(node):
         asyncio.run_coroutine_threadsafe(_broadcaster_mod.notify_node_refreshed_async(node), _main_loop)
         return
     if kind == "settings":
-        # Settings change re-prices EVERY property — the front page's
-        # refetch must see the new totals immediately.
-        _reset_listing_cache()
+        # The settings push makes every property's DAG recompute — each
+        # property node persists through the seam above and marks its own
+        # rid dirty. Nothing else to invalidate here.
         asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
         return
-    # An unknown or undeclared kind is dropped on purpose — but loudly:
     # a new node kind that was not given a role would otherwise vanish
     # silently, which is exactly how the id-shape bug stayed hidden.
     logger.debug(
