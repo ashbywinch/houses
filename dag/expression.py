@@ -64,13 +64,7 @@ class Expression(ABC, Generic[T]):
             return str(v)
         if isinstance(v, float):
             return f"{v:,.2f}"
-        proj = getattr(v, "to_provenance_value", None)
-        if callable(proj):
-            return str(proj())
-        raise TypeError(
-            f"expression value of type {type(v).__name__} has no provenance projection; "
-            "add to_provenance_value() to it or project it in to_formula_lines"
-        )
+        return str(v.to_provenance_value())
 
     @staticmethod
     def to_formula_lines() -> list[FormulaLine]:

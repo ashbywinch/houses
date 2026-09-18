@@ -212,5 +212,5 @@ class TestChooseNoReprs:
             selector=lambda results: "drive",
         )
         expr.evaluate()
-        with pytest.raises(TypeError, match="no provenance projection"):
+        with pytest.raises(AttributeError):
             expr.to_formula_lines()
