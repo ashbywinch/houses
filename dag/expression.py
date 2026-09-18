@@ -66,13 +66,7 @@ class Expression(ABC, Generic[T]):
             return f"{v:,.2f}"
         if isinstance(v, str):
             return v
-        projected = v.to_provenance_value()
-        if not isinstance(projected, str):
-            raise TypeError(
-                f"{type(v).__name__}.to_provenance_value() must return str for formula "
-                f"display, got {type(projected).__name__}"
-            )
-        return projected
+        return v.to_provenance_value()
 
     @staticmethod
     def to_formula_lines() -> list[FormulaLine]:
