@@ -705,7 +705,17 @@ class DerivedNode(Node[T], Generic[T]):
                     f"{self._id}._get_active_deps() returned None at index {i}. "
                     f"Active deps: {[d._id if d else None for d in active_deps]}"
                 )
-        dep_attempts = [await dep.attempt() for dep in active_deps]
+        dep_pairs = []
+        for dep in active_deps:
+            # Capture the dep's freshness stamp IN THE SAME PASS as its
+            # attempt: a stamp read later — after compute yields — can
+            # belong to a NEWER dep row than the attempt this evaluation
+            # actually bound, and the consumer then records a false
+            # freshness claim (never stale again) while serving the old
+            # value (2026-09-18 group-monthly-cost regression).
+            dep_pairs.append((dep, await dep.attempt(), dep._db_created_at))
+        dep_attempts = [a for _, a, _ in dep_pairs]
+        origin_stamps = {dep._id: stamp for dep, _, stamp in dep_pairs}
         # Propagate impossible before checking pending — if a dep is
         impossible_deps = [a for a in dep_attempts if a.impossible]
         if impossible_deps:
@@ -725,7 +735,7 @@ class DerivedNode(Node[T], Generic[T]):
             else:
                 result = Attempt.impossible(message)
             self._retry_count = 0
-            await self._complete_refresh(result, dep_attempts, active_deps)
+            await self._complete_refresh(result, dep_attempts, active_deps, origin_stamps)
             return
         # A dep still QUEUED in this drain has not settled: computing now
         # would freeze this node from its pre-refresh attempt. Defer —
@@ -739,8 +749,7 @@ class DerivedNode(Node[T], Generic[T]):
             isinstance(dep, DerivedNode) and dep is not self and dep._id in getattr(_sched, "_scheduled", {})
             for dep in active_deps
         ):
-            dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
-            await self._persist_status("pending", dep_timestamps, dep_attempts, active_deps)
+            await self._persist_status("pending", origin_stamps, dep_attempts, active_deps)
             return
         if any(a.pending for a in dep_attempts):
             return
@@ -770,7 +779,7 @@ class DerivedNode(Node[T], Generic[T]):
         # inputs this evaluation actually used, but emit NO change — the
         # value is the same, so dependents have nothing to recalculate
         # (and a planner must not re-plan because a stamp moved).
-        bound_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
+        bound_timestamps = origin_stamps
         identical = (
             result.succeeded and self._attempt.succeeded and result.value_or_none() == self._attempt.value_or_none()
         )
@@ -780,7 +789,7 @@ class DerivedNode(Node[T], Generic[T]):
                 return
             await self._persist_status("succeeded", bound_timestamps, dep_attempts, active_deps)
             return
-        await self._complete_refresh(result, dep_attempts, active_deps)
+        await self._complete_refresh(result, dep_attempts, active_deps, origin_stamps)
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
     async def _build_provenance_dict(
@@ -866,19 +875,21 @@ class DerivedNode(Node[T], Generic[T]):
         )
 
     async def _complete_refresh(
-        self, result: Attempt, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]
+        self,
+        result: Attempt,
+        dep_attempts: list[Attempt],
+        active_deps: tuple[Node, ...],
+        dep_timestamps: dict,
     ) -> None:
         """Store the attempt, stamp its inputs, persist — the shared tail.
 
         One path for every outcome, so the bookkeeping exists once.
+        ``dep_timestamps`` are the stamps captured WITH the bound attempts —
+        never a re-read at persist time (see refresh()).
         """
         self._attempt = result
         self._computed_at = datetime.now(UTC)
         self._persisted_code_version = self._current_code_version()
-        # _db_created_at may be None for deps never persisted (e.g. a
-        # freshly-created node). Storing None means the next staleness
-        # check skips this dep — the _computed_at comparison still works.
-        dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
         if result.pending:
             await self._persist_status("pending", dep_timestamps, dep_attempts, active_deps)
             return
