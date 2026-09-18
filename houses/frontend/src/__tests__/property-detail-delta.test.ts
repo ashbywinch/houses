@@ -139,4 +139,28 @@ describe('PropertyDetail monthly figures', () => {
     const text = wrapper.text()
     expect(text).toContain('£2,356')
   })
+
+  it('the top rows show the signed delta, never NaN, for a non-home property', async () => {
+    vi.mocked(fetchPropertyDetail).mockResolvedValue({
+      ...detailFixture,
+      affordability: {
+        ...detailFixture.affordability,
+        group_monthly_cost: {
+          ...detailFixture.affordability.group_monthly_cost,
+          value: {
+            ...detailFixture.affordability.group_monthly_cost.value,
+            delta_vs_home: {
+              couple: { value: '+1399.24', approx: false },
+              others: { value: '-283.84', approx: false },
+            },
+          },
+        },
+      },
+    } as any)
+    const wrapper = await mountDetail()
+    const text = wrapper.text()
+    expect(text).toContain('+£1,399/mo')
+    expect(text).toContain('−£284/mo')
+    expect(text).not.toContain('NaN')
+  })
 })

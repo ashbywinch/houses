@@ -299,7 +299,7 @@ async function saveAddress() {
               :title="monthlyGroups.coupleTitle ?? (monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined)"
             >
               <template v-if="monthlyGroups.coupleDelta !== null && monthlyGroups.vsAddress">
-                {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(monthlyGroups.couple.toLocaleString()) }}/mo
+                {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(String(monthlyGroups.couple)) }}/mo
                 <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
               </template>
               <template v-else>
@@ -312,7 +312,7 @@ async function saveAddress() {
               :title="monthlyGroups?.othersTitle ?? (monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined)"
             >
               <template v-if="monthlyGroups.othersDelta !== null && monthlyGroups.vsAddress">
-                {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(monthlyGroups.others.toLocaleString()) }}/mo
+                {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(String(monthlyGroups.others)) }}/mo
                 <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
               </template>
               <template v-else>
