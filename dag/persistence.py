@@ -268,7 +268,7 @@ def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any]
     if before is None:
         row = conn.execute(
             "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
-            " WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
+            " WHERE node_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (node_id,),
         ).fetchone()
     else:

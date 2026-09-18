@@ -149,3 +149,43 @@ def test_apply_advances_source_freshness_only():
     # derived rows keep their original clocks (no fake staleness on unchanged values)
     assert rows["111/1/Pimlico/walk"]["created_at"] == "2026-01-01T00:00:01"
     assert rows["111/works_estimates"]["created_at"] == works_ts
+
+
+def test_apply_bumps_only_the_current_persons_row():
+    """Append-order must survive: the persons freshness bump targets the
+    CURRENT row by id only. Stamping every history version identically
+    makes the latest-row query arbitrary — an old row can win the tie and
+    the household silently shrink (the clean-room finding)."""
+    conn = _connect()
+    _seed(conn)
+    # a legacy 3-person history row, older than the current 4-person row
+    legacy = {"status": "succeeded", "value": [
+        {"name": "Simon"}, {"name": "Lorena"}, {"name": "George"},
+    ]}
+    _row(conn, "persons", legacy, created="2025-01-01T00:00:00")
+
+    _, _ = _apply(conn)
+
+    rows = sorted(
+        conn.execute(
+            "SELECT id, created_at, result_json FROM node_results"
+            " WHERE node_id='persons' ORDER BY created_at, id"
+        ).fetchall(),
+        key=lambda r: (r["created_at"], r["id"]),
+    )
+    assert len(rows) == 2
+    legacy_row, current_row = rows
+    # the old version keeps its clock; only the current row advanced
+    assert legacy_row["created_at"] == "2025-01-01T00:00:00"
+    assert current_row["created_at"] > "2026-01-01T00:00:00"
+    current = json.loads(zlib.decompress(current_row["result_json"]).decode())["value"]
+    assert {p["name"]: p["person_id"] for p in current} == {"Simon": "1", "Lorena": "2", "Ashby": "3", "George": "4"}
+    # the script's own reader must resolve the SAME current row
+    read_id = conn.execute(
+        "SELECT id FROM node_results WHERE node_id='persons'"
+        " ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()["id"]
+    assert read_id == current_row["id"]
+    current_names = [p["name"] for p in current]
+    assert current_names == ["Simon", "Lorena", "Ashby", "George"]
+

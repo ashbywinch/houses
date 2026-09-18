@@ -166,7 +166,8 @@ def rows_to_remap(conn, mapping):
 def _read_persons(conn):
     """The latest persons row as (id, decoded dict); None when absent."""
     persons = conn.execute(
-        "SELECT id, result_json FROM node_results WHERE node_id='persons' ORDER BY created_at DESC LIMIT 1"
+        "SELECT id, result_json FROM node_results WHERE node_id='persons'"
+        " ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     if persons is None:
         return None
@@ -190,10 +191,13 @@ def backfill_persons(conn, persons_row_id: int, data, mapping) -> None:
     )
 
 
-def _mark_changed_sources(conn) -> None:
+def _mark_changed_sources(conn, persons_row_id: int) -> None:
     """Advance the freshness stamp (created_at) of the SOURCE rows whose
     content this migration rewrote: the persons row and every
-    person-keyed works_estimates row.
+    person-keyed works_estimates row. The persons bump targets the
+    CURRENT row by id — never the whole history: stamping every
+    version identically destroys the append-order the latest-row query
+    relies on (and an old row can win the tie).
 
     created_at IS the DAG's data-staleness contract (derived_node._is_stale
     compares each dep row's _db_created_at against the stored
@@ -205,7 +209,7 @@ def _mark_changed_sources(conn) -> None:
     stay untouched.
     """
     now = datetime.now(UTC).isoformat()
-    conn.execute("UPDATE node_results SET created_at=? WHERE node_id='persons'", (now,))
+    conn.execute("UPDATE node_results SET created_at=? WHERE id=?", (now, persons_row_id))
     for row in conn.execute(
         "SELECT id, result_json FROM node_results WHERE node_id LIKE '%/works_estimates'"
     ).fetchall():
@@ -226,12 +230,17 @@ def apply_migration(conn, db_path: str, persons_id: int, data, mapping, remaps, 
         backup_path = db_path + ".pre-person-id-migration"
         conn.backup(sqlite3.connect(backup_path))
         print(f"backup written: {backup_path}")
-    for row_id, node_id, dep_json, blob in remaps:
+    for idx, (row_id, node_id, dep_json, blob) in enumerate(remaps):
         conn.execute(
             "UPDATE node_results SET node_id=?, dep_timestamps=?, result_json=? WHERE id=?",
             (node_id, dep_json, blob, row_id),
         )
-    _mark_changed_sources(conn)
+        if idx % 10000 == 9999:
+            conn.commit()  # bound the journal: a single 860k-row transaction
+            # needs a ~2.4 GB rollback journal — the original out-of-disk crash
+            # (2026-09-18). Batched commits keep it bounded and make the
+            # idempotent migration resumable after any interruption.
+    _mark_changed_sources(conn, persons_id)
     backfill_persons(conn, persons_id, data, mapping)
     conn.commit()
     if verify:
