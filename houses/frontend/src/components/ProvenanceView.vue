@@ -711,12 +711,21 @@ const sharedRefsList = computed(() =>
           <span v-if="node.status === 'impossible'" class="detail-node__err" role="alert">⚠ {{ node.error || 'Unavailable' }}</span>
           <span v-else-if="node.value" class="detail-node__value">{{ node.value }}</span>
           <!-- A multi-line formula is a real breakdown (per-person equity
-               shares, commute legs) — render it where the node sits so the
-               unpack is visible without hunting for the root. -->
-          <span
+               shares, commute legs) — each figure on its OWN line so it
+               survives phone widths; never a joined narrative string. -->
+          <div
             v-if="activeLevel === 'detail' && !node.isRepeat && (node.formula?.lines?.length ?? 0) > 1"
             class="detail-node__formula"
-          >{{ node.formula!.lines.map(l => `${l.label}: ${l.value}`).join(' · ') }}</span>
+          >
+            <div
+              v-for="(line, li) in node.formula!.lines"
+              :key="li"
+              class="detail-node__formula-line"
+            >
+              <span class="detail-node__formula-label">{{ line.label }}</span>
+              <span class="detail-node__formula-value">{{ line.value }}</span>
+            </div>
+          </div>
           <span v-if="node.desc" class="detail-node__desc">— {{ node.desc }}</span>
           <a
             v-if="node.isRepeat"
@@ -1136,6 +1145,7 @@ const sharedRefsList = computed(() =>
 }
 .detail-node {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
@@ -1150,23 +1160,29 @@ const sharedRefsList = computed(() =>
   border-radius: var(--radius-full);
   flex-shrink: 0;
 }
-.detail-node__label {
-  font-weight: var(--fw-semibold);
-  color: var(--slate-700);
-  font-size: var(--fs-xs);
+.detail-node__formula {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0 0.4rem;
+  margin-left: 1rem;
+  border-top: 1px dashed var(--slate-200, #e2e8f0);
 }
-.detail-node__desc {
+.detail-node__formula-line {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.detail-node__formula-label {
   color: var(--text-secondary);
   font-size: var(--fs-xs);
+  flex-shrink: 0;
 }
-.detail-node__formula {
-  color: var(--text-tertiary, var(--text-secondary));
+.detail-node__formula-value {
   font-size: var(--fs-xs);
-  max-width: 46ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
+  color: var(--slate-700);
+  min-width: 0;
 }
 /* Shared nodes: the full copy links out, every other occurrence links
    back to it — never a dead-end badge. */
