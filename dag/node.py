@@ -253,6 +253,16 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         """
         ...
 
+    def provenance_display_value(self, att: Attempt[Any]) -> Any:
+        """The value a PARENT tree states for this node's bound attempt.
+
+        Defaults to the raw attempt value. Nodes whose value is a machine
+        dict (commute breakdowns, route plans) override this with a human
+        summary — without it, every parent's provenance embeds the raw
+        dump and the same dict repeats through the whole tree.
+        """
+        return att.value
+
     # lucidlint: ignore record-shape to_json returns the serialized node record (coding-standards.md)
     async def to_json(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None

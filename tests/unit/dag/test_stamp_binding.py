@@ -11,6 +11,7 @@ again — it serves the wrong figure forever.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import override
 
@@ -78,3 +79,33 @@ async def test_consumer_records_the_captured_stamp_not_a_mid_flight_rewrite():
         "the compute bound, not a stamp read after compute yielded"
     )
     assert row["value"] == 2, "the refresh must bind the pre-rewrite attempt"
+
+
+class _DictValued(DerivedNode[dict]):
+    """A dep whose value is a machine dict — parent trees must state it
+    humanly, never embed the raw dump."""
+
+    def __init__(self, node_id, src):
+        super().__init__(node_id, dict, (src,))
+
+    @override
+    def provenance_display_value(self, att) -> str:
+        return "£9,166.88/yr"
+
+    @override
+    async def compute(self, src: Attempt) -> Attempt:
+        return Attempt.succeeded({"persons": {"Simon": {"daily_gbp": "13.86"}}, "yearly_total_gbp": "9166.88"})
+
+
+@pytest.mark.asyncio
+async def test_parent_tree_states_a_dict_deps_value_humanly():
+    src = UserInputNode("dv_src", int)
+    dep = _DictValued("dv_dict", src)
+    await flush_processor()
+    src.push(1, "test")
+    await flush_processor()
+    att = dep.latest_attempt()
+
+    sub = await DerivedNode._dep_recorded_subtree(dep, att)
+    assert sub.value == "£9,166.88/yr", "a dict dep must be stated humanly in parent trees"
+    assert "daily_gbp" not in json.dumps(sub.to_dict())

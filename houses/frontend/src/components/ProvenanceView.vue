@@ -54,6 +54,10 @@ type FlatNode = {
   status: string
   error: string
   expressionType: string
+  /** The calc's own formula — carried so the full-detail tree can show
+   *  multi-line breakdowns (per-person equity shares, commute legs)
+   *  where they actually sit, not just at the root. */
+  formula: NonNullable<Provenance['formula']> | null
 }
 
 function daysSince(dateStr: string): number | null {
@@ -231,6 +235,7 @@ function buildFlattenedTree(root: Provenance): FlatNode[] {
       status: n.status ?? '',
       error: n.error ?? '',
       expressionType: n.expressionType ?? '',
+      formula: n.formula ?? null,
     })
     if (!isRepeat) {
       for (const [childId, child] of childrenById.get(nodeId) ?? []) {
@@ -705,6 +710,13 @@ const sharedRefsList = computed(() =>
           <span v-if="node.expressionType" class="detail-node__expr">{{ node.expressionType }}</span>
           <span v-if="node.status === 'impossible'" class="detail-node__err" role="alert">⚠ {{ node.error || 'Unavailable' }}</span>
           <span v-else-if="node.value" class="detail-node__value">{{ node.value }}</span>
+          <!-- A multi-line formula is a real breakdown (per-person equity
+               shares, commute legs) — render it where the node sits so the
+               unpack is visible without hunting for the root. -->
+          <span
+            v-if="activeLevel === 'detail' && !node.isRepeat && (node.formula?.lines?.length ?? 0) > 1"
+            class="detail-node__formula"
+          >{{ node.formula!.lines.map(l => `${l.label}: ${l.value}`).join(' · ') }}</span>
           <span v-if="node.desc" class="detail-node__desc">— {{ node.desc }}</span>
           <a
             v-if="node.isRepeat"
@@ -1144,8 +1156,17 @@ const sharedRefsList = computed(() =>
   font-size: var(--fs-xs);
 }
 .detail-node__desc {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: var(--fs-xs);
+}
+.detail-node__formula {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: var(--fs-xs);
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 /* Shared nodes: the full copy links out, every other occurrence links
    back to it — never a dead-end badge. */

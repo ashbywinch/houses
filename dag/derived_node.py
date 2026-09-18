@@ -969,12 +969,12 @@ class DerivedNode(Node[T], Generic[T]):
                 return await dep.live_provenance()
             return Provenance(
                 label=getattr(dep, "display_name", dep._id),
-                value=project_value(att.value) if att.succeeded else None,
+                value=project_value(dep.provenance_display_value(att)) if att.succeeded else None,
                 status="impossible" if att.impossible else ("pending" if att.pending else ""),
                 error=att.error or "",
             )
         if att is not None:
-            sub.value = project_value(att.value) if att.succeeded else None
+            sub.value = project_value(dep.provenance_display_value(att)) if att.succeeded else None
             sub.status = "impossible" if att.impossible else ("pending" if att.pending else "")
             sub.error = att.error or ""
         return sub

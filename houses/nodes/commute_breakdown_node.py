@@ -178,6 +178,17 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         )
 
     @override
+    def provenance_display_value(self, att) -> str:
+        """Parent trees state the breakdown as the human yearly total —
+        never the raw per-person dict (which would repeat through the
+        whole provenance tree)."""
+        v = att.value_or_none() if att is not None else None
+        yearly = (v or {}).get("yearly_total_gbp")
+        if yearly is None:
+            return "Commute Breakdown"
+        return f"£{Decimal(str(yearly)):,.2f}/yr"
+
+    @override
     async def build_provenance(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
     ):
