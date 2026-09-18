@@ -19,6 +19,7 @@ import houses.scrape_queue as _scrape_queue
 import houses.services as _services_mod
 import houses.services_provider as _sp
 import houses.town_desc as _town_desc
+import houses.web.api_router as _api_mod
 import houses.web.broadcaster as _broadcaster_mod
 from dag.persistence import delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
@@ -54,8 +55,6 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 hands broadcaster pushes to it (see _on_node_refreshed)."""
 
 
-
-
 def _on_node_refreshed(node):
     """The DAG→frontend seam, routed by what refreshed.
 
@@ -76,9 +75,10 @@ def _on_node_refreshed(node):
         return
     kind = getattr(node, "refresh_kind", None)
     if kind == "property":
-        asyncio.run_coroutine_threadsafe(
-            _broadcaster_mod.notify_node_refreshed_async(node), _main_loop
-        )
+        rid = getattr(node, "_id", "").split("/", 1)[0]
+        if rid:
+            _api_mod.mark_property_dirty(rid)
+        asyncio.run_coroutine_threadsafe(_broadcaster_mod.notify_node_refreshed_async(node), _main_loop)
         return
     if kind == "settings":
         # Settings change re-prices EVERY property — the front page's
@@ -94,8 +94,6 @@ def _on_node_refreshed(node):
         getattr(node, "_id", "?"),
         kind,
     )
-
-
 
 
 def _deploy_hash() -> str:
@@ -692,9 +690,7 @@ async def health() -> JSONResponse:
     try:
         from houses.database import get_connection
 
-        row = get_connection().execute(
-            "SELECT MAX(created_at) AS last_write FROM node_results"
-        ).fetchone()
+        row = get_connection().execute("SELECT MAX(created_at) AS last_write FROM node_results").fetchone()
         last_write = row["last_write"] or "" if row is not None else ""
     except Exception:  # lucidlint: ignore broad-except boundary — a health probe never takes the app down
         db = "error"

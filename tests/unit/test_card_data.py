@@ -637,19 +637,16 @@ class TestCardSorting:
 
 class TestListingCache:
     """The front-page listing cache isolates within a TTL window — the
-    page must not block behind DAG writer churn (scrapes hold the sqlite
-    write lock)."""
+    batch contract: a request re-serializes ONLY the properties the DAG
+    rewrote (dirty), never every property again."""
 
-    def test_second_call_within_ttl_serves_the_cached_listing(self, monkeypatch):
-        import houses.web.api_router as ar
-
-        calls = {"n": 0}
-
+    def _fake_props(self, calls, rids):
         class _FakeProp:
             def __init__(self, rid):
                 self.rid = rid
 
             async def to_json_summary(self):
+                calls["serialized"].append(self.rid)
                 return {
                     "rid": self.rid,
                     "commutes": {},
@@ -660,72 +657,70 @@ class TestListingCache:
                     "walkability": {"value": None},
                 }
 
-        def fake_registered():
-            calls["n"] += 1
-            return [_FakeProp("111")]
+        return [_FakeProp(r) for r in rids]
 
-        from houses.web.api_router import get_all_properties
+    def _patch(self, monkeypatch, props):
+        import houses.web.api_router as ar
 
-        monkeypatch.setattr(ar, "_registered_properties", fake_registered)
+        monkeypatch.setattr(ar, "_registered_properties", lambda: props)
         monkeypatch.setattr(
-            ar, "_attach_scrape_state", lambda s, rid: s.to_dict() if hasattr(s, "to_dict") else dict(s)
+            ar,
+            "_attach_scrape_state",
+            lambda s, rid: s.to_dict() if hasattr(s, "to_dict") else dict(s),
         )
 
         async def fake_delta(wire, rid, registry):
             return wire
 
         monkeypatch.setattr(ar, "attach_monthly_delta", fake_delta)
+        return ar
 
+    def test_second_call_within_ttl_serves_memoized_summaries(self, monkeypatch):
         import asyncio
 
-        first = asyncio.run(get_all_properties())
-        assert "111" in first
-        second = asyncio.run(get_all_properties())
-        assert calls["n"] == 1, "the second call must serve the cached listing, not rebuild"
-        assert second["111"]["rid"] == "111"
+        from houses.web.api_router import get_all_properties
+
+        calls = {"serialized": []}
+        props = self._fake_props(calls, ["111"])
+        self._patch(monkeypatch, props)
+
+        _ = asyncio.run(get_all_properties())
+        _ = asyncio.run(get_all_properties())
+        # the memo — NOT a re-serialization — serves the second call.
+        assert calls["serialized"] == ["111"], "the second call must not re-serialize"
 
     def test_ttl_expiry_rebuilds(self, monkeypatch):
-        import houses.web.api_router as ar
-
-        calls = {"n": 0}
-
-        class _FakeProp:
-            def __init__(self, rid):
-                self.rid = rid
-
-            async def to_json_summary(self):
-                return {
-                    "rid": self.rid,
-                    "commutes": {},
-                    "schools": {
-                        "primary": {"school": {"status": "impossible", "value": None}},
-                        "secondary": {"school": {"status": "impossible", "value": None}},
-                    },
-                    "walkability": {"value": None},
-                }
-
-        def fake_registered():
-            calls["n"] += 1
-            return [_FakeProp("222")]
-
-        monkeypatch.setattr(ar, "_registered_properties", fake_registered)
-        monkeypatch.setattr(
-            ar, "_attach_scrape_state", lambda s, rid: s.to_dict() if hasattr(s, "to_dict") else dict(s)
-        )
-
-        async def fake_delta(wire, rid, registry):
-            return wire
-
-        monkeypatch.setattr(ar, "attach_monthly_delta", fake_delta)
         import asyncio
 
+        import houses.web.api_router as ar
         from houses.web.api_router import get_all_properties
+
+        calls = {"serialized": []}
+        props = self._fake_props(calls, ["222"])
+        self._patch(monkeypatch, props)
 
         first = asyncio.run(get_all_properties())
         assert "222" in first
-        # Age the cache past the TTL: the next call rebuilds.
-        if ar._all_cache is not None:
-            ar._all_cache = (ar._all_cache[0] - 10.0, ar._all_cache[1])
-        again = asyncio.run(get_all_properties())
-        assert calls["n"] == 2
-        assert "222" in again
+        # Age the memo past the TTL: the next call rebuilds.
+        rid = "222"
+        ar._summary_memo[rid] = (ar._summary_memo[rid][0] - 10.0, *ar._summary_memo[rid][1:])
+        _ = asyncio.run(get_all_properties())
+        assert calls["serialized"] == ["222", "222"]
+
+    def test_dirty_rid_rebuilds_only_that_property(self, monkeypatch):
+        import asyncio
+
+        import houses.web.api_router as ar
+        from houses.web.api_router import get_all_properties, mark_property_dirty
+
+        calls = {"serialized": []}
+        props = self._fake_props(calls, ["111", "222"])
+        self._patch(monkeypatch, props)
+
+        _ = asyncio.run(get_all_properties())
+        assert set(calls["serialized"]) == {"111", "222"}
+        mark_property_dirty("111")
+        _ = asyncio.run(get_all_properties())
+        # only the dirty property re-serializes; 222 serves from the memo.
+        assert calls["serialized"] == ["111", "222", "111"]
+        assert set(ar._summary_memo) == {"111", "222"}

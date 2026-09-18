@@ -100,7 +100,6 @@ class _StalenessReport:
         return d
 
 
-
 def _registered_properties() -> Iterable[PropertyNodes]:
     """Every registered property — the skip-absent case lives here once
     (list endpoints iterate; the per-endpoint None check is gone)."""
@@ -118,6 +117,7 @@ def _require_property(rid: str) -> PropertyNodes:
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
     return prop
+
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -191,6 +191,8 @@ def _require_family_member(request: Request) -> None:
     )
     if not session_user.get("is_superuser") and not view.session_name():
         raise HTTPException(status_code=403, detail="This account is not linked to a family member")
+
+
 @dataclass(frozen=True)
 class _WhatIfApplyJson:
     """The what-if apply request body: the person updates to merge."""
@@ -201,6 +203,7 @@ class _WhatIfApplyJson:
     def from_dict(cls, raw: dict) -> _WhatIfApplyJson:
         people = raw.get("persons")
         return cls(persons=people if isinstance(people, list) else [])
+
 
 @api_router.post("/what-if/apply")
 # lucidlint: ignore record-shape the FastAPI request body IS the wire boundary — _WhatIfApplyJson.from_dict ingests it
@@ -398,6 +401,7 @@ def _score_from_summary(s: SummaryJson) -> int:
     score += _walkability_score(s.walkability)
     return score
 
+
 # lucidlint: ignore record-shape the scrape attach IS the serialization boundary — the summary record
 # carries no scrape field (coding-standards.md)
 def _attach_scrape_state(summary: SummaryJson | PropertyJson, rid: str) -> dict:
@@ -411,43 +415,68 @@ def _attach_scrape_state(summary: SummaryJson | PropertyJson, rid: str) -> dict:
         d["scrape"] = status.to_dict()
     return d
 
+
 _ALL_TTL_S = 2.0
 """Listing TTL — the front page must not block behind DAG writer churn
 (scrapes/recomputes hold the sqlite write lock; ~1000 node serializations
 per request contend). Serves ≤2s-stale data from memory instead."""
-_all_cache: tuple[float, dict[str, dict]] | None = None
+_summary_memo: dict[str, tuple[float, dict, int]] = {}
+"""Per-property serialized summaries — the batch: a request re-serializes
+only the properties the DAG rewrote since the last build (the refresh
+seam marks them dirty), never all ~1000 nodes again."""
 
+_dirty_rids: set[str] = set()
+_all_dirty = False
+
+
+def mark_property_dirty(rid: str) -> None:
+    """One property's DAG rows changed — its summary re-serializes."""
+    _dirty_rids.add(rid)
+
+
+def mark_all_properties_dirty() -> None:
+    """Settings change re-prices every property."""
+    global _all_dirty
+    _all_dirty = True
 
 
 def _reset_listing_cache() -> None:
-    """Clear the listing cache — per-test isolation and app startup."""
-    global _all_cache
-    _all_cache = None
+    """Clear the listing caches — per-test isolation and app startup."""
+    global _summary_memo, _dirty_rids, _all_dirty
+    _summary_memo = {}
+    _dirty_rids = set()
+    _all_dirty = False
 
 
 @api_router.get("/properties/all")
 async def get_all_properties():
     import time as _t
 
-    global _all_cache
+    global _all_dirty
+
     _now = _t.monotonic()
-    if _all_cache is not None and _now - _all_cache[0] < _ALL_TTL_S:
-        return _all_cache[1]
     results: dict[str, dict] = {}
     scores: dict[str, int] = {}
     for prop in _registered_properties():
         rid = prop.rid
-        # property_nodes.to_json_summary still returns the wire dict (its
-        # record conversion is out of this wave's file set) — reconstruct
-        # the record at the consumption boundary.
-        summary = SummaryJson(**await prop.to_json_summary())
-        wire = _attach_scrape_state(summary, rid)
-        await attach_monthly_delta(wire, rid, get_services().property_registry)
+        cached = _summary_memo.get(rid)
+        if cached is not None and not _all_dirty and rid not in _dirty_rids and _now - cached[0] < _ALL_TTL_S:
+            wire, score = cached[1], cached[2]
+        else:
+            # property_nodes.to_json_summary still returns the wire dict (its
+            # record conversion is out of this wave's file set) — reconstruct
+            # the record at the consumption boundary.
+            summary = SummaryJson(**await prop.to_json_summary())
+            wire = _attach_scrape_state(summary, rid)
+            await attach_monthly_delta(wire, rid, get_services().property_registry)
+            score = _score_from_summary(summary)
+            _summary_memo[rid] = (_now, wire, score)
+            _dirty_rids.discard(rid)
         results[rid] = wire
-        scores[rid] = _score_from_summary(summary)
+        scores[rid] = score
+    _all_dirty = False
     scored = sorted(results.items(), key=lambda kv: scores[kv[0]], reverse=True)
-    _all_cache = (_now, dict(scored))
-    return _all_cache[1]
+    return dict(scored)
 
 
 @dataclass(frozen=True)
@@ -678,9 +707,6 @@ async def get_settings(request: Request):
     return (await settings_payload(effective_session_user(request))).to_dict()
 
 
-
-
-
 _PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
 # Large house-purchase / deposit amounts are whole pounds — never pence
 # (the UI enforces this too; this is the hard guarantee).
@@ -773,7 +799,6 @@ def _parse_places_of_interest(pois: object) -> tuple:
 def _coerce_person_updates(
     updates: MutableMapping[str, Any], target: Person, merge_destinations: bool
 ) -> MutableMapping[str, Any]:
-
     """Parse each present field with its own parser — the per-field guards
     are a flat table of rules, extracted so _person_from_dict stays a
     merge, not a parser."""
@@ -803,6 +828,7 @@ def _coerce_person_updates(
             updates["places_of_interest"] = parsed
     return updates
 
+
 def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = False) -> Person:
     """MERGE an API dict into an existing Person — never replace.
 
@@ -818,9 +844,7 @@ def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = Fal
     the body's list replaces the tuple (the settings UI manages the full
     destination list, where omission means removal).
     """
-    updates = _coerce_person_updates(
-        {k: v for k, v in d.items() if k != "thresholds"}, target, merge_destinations
-    )
+    updates = _coerce_person_updates({k: v for k, v in d.items() if k != "thresholds"}, target, merge_destinations)
     return replace(target, **updates)
 
 

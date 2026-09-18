@@ -1087,6 +1087,7 @@ const sharedRefsList = computed(() =>
 }
 .formula-explain__step {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--sp-3);
   font-size: var(--fs-sm);
@@ -1116,7 +1117,9 @@ const sharedRefsList = computed(() =>
   font-weight: var(--fw-semibold);
   color: var(--slate-800);
   margin-left: auto;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .formula-explain__result {
   margin-top: var(--sp-3);
@@ -1178,6 +1181,14 @@ const sharedRefsList = computed(() =>
   color: var(--text-secondary);
   font-size: var(--fs-xs);
   flex-shrink: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.detail-node__formula-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
 }
 .detail-node__formula-value {
   font-size: var(--fs-xs);
