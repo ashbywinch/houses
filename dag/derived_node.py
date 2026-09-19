@@ -903,7 +903,15 @@ class DerivedNode(Node[T], Generic[T]):
         dep_attempts: list[Attempt],
         active_deps: tuple[Node, ...],
     ) -> None:
-        """Serialize for *status* and write the row with its input stamps."""
+        """Serialize for *status* and write the row with its input stamps.
+
+        ``_computed_at`` is recorded here too: an identical-value refresh
+        (refresh()'s dedupe short-circuit) recomputed at THIS moment, and
+        the node must not keep reporting its original compute time — that
+        would read as stale against any dependency that persisted since
+        (2026-09-19: stamp-stale geocode nodes re-enqueued every sweep).
+        """
+        self._computed_at = datetime.now(UTC)
         result_dict = await self._safe_result_dict(status, dep_attempts, active_deps)
         self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
 
