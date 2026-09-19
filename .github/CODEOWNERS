@@ -1,0 +1,4 @@
+# Changes to the docs folder require the maintainer's review — the
+# standards, architecture, and process documents there are load-bearing
+# for every contributor and every automation run.
+/docs/ @ashbywinch
