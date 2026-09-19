@@ -109,9 +109,17 @@ Exception: interactive/CLI setup flows may pre-check configuration when the natu
 
 **Delete dead code, don't deprecate it.** A shim compiles, passes tests, lulls readers into thinking it's real, and never gets cleaned up. Rename/remove + update every caller in the same commit. No aliases, no re-exports, no "will remove in a future version".
 
-### Never swallow errors
+### Never swallow errors — fail fast
 
-Every `except` block must log, re-raise, or handle observably. Bare `except: pass` / silent `except Exception:` forbidden. Safe-to-ignore errors log at `DEBUG` with an explanation.
+The only acceptable responses to an error are to **propagate it** (re-raise)
+or **terminate the operation with the error surfaced**. Logging and
+continuing is a swallowed error even with a log line: the caller proceeds
+on a premise the operation just disproved, and the failure is invisible
+to anything that depends on the outcome. Bare `except: pass`, silent
+`except Exception:`, and log-then-continue are all forbidden. A deliberate
+degrade is acceptable only when the error is turned into an explicit error
+**value** the caller decides on (None / error status / retry) — never a
+continuation that pretends nothing happened.
 
 ```python
 # ✗ invisible
@@ -119,11 +127,16 @@ try:
     do_something()
 except Exception:
     pass
-# ✓ observable
+# ✗ log-then-continue — still swallows the failure's consequence
 try:
     do_something()
 except Exception as e:
     logger.debug("do_something failed (non-fatal): %s", e)
+# ✓ fail fast
+try:
+    do_something()
+except Exception as e:
+    raise OperationError("do_something failed") from e
 ```
 
 DAG-specific error rules (`AttemptError` contract, API services return Attempt vs pure code throw, transient re-raise/retry, nodes propagate never re-literalize) → [dag-library.md](dag-library.md) *The three-state result: `Attempt[T]`*.

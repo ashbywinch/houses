@@ -94,10 +94,11 @@ def remap_row(node_id: str, dep_timestamps: Mapping[str, str], result_json_blob:
                     payload = None  # already remapped — nothing to write (idempotence)
             else:
                 payload = None  # not a person-keyed dict — nothing to remap
-        # lucidlint: ignore swallow a corrupt blob stays completely untouched —
-        # malparse keeps the row bytes as-is
-        except Exception:
-            payload = None
+        except Exception as exc:
+            raise RuntimeError(
+                f"backfill aborted: works_estimates row for {node_id!r} is not "
+                f"parseable ({exc.__class__.__name__}: {exc})"
+            ) from exc
 
     if node_id == new_node_id and dep == dict(dep_timestamps) and payload is None:
         return None

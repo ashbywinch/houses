@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import zlib
 
+import pytest
+
 from scripts.backfill_person_ids import collect_mapping, remap_row
 
 MAPPING = {"Simon": "1", "Lorena": "2"}
@@ -142,3 +144,9 @@ def test_legacy_string_value_dict_is_healed():
     assert remap_row("42345678/works_estimates", {}, out[2], {"Ashby": "3"}) is None
 
 
+def test_corrupt_works_estimates_blob_fails_fast():
+    """A works_estimates row the migration cannot parse must ABORT the
+    run — silently keeping its old person keys is a swallowed error
+    (coding-standards: never swallow errors — fail fast)."""
+    with pytest.raises(RuntimeError, match="not parseable"):
+        remap_row("123/works_estimates", {}, b"this-is-not-zlib", MAPPING)
