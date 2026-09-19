@@ -467,6 +467,20 @@ describe('PropertyCard error handling', () => {
     // an uncomputable total is never hidden silently — it reads as unknown
     expect(wrapper.text()).toContain('£—/mo')
   })
+  it('shows the DAG reason when the scraped price could not be parsed', () => {
+    const summary = makeSummary({
+      rightmove_price: {
+        succeeded: false, value: null, error: "price value 'ask the agent' is not parseable",
+        provenance: { label: 'test' },
+      },
+      total_monthly_cost: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Price unavailable')
+    expect(wrapper.text()).toContain('ask the agent')
+    expect(wrapper.text()).not.toContain('£500,000')
+  })
+
 
   it('handles empty commutes', () => {
     const wrapper = mountCard({ rid: '123', data: makeSummary() })

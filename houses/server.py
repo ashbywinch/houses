@@ -112,9 +112,8 @@ def _deploy_hash() -> str:
     return ""
 
 
-def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
+def _seed_dag(rid2: str, enriched: EnrichedProperty, scrape_errors: dict[str, str] | None = None) -> bool:
     """Seed the DAG for *rid2*; returns True on success.
-
     Reuses the registry's existing PropertyNodes when present (re-seeding
     after a scrape report must push onto the SAME nodes — a second
     PropertyNodes instance collides by node-id in the scheduler and its
@@ -134,6 +133,7 @@ def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
                 "rightmove_price": prop.rightmove_price,
                 "rightmove_location": prop.rightmove_location,
             },
+            scrape_errors=scrape_errors,
         )
         registry.register(rid2, prop)
         logger.info("Seeded DAG for %s", rid2)
@@ -449,8 +449,9 @@ async def upsert_property(
     enriched = _build_enriched(SeedFacts(payload=payload, scraped=scraped), address, postcode)
     rid2 = rid or enriched.rid
     if rid2:
-        # Mutations run on the processor thread — never on the event loop.
-        await run_on_processor(lambda: _seed_dag(rid2, enriched))
+        await run_on_processor(
+            lambda: _seed_dag(rid2, enriched, scrape_errors=(scraped.parse_errors if scraped else None))
+        )
 
     dump = asdict_serializable(enriched)
     # The postcode is no longer an EnrichedProperty field (the address

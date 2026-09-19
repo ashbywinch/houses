@@ -366,7 +366,7 @@ class TestEnrichmentBootstrap:
         enriched = EnrichedProperty(
             url="https://rightmove.co.uk/properties/999",
             address="Pembroke Avenue, Hersham, KT12",
-                        bedrooms=3,
+            bedrooms=3,
             price=300000,  # type: ignore[arg-type]  # why: legacy bare-int price is the fixture — push_enriched_property's non-Money wrap branch (isinstance guard → Money(str(price))) is the behaviour under test
             approx_latitude=None,
             approx_longitude=None,
@@ -414,7 +414,7 @@ class TestEnrichmentBootstrap:
         enriched = EnrichedProperty(
             url="",
             address="Some Road, Hersham",
-                        bedrooms=None,  # type: ignore[arg-type]  # why: push_enriched_property guards `enriched.bedrooms is not None`; None keeps rightmove_bedrooms unpushed (default 0 would wrongly seed it)
+            bedrooms=None,  # type: ignore[arg-type]  # why: push_enriched_property guards `enriched.bedrooms is not None`; None keeps rightmove_bedrooms unpushed (default 0 would wrongly seed it)
             price=None,  # type: ignore[arg-type]  # why: same guard on price — None keeps rightmove_price unpushed in this location-only test
             approx_latitude=51.37,
             approx_longitude=-0.4,
@@ -452,3 +452,47 @@ class TestEnrichmentBootstrap:
         a = await prop.best_location.attempt()
         assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.38, -0.41)
+
+    @pytest.mark.asyncio
+    async def test_scrape_errors_recorded_as_impossible_on_source_nodes(self):
+        """A scrape parse error lands on its DAG source node as an impossible
+        attempt (the DAG's error mechanism), and a value push supersedes it."""
+        from houses.nodes.cutover import push_enriched_property
+        from houses.nodes.property_nodes import PropertyNodes
+        from houses.property import EnrichedProperty
+
+        prop = PropertyNodes(RID * 3)
+        sources = {
+            "rightmove_address": prop.rightmove_address,
+            "rightmove_url": prop.rightmove_url,
+            "rightmove_bedrooms": prop.rightmove_bedrooms,
+            "rightmove_price": prop.rightmove_price,
+            "rightmove_location": prop.rightmove_location,
+        }
+        # price=None explicitly: the scrape produced no value, so nothing
+        # is pushed for it and the recorded failure is the node's state.
+        enriched = EnrichedProperty(url="https://rightmove.co.uk/properties/999", price=None)
+
+        push_enriched_property(
+            RID * 3,
+            enriched,
+            sources,
+            scrape_errors={"price": "price value 'ask the agent' is not parseable"},
+        )
+
+        att = await prop.rightmove_price.attempt()
+        assert att.impossible
+        assert "ask the agent" in (att.error_info.display_message if att.error_info else att.error)
+        wire = await prop.rightmove_price.to_json_value()
+        assert wire["status"] == "impossible" and wire["value"] is None
+
+        # A real value afterwards wins over the recorded failure.
+        push_enriched_property(
+            RID * 3,
+            EnrichedProperty(url="https://rightmove.co.uk/properties/999", price=Money("420000", "GBP")),
+            sources,
+            scrape_errors={"price": "stale failure that a real value supersedes"},
+        )
+        att = await prop.rightmove_price.attempt()
+        assert att.succeeded
+        assert att.value_or_none() == Money("420000", "GBP")

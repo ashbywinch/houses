@@ -79,6 +79,8 @@ const price = computed(() => props.data.rightmove_price.succeeded
   ? parseFloat(props.data.rightmove_price.value?.amount ?? '0') || null
   : null)
 
+const priceError = computed(() => uncomputableReason(props.data.rightmove_price))
+
 const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
   ? props.data.rightmove_bedrooms.value
   : null)
@@ -422,19 +424,21 @@ async function toggleViewed() {
       <div v-if="uncomputableReason(data.group_monthly_cost)" class="card__cost-error">
         {{ uncomputableReason(data.group_monthly_cost) }}
       </div>
-
-      <!-- Meta tags: price · bedrooms · freshness -->
-      <div class="card__meta">
-        <span v-if="price" class="card__tag card__tag--price">£{{ price.toLocaleString() }}</span>
-        <span v-if="bedrooms" class="card__tag">{{ bedrooms }} bed</span>
-        <span v-if="freshnessLabel" class="card__tag" :class="freshnessClass">{{ freshnessLabel }}</span>
-        <span
-          v-if="data.push_stale"
-          class="card__tag card__tag--stale"
-          title="Live updates are failing for this property — the figures here may be older than the current data"
-        >⧗ not updating</span>
-        <span v-if="triage?.is_viewed" class="card__tag card__tag--seen">Seen</span>
-      </div>
+    <div v-if="priceError" class="card__meta card__meta--price-error">
+      <span class="card__tag card__tag--price" :title="priceError">Price unavailable</span>
+      <span class="card__price-error" :title="priceError">{{ priceError }}</span>
+    </div>
+    <div v-else class="card__meta">
+      <span v-if="price" class="card__tag card__tag--price">£{{ price.toLocaleString() }}</span>
+      <span v-if="bedrooms" class="card__tag">{{ bedrooms }} bed</span>
+      <span v-if="freshnessLabel" class="card__tag" :class="freshnessClass">{{ freshnessLabel }}</span>
+      <span
+        v-if="data.push_stale"
+        class="card__tag card__tag--stale"
+        title="Live updates are failing for this property — the figures here may be older than the current data"
+      >⧗ not updating</span>
+      <span v-if="triage?.is_viewed" class="card__tag card__tag--seen">Seen</span>
+    </div>
 
       <!-- Commute rows: per-person -->
       <div v-if="data.commutes" class="card__commutes">
@@ -717,12 +721,19 @@ async function toggleViewed() {
   gap: var(--sp-2);
   color: var(--text-secondary);
 }
-.pill-link { text-decoration: none; }
-/* A commute that could not be computed: the reason, in the DAG's words. */
+/* A cost that could not be computed: the reason, in the DAG's words. */
 .card__cost-error {
   font-size: var(--fs-xs);
   color: var(--red-text);
   line-height: 1.3;
+}
+/* A price the scraper saw but could not parse: the same DAG reason. */
+.card__meta--price-error {
+  gap: var(--sp-2);
+}
+.card__price-error {
+  font-size: var(--fs-xs);
+  color: var(--red-text);
 }
 .card__commute-error {
   font-size: var(--fs-xs);
