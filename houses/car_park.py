@@ -204,12 +204,13 @@ class ApcoaCarParkLookup:
                     result = self._apcoa_scraper._parse_apcoa_location_page(page_text, title)
                     if result is not None:
                         return _log_apcoa_find(result, "location page", station)
-                # Fail fast: an APCOA page/network failure must not be
-                # conflated with 'no car park found here' — it propagates
-                # so the DAG classifies it (transient → pending, permanent
-                # → impossible) instead of silently skipping the cost.
-                except Exception as exc:
-                    raise RuntimeError(f"APCOA lookup failed for {station.name} (url={url}): {exc}") from exc
+                # Fail fast: re-raise the ORIGINAL exception so the DAG's
+                # single classifier (_compute_attempt) decides retry vs
+                # impossible — a RuntimeError wrapper would hide the
+                # network type and kill the retry (2026-09-19).
+                except Exception:
+                    logger.warning("APCOA lookup failed for %s (url=%s)", station.name, url)
+                    raise
 
             # ── Strategy 2: Prebook listing page ─────────────
             lat, lng = station.location.lat, station.location.lon

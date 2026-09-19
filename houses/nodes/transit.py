@@ -9,7 +9,7 @@ from typing import Any, override
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt, AttemptError, Provenance, classify_exception
+from dag.attempt import Attempt, AttemptError, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import LegMode
@@ -552,19 +552,10 @@ class TransitNode(DerivedNode[Commute]):
             return None
         try:
             fallback = await self._transit_route_fn(location_val, poi_val)
-        except Exception as e:  # lucidlint: ignore broad-except — the fallback must never mask drive/walk
+        except Exception as e:
             logging.getLogger(__name__).warning("National Rail fallback failed: %s", e)
             self._last_fallback_detail = f"National Rail fallback failed: {e}"
-            if classify_exception(e).retryable:
-                return Attempt.pending()
-            return Attempt.impossible(
-                f"National Rail fallback failed: {e}",
-                error_info=AttemptError(
-                    code="no_data",
-                    message=f"National Rail fallback failed: {e}",
-                    user_message="Couldn't find a route to this destination — transit planning failed.",
-                ),
-            )
+            raise
         if fallback is None:
             return None
         if fallback.infeasible:
