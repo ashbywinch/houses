@@ -606,7 +606,8 @@ class TestCommentAuth:
         assert "superuser" in resp.json()["detail"]
 
     def test_post_400_unlinked_email(self):
-        """Email doesn't match any Person — 400."""
+        """Email doesn't match any Person — 400 with a generic message:
+        the detail must not confirm anything about the account."""
         auth_token = _enable_auth()
         session_cookie = _inject_session(email="unlinked@example.com", is_superuser=False)
         client.cookies.set("session", session_cookie)
@@ -618,7 +619,7 @@ class TestCommentAuth:
         finally:
             _sp.reset(auth_token)
         assert resp.status_code == 400
-        assert "not linked" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Not authorised"
 
     def test_post_200_normal_user(self):
         """Non-superuser with linked email can post a comment."""

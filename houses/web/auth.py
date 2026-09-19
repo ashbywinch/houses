@@ -246,7 +246,7 @@ def _linked_person(session: Mapping[str, Any]) -> Any | None:
             return p
     raise HTTPException(
         status_code=401,
-        detail="This account is not linked to a person in settings",
+        detail="Not authorised",
     )
 
 

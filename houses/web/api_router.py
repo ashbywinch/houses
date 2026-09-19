@@ -190,7 +190,7 @@ def _require_family_member(request: Request) -> None:
         session_user=session_user,
     )
     if not session_user.get("is_superuser") and not view.session_name():
-        raise HTTPException(status_code=403, detail="This account is not linked to a family member")
+        raise HTTPException(status_code=403, detail="Not authorised")
 
 
 @dataclass(frozen=True)
@@ -646,7 +646,7 @@ def _comment_person(request: Request, session_user: SessionClaims, svc) -> str:
     if name is None:
         raise HTTPException(
             status_code=400,
-            detail="Your account is not linked to a person in settings",
+            detail="Not authorised",
         )
     return name
 
