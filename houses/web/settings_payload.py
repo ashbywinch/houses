@@ -16,17 +16,18 @@ from typing import Any
 from money import Money
 
 from houses.model.domain import (
+    EquityInputs,
     Person,
     effective_acceptable_modes,
     effective_editable_by,
     effective_selling_home,
+    equity_line,
     home_equity_contributions,
+    person_id_of,
 )
 from houses.nodes.settings_node import aggregate_dict
 from houses.services_provider import get_services
 from houses.web.json_utils import MoneyJson
-
-TOTAL_SHARE_PERCENT = 100
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ class DepositBreakdown:
     total: Money
     lines: list[dict]
 
+
 def _home_property_address(person) -> str:
     """First street line of the linked house's best address; '' when unset."""
     linked_rid = getattr(person, "home_property_rid", "")
@@ -211,6 +213,7 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
         if addr:
             item["home_property_address"] = addr
 
+
 async def settings_payload(session_user: dict | None = None) -> SettingsPayloadJson:
     """The settings document: persons, financial aggregates, commute
     thresholds, the household deposit, and the what-if flag. Shared by
@@ -248,6 +251,7 @@ async def settings_payload(session_user: dict | None = None) -> SettingsPayloadJ
         what_if_active=bool(started),
     )
 
+
 def _deposit_breakdown(persons: list) -> DepositBreakdown:
     """Per-person deposit (distributed home equity + cash) and the
     household total. Home equity splits by co-owner shares; children
@@ -259,37 +263,14 @@ def _deposit_breakdown(persons: list) -> DepositBreakdown:
     deposit_lines: list[dict] = []
     for name, person in by_name.items():
         cash = person.cash_contribution.amount
-        home_share = contributions.get(name, _Decimal("0"))
+        home_share = contributions.get(person_id_of(person), _Decimal("0"))
         value = home_share + cash
         deposit_persons[name] = MoneyJson(amount=f"{value:.2f}", currency="GBP").to_dict()
         deposit_total = deposit_total + Money(str(value), "GBP")
-        if home_share > 0 and effective_selling_home(person):
-            gross = max(_Decimal("0"), person.home_sale_price.amount - person.outstanding_mortgage.amount)
-            co_sum = sum(co.share for co in person.home_co_owners)
-            if co_sum == 0:
-                line = (
-                    f"£{person.home_sale_price.amount:,.2f} sale − "
-                    f"£{person.outstanding_mortgage.amount:,.2f} mortgage + "
-                    f"£{cash:,.2f} cash = £{value:,.2f}"
-                )
-            else:
-                holder_part = f"£{gross:,.2f} home ({TOTAL_SHARE_PERCENT - co_sum}% yours) + "
-                line = f"{holder_part}£{home_share:,.2f} home share + £{cash:,.2f} cash = £{value:,.2f}"
-        elif home_share > 0:
-            # this person's share came from co-owning someone else's home
-            source = ""
-            for other in by_name.values():
-                if other.name == name:
-                    continue
-                for co in other.home_co_owners:
-                    if co.name == name:
-                        gross_other = max(
-                            _Decimal("0"),
-                            other.home_sale_price.amount - other.outstanding_mortgage.amount,
-                        )
-                        source = f"{co.share}% of {other.name}'s home (£{gross_other:,.2f}) "
-            line = f"{source}+ £{cash:,.2f} cash = £{value:,.2f}"
-        else:
-            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
-        deposit_lines.append(_ProvenanceLineJson(label=name, value=line).to_dict())
+        deposit_lines.append(
+            _ProvenanceLineJson(
+                label=name,
+                value=equity_line(EquityInputs(name, person, contributions, persons, cash=cash, show_cash=True)),
+            ).to_dict()
+        )
     return DepositBreakdown(deposit_persons, deposit_total, deposit_lines)

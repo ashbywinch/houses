@@ -16,7 +16,7 @@ from houses.commute import LegMode
 from houses.commute_router import CommuteRouter as _CommuteRouter
 from houses.geopoint import GeoPoint
 from houses.location import extract_postcode
-from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.model.domain import Commute, Person, PlaceOfInterest, person_id_of
 from houses.services_provider import get_services
 from houses.tfl_client import TflRouteOptions
 
@@ -144,8 +144,8 @@ class PersonMaxWalkNode(DerivedNode[int]):
     the incremental evaluator re-scores the same planned routes.
     """
 
-    def __init__(self, node_id: str, *, persons_source, person_name: str):
-        self._person_name: str = person_name
+    def __init__(self, node_id: str, *, persons_source, person_id: str):
+        self._person_id: str = person_id
         super().__init__(node_id, int, (persons_source,))
         self.display_name: str = "Max walk"
 
@@ -154,7 +154,7 @@ class PersonMaxWalkNode(DerivedNode[int]):
         if not persons.succeeded:
             return Attempt.impossible(persons.error)
         for p in persons.value_or_none() or []:
-            if getattr(p, "name", None) == self._person_name:
+            if person_id_of(p) == self._person_id:
                 penalty = getattr(p, "bus_walk_penalty", None)
                 if penalty is not None:
                     return Attempt.succeeded(int(penalty.magnitude))
@@ -246,21 +246,21 @@ class DestinationPlaceNode(DerivedNode[PlaceOfInterest]):
     normal DAG staleness — no rebuild, no rewiring, nothing frozen.  If
     the destination is removed from persons, the node is impossible."""
 
-    def __init__(self, node_id: str, *, persons_source: Node, person_name: str, label: str):
+    def __init__(self, node_id: str, *, persons_source: Node, person_id: str, label: str):
         super().__init__(node_id, PlaceOfInterest, (persons_source,))
         self._persons_source: Node = persons_source
-        self._person_name: str = person_name
+        self._person_id: str = person_id
         self._label: str = label
 
     @override
     def compute(self, persons: Attempt[list]) -> Attempt[PlaceOfInterest]:
         for p in persons.value_or_none() or []:
-            if getattr(p, "name", None) != self._person_name:
+            if person_id_of(p) != self._person_id:
                 continue
             for q in getattr(p, "places_of_interest", None) or ():
                 if q.label == self._label:
                     return Attempt.succeeded(q)
-        return Attempt.impossible(f"{self._person_name}/{self._label} is not a current destination")
+        return Attempt.impossible(f"{self._person_id}/{self._label} is not a current destination")
 
 
 class DriveNode(DerivedNode[Commute]):

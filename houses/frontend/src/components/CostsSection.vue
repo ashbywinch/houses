@@ -192,8 +192,15 @@ function handleRentalKeydown(e: KeyboardEvent) {
 }
 
 // ── Helpers for works display ─────────────────────────
-// Per-person works estimates are Money-shaped ({amount, currency}) —
-// normalize to a plain number for the editing UI. This is an editor,
+/** The canonical person identity the server uses for attribution keys:
+ *  the explicit person_id, else the name-slug fallback (mirrors
+ *  domain.slugify for legacy rows). */
+const personIdOf = (p: { person_id?: string; name?: string }): string => {
+  if (p.person_id) return p.person_id
+  return (p.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+}
+
+// ── Per-person works estimates ─────────────────────────
 // not a provenance renderer; display goes through ProvenanceView.
 const worksEstimates = (): Record<string, number> => {
   const raw = props.affordability?.works_estimates?.succeeded
@@ -215,8 +222,8 @@ const buyerList = () =>
     ? (props.persons.value as any[]).filter((p: any) => !p.is_child)
     : []
 
-function canEdit(personName: string): boolean {
-  return props.currentPerson != null && props.currentPerson === personName
+function canEdit(person: { person_id?: string; name?: string }): boolean {
+  return props.currentPerson != null && props.currentPerson === personIdOf(person)
 }
 </script>
 
@@ -242,7 +249,7 @@ function canEdit(personName: string): boolean {
         >
           <span class="costs-label">{{ p.name }}</span>
           <!-- Editing state (current person only) -->
-          <div v-if="editingPerson === p.name" class="costs-edit-group">
+          <div v-if="editingPerson === personIdOf(p)" class="costs-edit-group">
             <span class="costs-edit-prefix">£</span>
             <input
               :value="editValue"
@@ -250,36 +257,36 @@ function canEdit(personName: string): boolean {
               inputmode="numeric"
               class="costs-edit-input"
               autofocus
-              @keydown="handleKeydown($event, p.name as string)"
+              @keydown="handleKeydown($event, personIdOf(p))"
               @paste="rejectWholePoundsPaste"
               @input="editValue = wholePoundsValue($event.target as HTMLInputElement, editValue)"
-              @blur="saveEdit(p.name as string)"
+              @blur="saveEdit(personIdOf(p))"
             />
           </div>
           <!-- Editable value (current person) -->
           <span
-            v-else-if="canEdit(p.name as string) && p.name in worksEstimates() && worksEstimates()[p.name as string] != null"
+            v-else-if="canEdit(p) && personIdOf(p) in worksEstimates() && worksEstimates()[personIdOf(p)] != null"
             class="costs-value costs-value--editable"
             title="Click to edit your works estimate"
-            @click="startEdit(p.name as string, worksEstimates()[p.name as string])"
-          >✎ £{{ worksEstimates()[p.name as string].toLocaleString() }}</span>
+            @click="startEdit(personIdOf(p), worksEstimates()[personIdOf(p)])"
+          >✎ £{{ worksEstimates()[personIdOf(p)].toLocaleString() }}</span>
           <span
-            v-else-if="canEdit(p.name as string) && (p as any).works_estimate_required"
+            v-else-if="canEdit(p) && (p as any).works_estimate_required"
             class="costs-value costs-value--editable costs-value--required"
             title="Click to add your works estimate"
-            @click="startEdit(p.name as string, null)"
+            @click="startEdit(personIdOf(p), null)"
           >✎ £? — required</span>
           <span
-            v-else-if="canEdit(p.name as string)"
+            v-else-if="canEdit(p)"
             class="costs-value costs-value--editable"
             title="Click to add your works estimate"
-            @click="startEdit(p.name as string, null)"
+            @click="startEdit(personIdOf(p), null)"
           >✎ £?</span>
           <!-- Read-only value (other person) -->
           <span
-            v-else-if="p.name in worksEstimates() && worksEstimates()[p.name as string] != null"
+            v-else-if="personIdOf(p) in worksEstimates() && worksEstimates()[personIdOf(p)] != null"
             class="costs-value costs-value--readonly"
-          >£{{ worksEstimates()[p.name as string].toLocaleString() }}</span>
+          >£{{ worksEstimates()[personIdOf(p)].toLocaleString() }}</span>
           <span
             v-else-if="(p as any).works_estimate_required"
             class="costs-value costs-value--readonly costs-value--required"

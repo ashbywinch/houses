@@ -385,3 +385,34 @@ The 0.2.0-era census above is historical.
 `make lucidlint`: **GATE PASS — 0 fail-severity actions, 1 accepted census
 warning.** `make test`: **1571 passed.** ruff + pyrefly: clean. lucidlint
 0.4.0 (`f8cbbc8`) pinned in pyproject.toml.
+
+## 2026-09-19 — engine upgrade 0.4.0 → 0.6.1 (`1019627b`), baseline recalibrated
+
+Lucidlint jumped 0.4.0 → 0.6.1 (new rule behavior: `record-shape` no
+longer exempts wire payloads, `loop-pipeline` family expanded, fix-engine
+seams corrected). The whole-repo debt census changed with the rule set, so
+the baseline was re-locked under the new engine (`lucidlint-update-baseline`).
+
+Accepted into the new baseline (pre-existing, predates this PR; not
+introduced by its changes):
+
+- **loop-pipeline ×~80**: sequential/mutating loops across legacy
+  enrichment modules (parse_netex_fares, drive_isochrone, tfl_client,
+  walkability, extract_bus_fares, tile, map_layers, station_shed,
+  sync_parking_rates, apcoa_scraper, …). Verdict: the loops carry
+  multi-state accumulation where a comprehension would obscure the
+  steps; dedicated refactor per module when that module is next touched.
+- **record-shape ×~65**: `from_dict`/payload records that were exempt as
+  "wire formats" under 0.4.0 — the exemption was removed in 0.6.1.
+  Verdict: genuine debt, but converting every ingest boundary in one PR
+  is churn without behavior change; convert per-surface alongside its
+  next functional change.
+
+Fixed rather than accepted (this branch's own findings, all under the new
+engine): `equity_line` → `EquityInputs` param object + `_co_owner_source_line`
+helper; private-import renames (`person_key`, `resolve_person_identity`);
+`_current_person_id` swallow restructure (error-value return, comment
+removed as stale); `# lucidlint: ignore-file fakefs` justified on the
+sqlite-backed migration tests; stale file-level suppressions removed.
+
+Gate after recalibration: **PASS — 0 fail-severity actions.**

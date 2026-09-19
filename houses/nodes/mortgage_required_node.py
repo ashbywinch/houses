@@ -5,7 +5,7 @@ from typing import override
 
 from money import Money
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.expression import Ref
 
@@ -36,6 +36,29 @@ class MortgageRequiredNode(DerivedNode[Money]):
         return Ref(self._deps[0]) + Ref(self._deps[1]) + Ref(self._deps[2]) - Ref(self._deps[3])
 
     @override
+    @property
+    def provenance_formula(self) -> Formula | None:
+        if not self._attempt.succeeded or self._attempt.value_or_none() is None:
+            return None
+        expr = self.expression
+        lines = list(expr.to_formula_lines()) if expr is not None else []
+        vals = [dep.latest_attempt().value_or_none() for dep in self._deps]
+
+        def _fmt(v) -> str:
+            return f"£{v.amount:,.2f}" if isinstance(v, Money) else str(v)
+
+        lines.append(
+            FormulaLine(
+                label="Price + Stamp Duty + Works − Equity",
+                value=(
+                    f"{_fmt(vals[0])} + {_fmt(vals[1])} + {_fmt(vals[2])} − {_fmt(vals[3])}"
+                    f" = {_fmt(self._attempt.value)}"
+                ),
+            )
+        )
+        return Formula(lines=lines, result=str(self._attempt.value))
+
+    @override
     def compute(
         self,
         price: Attempt[Money],
@@ -54,3 +77,4 @@ class MortgageRequiredNode(DerivedNode[Money]):
         if clamped:
             return Attempt.succeeded(Money(amount="0", currency="GBP"))
         return result
+

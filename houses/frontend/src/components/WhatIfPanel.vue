@@ -17,6 +17,7 @@ interface PoiEdit {
 }
 
 interface PersonEdit {
+  person_id: string
   name: string
   selling_home: boolean
   has_car: boolean
@@ -87,6 +88,7 @@ async function load() {
       // children have no finances — never show them in the what-if
       .filter(p => !p.is_child)
       .map(p => ({
+        person_id: String((p as Record<string, unknown>).person_id ?? ''),
         name: String(p.name),
         selling_home: Boolean(p.selling_home),
         has_car: Boolean(p.has_car),
@@ -122,6 +124,7 @@ async function load() {
 function payload() {
   return persons.value.map(p => {
     const body: Record<string, unknown> = {
+      person_id: p.person_id,
       name: p.name,
       selling_home: p.selling_home,
       has_car: p.has_car,
@@ -139,14 +142,22 @@ function payload() {
   })
 }
 
+
 /** Writes the scenario persons through the NORMAL settings write: the
- *  DAG recomputes every number server-side and the existing websocket
- *  broadcast refreshes every surface. */
+ *  DAG recomputes every number server-side; the refetched summaries
+ *  then re-render every card with the scenario's figures (the card
+ *  monthly payment reads store.summaries — the websocket is a bonus
+ *  refresh, never the only one). */
 async function apply() {
   busy.value = true
   errorMsg.value = ''
   try {
     await api.applyWhatIf(payload())
+    // Refetch FIRST: loadAll re-reads /what-if/state, and the server's
+    // marker is already set — the fresh flag is the true one, set here
+    // after the refetch so a stale read can never clear it (the live
+    // 2026-09-17 report: applying never updated the card figures).
+    await store.loadAll()
     store.setWhatIfActive(true)
   } catch {
     errorMsg.value = "Couldn't apply the what-if."
@@ -156,7 +167,8 @@ async function apply() {
 }
 
 /** Puts the original numbers back — the DAG recomputes server-side
- *  and the websocket broadcast refreshes every surface. */
+ *  and the refetched summaries re-render every card with the real
+ *  figures. */
 async function restore(): Promise<boolean> {
   busy.value = true
   errorMsg.value = ''
@@ -164,6 +176,7 @@ async function restore(): Promise<boolean> {
   try {
     await api.restoreWhatIf()
     store.setWhatIfActive(false)
+    await store.loadAll()
   } catch {
     ok = false
     errorMsg.value = "Couldn't restore the real numbers."
@@ -174,19 +187,21 @@ async function restore(): Promise<boolean> {
 }
 
 /** Keeps the scenario as the new real numbers — the server discards
- *  the restore snapshot. */
+ *  the restore snapshot; the refetched summaries are the new truth. */
 async function accept() {
   busy.value = true
   errorMsg.value = ''
   try {
     await api.acceptWhatIf()
     store.setWhatIfActive(false)
+    await store.loadAll()
   } catch {
     errorMsg.value = "Couldn't accept the what-if numbers."
   } finally {
     busy.value = false
   }
 }
+
 
 </script>
 

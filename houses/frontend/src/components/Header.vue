@@ -8,6 +8,7 @@ const auth = useAuthStore()
 
 interface PersonEntry {
   name: string
+  person_id: string
   email: string
 }
 
@@ -76,11 +77,10 @@ onMounted(fetchPersons)
       <span class="su-bar__label">Superuser mode — acting as:</span>
       <select
         class="su-bar__select"
-        :value="auth.impersonating ?? auth.user.person ?? ''"
+        :value="auth.actingAs ?? ''"
         @change="(e) => auth.setImpersonating((e.target as HTMLSelectElement).value)"
       >
-        <option value="" disabled>Select a person…</option>
-        <option v-for="p in persons" :key="p.name" :value="p.name">{{ p.name }}</option>
+        <option v-for="p in persons" :key="p.person_id" :value="p.person_id">{{ p.name }}</option>
       </select>
       <button class="su-bar__exit" @click="auth.toggleSuperuser()">Exit</button>
     </div>

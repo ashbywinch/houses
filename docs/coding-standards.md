@@ -109,9 +109,18 @@ Exception: interactive/CLI setup flows may pre-check configuration when the natu
 
 **Delete dead code, don't deprecate it.** A shim compiles, passes tests, lulls readers into thinking it's real, and never gets cleaned up. Rename/remove + update every caller in the same commit. No aliases, no re-exports, no "will remove in a future version".
 
-### Never swallow errors
+### Never swallow errors — fail fast unless the failure surfaces
 
-Every `except` block must log, re-raise, or handle observably. Bare `except: pass` / silent `except Exception:` forbidden. Safe-to-ignore errors log at `DEBUG` with an explanation.
+An error must be **surfaced to someone who can act on it** — the user in
+the interface, a caller via an explicit error value, or a visibly degraded
+state. Raising (fail fast) is the default; surfacing-and-continuing is
+valid when the continuation is honest: the degraded outcome is visible and
+the reader can reconstruct what failed. Forbidden is the silent swallow —
+an `except` that logs into the void (or logs nothing) and continues as if
+nothing happened: the caller proceeds on a premise the operation just
+disproved, and the failure is invisible to anything that depends on the
+outcome. Bare `except: pass`, silent `except Exception:`, and
+log-only-and-continue are all forbidden without a visible surface.
 
 ```python
 # ✗ invisible
@@ -119,12 +128,24 @@ try:
     do_something()
 except Exception:
     pass
-# ✓ observable
+# ✗ log-only — nothing surfaces to anyone who can act
 try:
     do_something()
 except Exception as e:
     logger.debug("do_something failed (non-fatal): %s", e)
+# ✓ surface-and-continue — the degraded state is visible to the caller
+try:
+    do_something()
+except Exception as e:
+    logger.error("do_something failed: %s", e)
+    return ErrorResult(f"do_something failed: {e}")  # the caller decides
+# ✓ fail fast
+try:
+    do_something()
+except Exception as e:
+    raise OperationError("do_something failed") from e
 ```
+
 
 DAG-specific error rules (`AttemptError` contract, API services return Attempt vs pure code throw, transient re-raise/retry, nodes propagate never re-literalize) → [dag-library.md](dag-library.md) *The three-state result: `Attempt[T]`*.
 

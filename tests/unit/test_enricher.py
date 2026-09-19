@@ -621,9 +621,9 @@ class TestCommuteBreakdown:
         """46wk x (15 + 10 + 2x24) = 46 x 73 = 3358"""
         from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
-        so = UserInputNode[Commute]("Simon/Pimlico", Commute)
-        sb = UserInputNode[Commute]("Simon/Bracknell", Commute)
-        lo = UserInputNode[Commute]("Lorena/Aldgate", Commute)
+        so = UserInputNode[Commute]("simon/Pimlico", Commute)
+        sb = UserInputNode[Commute]("simon/Bracknell", Commute)
+        lo = UserInputNode[Commute]("lorena/Aldgate", Commute)
         persons = UserInputNode[list]("cbd_ps1", list)
 
         node = CommuteBreakdownNode(
@@ -670,9 +670,9 @@ class TestCommuteBreakdown:
         """When some costs are present, total includes only those."""
         from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
-        so = UserInputNode[Commute]("Simon/Pimlico", Commute)
-        sb = UserInputNode[Commute]("Simon/Bracknell", Commute)
-        lo = UserInputNode[Commute]("Lorena/Aldgate", Commute)
+        so = UserInputNode[Commute]("simon/Pimlico", Commute)
+        sb = UserInputNode[Commute]("simon/Bracknell", Commute)
+        lo = UserInputNode[Commute]("lorena/Aldgate", Commute)
         persons = UserInputNode[list]("cbd_ps2", list)
 
         node = CommuteBreakdownNode(
@@ -750,9 +750,9 @@ class TestCommuteBreakdown:
         """When some commute selectors are impossible, node still succeeds."""
         from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
-        so = UserInputNode[Commute]("Simon/Pimlico", Commute)
-        sb = UserInputNode[Commute]("Simon/Bracknell", Commute)
-        lo = UserInputNode[Commute]("Lorena/Aldgate", Commute)
+        so = UserInputNode[Commute]("simon/Pimlico", Commute)
+        sb = UserInputNode[Commute]("simon/Bracknell", Commute)
+        lo = UserInputNode[Commute]("lorena/Aldgate", Commute)
         persons = UserInputNode[list]("cbd_ps3", list)
 
         node = CommuteBreakdownNode(

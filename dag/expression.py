@@ -64,7 +64,9 @@ class Expression(ABC, Generic[T]):
             return str(v)
         if isinstance(v, float):
             return f"{v:,.2f}"
-        return str(v)
+        if isinstance(v, str):
+            return v
+        return v.to_provenance_value()
 
     @staticmethod
     def to_formula_lines() -> list[FormulaLine]:
