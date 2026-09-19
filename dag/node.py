@@ -253,7 +253,8 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         """
         ...
 
-    def provenance_display_value(self, att: Attempt[Any]) -> Any:
+    @staticmethod
+    def provenance_display_value(att: Attempt[Any]) -> Any:
         """The value a PARENT tree states for this node's bound attempt.
 
         Defaults to the raw attempt value. Nodes whose value is a machine

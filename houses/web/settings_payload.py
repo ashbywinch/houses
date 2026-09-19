@@ -16,6 +16,7 @@ from typing import Any
 from money import Money
 
 from houses.model.domain import (
+    EquityInputs,
     Person,
     effective_acceptable_modes,
     effective_editable_by,
@@ -141,6 +142,7 @@ class DepositBreakdown:
     total: Money
     lines: list[dict]
 
+
 def _home_property_address(person) -> str:
     """First street line of the linked house's best address; '' when unset."""
     linked_rid = getattr(person, "home_property_rid", "")
@@ -211,6 +213,7 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
         if addr:
             item["home_property_address"] = addr
 
+
 async def settings_payload(session_user: dict | None = None) -> SettingsPayloadJson:
     """The settings document: persons, financial aggregates, commute
     thresholds, the household deposit, and the what-if flag. Shared by
@@ -248,6 +251,7 @@ async def settings_payload(session_user: dict | None = None) -> SettingsPayloadJ
         what_if_active=bool(started),
     )
 
+
 def _deposit_breakdown(persons: list) -> DepositBreakdown:
     """Per-person deposit (distributed home equity + cash) and the
     household total. Home equity splits by co-owner shares; children
@@ -266,7 +270,7 @@ def _deposit_breakdown(persons: list) -> DepositBreakdown:
         deposit_lines.append(
             _ProvenanceLineJson(
                 label=name,
-                value=equity_line(name, person, contributions, persons, cash=cash, show_cash=True),
+                value=equity_line(EquityInputs(name, person, contributions, persons, cash=cash, show_cash=True)),
             ).to_dict()
         )
     return DepositBreakdown(deposit_persons, deposit_total, deposit_lines)

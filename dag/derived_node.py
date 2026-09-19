@@ -1,4 +1,3 @@
-# lucidlint: ignore-file bulk-suppression the 62 broad-except suppressions here are per-site boundary policy (cache
 from __future__ import annotations
 
 import ast
@@ -705,15 +704,13 @@ class DerivedNode(Node[T], Generic[T]):
                     f"{self._id}._get_active_deps() returned None at index {i}. "
                     f"Active deps: {[d._id if d else None for d in active_deps]}"
                 )
-        dep_pairs = []
-        for dep in active_deps:
-            # Capture the dep's freshness stamp IN THE SAME PASS as its
-            # attempt: a stamp read later — after compute yields — can
-            # belong to a NEWER dep row than the attempt this evaluation
-            # actually bound, and the consumer then records a false
-            # freshness claim (never stale again) while serving the old
-            # value (2026-09-18 group-monthly-cost regression).
-            dep_pairs.append((dep, await dep.attempt(), dep._db_created_at))
+        # Capture the dep's freshness stamp IN THE SAME PASS as its
+        # attempt: a stamp read later — after compute yields — can
+        # belong to a NEWER dep row than the attempt this evaluation
+        # actually bound, and the consumer then records a false
+        # freshness claim (never stale again) while serving the old
+        # value (2026-09-18 group-monthly-cost regression).
+        dep_pairs = [(dep, await dep.attempt(), dep._db_created_at) for dep in active_deps]
         dep_attempts = [a for _, a, _ in dep_pairs]
         origin_stamps = {dep._id: stamp for dep, _, stamp in dep_pairs}
         # Propagate impossible before checking pending — if a dep is

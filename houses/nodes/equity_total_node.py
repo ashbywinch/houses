@@ -8,7 +8,7 @@ from money import Money
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.user_input_node import UserInputNode
-from houses.model.domain import Person, equity_line, home_equity_contributions, person_id_of
+from houses.model.domain import EquityInputs, Person, equity_line, home_equity_contributions, person_id_of
 
 _ZERO = Decimal("0")
 
@@ -40,11 +40,7 @@ class EquityTotalNode(DerivedNode[Money]):
         for p in ps:
             if not isinstance(p, Person) or getattr(p, "is_child", False):
                 continue
-            cash = (
-                _ZERO
-                if is_current
-                else getattr(p, "cash_contribution", Money(amount="0", currency="GBP")).amount
-            )
+            cash = _ZERO if is_current else getattr(p, "cash_contribution", Money(amount="0", currency="GBP")).amount
             # Every adult gets a line — even a £0 contribution — so the
             # unpack never collapses to a bare total (a current home with
             # cash-only people, or zero equity, must still show each
@@ -52,7 +48,7 @@ class EquityTotalNode(DerivedNode[Money]):
             lines.append(
                 FormulaLine(
                     label=p.name,
-                    value=equity_line(p.name, p, contributions, ps, cash=cash, show_cash=not is_current),
+                    value=equity_line(EquityInputs(p.name, p, contributions, ps, cash=cash, show_cash=not is_current)),
                 )
             )
         return Formula(lines=lines, result=str(self._attempt.value))
@@ -72,6 +68,7 @@ class EquityTotalNode(DerivedNode[Money]):
         if self._status_node is not None:
             return (self._persons_source, self._status_node)
         return (self._persons_source,)
+
     @override
     def compute(
         self,

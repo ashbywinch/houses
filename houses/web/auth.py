@@ -42,7 +42,7 @@ class SessionClaims:
     impersonating: str | None = None
 
     @classmethod
-    
+
     # (coding-standards.md)
     def from_dict(cls, data: dict) -> SessionClaims:
         return cls(
@@ -57,11 +57,16 @@ class SessionClaims:
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction mirrors the cookie claims (coding-standards.md)
         return dict(
-            email=self.email, name=self.name, picture=self.picture,
-            is_superuser=self.is_superuser, impersonating=self.impersonating,
+            email=self.email,
+            name=self.name,
+            picture=self.picture,
+            is_superuser=self.is_superuser,
+            impersonating=self.impersonating,
         )
 
+
 logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class SessionMint:
@@ -72,13 +77,13 @@ class SessionMint:
     cookie_value: str
 
 
-
 @dataclass(frozen=True)
 class _OAuthState:
     """Per-login PKCE state: the code_verifier and when it was minted."""
 
     code_verifier: str
     created_at: float
+
 
 @dataclass(frozen=True)
 class _SessionStatus:
@@ -106,6 +111,7 @@ class _SessionStatus:
             "impersonating": self.impersonating,
         }
 
+
 @dataclass(frozen=True)
 class _ImpersonateRequest:
     """The impersonate request body: {person: name | null} (wire shape)."""
@@ -113,7 +119,7 @@ class _ImpersonateRequest:
     person: str | None
 
     @classmethod
-    
+
     # (coding-standards.md)
     def from_dict(cls, body: dict) -> _ImpersonateRequest:
         return cls(person=body.get("person"))
@@ -151,8 +157,6 @@ def _sweep_stale_states() -> None:
     stale = [k for k, v in _oauth_states.items() if v.created_at < cutoff]
     for k in stale:
         _oauth_states.pop(k, None)
-
-
 
 
 def get_serializer() -> URLSafeTimedSerializer:
@@ -249,12 +253,12 @@ def _current_person_id(session: Mapping[str, Any]) -> str | None:
             for p in persons_attempt.value_or_none() or []:
                 if isinstance(p, dict):
                     if p.get("name") == name:
-                        return _person_key(p)
+                        return person_key(p)
                 elif getattr(p, "name", None) == name:
-                    return _person_key(p)
-    # lucidlint: ignore broad-except deliberate degrade — person-id lookup failure returns None
+                    return person_key(p)
     except Exception:
         logger.exception("Failed to look up person id")
+        return None
     return None
 
 
@@ -267,8 +271,11 @@ def _make_session_cookie(
 ) -> str:
     """Create a signed session cookie value."""
     payload = SessionClaims(
-        email=email, name=name, picture=picture,
-        is_superuser=is_superuser, impersonating=impersonating,
+        email=email,
+        name=name,
+        picture=picture,
+        is_superuser=is_superuser,
+        impersonating=impersonating,
     ).to_dict()
     return get_serializer().dumps(payload)
 
@@ -288,8 +295,11 @@ def _build_session(user: GoogleUserInfo) -> SessionMint:
 
     cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
     payload = SessionClaims(
-        email=folded_email, name=name, picture=picture,
-        is_superuser=is_superuser, impersonating=None,
+        email=folded_email,
+        name=name,
+        picture=picture,
+        is_superuser=is_superuser,
+        impersonating=None,
     ).to_dict()
     return SessionMint(payload, cookie_value)
 
@@ -316,7 +326,6 @@ def _is_superuser_for_email(folded_email: str) -> bool:
     return False
 
 
-
 def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | None:
     """Scan persons list for a matching email (casefolded), return the person name or None."""
     if not persons_attempt_value:
@@ -332,7 +341,7 @@ def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | Non
     return None
 
 
-def _person_key(p) -> str:
+def person_key(p) -> str:
     """The person's canonical identity key, tolerant of legacy dict
     shapes: explicit person_id, else the name-slug fallback."""
     if isinstance(p, dict):
@@ -340,7 +349,7 @@ def _person_key(p) -> str:
     return person_id_of(p)
 
 
-def _resolve_person_identity(persons_value: Any, key: str) -> str | None:
+def resolve_person_identity(persons_value: Any, key: str) -> str | None:
     """Resolve an id-or-legacy-name key to the person's canonical
     person_id, or None when unknown. Old cookies/headers carry names;
     every NEW write stores the id."""
@@ -348,11 +357,11 @@ def _resolve_person_identity(persons_value: Any, key: str) -> str | None:
     if not key:
         return None
     for p in persons_value or []:
-        if _person_key(p) == key:
-            return _person_key(p)
+        if person_key(p) == key:
+            return person_key(p)
         name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "")
         if name == key:
-            return _person_key(p)
+            return person_key(p)
     return None
 
 
@@ -527,9 +536,7 @@ async def device(request: Request):
         user = await svc.oauth_service.verify_id_token(token)
     except TransportError as e:
         logger.warning("Device-flow id_token verification failed (transport): %s", e)
-        return JSONResponse(
-            status_code=503, content={"detail": "identity provider unreachable, try again"}
-        )
+        return JSONResponse(status_code=503, content={"detail": "identity provider unreachable, try again"})
     # lucidlint: ignore broad-except device-flow id_token verification failure returns a 401 JSON response
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)
@@ -571,7 +578,7 @@ async def me(request: Request):
     if raw:
         persons_attempt = get_services().persons_source.latest_attempt()
         value = persons_attempt.value_or_none() if persons_attempt.succeeded else None
-        impersonating = _resolve_person_identity(value, raw)
+        impersonating = resolve_person_identity(value, raw)
 
     return _SessionStatus(
         email=session["email"],
@@ -617,10 +624,10 @@ async def impersonate(request: Request, body: dict):
     if person is not None:
         persons_attempt = get_services().persons_source.latest_attempt()
         persons_value = persons_attempt.value_or_none() if persons_attempt.succeeded else None
-        target_id = _resolve_person_identity(persons_value, person)
+        target_id = resolve_person_identity(persons_value, person)
         if target_id is None:
             raise HTTPException(status_code=400, detail=f"Unknown person {person!r}")
-        target = next((p for p in persons_value or [] if _person_key(p) == target_id), None)
+        target = next((p for p in persons_value or [] if person_key(p) == target_id), None)
         is_child = (
             bool(target.get("is_child")) if isinstance(target, dict) else bool(getattr(target, "is_child", False))
         )

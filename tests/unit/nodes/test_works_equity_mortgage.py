@@ -1,5 +1,10 @@
 """Unit tests for TotalWorksNode, EquityTotalNode, MortgageRequiredNode,
 and the restructured MonthlyMortgagePaymentNode."""
+# lucidlint: ignore-file fakefs the DAG nodes under test persist through
+# node_results (sqlite3) — C-level I/O, the fakefs carve-out in
+# testing-standards; pyfakefs cannot intercept libsqlite3, and no temp
+# files are reachable from these tests.
+
 
 from __future__ import annotations
 

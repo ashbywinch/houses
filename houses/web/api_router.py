@@ -39,10 +39,10 @@ from houses.services_provider import get_services
 from houses.web.auth import (
     SESSION_MAX_AGE,
     SessionClaims,
-    _person_key,
-    _resolve_person_identity,
     effective_session_user,
     get_serializer,
+    person_key,
+    resolve_person_identity,
 )
 from houses.web.broadcaster import register_client
 from houses.web.monthly_delta import attach as attach_monthly_delta
@@ -100,7 +100,6 @@ class _StalenessReport:
         return d
 
 
-
 def _registered_properties() -> Iterable[PropertyNodes]:
     """Every registered property — the skip-absent case lives here once
     (list endpoints iterate; the per-endpoint None check is gone)."""
@@ -118,6 +117,7 @@ def _require_property(rid: str) -> PropertyNodes:
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
     return prop
+
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -156,7 +156,7 @@ def _merge_what_if_persons(updates: list, current: list) -> list:
     """
     by_key: dict[str, Person] = {}
     for p in current:
-        by_key[_person_key(p)] = p
+        by_key[person_key(p)] = p
         by_key[getattr(p, "name", "")] = p
     merged: list = []
     merged_keys: set[str] = set()
@@ -173,8 +173,8 @@ def _merge_what_if_persons(updates: list, current: list) -> list:
             merged.append(_person_from_dict(d, target, merge_destinations=True))
         except (ValueError, TypeError) as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-        merged_keys.add(_person_key(target))
-    merged.extend(p for p in current if _person_key(p) not in merged_keys)
+        merged_keys.add(person_key(target))
+    merged.extend(p for p in current if person_key(p) not in merged_keys)
     return merged
 
 
@@ -191,6 +191,8 @@ def _require_family_member(request: Request) -> None:
     )
     if not session_user.get("is_superuser") and not view.session_name():
         raise HTTPException(status_code=403, detail="This account is not linked to a family member")
+
+
 @dataclass(frozen=True)
 class _WhatIfApplyJson:
     """The what-if apply request body: the person updates to merge."""
@@ -201,6 +203,7 @@ class _WhatIfApplyJson:
     def from_dict(cls, raw: dict) -> _WhatIfApplyJson:
         people = raw.get("persons")
         return cls(persons=people if isinstance(people, list) else [])
+
 
 @api_router.post("/what-if/apply")
 # lucidlint: ignore record-shape the FastAPI request body IS the wire boundary — _WhatIfApplyJson.from_dict ingests it
@@ -398,6 +401,7 @@ def _score_from_summary(s: SummaryJson) -> int:
     score += _walkability_score(s.walkability)
     return score
 
+
 # lucidlint: ignore record-shape the scrape attach IS the serialization boundary — the summary record
 # carries no scrape field (coding-standards.md)
 def _attach_scrape_state(summary: SummaryJson | PropertyJson, rid: str) -> dict:
@@ -411,9 +415,8 @@ def _attach_scrape_state(summary: SummaryJson | PropertyJson, rid: str) -> dict:
         d["scrape"] = status.to_dict()
     return d
 
+
 @api_router.get("/properties/all")
-
-
 async def get_all_properties():
     results: dict[str, dict] = {}
     scores: dict[str, int] = {}
@@ -596,6 +599,30 @@ class CommentBody(BaseModel):
         return stripped
 
 
+def _linked_person_name(persons, *, person_id: str | None = None, email: str | None = None) -> str | None:
+    """The display name of the person matching ``person_id`` or ``email``.
+
+    Legacy name shapes resolve through ``person_key``; the person record
+    stays keyed by display name. None when no person carries the identity.
+    """
+    for p in persons or []:
+        if person_id is not None and person_key(p) != person_id:
+            continue
+        name = ""
+        if isinstance(p, dict):
+            pe = p.get("email")
+            if email is not None and (pe is None or pe.casefold() != email.casefold()):
+                continue
+            name = p.get("name", "")
+        elif hasattr(p, "email"):
+            if email is not None and (p.email is None or p.email.casefold() != email.casefold()):
+                continue
+            name = getattr(p, "name", "")
+        if name:
+            return name
+    return None
+
+
 def _comment_person(request: Request, session_user: SessionClaims, svc) -> str:
     """Resolve the comment author — impersonation header for superusers,
     else the session email's linked person in settings.
@@ -608,33 +635,20 @@ def _comment_person(request: Request, session_user: SessionClaims, svc) -> str:
         if not session_user.is_superuser:
             raise HTTPException(status_code=403, detail="Only superusers can impersonate")
         persons_value = svc.persons_source.latest_attempt().value_or_none()
-        target_id = _resolve_person_identity(persons_value, impersonate)
+        target_id = resolve_person_identity(persons_value, impersonate)
         if target_id is None:
             raise HTTPException(status_code=400, detail=f"Unknown person {impersonate!r}")
-        for p in persons_value or []:
-            if _person_key(p) == target_id:
-                name = p.get("name") if isinstance(p, dict) else p.name
-                if isinstance(name, str) and name:
-                    return name
-                break
-        raise HTTPException(status_code=400, detail=f"Unknown person {impersonate!r}")
-    folded_email = session_user.email.casefold()
-    persons_attempt = svc.persons_source.latest_attempt()
-    if persons_attempt.succeeded:
-        for p in persons_attempt.value_or_none() or []:
-            name = ""
-            if isinstance(p, dict):
-                pe = p.get("email")
-                if pe is not None and pe.casefold() == folded_email:
-                    name = p.get("name", "")
-            elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded_email:
-                name = getattr(p, "name", "")
-            if name:
-                return name
-    raise HTTPException(
-        status_code=400,
-        detail="Your account is not linked to a person in settings",
-    )
+        name = _linked_person_name(persons_value, person_id=target_id)
+        if name is None:
+            raise HTTPException(status_code=400, detail=f"Unknown person {impersonate!r}")
+        return name
+    name = _linked_person_name(svc.persons_source.latest_attempt().value_or_none(), email=session_user.email)
+    if name is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Your account is not linked to a person in settings",
+        )
+    return name
 
 
 @api_router.post("/properties/{rid}/comments")
@@ -657,9 +671,6 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
 @api_router.get("/settings")
 async def get_settings(request: Request):
     return (await settings_payload(effective_session_user(request))).to_dict()
-
-
-
 
 
 _PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
@@ -754,7 +765,6 @@ def _parse_places_of_interest(pois: object) -> tuple:
 def _coerce_person_updates(
     updates: MutableMapping[str, Any], target: Person, merge_destinations: bool
 ) -> MutableMapping[str, Any]:
-
     """Parse each present field with its own parser — the per-field guards
     are a flat table of rules, extracted so _person_from_dict stays a
     merge, not a parser."""
@@ -784,6 +794,7 @@ def _coerce_person_updates(
             updates["places_of_interest"] = parsed
     return updates
 
+
 def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = False) -> Person:
     """MERGE an API dict into an existing Person — never replace.
 
@@ -799,9 +810,7 @@ def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = Fal
     the body's list replaces the tuple (the settings UI manages the full
     destination list, where omission means removal).
     """
-    updates = _coerce_person_updates(
-        {k: v for k, v in d.items() if k != "thresholds"}, target, merge_destinations
-    )
+    updates = _coerce_person_updates({k: v for k, v in d.items() if k != "thresholds"}, target, merge_destinations)
     return replace(target, **updates)
 
 
@@ -845,7 +854,7 @@ async def patch_person(name: str, body: dict, request: Request):
     svc = get_services()
     persons = list(svc.persons_source.latest_attempt().value_or_none() or [])
     target = next(
-        (p for p in persons if _person_key(p) == name or getattr(p, "name", "") == name),
+        (p for p in persons if person_key(p) == name or getattr(p, "name", "") == name),
         None,
     )
     if target is None:
@@ -933,26 +942,26 @@ async def patch_rental_income(
     return {"status": "ok"}
 
 
-def _validate_works_person(person_key: str):
+def _validate_works_person(person_ref: str):
     """400 guard + resolution: the person must exist; returns the
     canonical Person so the estimate is stored under its id."""
-    if not person_key:
+    if not person_ref:
         raise HTTPException(status_code=400, detail="person is required")
     _pa = get_services().persons_source.latest_attempt()
     _pa_value = _pa.value_or_none()
     if _pa.succeeded and _pa_value:
-        pid = _resolve_person_identity(_pa_value, person_key)
+        pid = resolve_person_identity(_pa_value, person_ref)
         if pid is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown person: {person_key}",
+                detail=f"Unknown person: {person_ref}",
             )
         for p in _pa_value:
-            if _person_key(p) == pid:
+            if person_key(p) == pid:
                 return p
     raise HTTPException(
         status_code=400,
-        detail=f"Unknown person: {person_key}",
+        detail=f"Unknown person: {person_ref}",
     )
 
 

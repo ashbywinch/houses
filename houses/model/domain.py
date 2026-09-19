@@ -34,6 +34,16 @@ _MODE_LABELS = {
 PERCENT = 100
 
 
+@dataclass
+class EquityInputs:
+    name: str
+    person: Person
+    contributions: dict[str, Decimal]
+    persons: list[Person]
+    cash: Decimal
+    show_cash: bool
+
+
 @dataclass(frozen=True)
 class PlaceOfInterest:
     """A named place a person needs to commute to."""
@@ -432,15 +442,26 @@ def person_id_of(person) -> str:
     return slugify(getattr(person, "name", "") or "")
 
 
-def equity_line(
-    name: str,
-    person,
-    contributions: dict,
-    persons: list,
-    *,
-    cash: Decimal,
-    show_cash: bool,
-) -> str:
+def _co_owner_source_line(name: str, persons: list[Person]) -> str:
+    """'<share>% of <owner>'s home (£…) ' — the equity source when this
+    person's share came from co-owning someone else's home."""
+    source = ""
+    for other in persons:
+        if getattr(other, "name", None) == name or getattr(other, "is_child", False):
+            continue
+        if not effective_selling_home(other):
+            continue
+        for co in getattr(other, "home_co_owners", ()):
+            if co.name == name:
+                gross_other = max(
+                    Decimal("0"),
+                    other.home_sale_price.amount - other.outstanding_mortgage.amount,
+                )
+                source = f"{co.share}% of {other.name}'s home (£{gross_other:,.2f}) "
+    return source
+
+
+def equity_line(options: EquityInputs) -> str:
     """One person's equity contribution as a provenance line: sale −
     mortgage + cash = contribution, co-owner aware.
 
@@ -449,37 +470,25 @@ def equity_line(
     False for owner-occupied pricing (Status=current: cash is not an
     input to that calculation).
     """
-    home_share = contributions.get(person_id_of(person), Decimal("0"))
-    value = home_share + cash
-    if home_share > 0 and effective_selling_home(person):
-        gross = max(Decimal("0"), person.home_sale_price.amount - person.outstanding_mortgage.amount)
-        co_sum = sum(co.share for co in person.home_co_owners)
-        cash_part = f" + £{cash:,.2f} cash" if show_cash else ""
+    home_share = options.contributions.get(person_id_of(options.person), Decimal("0"))
+    value = home_share + options.cash
+    if home_share > 0 and effective_selling_home(options.person):
+        gross = max(Decimal("0"), options.person.home_sale_price.amount - options.person.outstanding_mortgage.amount)
+        co_sum = sum(co.share for co in options.person.home_co_owners)
+        cash_part = f" + £{options.cash:,.2f} cash" if options.show_cash else ""
         if co_sum == 0:
             return (
-                f"£{person.home_sale_price.amount:,.2f} sale − "
-                f"£{person.outstanding_mortgage.amount:,.2f} mortgage{cash_part} = £{value:,.2f}"
+                f"£{options.person.home_sale_price.amount:,.2f} sale − "
+                f"£{options.person.outstanding_mortgage.amount:,.2f} mortgage{cash_part} = £{value:,.2f}"
             )
         holder_part = f"£{gross:,.2f} home ({PERCENT - co_sum}% yours) + "
         return f"{holder_part}£{home_share:,.2f} home share{cash_part} = £{value:,.2f}"
     if home_share > 0:
         # this person's share came from co-owning someone else's home
-        source = ""
-        for other in persons:
-            if getattr(other, "name", None) == name or getattr(other, "is_child", False):
-                continue
-            if not effective_selling_home(other):
-                continue
-            for co in getattr(other, "home_co_owners", ()):
-                if co.name == name:
-                    gross_other = max(
-                        Decimal("0"),
-                        other.home_sale_price.amount - other.outstanding_mortgage.amount,
-                    )
-                    source = f"{co.share}% of {other.name}'s home (£{gross_other:,.2f}) "
-        if show_cash:
-            return f"{source}+ £{cash:,.2f} cash = £{value:,.2f}"
+        source = _co_owner_source_line(options.name, options.persons)
+        if options.show_cash:
+            return f"{source}+ £{options.cash:,.2f} cash = £{value:,.2f}"
         return f"{source}= £{value:,.2f}"
-    if show_cash:
-        return f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
+    if options.show_cash:
+        return f"£0 home + £{options.cash:,.2f} cash = £{value:,.2f}"
     return f"£0 home = £{value:,.2f}"
