@@ -47,6 +47,10 @@ class RightmoveProperty:
     price: float | None = None
     latitude: float | None = None
     longitude: float | None = None
+    parse_errors: dict[str, str] = field(default_factory=dict)
+    """Fields whose page-model structure or VALUE the parser could not
+    interpret — carried out of the scrape so nothing downstream mistakes
+    a failed parse for a legitimate absence."""
     # Extracted from url in __post_init__; deliberately not an __init__ parameter.
     rid: str = field(init=False)
 
@@ -97,8 +101,41 @@ async def _human_delay():
     await asyncio.sleep(delay)
 
 
+_PRICE_MARKERS = frozenset({"poa", "price on application", "priced on application"})
+"""Rightmove's explicit 'no listed price' markers — a legitimate None,
+never a parse error."""
+
+
+def _price_marker(raw: Any) -> bool:
+    """True when the value is a recognized no-price marker (POA)."""
+    return str(raw).strip().lower() in _PRICE_MARKERS
+
+
+def _extract_price(raw: Any, *, field: str) -> float | None:
+    """One price value: None when absent or a recognized marker (POA);
+    the float when parseable; raises _PageModelError for a value the
+    parser cannot interpret — a failed parse is an error, not absence."""
+    if raw is None or _price_marker(raw):
+        return None
+    cleaned = _clean_price(raw)
+    if cleaned is not None:
+        return cleaned
+    raise _PageModelError(f"{field} value {raw!r} is not parseable")
+
+
+def _record_or_set_price(extracted, raw: Any):
+    """Record a price parse error on the extract, or set the parsed price."""
+    try:
+        price = _extract_price(raw, field="price")
+    except _PageModelError as e:
+        return replace(extracted, parse_errors={"price": str(e)})
+    return replace(extracted, price=price) if price is not None else extracted
+
+
 def _clean_price(raw: Any) -> float | None:
-    """Parse a price value that may be a number, string, or contain formatting."""
+    """Parse a price value that may be a number, string, or contain formatting.
+    Returns None ONLY for absent or marker values (via _extract_price);
+    unparseable values raise there instead of silently vanishing."""
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
@@ -162,9 +199,7 @@ def _parse_json_ld(html: str) -> _PropertyExtractJson:
         extracted = replace(extracted, postcode=postcode)
 
     offers = data.get("offers") or {}
-    price = _clean_price(offers.get("price"))
-    if price is not None:
-        extracted = replace(extracted, price=price)
+    extracted = _record_or_set_price(extracted, offers.get("price"))
 
     geo = data.get("geo") or {}
     lat = geo.get("latitude")
@@ -193,9 +228,7 @@ def _parse_preloaded_state(html: str) -> _PropertyExtractJson:
             extracted = replace(extracted, address=pd["address"])
         if pd.get("bedrooms") is not None:
             extracted = replace(extracted, bedrooms=int(pd["bedrooms"]))
-        price = _clean_price(pd.get("price"))
-        if price is not None:
-            extracted = replace(extracted, price=price)
+        extracted = _record_or_set_price(extracted, pd.get("price"))
         loc = pd.get("location") or {}
         lat = loc.get("latitude")
         lng = loc.get("longitude")
@@ -309,7 +342,7 @@ def _page_model_price(data: Any, prop: Any) -> float | None:
         price_schema = data[prop["prices"]]
     except (IndexError, KeyError, TypeError) as e:
         raise _PageModelError(f"price schema missing ({e})") from e
-    return _clean_price(data[price_schema["primaryPrice"]])
+    return _extract_price(data[price_schema["primaryPrice"]], field="price")
 
 
 def _page_model_bedrooms(data: Any, prop: Any) -> int | None:
@@ -390,11 +423,16 @@ def _parse_html(html: str, url: str) -> RightmoveProperty | None:
             result = replace(result, bedrooms=beds)
 
     if not (set(result.to_dict()) - {"parse_errors"}):
-        # Nothing VALUE was extracted — fields that failed their schema
-        # traversal are recorded on parse_errors (and logged per field);
-        # no property exists to return (2026-09-19: rightmove changed the
-        # page-model layout — a silent 'no data' followed by a 'changed
-        # structure' marker is the honest surface).
+        if result.parse_errors:
+            # Nothing VALUE extracted, but the parser SAW a page it could
+            # not interpret — the failures are the honest record; carry
+            # them on the property instead of dropping them (2026-09-19).
+            return RightmoveProperty(
+                url=url,
+                address=result.address or "",
+                postcode=result.postcode or "",
+                parse_errors=result.parse_errors,
+            )
         return None
     return RightmoveProperty(
         url=url,
@@ -404,6 +442,7 @@ def _parse_html(html: str, url: str) -> RightmoveProperty | None:
         price=result.price,
         latitude=result.latitude,
         longitude=result.longitude,
+        parse_errors=result.parse_errors,
     )
 
 
@@ -625,6 +664,13 @@ async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty |
     if cache_file.exists():
         logger.info("Using cached Rightmove page for %s", rid)
         return _parsed_from(cache_file.read_text(encoding="utf-8"), url, rid)
+
+    # 1b. Offline mode: never fabricate a page — a cache miss IS None
+    # (the docstring contract; the sample step below is for tests that
+    # pass _page_path explicitly, not for offline production runs).
+    if settings.rightmove_scraper_offline:
+        logger.warning("Rightmove scraper offline mode — no cached page for %s", url)
+        return None
 
     # 2. Sample page (development / tests)
     sample = _page_path or settings.rightmove_sample_page

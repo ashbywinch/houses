@@ -121,7 +121,7 @@ class TestScrapeWithSamplePage:
         saved = settings.rightmove_scraper_offline
         settings.rightmove_scraper_offline = True
         try:
-            result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/00000000"))
+            result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/99999999"))
             assert result is None, f"Expected None, got {result}"
         finally:
             settings.rightmove_scraper_offline = saved
@@ -166,3 +166,37 @@ class TestPageModelErrorVsAbsence:
         result = _parse_page_model(self._html(data))
         assert result.price is None
         assert "price" not in result.parse_errors
+
+
+class TestPriceErrorVsPoa:
+    """A price VALUE the parser cannot interpret is a typed parse error;
+    POA is a legitimate None — never the same thing."""
+
+    def _html(self, data_list: list) -> str:
+        import json
+
+        model = {"data": json.dumps(data_list, separators=(",", ":"))}
+        return f"<script>window.__PAGE_MODEL={json.dumps(model)};</script>"
+
+    def test_poa_is_a_legitimate_none_not_an_error(self):
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "POA"]
+        result = _parse_page_model(self._html(data))
+        assert result.price is None
+        assert "price" not in result.parse_errors
+
+    def test_garbage_price_value_is_a_parse_error(self):
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "ask the agent"]
+        result = _parse_page_model(self._html(data))
+        assert result.price is None
+        assert "not parseable" in result.parse_errors["price"]
+
+    def test_parse_errors_ride_onto_the_property(self):
+        from houses.rightmove_scraper import _parse_html
+
+        html = self._html([{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "ask the agent"])
+        prop = _parse_html(html, "https://www.rightmove.co.uk/properties/77777777")
+        assert prop is not None and prop.parse_errors.get("price", "").startswith("price value")
