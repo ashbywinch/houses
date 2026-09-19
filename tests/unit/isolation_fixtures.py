@@ -60,7 +60,6 @@ from houses.council_tax import _reset as _reset_council_tax  # noqa: E402
 from houses.property_registry import _reset as _reset_property_registry  # noqa: E402
 from houses.services import _reset_settings_cache  # noqa: E402
 from houses.town_desc import _reset as _reset_town_desc  # noqa: E402
-from houses.web.api_router import _reset_listing_cache  # noqa: E402
 from houses.web.broadcaster import _reset as _reset_broadcaster  # noqa: E402
 
 
@@ -72,5 +71,4 @@ def _reset_global_state():
     _reset_broadcaster()
     _reset_town_desc()
     _reset_council_tax()
-    _reset_listing_cache()
     yield

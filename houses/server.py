@@ -19,7 +19,6 @@ import houses.scrape_queue as _scrape_queue
 import houses.services as _services_mod
 import houses.services_provider as _sp
 import houses.town_desc as _town_desc
-import houses.web.api_router as _api_mod
 import houses.web.broadcaster as _broadcaster_mod
 from dag.persistence import delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
@@ -43,7 +42,7 @@ from houses.property import EnrichedProperty, Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.services import Services
 from houses.settings import settings
-from houses.web.api_router import _reset_listing_cache, api_router
+from houses.web.api_router import api_router
 from houses.web.auth import auth_router, effective_session_user, get_session_user
 from houses.web.json_utils import asdict_serializable
 
@@ -53,6 +52,8 @@ logger = logging.getLogger(__name__)
 _main_loop: asyncio.AbstractEventLoop | None = None
 """The uvicorn loop, captured at lifespan startup — the processor thread
 hands broadcaster pushes to it (see _on_node_refreshed)."""
+
+
 
 
 def _on_node_refreshed(node):
@@ -75,17 +76,14 @@ def _on_node_refreshed(node):
         return
     kind = getattr(node, "refresh_kind", None)
     if kind == "property":
-        rid = getattr(node, "_id", "").split("/", 1)[0]
-        if rid:
-            _api_mod.mark_property_dirty(rid)
-        asyncio.run_coroutine_threadsafe(_broadcaster_mod.notify_node_refreshed_async(node), _main_loop)
+        asyncio.run_coroutine_threadsafe(
+            _broadcaster_mod.notify_node_refreshed_async(node), _main_loop
+        )
         return
     if kind == "settings":
-        # The settings push makes every property's DAG recompute — each
-        # property node persists through the seam above and marks its own
-        # rid dirty. Nothing else to invalidate here.
         asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
         return
+    # An unknown or undeclared kind is dropped on purpose — but loudly:
     # a new node kind that was not given a role would otherwise vanish
     # silently, which is exactly how the id-shape bug stayed hidden.
     logger.debug(
@@ -93,6 +91,8 @@ def _on_node_refreshed(node):
         getattr(node, "_id", "?"),
         kind,
     )
+
+
 
 
 def _deploy_hash() -> str:
@@ -180,7 +180,6 @@ async def lifespan(_app: FastAPI):
     _property_registry._reset()
     _broadcaster_mod._reset()
     _town_desc._reset()
-    _reset_listing_cache()
 
     load_property_nodes_from_db()
     # THE DAG PROCESSOR: one thread, one queue. It owns recompute AND
@@ -689,7 +688,9 @@ async def health() -> JSONResponse:
     try:
         from houses.database import get_connection
 
-        row = get_connection().execute("SELECT MAX(created_at) AS last_write FROM node_results").fetchone()
+        row = get_connection().execute(
+            "SELECT MAX(created_at) AS last_write FROM node_results"
+        ).fetchone()
         last_write = row["last_write"] or "" if row is not None else ""
     except Exception:  # lucidlint: ignore broad-except boundary — a health probe never takes the app down
         db = "error"
