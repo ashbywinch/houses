@@ -112,6 +112,33 @@ class TestLogin:
         _oauth_states.clear()
 
 
+def _push_person_emails(emails_by_name: dict[str, str], *, superuser: set[str] | None = None) -> None:
+    """Link emails to settings persons in ONE push — the real auth
+    contract: every account is a settings person, so a session's person
+    always resolves (no unlinked accounts exist)."""
+    from dataclasses import replace
+
+    from houses.nodes.settings import make_default_persons
+    from houses.services_provider import get_services
+
+    svc = get_services()
+    persons = [
+        replace(
+            p,
+            email=emails_by_name.get(p.name, ""),
+            is_superuser=p.name in (superuser or set()),
+        )
+        if p.name in emails_by_name
+        else p
+        for p in make_default_persons()
+    ]
+    svc.persons_source.push(persons, "test")
+
+
+def _push_person_email(name: str, email: str, *, is_superuser: bool = False) -> None:
+    _push_person_emails({name: email}, superuser={name} if is_superuser else None)
+
+
 class TestMe:
     def test_not_authenticated(self):
         resp = client.get("/api/auth/me")
@@ -119,6 +146,7 @@ class TestMe:
         assert resp.json() == {"authenticated": False}
 
     def test_authenticated_with_session(self):
+        _push_person_email("Simon", "simon@example.com")
         cookie = _inject_session(email="simon@example.com")
         client.cookies.set("session", cookie)
         resp = client.get("/api/auth/me")
@@ -126,9 +154,12 @@ class TestMe:
         data = resp.json()
         assert data["authenticated"] is True
         assert data["email"] == "simon@example.com"
+        # every account is a settings person — the person always resolves
+        assert data["person_id"] == "1"
         assert data["is_superuser"] is False
 
     def test_authenticated_superuser(self):
+        _push_person_email("Simon", "simon@example.com", is_superuser=True)
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
         client.cookies.set("session", cookie)
         resp = client.get("/api/auth/me")
@@ -138,6 +169,7 @@ class TestMe:
         assert data["is_superuser"] is True
 
     def test_returns_impersonating(self):
+        _push_person_email("Simon", "simon@example.com", is_superuser=True)
         cookie = _inject_session(email="simon@example.com", is_superuser=True, impersonating="Ashby")
         client.cookies.set("session", cookie)
         resp = client.get("/api/auth/me")
@@ -145,10 +177,10 @@ class TestMe:
         data = resp.json()
         # The /me report is the canonical person_id, never the display name
         assert data["impersonating"] == "3"
-        # the defaults carry no email → no linked person → no person_id
-        assert data["person_id"] is None
+        assert data["person_id"] == "1"
 
     def test_returns_impersonating_null_when_not_impersonating(self):
+        _push_person_email("Simon", "simon@example.com", is_superuser=True)
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
         client.cookies.set("session", cookie)
         resp = client.get("/api/auth/me")
@@ -183,8 +215,7 @@ class TestLiveSuperuserDerivation:
 
         svc = get_services()
         persons = [
-            replace(p, email=email, is_superuser=True) if p.name == "Simon" else p
-            for p in make_default_persons()
+            replace(p, email=email, is_superuser=True) if p.name == "Simon" else p for p in make_default_persons()
         ]
         svc.persons_source.push(persons, "test")
 
@@ -202,6 +233,7 @@ class TestLiveSuperuserDerivation:
 
     def test_me_keeps_false_when_settings_do_not_promote(self):
         """No live superuser flag → the cookie snapshot stands."""
+        _push_person_email("Simon", "simon@example.com")
         cookie = _inject_session(email="simon@example.com", is_superuser=False)
         client.cookies.set("session", cookie)
         resp = client.get("/api/auth/me")
@@ -433,9 +465,7 @@ class TestDevice:
     def test_rejects_invalid_token(self):
         from houses.settings import settings
 
-        token = _sp.set(
-            make_services(oauth_service=FakeOAuthService(verify_error=ValueError("bad")))
-        )
+        token = _sp.set(make_services(oauth_service=FakeOAuthService(verify_error=ValueError("bad"))))
         saved = settings.device_client_id
         settings.device_client_id = "fake-device-client"
         try:
@@ -449,6 +479,7 @@ class TestDevice:
         # autouse _fake_oauth fixture provides FakeOAuthService (id_info ashby@example.com)
         from houses.settings import settings
 
+        _push_person_email("Ashby", "ashby@example.com")
         saved = settings.device_client_id
         settings.device_client_id = "fake-device-client"
         try:
@@ -485,9 +516,7 @@ class TestDevice:
 
         from houses.settings import settings
 
-        token = _sp.set(
-            make_services(oauth_service=FakeOAuthService(verify_error=TransportError("no network")))
-        )
+        token = _sp.set(make_services(oauth_service=FakeOAuthService(verify_error=TransportError("no network"))))
         saved = settings.device_client_id
         settings.device_client_id = "fake-device-client"
         try:
@@ -656,15 +685,16 @@ class TestCommentAuth:
 class TestSessionIsolation:
     def test_concurrent_sessions_independent(self):
         """Two different session cookies see their own session data."""
-        cookie_a = _inject_session(email="alice@example.com", is_superuser=False)
-        cookie_b = _inject_session(email="bob@example.com", is_superuser=True)
+        _push_person_emails({"Simon": "simon@example.com", "Lorena": "lorena@example.com"}, superuser={"Lorena"})
+        cookie_a = _inject_session(email="simon@example.com", is_superuser=False)
+        cookie_b = _inject_session(email="lorena@example.com", is_superuser=True)
 
         client.cookies.set("session", cookie_a)
         resp_a = client.get("/api/auth/me")
         client.cookies.set("session", cookie_b)
         resp_b = client.get("/api/auth/me")
 
-        assert resp_a.json()["email"] == "alice@example.com"
+        assert resp_a.json()["email"] == "simon@example.com"
         assert resp_a.json()["is_superuser"] is False
-        assert resp_b.json()["email"] == "bob@example.com"
+        assert resp_b.json()["email"] == "lorena@example.com"
         assert resp_b.json()["is_superuser"] is True

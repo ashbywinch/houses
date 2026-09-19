@@ -228,38 +228,41 @@ def effective_session_user(request: Request) -> dict[str, Any] | None:
     return session
 
 
-def _current_person_name(session: Mapping[str, Any]) -> str | None:
-    """The Person display name for the session email, or None when unknown/failed."""
-    svc = get_services()
-    try:
-        persons_attempt = svc.persons_source.latest_attempt()
-        if persons_attempt.succeeded:
-            return _lookup_person_by_email(session["email"], persons_attempt.value_or_none())
-    # lucidlint: ignore broad-except deliberate degrade — person-name lookup failure returns None
-    except Exception:
-        logger.exception("Failed to look up person name")
+def _linked_person(session: Mapping[str, Any]) -> Any | None:
+    """The settings Person for the session email, or None while the
+    persons source is not yet computed (startup).
+
+    A SUCCEEDED source with no linked person is a bug — every account is
+    in settings — and raises instead of silently rendering the session
+    as an unlinked guest.
+    """
+    persons_attempt = get_services().persons_source.latest_attempt()
+    if not persons_attempt.succeeded:
         return None
-    return None
+    folded = session["email"].casefold()
+    for p in persons_attempt.value_or_none() or []:
+        pe = p.get("email") if isinstance(p, dict) else getattr(p, "email", None)
+        if pe is not None and str(pe).casefold() == folded:
+            return p
+    raise LookupError(f"session email {session['email']!r} has no linked person in settings")
+
+
+def _current_person_name(session: Mapping[str, Any]) -> str | None:
+    """The Person display name for the session email (None only while the
+    persons source is not yet computed)."""
+    person = _linked_person(session)
+    if person is None:
+        return None
+    return person.get("name") if isinstance(person, dict) else getattr(person, "name", None)
 
 
 def _current_person_id(session: Mapping[str, Any]) -> str | None:
-    """The canonical person_id for the session email's linked person."""
-    name = _current_person_name(session)
-    if name is None:
+    """The canonical person_id for the session email's linked person
+    (None only while the persons source is not yet computed)."""
+    person = _linked_person(session)
+    if person is None:
         return None
-    try:
-        persons_attempt = get_services().persons_source.latest_attempt()
-        if persons_attempt.succeeded:
-            for p in persons_attempt.value_or_none() or []:
-                if isinstance(p, dict):
-                    if p.get("name") == name:
-                        return person_key(p)
-                elif getattr(p, "name", None) == name:
-                    return person_key(p)
-    except Exception:
-        logger.exception("Failed to look up person id")
-        return None
-    return None
+    return person_key(person)
 
 
 def _make_session_cookie(
@@ -324,21 +327,6 @@ def _is_superuser_for_email(folded_email: str) -> bool:
         ):
             return True
     return False
-
-
-def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | None:
-    """Scan persons list for a matching email (casefolded), return the person name or None."""
-    if not persons_attempt_value:
-        return None
-    folded = email.casefold()
-    for p in persons_attempt_value:
-        if isinstance(p, dict):
-            pe = p.get("email")
-            if pe is not None and pe.casefold() == folded:
-                return p.get("name")
-        elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded:
-            return getattr(p, "name", None)
-    return None
 
 
 def person_key(p) -> str:
