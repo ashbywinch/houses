@@ -140,6 +140,14 @@ def _push_person_email(name: str, email: str, *, is_superuser: bool = False) -> 
 
 
 class TestMe:
+    def test_unlinked_session_is_401_not_500(self):
+        """Authenticated but not in settings is an authorization failure —
+        a 401, never a 500 crash on the lookup."""
+        cookie = _inject_session(email="outsider@example.com")
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/auth/me")
+        assert resp.status_code == 401
+
     def test_not_authenticated(self):
         resp = client.get("/api/auth/me")
         assert resp.status_code == 200

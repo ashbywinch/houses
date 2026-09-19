@@ -233,8 +233,8 @@ def _linked_person(session: Mapping[str, Any]) -> Any | None:
     persons source is not yet computed (startup).
 
     A SUCCEEDED source with no linked person is a bug — every account is
-    in settings — and raises instead of silently rendering the session
-    as an unlinked guest.
+    in settings — and answers 401 instead of silently rendering the
+    session as an unlinked guest.
     """
     persons_attempt = get_services().persons_source.latest_attempt()
     if not persons_attempt.succeeded:
@@ -244,7 +244,10 @@ def _linked_person(session: Mapping[str, Any]) -> Any | None:
         pe = p.get("email") if isinstance(p, dict) else getattr(p, "email", None)
         if pe is not None and str(pe).casefold() == folded:
             return p
-    raise LookupError(f"session email {session['email']!r} has no linked person in settings")
+    raise HTTPException(
+        status_code=401,
+        detail="This account is not linked to a person in settings",
+    )
 
 
 def _current_person_name(session: Mapping[str, Any]) -> str | None:
