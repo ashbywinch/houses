@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -129,3 +130,39 @@ class TestScrapeWithSamplePage:
     async def test_unknown_url_rid_returns_none(self):
         result = await scrape("https://example.com/no-rid-here", _page_path=str(SAMPLE_HTML))
         assert result is None
+
+
+class TestPageModelErrorVsAbsence:
+    """The scrape parser distinguishes a page-model STRUCTURE mismatch
+    (Rightmove changed the layout — a typed error, logged and recorded)
+    from a field that is genuinely ABSENT (None, no error)."""
+
+    def _model(self, data_list: list) -> dict:
+        # Page model: "data" is a JSON string over a FLAT array; data[0] is
+        # the schema whose propertyData key indexes the property entry, and
+        # the property's field keys are INDICES into the same array.
+        return {"data": json.dumps(data_list, separators=(",", ":"))}
+
+    def _html(self, data_list: list) -> str:
+        return f"<script>window.__PAGE_MODEL={json.dumps(self._model(data_list))};</script>"
+
+    def test_schema_mismatch_is_recorded_not_swallowed(self):
+        """The prices schema key is missing from the property entry → a
+        typed parse error is recorded on the extract (value stays None)."""
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"address": 2}, {"foo": "bar"}]
+        result = _parse_page_model(self._html(data))
+        assert isinstance(result.parse_errors.get("price"), str)
+        assert "prices" in result.parse_errors["price"]
+        assert result.price is None
+
+    def test_unparseable_value_is_genuine_absence(self):
+        """The prices schema EXISTS and 'POA' sits in the value slot — a
+        genuine absence: None, and NO parse error."""
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "POA"]
+        result = _parse_page_model(self._html(data))
+        assert result.price is None
+        assert "price" not in result.parse_errors

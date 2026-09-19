@@ -124,6 +124,10 @@ class _PropertyExtractJson:
     price: float | None = None
     latitude: float | None = None
     longitude: float | None = None
+    parse_errors: dict[str, str] = field(default_factory=dict)
+    """Fields whose page-model STRUCTURE the parser could not traverse —
+    distinct from genuine absence (a field the page simply doesn't carry).
+    A structure mismatch means Rightmove changed the page layout."""
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
@@ -211,6 +215,12 @@ def _parse_map_coords(html: str) -> _PropertyExtractJson:
     return _PropertyExtractJson()
 
 
+class _PageModelError(Exception):
+    """The page-model STRUCTURE is not what the parser expects (Rightmove
+    changed the layout) — a typed error, never a silent None. Genuine
+    field ABSENCE (the page carries no such value) stays None."""
+
+
 def _parse_page_model(html: str) -> _PropertyExtractJson:
     """Extract property data from window.__PAGE_MODEL (Rightmove's primary data format).
 
@@ -236,25 +246,36 @@ def _parse_page_model(html: str) -> _PropertyExtractJson:
     extracted = _PropertyExtractJson()
 
     # Address
-    address = _page_model_address(data, prop)
-    if address is not None:
-        extracted = replace(extracted, address=address[0], postcode=address[1])
+    try:
+        address = _page_model_address(data, prop)
+        if address is not None:
+            extracted = replace(extracted, address=address[0], postcode=address[1])
+    except _PageModelError as e:
+        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "address": str(e)})
 
     # Price
-    price = _page_model_price(data, prop)
-    if price is not None:
-        extracted = replace(extracted, price=price)
+    try:
+        price = _page_model_price(data, prop)
+        if price is not None:
+            extracted = replace(extracted, price=price)
+    except _PageModelError as e:
+        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "price": str(e)})
 
-        # lucidlint: ignore duplicate-block field-merge accordion — each 3-line block merges a different page-model
-        # Bedrooms
-    bedrooms = _page_model_bedrooms(data, prop)
-    if bedrooms is not None:
-        extracted = replace(extracted, bedrooms=bedrooms)
+    # Bedrooms
+    try:
+        bedrooms = _page_model_bedrooms(data, prop)
+        if bedrooms is not None:
+            extracted = replace(extracted, bedrooms=bedrooms)
+    except _PageModelError as e:
+        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "bedrooms": str(e)})
 
     # Location (lat/lng)
-    location = _page_model_location(data, prop)
-    if location is not None:
-        extracted = replace(extracted, latitude=location[0], longitude=location[1])
+    try:
+        location = _page_model_location(data, prop)
+        if location is not None:
+            extracted = replace(extracted, latitude=location[0], longitude=location[1])
+    except _PageModelError as e:
+        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "location": str(e)})
 
     return extracted
 
@@ -264,7 +285,11 @@ _PageModelLocation = tuple[float, float]  # (lat, lng)
 
 
 def _page_model_address(data: Any, prop: Any) -> _PageModelAddress | None:
-    """(address, postcode) from the page model, or None when the fields are absent."""
+    """(address, postcode) from the page model.
+
+    A structure the parser cannot traverse is a typed _PageModelError
+    (Rightmove changed the page); None means the page genuinely carries
+    no such field."""
     try:
         addr_schema = data[prop["address"]]
         addr_parts = [data[addr_schema["displayAddress"]]]
@@ -272,43 +297,46 @@ def _page_model_address(data: Any, prop: Any) -> _PageModelAddress | None:
         incode = data[addr_schema["incode"]]
         return addr_parts[0], f"{outcode} {incode}"
     except (IndexError, KeyError, TypeError) as e:
-        logger.debug("address/postcode fields absent from the page model (skipped): %s", e)
-        return None
+        raise _PageModelError(f"address schema missing ({e})") from e
 
 
 def _page_model_price(data: Any, prop: Any) -> float | None:
-    """Price from the page model, or None when the field is absent/unparseable."""
+    """Price from the page model.
+
+    Structure mismatch → _PageModelError; a present but unparseable
+    value (e.g. 'POA') is genuine absence → None."""
     try:
         price_schema = data[prop["prices"]]
-        return _clean_price(data[price_schema["primaryPrice"]])
     except (IndexError, KeyError, TypeError) as e:
-        logger.debug("price field absent from the page model (skipped): %s", e)
-        return None
+        raise _PageModelError(f"price schema missing ({e})") from e
+    return _clean_price(data[price_schema["primaryPrice"]])
 
 
 def _page_model_bedrooms(data: Any, prop: Any) -> int | None:
-    """Bedroom count from the page model, or None when absent or not an integer."""
+    """Bedroom count from the page model.
+
+    Structure mismatch → _PageModelError; a non-integer value is
+    genuine absence → None."""
     try:
         beds = data[prop["bedrooms"]]
-        if isinstance(beds, int):
-            return beds
     except (IndexError, KeyError, TypeError) as e:
-        logger.debug("bedrooms field absent from the page model (skipped): %s", e)
-        return None
-    return None
+        raise _PageModelError(f"bedrooms schema missing ({e})") from e
+    return beds if isinstance(beds, int) else None
 
 
 def _page_model_location(data: Any, prop: Any) -> _PageModelLocation | None:
-    """(lat, lng) from the page model, or None when absent or non-numeric."""
+    """(lat, lng) from the page model.
+
+    Structure mismatch → _PageModelError; non-numeric coordinates are
+    genuine absence → None."""
     try:
         loc_schema = data[prop["location"]]
         lat = data[loc_schema["latitude"]]
         lng = data[loc_schema["longitude"]]
-        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-            return float(lat), float(lng)
     except (IndexError, KeyError, TypeError) as e:
-        logger.debug("location fields absent from the page model (skipped): %s", e)
-        return None
+        raise _PageModelError(f"location schema missing ({e})") from e
+    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+        return float(lat), float(lng)
     return None
 
 
@@ -321,6 +349,7 @@ def _merge_missing(result: _PropertyExtractJson, source: _PropertyExtractJson) -
         price=result.price if result.price is not None else source.price,
         latitude=result.latitude if result.latitude is not None else source.latitude,
         longitude=result.longitude if result.longitude is not None else source.longitude,
+        parse_errors={**result.parse_errors, **source.parse_errors},
     )
 
 
@@ -360,7 +389,12 @@ def _parse_html(html: str, url: str) -> RightmoveProperty | None:
         if beds is not None:
             result = replace(result, bedrooms=beds)
 
-    if result == _PropertyExtractJson():
+    if not (set(result.to_dict()) - {"parse_errors"}):
+        # Nothing VALUE was extracted — fields that failed their schema
+        # traversal are recorded on parse_errors (and logged per field);
+        # no property exists to return (2026-09-19: rightmove changed the
+        # page-model layout — a silent 'no data' followed by a 'changed
+        # structure' marker is the honest surface).
         return None
     return RightmoveProperty(
         url=url,
