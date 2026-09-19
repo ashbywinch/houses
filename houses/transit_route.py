@@ -200,15 +200,14 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
             set_cached("POST", ORS_DIRECTIONS_URL, None, key, data)
             response = _DirectionsResponseJson.from_dict(data)
             return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
-    # lucidlint: ignore broad-except ORS park-and-ride lookup logs and falls back
-    except Exception:
-        logger.warning(
-            "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s)",
-            origin_coords,
-            station_name,
-            ORS_DIRECTIONS_URL,
-        )
-        return None
+    except Exception as exc:
+        # Fail fast: a failed ORS lookup must not silently keep the walk
+        # leg as if the drive time were unknowable. Propagating lets the
+        # DAG classify it — transient/retryable → pending, permanent →
+        # impossible — instead of masking a broken journey (2026-09-19).
+        raise RuntimeError(
+            f"park-and-ride ORS lookup failed for {origin_coords} \u2192 {station_name} ({ORS_DIRECTIONS_URL}): {exc}"
+        ) from exc
 
 
 # lucidlint: ignore record-shape consumes the TfL journeys provider payload — provider wire shape (coding-standards.md)
@@ -269,4 +268,3 @@ async def apply_park_and_ride_to_journeys(
         old_duration = journey.get("duration", 0)
         journey["duration"] = old_duration - walk_duration + drive_minutes
     return data
-

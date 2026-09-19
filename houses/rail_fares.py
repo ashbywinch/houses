@@ -62,9 +62,11 @@ class RailFareRegistry:
                 if origin and dest and cost_str:
                     try:
                         fares[frozenset({origin, dest})] = Money(cost_str, "GBP")
-                    # lucidlint: ignore broad-except one malformed fare row is skipped; the remaining rows still load
-                    except Exception:
-                        continue
+                    except (ValueError, TypeError) as exc:
+                        raise ValueError(
+                            f"malformed rail fares row ({origin}→{dest}, {cost_str!r}) — "
+                            "a fare the lookup cannot read would silently fall back to driving"
+                        ) from exc
         self._fares_by_pair = fares
 
     def nearest_station(self, point: GeoPoint) -> Station | None:
@@ -93,4 +95,3 @@ class RailFareRegistry:
         if not self._fares_by_pair:
             return None
         return self._fares_by_pair.get(frozenset({origin.crs, destination.crs}))
-

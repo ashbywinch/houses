@@ -138,6 +138,16 @@ describe('PropertyCard basic rendering', () => {
     expect(wrapper.text()).toContain('London')
   })
 
+  it('shows the not-updating chip when a push failed', () => {
+    const wrapper = mountCard({ rid: '123', data: makeSummary({ push_stale: true }) })
+    expect(wrapper.text()).toContain('not updating')
+  })
+
+  it('hides the not-updating chip when pushes succeed', () => {
+    const wrapper = mountCard({ rid: '123', data: makeSummary({}) })
+    expect(wrapper.text()).not.toContain('not updating')
+  })
+
   it('falls back to rid when address fails', () => {
     const summary = makeSummary({
       best_address: { succeeded: false, value: null, error: 'fail', provenance: { label: 'test' } },

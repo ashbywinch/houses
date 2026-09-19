@@ -44,7 +44,7 @@ from houses.web.auth import (
     person_key,
     resolve_person_identity,
 )
-from houses.web.broadcaster import register_client
+from houses.web.broadcaster import register_client, stale_push_rids
 from houses.web.monthly_delta import attach as attach_monthly_delta
 from houses.web.settings_payload import SessionPersons, settings_payload
 
@@ -428,6 +428,8 @@ async def get_all_properties():
         summary = SummaryJson(**await prop.to_json_summary())
         wire = _attach_scrape_state(summary, rid)
         await attach_monthly_delta(wire, rid, get_services().property_registry)
+        if rid in stale_push_rids():
+            wire["push_stale"] = True
         results[rid] = wire
         scores[rid] = _score_from_summary(summary)
     scored = sorted(results.items(), key=lambda kv: scores[kv[0]], reverse=True)

@@ -9,7 +9,7 @@ from typing import Any, override
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt, AttemptError, Provenance
+from dag.attempt import Attempt, AttemptError, Provenance, classify_exception
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import LegMode
@@ -483,14 +483,23 @@ class TransitNode(DerivedNode[Commute]):
             # (the accessor raises).
             fallback = await self._nr_fallback(location, poi)
             if fallback is not None:
-                # Same label/destination fixups as the normal path — the
-                # router only knows the address; the summary/provenance
-                # must show the POI label + trips (PR #68 review).
-                parts = self._id.split("/")
-                label = parts[2] if len(parts) >= 3 else (fallback.destination.label if fallback.destination else "")
-                fallback = replace(fallback, label=label)
-                fallback = _with_poi_destination(fallback, poi_val)
-                return Attempt.succeeded(fallback)
+                if fallback.succeeded:
+                    fb = fallback.value_or_none()
+                    if fb is None:
+                        return fallback
+                    # Same label/destination fixups as the normal path — the
+                    # router only knows the address; the summary/provenance
+                    # must show the POI label + trips (PR #68 review).
+                    parts = self._id.split("/")
+                    label = parts[2] if len(parts) >= 3 else (fb.destination.label if fb.destination else "")
+                    fb = replace(fb, label=label)
+                    fb = _with_poi_destination(fb, poi_val)
+                    return Attempt.succeeded(fb)
+                # The fallback API failed: propagate the typed failure. An
+                # impossible journey stays impossible (retried when pending) —
+                # never present the failed fallback as a plain
+                # 'TfL had no route' infeasible success (2026-09-19).
+                return fallback
             return Attempt.succeeded(val)
 
         parts = self._id.split("/")
@@ -517,14 +526,16 @@ class TransitNode(DerivedNode[Commute]):
         self,
         location: Attempt[GeoPoint],
         poi: Attempt[PlaceOfInterest],
-    ) -> Commute | None:
+    ) -> Attempt[Commute] | None:
         """National Rail fallback for origins beyond TfL coverage.
 
         Calls the wired transit_route_fn (Google Routes TRANSIT) with the
-        property's location and the destination POI.  Returns the Commute
-        on success, None when unwired, unroutable, or failed — the
-        caller keeps the succeeded-infeasible result, so the commute
-        selector still falls back to drive/walk.
+        property's location and the destination POI.  None when no
+        fallback applies (unwired, unroutable inputs) — the caller keeps
+        the succeeded-infeasible TfL result.  An API failure is typed:
+        temporary → pending (retried), permanent → impossible.  The
+        journey is ALREADY broken when the only transit option depends on
+        a failed API — it must not be masked as a plain 'TfL no route'.
         """
         if self._transit_route_fn is None:
             return None
@@ -544,13 +555,32 @@ class TransitNode(DerivedNode[Commute]):
         except Exception as e:  # lucidlint: ignore broad-except — the fallback must never mask drive/walk
             logging.getLogger(__name__).warning("National Rail fallback failed: %s", e)
             self._last_fallback_detail = f"National Rail fallback failed: {e}"
+            if classify_exception(e).retryable:
+                return Attempt.pending()
+            return Attempt.impossible(
+                f"National Rail fallback failed: {e}",
+                error_info=AttemptError(
+                    code="no_data",
+                    message=f"National Rail fallback failed: {e}",
+                    user_message="Couldn't find a route to this destination — transit planning failed.",
+                ),
+            )
+        if fallback is None:
             return None
-        if fallback is None or fallback.infeasible:
-            return None
+        if fallback.infeasible:
+            self._last_fallback_detail = "TfL found no route — National Rail fallback was not routable either"
+            return Attempt.impossible(
+                "no route available",
+                error_info=AttemptError(
+                    code="no_data",
+                    message="no route available",
+                    user_message="Couldn't find a route to this destination — check the address.",
+                ),
+            )
         self._last_fallback_detail = (
             "TfL found no route for this journey — National Rail fallback (Google transit) used"
         )
-        return fallback
+        return Attempt.succeeded(fallback)
 
     @override
     async def build_provenance(

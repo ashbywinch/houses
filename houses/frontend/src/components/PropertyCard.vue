@@ -428,6 +428,11 @@ async function toggleViewed() {
         <span v-if="price" class="card__tag card__tag--price">£{{ price.toLocaleString() }}</span>
         <span v-if="bedrooms" class="card__tag">{{ bedrooms }} bed</span>
         <span v-if="freshnessLabel" class="card__tag" :class="freshnessClass">{{ freshnessLabel }}</span>
+        <span
+          v-if="data.push_stale"
+          class="card__tag card__tag--stale"
+          title="Live updates are failing for this property — the figures here may be older than the current data"
+        >⧗ not updating</span>
         <span v-if="triage?.is_viewed" class="card__tag card__tag--seen">Seen</span>
       </div>
 
@@ -668,6 +673,7 @@ async function toggleViewed() {
 }
 .card__tag--price { font-weight: var(--fw-semibold); color: var(--text); }
 .card__tag--seen { background: var(--slate-100); color: var(--slate-600); }
+.card__tag--stale { background: var(--orange-bg, #fff4e0); color: var(--orange-text, #b45309); }
 .card__tag.pill--good { background: var(--green-bg); color: var(--green-text); }
 .card__tag.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
 .card__tag.pill--bad { background: var(--red-bg); color: var(--red-text); }

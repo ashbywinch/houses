@@ -587,17 +587,27 @@ class TestNationalRailFallback:
         assert _v is not None and _v.infeasible
 
     @pytest.mark.asyncio
-    async def test_fallback_failure_keeps_infeasible(self):
-        """A Google failure must never crash the node nor mask the
-        drive/walk fallback."""
+    async def test_fallback_permanent_failure_is_impossible(self):
+        """A permanent fallback failure is typed impossible — the journey
+        is already broken and must not be masked as 'TfL had no route'."""
 
         async def fake_route(loc, dest):
             raise RuntimeError("google down")
 
         a = await self._run(fake_route)
-        assert a.succeeded
-        _v = a.value_or_none()
-        assert _v is not None and _v.infeasible
+        assert a.impossible, f"a permanent fallback failure must be impossible, got {a.status}"
+        assert "google down" in a.error
+
+    @pytest.mark.asyncio
+    async def test_fallback_transient_failure_is_pending(self):
+        """A transient fallback failure is pending — the DAG retries it
+        instead of silently substituting drive/walk."""
+
+        async def fake_route(loc, dest):
+            raise TimeoutError("google timeout")
+
+        a = await self._run(fake_route)
+        assert a.pending, f"a transient fallback failure must be pending, got {a.status}"
 
     @pytest.mark.asyncio
     async def test_fallback_provenance_narrates_both_steps(self):

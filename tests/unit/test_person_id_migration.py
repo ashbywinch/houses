@@ -17,9 +17,12 @@ from scripts.backfill_person_ids import collect_mapping, remap_row
 
 MAPPING = {"Simon": "1", "Lorena": "2"}
 
+
 # lucidlint: ignore record-shape the test payload IS an opaque wire fixture — typed loosely on purpose
 def blob(payload: dict) -> bytes:
     return zlib.compress(json.dumps(payload).encode())
+
+
 def test_collect_mapping_assigns_numeric_ids_incrementally():
     """Numeric scheme: everyone missing an id gets max(existing)+1, in
     list order — collision-free by construction, no slug dance."""
@@ -41,6 +44,7 @@ def test_node_id_rekeys_the_person_segment():
     assert out2 is not None
     assert out2[0] == "1234/2/Lorena Square/walk"
 
+
 def test_dep_timestamps_rekey_inner_node_ids():
     dep = {"1234/Simon/Pimlico/poi": "2026-01-01", "unrelated": "2026-01-02"}
     out = remap_row("1234/Simon/Pimlico/final_fuel", dep, b"", MAPPING)
@@ -61,6 +65,7 @@ def test_works_estimates_value_keys_follow_the_id():
 
 def test_unrelated_rows_are_untouched():
     assert remap_row("9999/best_address", {}, b"", MAPPING) is None
+
 
 def test_label_segment_that_equals_a_person_name_is_not_rekeyed():
     """Position-2 anchoring: a POI label that happens to be a person's
@@ -119,6 +124,7 @@ def test_works_slug_keyed_row_remaps_to_the_id():
     assert payload["value"]["3"]["amount"] == "25000.00"
     assert "ashby" not in payload["value"]
 
+
 def test_slug_segment_node_id_resolves():
     """Rows written by the running app between the code cutover and the
     migration carry the slug in the person segment (``simon``) — the
@@ -130,6 +136,7 @@ def test_slug_segment_node_id_resolves():
     out2 = remap_row("1234/simon/Pimlico/final_fuel", dep, b"", MAPPING)
     assert out2 is not None
     assert json.loads(out2[1]) == {"1234/1/Pimlico/poi": "2026-01-01"}
+
 
 def test_legacy_string_value_dict_is_healed():
     """A sheet-migration row stores the works dict as a JSON STRING —
