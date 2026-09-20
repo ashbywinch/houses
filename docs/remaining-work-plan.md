@@ -744,66 +744,47 @@ missing piece on pyrefly instead — and it works:
 
 ## Part F — DAG dep correctness (2026-09-13, PR #114 review fallout)
 
-Status: plan. Audience: the next agent executing it. Rule for all
-waves: **a node depends only on what its `compute` reads; `compute`
-reads only its dep attempts; derived state lives on the value**
-(`docs/dag-library.md` → Wiring rules, rules 7–8). Working around the
-DAG (string-patching provenance, manual scheduling, side memory) is
-an antipattern — fix the deps. No `node_results` surgery, no manual
-scheduling, no side memory in any wave.
+Status: **done on 2026-09-20** (branch `fix/provenance-mobile-commute`,
+commits `ee6c725`/`e860386` + main). Rule that framed every wave:
+**a node depends only on what its `compute` reads; `compute` reads only
+its dep attempts; derived state lives on the value** (`docs/dag-library.md`
+→ Wiring rules). Working around the DAG (string-patching provenance,
+manual scheduling, side memory) is an antipattern — fix the deps. No
+`node_results` surgery, no manual scheduling, no side memory in any wave.
 
-### Wave 0 — revert the workarounds (first, same branch)
+- **Wave 0 — revert the workarounds: done.** The `DepInputs` envelope
+  (per-row projected dep-value subsets beside the frozen provenance tree)
+  is deleted; the layer serves the stored tree verbatim (main, merged via
+  #116). The inert `_restamp_*` hooks, `Commute.origin` reuse semantics
+  and the fan-out are gone; the envelope-bound tests were removed.
+- **Wave 1 — narrow the planner deps: done (main).** `DestinationAddressNode`
+  (`houses/nodes/transit.py`) projects the address; planners plan the
+  address string and are never marked stale by trips-only edits.
+- **Wave 2.1 — always wire DriveNode: done.** A carless person's drive
+  value is infeasible ("no car available") from `DriveNode.compute`
+  (`houses/nodes/transit.py`); `commute_pipeline_builder.py` no longer
+  drops the node, so a car flip never rebuilds the graph.
+- **Wave 2.2 — acceptable as a persons-sourced dep: done.**
+  `SchoolAcceptanceNode` (`houses/nodes/schools.py`) is a dependency of
+  the school nodes; a filter edit recomputes the lookup.
+- **Wave 2.3 — bound max_walk in the selector choose: done (main).**
+  `commute.py` reads `inputs.max_walk.value_or_none()`.
+- **Wave 3 — formulas from bound dep attempts: done.**
+  `DerivedNode.provenance_formula_for(dep_attempts, active_deps)` is the
+  persist-path hook; petrol, the rail-fare merge and the monthly total
+  render from the bound attempts (the merge excludes a fare outside the
+  evaluation's conditional dep set). `latest_attempt()` remains only on
+  the never-persisted render.
+- **Wave 4 — unread-dep removal: done.** `TownDescNode.best_location` and
+  `NearestSchoolNode.best_address` are gone (a location/address change
+  can no longer re-run the town description or school lookup);
+  `BusLegAugment._walk_too_long` honours the bound `max_walk` attempt.
+  `provenance_display_value()` renders raw tuples as human text in the
+  tree ("mixed, boys, girls"), enforced by the friendly-provenance API
+  test.
 
-Delete `Commute.origin` (`houses/model/domain.py`), `_origin_key` +
-`_reusable_journey` + the three `cached = …` early-returns
-(`houses/nodes/transit.py`), verify no `_restamp_*`/fan-out remnants
-in `dag/derived_node.py` / `houses/nodes/property_nodes.py`, retire
-the tripwire test. Verify: `ruff`, `pyrefly`,
-`test_zero_day_provenance.py` FAILS again (live repro back on),
-everything else green.
-
-### Wave 1 — narrow the planner deps (the actual fix)
-
-New `DestinationAddressNode(place) -> str` (pure address projection;
-impossible when empty). Builder wires `WalkNode`, `DriveNode`,
-`TflTransitNode`, `BusRouteNode` as `(best_location, address_node)`;
-their `compute(location, address)` plans the address string and the
-stamp flows downstream (selector → merge → fuel → breakdown hold the
-full-POI dep and project frequency). Trips-only pushes stop marking
-planners stale — no refresh, no call, nothing to count. Rewrite
-`test_trips_change_no_recalc` as a non-refresh test; update
-`TestCongestionZoneAndProvenanceFrequency` wiring. Files:
-`houses/nodes/transit.py`, `houses/nodes/bus.py`,
-`houses/nodes/commute_pipeline_builder.py`, `houses/nodes/commute.py`
-(options types), the two test files.
-
-### Wave 2 — HIGH build-time copies
-
-2.1 Always wire `DriveNode`; gate no-car feasibility in `compute`
-(`commute_pipeline_builder.py:104-114`). 2.2 `acceptable` becomes a
-persons-sourced dep, not a constructor snapshot
-(`property_nodes.py:395-404`, `schools.py:57-71`). 2.3 Bind the
-`max_walk` attempt into the selector choose instead of the
-`self._max_walk` write-then-read (`commute.py:353`). Tests: car-flip
-re-scores without key churn; filter edits recompute; tolerance
-survives restart.
-
-### Wave 3 — stale `latest_attempt` in formulas (follow-up)
-
-`commute.py:439,444` (merge), `petrol.py:136-137` (mpg/price),
-`total_monthly_housing_cost_node.py:279-289` (payer splits): render
-from bound dep attempts / `self._attempt`, never `latest_attempt()`,
-each with a two-write test.
-
-### Wave 4 — unread-dep removal (follow-up)
-
-Delete `TownDescNode.best_location` (`area.py:80-81,89`),
-`NearestSchoolNode.best_address` (`schools.py:57-63`); use the bound
-`max_walk` attempt in `BusLegAugment._walk_too_long` (`bus.py:317`).
-Each with a two-write non-recompute test.
-
-### Verification (every wave)
-
-`ruff`, `pyrefly`, `vue-tsc -b` clean; targeted suites green;
-`test_zero_day_provenance.py` green from Wave 1 on; full `make test`
-before merge.
+Verification: `pytest tests/unit` 1614 passed; `ruff`, `pyrefly`, lint
+clean. lucidlint: the 4 open actions are pre-existing on base main
+(server.py record-shape + health import + swallow + stale-suppression)
+— the recalibrated baseline lands with the chore branch (PR #117); the
+PR introduces no new actions.
