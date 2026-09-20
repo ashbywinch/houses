@@ -50,7 +50,7 @@ Docs are read inside a limited AI context window. Every sentence costs context. 
 | Technique | Rule | ✗ Low-density | ✓ High-density |
 |---|---|---|---|
 | **Rules as explicit negatives** | State constraints as prohibitions, not preferences — "Never X" reads faster, followed more reliably | "Avoid swallowing errors silently when catching exceptions" | "**Never swallow errors.** Every `except` must log, re-raise, or handle observably. Bare `except: pass` forbidden" |
-| **Commands over prose** | Executable commands beat descriptive sentences | "To start the dev environment, use the make run command" | "`make run` # backend :8765 + frontend :5173, auto-reload" |
+| **Instructions, not summaries** | Every rule sentence tells the reader what to DO or NEVER do — "call `node.fail(...)`", "never store errors off-node". Narrating what the code already does ("the failure records an impossible attempt") is not an instruction; an agent cannot act on it. No cryptic-crossword summaries | "A failure recorded on the node becomes an impossible attempt" | "To record a failure, call `node.fail(message)`. **Never** store it on the scrape object" |
 | **Tables over prose** | Rule-per-row beats paragraph-per-rule; use when facts have consistent fields | prose bullets | state/meaning, layer/rule/files, fake/default tables |
 | **Canonical ✗/✓ pairs** | One right/wrong code pair teaches more than enumerating edge cases | list every failure mode | `# ✗ string parsing` / `# ✓ structured` pair |
 | **One-line contracts** | A contract that fits one line is easier to hold in context | three sentences of explanation | "`compute()` MUST return an `Attempt`" |
@@ -67,7 +67,7 @@ Always-loaded files (AGENTS.md, this doc, skill bodies) target **~150–200 line
 - [ ] Every sentence carries a fact, a decision, or a constraint
 - [ ] Rules are explicit negatives ("Never X"), not vague preferences
 - [ ] Commands replace descriptions where executable
-- [ ] Tables replace paragraphs where fields are consistent
+- [ ] Every rule sentence is an instruction — do/never, not mechanism narration ("X records Y")
 - [ ] Code shows a canonical ✗/✓ pair, not exhaustive cases
 - [ ] No filler, no restated motivation
 - [ ] Always-loaded files within the ~150–200 line ceiling

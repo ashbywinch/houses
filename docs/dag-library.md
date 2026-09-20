@@ -82,44 +82,46 @@ if not result.succeeded:
 
 `Node._impossible(deps)` and the dep-failure path build `code=dep_failed` with a `causes` chain — traverse structurally, never by string match.
 
-### Leaf facts fail too — node state is the only surface
+### Leaf facts can fail — record the failure on the node
 
-`UserInputNode` is not value-or-nothing. A source that **claims to have
-data but cannot produce it** (a scrape that saw a page but could not parse
-the price) records `node.fail(message, error_info=AttemptError(...))` — an
-`impossible` attempt, persisted, restored on reload, propagated to derived
-nodes as `dep_failed`. A later `push` supersedes the failure.
+`UserInputNode` holds a value, nothing, or a **recorded failure**. A source
+that saw data but could not read it (a scrape that parsed the page but not the
+price) MUST record it on the owning node. Recording it anywhere else makes it
+invisible to the wire, the card, and the cascade.
 
-**The node's Attempt is the wire.** `to_json`/`to_json_value` serialize the
-attempt state (`succeeded`/`pending`/`impossible` + `error` + `error_detail`);
-the frontend renders from those fields. Never carry error information in a
-side channel — a `parse_errors` dict on the scrape object, a field on
-`EnrichedProperty`, an extra key on a wire dict. A failure recorded anywhere
-other than the owning node's attempt is invisible to every consumer:
-`to_json_value` won't emit it, the card won't render it, the cascade won't
-propagate it.
+**To record a failure, call `node.fail(message, *, error_info=…)`.**
+`fail()` persists an `impossible` row; `attempt()` and every
+`to_json`/`to_json_value` serialization report `impossible` + the reason;
+derived nodes see a failed dependency and propagate `dep_failed`.
+`push()` clears the failure — a real value always wins.
 
 ```python
-# ✗ a parallel error channel — nobody reads it, the DAG never sees it
+# ✗ do NOT do this — a failure stored off-node is read by nobody
 prop = RightmoveProperty(price=None, parse_errors={"price": "..."})
-# ✓ the owning node's attempt — DAG, wire, and UI all agree
-rightmove_price_node.fail("price value 'ask the agent' is not parseable",
-                          error_info=AttemptError(code="parse_error", ...))
+# ✓ do this — the owning node's attempt is the DAG, wire, and UI
+rightmove_price_node.fail(
+    "price value 'ask the agent' is not parseable",
+    error_info=AttemptError(code="parse_error", source="Rightmove", ...),
+)
 ```
 
-**Absence is not failure, failure is not absence** — a source that
-legitimately has no value for a field (Rightmove's `POA` = "price on
-application") yields `None` with NO error; a source that cannot interpret a
-value it saw yields a typed error on that field. Conflating either direction
-corrupts the state machine: absence-as-impossible misleads (nothing is
-wrong — there is no price), failure-as-absence hides (a changed page layout
-reads as "no price" forever).
+**Do:**
 
-**Seed defaults are fabricated values.** Container defaults that look like
-real data (`EnrichedProperty.price: Money | None = Money("0")`) push a
-made-up £0 through the cutover guards when the caller forgets to pass the
-field. Seed paths pass `None` explicitly for every field the source did NOT
-produce — the guard `is not None` is what keeps fiction off the card.
+- Record a failure when the source could not interpret a value it saw.
+- Pass `None` explicitly for every `EnrichedProperty` field the source did not
+  produce — the `is not None` cutover guard is what keeps fiction off the card.
+
+**Never:**
+
+- Carry error info outside the node: no `parse_errors` dict on a scrape
+  object, no field on `EnrichedProperty`, no extra key on a wire dict —
+  `to_json_value` emits only attempt state.
+- Record a failure for a legitimate absence. Rightmove `POA` means "no listed
+  price" — return `None` with NO error.
+- Return `None` for a value you saw but could not parse — that reads as "no
+  price" forever and hides the next page-layout change.
+- Rely on container defaults for unset fields — `EnrichedProperty.price:
+  Money | None = Money("0")` pushes a fabricated £0 if you omit the field.
 
 ## Expression System
 
