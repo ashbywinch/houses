@@ -82,6 +82,45 @@ if not result.succeeded:
 
 `Node._impossible(deps)` and the dep-failure path build `code=dep_failed` with a `causes` chain — traverse structurally, never by string match.
 
+### Leaf facts fail too — node state is the only surface
+
+`UserInputNode` is not value-or-nothing. A source that **claims to have
+data but cannot produce it** (a scrape that saw a page but could not parse
+the price) records `node.fail(message, error_info=AttemptError(...))` — an
+`impossible` attempt, persisted, restored on reload, propagated to derived
+nodes as `dep_failed`. A later `push` supersedes the failure.
+
+**The node's Attempt is the wire.** `to_json`/`to_json_value` serialize the
+attempt state (`succeeded`/`pending`/`impossible` + `error` + `error_detail`);
+the frontend renders from those fields. Never carry error information in a
+side channel — a `parse_errors` dict on the scrape object, a field on
+`EnrichedProperty`, an extra key on a wire dict. A failure recorded anywhere
+other than the owning node's attempt is invisible to every consumer:
+`to_json_value` won't emit it, the card won't render it, the cascade won't
+propagate it.
+
+```python
+# ✗ a parallel error channel — nobody reads it, the DAG never sees it
+prop = RightmoveProperty(price=None, parse_errors={"price": "..."})
+# ✓ the owning node's attempt — DAG, wire, and UI all agree
+rightmove_price_node.fail("price value 'ask the agent' is not parseable",
+                          error_info=AttemptError(code="parse_error", ...))
+```
+
+**Absence is not failure, failure is not absence** — a source that
+legitimately has no value for a field (Rightmove's `POA` = "price on
+application") yields `None` with NO error; a source that cannot interpret a
+value it saw yields a typed error on that field. Conflating either direction
+corrupts the state machine: absence-as-impossible misleads (nothing is
+wrong — there is no price), failure-as-absence hides (a changed page layout
+reads as "no price" forever).
+
+**Seed defaults are fabricated values.** Container defaults that look like
+real data (`EnrichedProperty.price: Money | None = Money("0")`) push a
+made-up £0 through the cutover guards when the caller forgets to pass the
+field. Seed paths pass `None` explicitly for every field the source did NOT
+produce — the guard `is not None` is what keeps fiction off the card.
+
 ## Expression System
 
 Nodes can declare `expression` (an `Expression` tree in `dag/expression.py`) instead of an imperative `compute()`; the base class evaluates and auto-generates provenance. Node objects work directly in expressions via `__add__`/`__sub__`/`__mul__`/`__truediv__`/`__neg__`.
