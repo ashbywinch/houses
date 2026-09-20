@@ -14,28 +14,6 @@ from dag.persistence import latest_node_result, save_node_result
 from dag.signals import Signal
 
 
-@dataclass(frozen=True)
-class DepInputs:
-    """The exact dep attempts a value was calculated from, as persisted.
-
-    Stored alongside the result at persist time (projected JSON-safe via
-    project_value). Provenance renders from these — never live dep
-    attempts, which may have moved on. A missing key means the dep was
-    never persisted: the reader treats it as unavailable, never as a
-    re-read signal.
-    """
-
-    inputs: dict[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"dep_inputs": dict(self.inputs)}
-
-    @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> DepInputs:
-        inputs = raw.get("dep_inputs")
-        return cls(inputs=dict(inputs) if isinstance(inputs, dict) else {})
-
-
 @dataclass
 class NodeJson:
     """The serialized node record served by to_json/to_json_value and
@@ -205,13 +183,10 @@ class PersistedNodeMixin(Generic[T]):
         dep_timestamps: dict[str, str] | None = None,
         *,
         code_version: str | None = None,
-        dep_inputs: DepInputs | None = None,
     ) -> None:
         now_str = datetime.now(UTC).isoformat()
         # Persistence runs on the DAG processor thread (or a
         # single-threaded context); save_node_result's guard enforces it.
-        if dep_inputs is not None:
-            result_dict = {**result_dict, **dep_inputs.to_dict()}
         save_node_result(self._id, result_dict, dep_timestamps, created_at=now_str, code_version=code_version)
         now = datetime.fromisoformat(now_str)
         self._persisted_at = now
@@ -220,13 +195,6 @@ class PersistedNodeMixin(Generic[T]):
             self._persisted_code_version = code_version
         if dep_timestamps is not None:
             self._loaded_dep_timestamps = dep_timestamps
-
-    def _stored_dep_inputs(self) -> DepInputs:
-        """The dep attempts this value was calculated from, as persisted."""
-        stored = latest_node_result(self._id)
-        if stored is None:
-            return DepInputs(inputs={})
-        return DepInputs.from_dict(stored)
 
 
 class Node(ABC, PersistedNodeMixin[T], Generic[T]):
@@ -265,21 +233,30 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         """Compute or retrieve the current value."""
         ...
 
+    async def live_provenance(self) -> Provenance:
+        """The node's live provenance (persist-path rendering).
+
+        Leaf nodes have no frozen tree of their own beyond this — the
+        default renders the node's own provenance directly."""
+        return await self.build_provenance()
+
     @staticmethod
     @abstractmethod
-    async def build_provenance(  # noqa: D102 — subclasses override with the bound-attempt params
-        dep_attempts: list[Attempt] | None = None,  # noqa: ANN001, ARG004 — part of the override contract
-        active_deps: tuple[Node, ...] | None = None,  # noqa: ANN001, ARG004 — part of the override contract
+    async def build_provenance(
+        dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
     ) -> Provenance:
-        """Build provenance by walking dependency nodes.
-        Subclasses override this to return a Provenance describing
-        how this node's value was derived."""
+        """The provenance for this node.
+
+        ``dep_attempts=None`` is the SERVE path — return the frozen
+        stored tree verbatim. With bound attempts it is the PERSIST
+        path — build fresh from this evaluation.
+        """
         ...
 
     # lucidlint: ignore record-shape to_json returns the serialized node record (coding-standards.md)
     async def to_json(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:  # type: ignore[override]
+    ) -> dict:
         attempt = await self.attempt()
         rec = NodeJson(
             status=attempt.status,
@@ -296,7 +273,7 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         if self._source_url:
             rec.source_url = self._source_url
         if not attempt.pending:
-            rec.provenance = (await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()  # type: ignore[call-arg]
+            rec.provenance = (await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
         return rec.to_dict()
 
     # lucidlint: ignore record-shape returns the serialized node record (coding-standards.md)

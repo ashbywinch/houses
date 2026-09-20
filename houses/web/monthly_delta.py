@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from dag.attempt import Formula, FormulaLine, Provenance, SourceType
+
 CURRENT_STATUS = "current"
 
 
@@ -34,7 +36,7 @@ class _RawFigure:
     stddev: float
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RawFigure:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _RawFigure:
         return cls(value=raw.get("value"), stddev=float(raw.get("stddev") or 0))
 
 
@@ -63,6 +65,7 @@ class _FigureWire:
         return {"value": self.value, "approx": self.approx}
 
 
+# lucidlint: ignore record-shape Provenance.to_dict() IS the boundary for this wire dict
 def _delta_provenance(
     *,
     own: _RawFigure | None,
@@ -84,19 +87,19 @@ def _delta_provenance(
     base_str = str(base.value) if base is not None and base.value is not None else "?"
     approx_note = " (≈ = council tax estimated)" if _is_approx(own) or _is_approx(base) else ""
     short = (baseline_address.split(",")[0] or baseline_address).strip()
-    return {
-        "label": "Monthly difference vs your home",
-        "description": f"Candidate monthly total minus your home ({short}).{approx_note}",
-        "sourceType": "calc",
-        "formula": {
-            "lines": [
-                {"label": f"This property ({candidate_label})", "value": f"£{own_str}/mo"},
-                {"label": f"Your home ({short})", "value": f"£{base_str}/mo"},
+    # The provenance IS the DAG's own record — build it, do not re-spell it.
+    return Provenance(
+        label="Monthly difference vs your home",
+        description=f"Candidate monthly total minus your home ({short}).{approx_note}",
+        source_type=SourceType.CALC,
+        formula=Formula(
+            lines=[
+                FormulaLine(label=f"This property ({candidate_label})", value=f"£{own_str}/mo"),
+                FormulaLine(label=f"Your home ({short})", value=f"£{base_str}/mo"),
             ],
-            "result": f"{delta}/mo",
-        },
-        "sources": {},
-    }
+            result=f"{delta}/mo",
+        ),
+    ).to_dict()
 
 
 @dataclass(frozen=True)
@@ -131,6 +134,7 @@ def _figure_value(figure: object) -> object:
     """A group figure's amount — None when the figure is uncomputable."""
     return figure.get("value") if isinstance(figure, dict) else None
 
+
 def _wire_figure(figure: _RawFigure) -> _FigureWire:
     return _FigureWire(value=str(figure.value), approx=_is_approx(figure))
 
@@ -142,12 +146,11 @@ def _wire_figure_or_none(figure: _RawFigure | None) -> dict | None:
     if figure is None or figure.value is None:
         return None
     return _wire_figure(figure).to_dict()
+
+
 def _is_approx(figure: _RawFigure | None) -> bool:
     """The figure carries uncertainty (nonzero stddev)."""
     return figure is not None and figure.stddev > 0
-
-
-
 
 
 def _status_is_current(prop) -> bool:
@@ -195,6 +198,7 @@ def resolve_baseline(registry) -> MonthlyBaseline | None:
         group_value=value,
         others_rent_paid=float(rent_paid or 0),
     )
+
 
 def _group_delta(
     own: _RawFigure | None,

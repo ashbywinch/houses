@@ -117,6 +117,7 @@ make stop                       # Stop dev server + frontend
 - **Lucidlint review log (accepted/deferred findings)**: [docs/lucidlint-review-log.md](docs/lucidlint-review-log.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Remaining work (uncertainty in the DAG library, usability backlog)**: [docs/remaining-work-plan.md](docs/remaining-work-plan.md)
+- **Provenance rebuild plan (frozen rows, deps as nodes, audit list)**: [docs/provenance-frozen-row-rebuild.md](docs/provenance-frozen-row-rebuild.md)
 - **Troubleshoot batch endpoints**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
 - **Users & UX requirements (provenance, filters, states)**: [docs/personas.md](docs/personas.md)
 - **Frontend architecture decisions (Vue)**: [docs/vue-architecture-decisions.md](docs/vue-architecture-decisions.md)

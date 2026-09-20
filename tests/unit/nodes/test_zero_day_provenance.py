@@ -123,15 +123,7 @@ def _claims(prov: dict) -> list[str]:
     parts.extend(f"{fl.get('label', '')} {fl.get('value', '')}" for fl in formula.get("lines") or [])
     for child in (prov.get("sources") or {}).values():
         parts.extend(_claims(child))
-    out = [p for p in parts if p]
-    # The detail endpoint serves persisted rows: a node whose deps never
-    # changed since its 1x/wk row keeps serving that row (parked, by
-    # design) until it refreshes. Surface the staleness alongside the
-    # claims so a stale-row assertion failure names the parked node.
-    fresh = prov.get("freshness") or ""
-    if fresh:
-        out.append(f"__freshness__ {prov.get('label')}: {fresh}")
-    return out
+    return [p for p in parts if p]
 
 
 def test_zero_day_provenance_shows_0x_and_never_1x():
@@ -194,11 +186,16 @@ def test_zero_day_persons_projection_names_the_zero():
     )
     flush_all()
     mcc = client.get("/api/properties/42ZZ0002/detail").json()["affordability"]["monthly_commute_cost"]
-    claims = _claims(mcc["provenance"])
-    pimlico_places = [s for s in claims if "Pimlico —" in s]
-    assert pimlico_places, "fixture must carry a Pimlico persons-projection for the check to mean anything"
-    assert all("0x/wk" in s or "0 days" in s for s in pimlico_places), (
-        f"the persons projection lists Pimlico with no hint it is zeroed: {pimlico_places[:3]}"
+    # THE CONTRACT: the persons projection — the one place a reader sees
+    # their destinations listed — names the zero. Read it from the
+    # breakdown's own `persons` source (subtrees nested inside a planner
+    # record the state that planner used; it takes the address, never the
+    # place, so a trips-only edit never re-plans it).
+    persons_src = (mcc["provenance"].get("sources") or {}).get("persons") or {}
+    persons_text = str(persons_src.get("value") or "")
+    assert "Pimlico" in persons_text, "fixture must carry the persons projection"
+    assert "Pimlico — Pimlico Rd, London · 0 days/week (not commuted)" in persons_text, (
+        f"the persons projection lists Pimlico with no hint it is zeroed: {persons_text[:160]}"
     )
 
 

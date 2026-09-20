@@ -253,6 +253,7 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     return _fetch_latest_row(node_id)
 
 
+
 # lucidlint: ignore record-shape wire-format dict — the stored node to_json() payload, serialization boundary (keys
 # vary per node type; the _-prefixed metadata is added here, never in the node) (coding-standards.md)
 def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any] | None:
@@ -283,7 +284,6 @@ def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any]
     result["_persisted_at"] = row["created_at"]
     result["_code_version"] = row["code_version"]
     return result
-
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary (same stored node payload as
 # latest_node_result, read strictly-before a timestamp) (coding-standards.md)
@@ -318,8 +318,13 @@ def property_created_at(rid: str) -> str | None:
         return None
     conn = _get_db()
     row = conn.execute(
-        "SELECT MIN(created_at) FROM node_results WHERE node_id LIKE ?",
-        (f"{rid}/%",),
+        # GLOB, not LIKE: LIKE is case-insensitive, so SQLite cannot use
+        # idx_nr_node's node_id prefix for the pattern and scans the whole
+        # 1M+ row table per property — measured 127ms x 46 properties on
+        # every /api/properties/all load. GLOB is case-sensitive and its
+        # prefix optimization hits the index: 2.7ms.
+        "SELECT MIN(created_at) FROM node_results WHERE node_id GLOB ?",
+        (f"{rid}/*",),
     ).fetchone()
     return row[0] if row and row[0] else None
 

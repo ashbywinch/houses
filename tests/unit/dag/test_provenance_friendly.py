@@ -1,5 +1,6 @@
 """Provenance must be user-friendly: no node-id/dep chains, no repr dumps,
 no internal source labels ('db', 'migration')."""
+
 from __future__ import annotations
 
 import asyncio

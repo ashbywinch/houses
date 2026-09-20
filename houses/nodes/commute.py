@@ -441,78 +441,21 @@ class MergeRailFareNode(DerivedNode[Commute]):
     @property
     @override
     def provenance_formula(self):
-        # Render from the STORED calculating inputs — never live dep
-        # attempts, which may have moved on since this value was
-        # produced. Missing keys mean the dep never persisted:
-        # fall back to the merged value's own legs, never a re-read.
+
         val = self._attempt.value_or_none()
         if not self._attempt.succeeded or val is None:
             return None
-        stored = self._stored_dep_inputs().inputs
-        commute_raw = stored.get(self._commute_result._id)
-        commute_val = commute_raw.get("value") if isinstance(commute_raw, dict) else None
-        fare_raw = stored.get(self._rail_fare_result._id)
-        fare_val = fare_raw.get("value") if isinstance(fare_raw, dict) else None
-        if fare_val is None and transit_legs(val):
-            # The fare dep persisted under a DIFFERENT id (test fixed
-            # nodes) or not at all: fall back to its live attempt —
-            # an attempted dep contributed to this evaluation even if
-            # no row exists under our dep id. Never a recompute:
-            # latest_attempt() returns the current value.
-            fare_live = self._rail_fare_result.latest_attempt()
-            if fare_live.succeeded and fare_live.value_or_none() is not None:
-                fare_val = self._rail_fare_result._adapter.dump_python(fare_live.value_or_none(), mode="json")
-            if fare_val is None:
-                # No fare input at all — the merge passed the commute
-                # through unchanged, so show the commute line, not an
-                # empty formula.
-                commute_live = self._commute_result.latest_attempt()
-                if commute_live.succeeded and commute_live.value_or_none() is not None:
-                    commute_val = self._adapter.dump_python(commute_live.value_or_none(), mode="json")
-        return self._merge_formula(val, commute_val, fare_val)
-
-    @override
-    def provenance_formula_for(
-        self, dep_attempts: list[Attempt] | None, active_deps: tuple[Node, ...] | None
-    ) -> Formula | None:
-        # Serve path (no bound attempts): the stored-input property
-        # owns rendering. Persist path below renders from the BOUND
-        # calculating attempts — the exact inputs to this evaluation.
-        if dep_attempts is None:
-            return self.provenance_formula
-        val = self._attempt.value_or_none()
-        if not self._attempt.succeeded or val is None:
-            return None
-        by_id = {d._id: a for d, a in zip(active_deps or (), dep_attempts or [], strict=False)}
-        commute_att = by_id.get(self._commute_result._id)
-        fare_att = by_id.get(self._rail_fare_result._id)
-        commute_val = commute_att.value_or_none() if commute_att is not None and commute_att.succeeded else None
-        fare_val = fare_att.value_or_none() if fare_att is not None and fare_att.succeeded else None
-        commute_dict = self._adapter.dump_python(commute_val, mode="json") if commute_val is not None else None
-        fare_dict = self._rail_fare_result._adapter.dump_python(fare_val, mode="json") if fare_val is not None else None
-        return self._merge_formula(val, commute_dict, fare_dict)
-
-    @staticmethod
-    def _merge_formula(val: Any, commute_val: Any, fare_val: Any) -> Formula:
-        def _cost(v: Any) -> Any:
-            if isinstance(v, dict):
-                dc = v.get("daily_cost")
-                # Serialized Money is {"amount","currency"}; the formula
-                # shows the canonical "GBP 9.90" string either way.
-                if isinstance(dc, dict):
-                    return f"{dc.get('currency', 'GBP')} {dc.get('amount', '?')}"
-                return dc
-            return None
-
         lines: list[FormulaLine] = []
-        commute_cost = _cost(commute_val)
-        if commute_cost is not None:
-            lines.append(FormulaLine(label="Commute", value=str(commute_cost)))
-        fare_cost = _cost(fare_val)
-        if fare_cost is not None and transit_legs(val):
-            lines.append(FormulaLine(label="Rail fare", value=str(fare_cost)))
-        if not lines:
-            lines.append(FormulaLine(label="Commute", value=str(val.daily_cost)))
+        commute_att = self._commute_result.latest_attempt()
+        if commute_att.succeeded:
+            cv = commute_att.value_or_none()
+            if cv is not None:
+                lines.append(FormulaLine(label="Commute", value=str(cv.daily_cost)))
+        fare_att = self._rail_fare_result.latest_attempt()
+        if fare_att.succeeded:
+            rf = fare_att.value_or_none()
+            if rf is not None and rf.daily_cost is not None and rf.daily_cost.amount > 0 and transit_legs(val):
+                lines.append(FormulaLine(label="Rail fare", value=str(rf.daily_cost)))
         return Formula(lines=lines, result=str(val.daily_cost))
 
     @override

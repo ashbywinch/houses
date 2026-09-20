@@ -21,16 +21,13 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
         lines = []
-        stored = self._stored_dep_inputs().inputs
-        persons_raw = (stored.get(self._persons_source._id) or {}).get("value") or []
-        for p in persons_raw:
-            name = p.get("name", "?") if isinstance(p, dict) else getattr(p, "name", "?")
-            ins = p.get("life_insurance_monthly") if isinstance(p, dict) else getattr(p, "life_insurance_monthly", None)
+        ps = self._persons_source.latest_attempt().value_or_none() or []
+        for p in ps:
+            name = getattr(p, "name", "?")
+            ins = getattr(p, "life_insurance_monthly", None)
             if ins is None:
                 continue
-            # Stored inputs are serialized: Money is {"amount","currency"}.
-            amt = ins.get("amount") if isinstance(ins, dict) else (ins.amount if isinstance(ins, Money) else ins)
-            amt = Decimal(str(amt))
+            amt = ins.amount if isinstance(ins, Money) else Decimal(str(ins))
             if amt == 0:
                 lines.append(FormulaLine(label=f"{name}’s life insurance", value="£0.00"))
             else:

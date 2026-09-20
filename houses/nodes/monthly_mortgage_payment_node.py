@@ -25,7 +25,7 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
             term_years=Ref(self._deps[2]),
         )
 
-    # lucidlint: ignore middle-man protocol/reflected-operator requirement
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     @override
     def compute(
         self,

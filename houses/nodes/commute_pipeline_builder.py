@@ -50,13 +50,12 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
             key = f"{p_name}/{label}"
             if keys is not None and key not in keys:
                 continue
-
             is_child = p_info.is_child
             # The destination's CURRENT PlaceOfInterest, read live from
             # the persons source: routes re-plan and the congestion-zone
             # gate re-evaluates when the address or trips change — no
             # rebuild, no rewiring, nothing frozen.  For children the
-            # school node resolves the school's real location instead
+            # school node resolves the school's real location instead.
             if is_child:
                 school_node = (
                     prop.primary_school
@@ -111,19 +110,23 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
             # Only create a DriveNode for persons who have a car. The
             # congestion-charge rule is enforced inside DriveNode against
             # the destination's current address.
-            drive_node = DriveNode(
-                f"{prop.rid}/{key}/drive",
-                options=RouteOptions(
-                    best_location=prop.best_location,
-                    poi=address_node,
-                    has_car=True,
-                ),
-            )
+            if p_info.has_car:
+                drive_node = DriveNode(
+                    f"{prop.rid}/{key}/drive",
+                    options=RouteOptions(
+                        best_location=prop.best_location,
+                        poi=address_node,
+                        has_car=True,
+                    ),
+                )
+            else:
+                drive_node = None
             no_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_no_bus",
                 options=TransitOptions(
                     best_location=prop.best_location,
                     poi=address_node,
+                    poi_label=label,
                     has_car=p_info.has_car,
                     allow_bus=False,
                 ),
@@ -133,6 +136,7 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
                 options=TransitOptions(
                     best_location=prop.best_location,
                     poi=address_node,
+                    poi_label=label,
                     has_car=p_info.has_car,
                     allow_bus=True,
                 ),
@@ -174,7 +178,6 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
                 f"{prop.rid}/{key}/bods_fare",
                 bus_route_node=bus_route_node,
             )
-
             bus_augment = BusLegAugmentNode(
                 f"{prop.rid}/{key}/bus_augment",
                 transit_input=park_and_ride,

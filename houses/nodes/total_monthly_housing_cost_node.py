@@ -84,28 +84,32 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         self._status_node: Node = config.status_node
         self._sinking_node: Node = config.yearly_sinking_fund_node
         self._life_insurance_node: Node = config.life_insurance_node
-        super().__init__(
-            node_id,
-            Measurement[Money],
-            (
-                config.monthly_mortgage_node,
-                config.rental_income_node,
-                config.status_node,
-                config.commute_breakdown_node,
-                config.council_tax_node,
-                config.yearly_sinking_fund_node,
-                config.life_insurance_node,
-            ),
-            dep_names=(
-                "mortgage",
-                "rental_income",
-                "status",
-                "commute",
-                "council_tax",
-                "sinking",
-                "life_insurance",
-            ),
+        # Deps are exactly what the node reads: the value expression
+        # reads the first seven; build_provenance's apportionment text
+        # reads the payers/ignored/persons nodes beyond them — every
+        # read must be a dep edge, never a parent member. The
+        # apportionment inputs are conditional (present only when the
+        # group aggregates them).
+        value_deps = (
+            config.monthly_mortgage_node,
+            config.rental_income_node,
+            config.status_node,
+            config.commute_breakdown_node,
+            config.council_tax_node,
+            config.yearly_sinking_fund_node,
+            config.life_insurance_node,
         )
+        value_names = ("mortgage", "rental_income", "status", "commute", "council_tax", "sinking", "life_insurance")
+        provenance_deps: tuple[Node | None, ...] = (
+            config.annexe_payers_node,
+            config.annexe_ignored_node,
+            config.persons_source,
+            config.council_tax_payers_node,
+        )
+        provenance_names = ("annexe_payers", "annexe_ignored", "persons", "council_tax_payers")
+        deps = value_deps + tuple(d for d in provenance_deps if d is not None)
+        names = value_names + tuple(n for n, d in zip(provenance_names, provenance_deps, strict=True) if d is not None)
+        super().__init__(node_id, Measurement[Money], deps, dep_names=names)
 
     @property
     @override
@@ -240,7 +244,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         from it), but the provenance trust bar leads with the value —
         dumping the dict read "couple: value: 3753.21, stddev: …".
         """
-        prov = await super().build_provenance()
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         val = self._attempt.value_or_none()
         if isinstance(val, dict):
             couple = val.get("couple") or {}
@@ -257,16 +261,9 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             allocated = (val.get("couple_breakdown") or {}).get("annexe_council_tax") or (
                 val.get("others_breakdown") or {}
             ).get("annexe_council_tax")
-            stored = self._stored_dep_inputs().inputs
-
-            def _stored_list(node: Node | None) -> list[str]:
-                if node is None:
-                    return []
-                raw = (stored.get(node._id) or {}).get("value")
-                return [str(n) for n in raw] if isinstance(raw, list) else []
-
             if allocated and self._annexe_payers_node is not None:
-                payers = _stored_list(self._annexe_payers_node)
+                payer_att = self._annexe_payers_node.latest_attempt()
+                payers = payer_att.value_or_none() if payer_att is not None else None
                 if payers:
                     annexe_note = "includes annexe council tax (second dwelling) split between: " + ", ".join(payers)
                     if prov.description is None:
@@ -274,57 +271,47 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                     else:
                         prov.description = f"{prov.description} — {annexe_note}"
             # THE APPORTIONMENT, stated for the reader: which bills, and
-            # who pays them (P2 — explainable one step away). Rendered
-            # from the STORED calculating inputs — never live dep
-            # attempts, which may have moved on since this value was
-            # produced.
-            council_raw = (
-                (stored.get(self._council_tax_node._id) or {}).get("value")
-                if self._council_tax_node is not None
-                else None
-            )
-            council_val = council_raw if isinstance(council_raw, dict) else None
-            persons_raw = (
-                (stored.get(self._config.persons_source._id) or {}).get("value")
-                if self._config.persons_source is not None
-                else []
-            )
-            adults: list[str] = [
-                str(p.get("name")) for p in (persons_raw or []) if isinstance(p, dict) and not p.get("is_child", False)
-            ]
-            stored_main = set(_stored_list(self._config.council_tax_payers_node))
+            # who pays them (P2 — explainable one step away).
+            council_node = self._council_tax_node
+            council_att = council_node.latest_attempt() if council_node is not None else None
+            council_val = council_att.value_or_none() if council_att is not None else None
+            persons_source = self._config.persons_source
+            persons_att = persons_source.latest_attempt() if persons_source is not None else None
+            persons_value = persons_att.value_or_none() if persons_att is not None else []
+            adults = [p.name for p in (persons_value or []) if not getattr(p, "is_child", False)]
+
+            def _stored_names(node):
+                att = node.latest_attempt() if node is not None else None
+                return set(att.value_or_none() or []) if att is not None else set()
+
+            stored_main = _stored_names(self._config.council_tax_payers_node)
             main_payers = sorted((stored_main & set(adults)) or adults)
-            stored_annexe = set(_stored_list(self._annexe_payers_node))
+            stored_annexe = _stored_names(self._annexe_payers_node)
             annexe_payers = sorted((stored_annexe & set(adults)) or adults)
-            ignored_raw = (
-                (stored.get(self._annexe_ignored_node._id) or {}).get("value")
+            ignored = (
+                bool(self._annexe_ignored_node.latest_attempt().value_or_none())
                 if self._annexe_ignored_node is not None
-                else None
+                else False
             )
-            ignored = bool(ignored_raw) if self._annexe_ignored_node is not None else False
             if council_val is not None:
                 parts = []
-                yearly = (council_val.get("yearly_cost") or {}).get("value") or {}
-                if yearly.get("amount") is not None:
+                if council_val.yearly_cost is not None:
                     parts.append(
                         _band_line(
                             "main",
-                            council_val.get("band"),
-                            yearly.get("amount"),
+                            council_val.band,
+                            council_val.yearly_cost.value.amount,
                             ", ".join(main_payers) or "all adults",
                             ignored=False,
                         )
                     )
-                annexe = council_val.get("annexe")
-                annexe_yearly = (
-                    ((annexe or {}).get("yearly_cost") or {}).get("value") or {} if isinstance(annexe, dict) else {}
-                )
-                if isinstance(annexe, dict) and annexe_yearly.get("amount") is not None:
+                annexe = council_val.annexe
+                if annexe is not None and annexe.yearly_cost is not None:
                     parts.append(
                         _band_line(
                             "annexe",
-                            annexe.get("band"),
-                            annexe_yearly.get("amount"),
+                            annexe.band,
+                            annexe.yearly_cost.value.amount,
                             ", ".join(annexe_payers) or "all adults",
                             ignored=ignored,
                         )

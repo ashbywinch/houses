@@ -29,7 +29,7 @@ class _TransitPreferencesJson:
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-
+        
         return dict(routingPreference=self.routing_preference)
 
 
@@ -126,19 +126,19 @@ class BusRouteNode(DerivedNode[dict]):
         if grp is None:
             return Attempt.impossible("Google Routes posting function not configured")
 
-        # The pipeline feeds this node the destination ADDRESS string
-        # (projected from the household's PlaceOfInterest) — trips-only
-        # edits never mark it stale. A bare address or point still
-        # routes for legacy callers.
-        if isinstance(dest_val, str):
-            dest_str = dest_val
-        elif isinstance(dest_val, PlaceOfInterest):
+        # The pipeline feeds this node the destination as the household
+        # settings define it — a PlaceOfInterest — as well as a bare
+        # address or a point, depending on the caller.
+        if isinstance(dest_val, PlaceOfInterest):
             dest_str = dest_val.address
+        elif isinstance(dest_val, str):
+            dest_str = dest_val
         else:
             dest_str = f"{dest_val.lat},{dest_val.lon}"
         if not dest_str:
             return Attempt.impossible("no destination address for this journey")
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
+
         body = _RoutesBodyJson(
             origin=CommuteRouter._address_waypoint(origin_str).to_dict(),
             destination=CommuteRouter._address_waypoint(dest_str).to_dict(),
@@ -222,7 +222,9 @@ class BodsFareNode(DerivedNode[dict]):
                 else None
             )
             arr_point = (
-                GeoPoint(stop["arrival_lat"], stop["arrival_lon"]) if stop.get("arrival_lat") is not None else None
+                GeoPoint(stop["arrival_lat"], stop["arrival_lon"])
+                if stop.get("arrival_lat") is not None
+                else None
             )
             fares = reader.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
             cheapest = cheapest_round_trip(fares, reader.national_max_single)
@@ -300,7 +302,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
                 deps.append(self._bods_fare_node)
         return tuple(deps)
 
-    def _walk_too_long(self, commute: Commute, max_walk: int | None = None) -> bool:
+    def _walk_too_long(self, commute: Commute) -> bool:
         if commute.infeasible:
             # .details raises on infeasible commutes — and an infeasible
             # route has no walk leg to augment anyway.
@@ -312,8 +314,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             return False
         if first_legs[0].mode != LegMode.WALK:
             return False
-        limit = max_walk if max_walk is not None else self._current_max_walk()
-        return int(first_legs[0].duration.magnitude) > limit
+        return int(first_legs[0].duration.magnitude) > self._current_max_walk()
 
     @override
     def compute(
@@ -336,8 +337,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             # walk-replacement path below.
             return self._bus_augment(commute, bus_route_attempt, bods_fare_attempt, full_trip=True)
 
-        max_walk_val = max_walk.value_or_none() if max_walk is not None and max_walk.succeeded else None
-        if not self._walk_too_long(commute, int(max_walk_val) if max_walk_val is not None else 30):
+        if not self._walk_too_long(commute):
             return Attempt.succeeded(commute)
         return self._bus_augment(commute, bus_route_attempt, bods_fare_attempt, full_trip=False)
 

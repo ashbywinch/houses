@@ -217,43 +217,32 @@ class AsyncQueueScheduler(RefreshScheduler):
         """
         # lucidlint: ignore inline-import cycle break — DerivedNode imports get_scheduler from this module
         from dag.derived_node import DerivedNode
+
         active = [dep for dep in event.node._get_active_deps() if dep is not None]
-        # Re-queue only when the deferral waits on queueable work: a
-        # pending DerivedNode that is actually IN the queue (register
-        # schedules fresh nodes; deferrals re-queue). A pending node
-        # that is parked OUTSIDE the queue is dormant — it waits on an
-        # unpushed user input, nothing will ever pop for it, and the
-        # input's push signal already owns the wake-up for the whole
-        # downstream chain. Re-queueing behind a parked dep would spin
-        # the drain forever.
-        if not any(
-            isinstance(dep, DerivedNode)
-            and dep._attempt.pending
-            and dep._id in self._scheduled
-            for dep in active
-        ):
+        # Re-queue when the deferral waits on queueable work: a dep that
+        # is actually IN the queue and still needs its own refresh —
+        # pending (input not arrived) or stale (attempt not yet settled
+        # from this change). A dep parked OUTSIDE the queue is dormant:
+        # it waits on an unpushed user input, nothing will ever pop for
+        # it, and the input's push signal already owns the wake-up for
+        # the whole downstream chain. Re-queueing behind a parked dep
+        # would spin the drain forever.
+        if not any(isinstance(dep, DerivedNode) and dep._id in self._scheduled for dep in active):
             return
         dep_ids = {dep._id for dep in active}
         now = datetime.now(UTC).timestamp()
         last_dep_at = max(
-            (
-                queued.scheduled_at
-                for node_id, queued in self._scheduled.items()
-                if node_id in dep_ids
-            ),
+            (queued.scheduled_at for node_id, queued in self._scheduled.items() if node_id in dep_ids),
             default=now,
         )
         queue = self._queue
         assert queue is not None
-        requeued = QueueEvent(
-            scheduled_at=last_dep_at + 1e-6, node_id=event.node_id, node=event.node
-        )
+        requeued = QueueEvent(scheduled_at=last_dep_at + 1e-6, node_id=event.node_id, node=event.node)
         count = self._requeue_counts.get(event.node_id, 0) + 1
         if count > len(self._registered):
             self._requeue_counts.pop(event.node_id, None)
             raise RuntimeError(
-                f"{event.node_id} re-queued {count} times in one drain: "
-                "a pending dependency never enters the queue"
+                f"{event.node_id} re-queued {count} times in one drain: a pending dependency never enters the queue"
             )
         self._requeue_counts[event.node_id] = count
         self._scheduled[event.node_id] = requeued
@@ -344,7 +333,6 @@ _processor_thread: threading.Thread | None = None
 _processor_loop: asyncio.AbstractEventLoop | None = None
 _processor_sched: AsyncQueueScheduler | None = None
 _processor_task: asyncio.Task | None = None
-
 
 
 # lucidlint: ignore unused deliberate test seam asserted by the isolation fixture
@@ -503,7 +491,7 @@ def _run_and_log(fn: Callable[[], Any]) -> None:
             # must be synchronous here (the processor path awaits coroutines).
             result.close()
             raise RuntimeError("queued work must be synchronous without a processor thread")
-    
+
     # lucidlint: ignore swallow the producer has already returned — the failing work is logged for the
     # operator; a raise here would take down the caller long after the fact
     except Exception:

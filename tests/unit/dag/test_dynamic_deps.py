@@ -1,10 +1,10 @@
-"""Dynamic dependency sets: a node's deps may be supplied as a zero-arg
-provider callable (composition) instead of a static tuple.
+"""Dynamic dependency sets: deps are nodes; a node whose dep SET
+changes at runtime rewires with ``set_deps(...)``.
 
-The provider closes over its own data and may be evaluated at any point
-in the node's life — construction, staleness checks, refresh.  It must
-never read `self`; the owner of the underlying data schedules the node
-when that data changes."""
+A callable passed as ``deps`` raises TypeError — dependencies are nodes,
+never lambdas, dicts, or provider closures. The node connected to the
+change signal of each dep; the owner that mutates the input set calls
+``set_deps`` so the wiring follows the set."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from pint import Quantity
 import dag.user_input_node  # noqa: F401 — register pydantic schemas
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.node import Node
 from dag.scheduler import get_scheduler
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -28,10 +27,12 @@ from tests.unit.conftest import flush_all
 _WEEKS_PER_YEAR = 46
 
 
-def test_deps_provider_is_not_evaluated_during_construction():
-    calls: list[int] = []
-    dep = UserInputNode("dyn_dep", int)
-    dep.push(7, "test")
+def test_callable_deps_raise_typeerror():
+    """Deps are nodes — a provider closure is the wiring bug, not a
+    composition tool."""
+    import pytest
+
+    dep = UserInputNode("dyn_callable_dep", int)
 
     class _PassThrough(DerivedNode[int]):
         @staticmethod
@@ -40,37 +41,49 @@ def test_deps_provider_is_not_evaluated_during_construction():
             (dep_attempt,) = dep_attempts
             return Attempt.succeeded(dep_attempt.value_or_none())
 
-    def provider():
-        calls.append(1)
-        return (dep,)
+    from typing import Any, cast
 
-    node = _PassThrough("dyn_node", int, provider)
-    assert calls == [], "the provider must not run inside __init__"
-    assert node._get_active_deps() == (dep,)
-    get_scheduler().unregister(node)
+    callable_deps = cast(Any, lambda: (dep,))
+    with pytest.raises(TypeError):
+        _PassThrough("dyn_callable", int, callable_deps)
+
+
+def test_set_deps_rewires_signals():
+    """After set_deps, a write to the NEW dep wakes the node — the dep
+    graph, not a hand-crafted schedule, drives updates."""
+    a = UserInputNode("dyn_a", int)
+    b = UserInputNode("dyn_b", int)
+    a.push(1, "test")
+
+    class _Sum(DerivedNode[int]):
+        @staticmethod
+        @override
+        def compute(x: Attempt[int]) -> Attempt[int]:
+            return Attempt.succeeded(x.value_or_none() or 0)
+
+    node = _Sum("dyn_sum", int, (a,), dep_names=("x",))
+    flush_all()
+    assert node.latest_attempt().value_or_none() == 1
+    node.set_deps((b,))
+    b.push(5, "test")
+    flush_all()
+    assert node.latest_attempt().value_or_none() == 5
 
 
 def test_breakdown_construction_with_zero_post_super_attributes():
-    """The congestion-gate composition: CommuteBreakdownNode passes its
-    dep policy as a closure over its CONSTRUCTOR ARGUMENTS, so the node
-    is fully registered and staleness-checkable immediately after
-    construction — no post-super attribute reads can crash it (the live
-    startup crash on 2026-09-09)."""
-    selectors: dict[str, Node] = {}
-    persons = UserInputNode("cb_persons", list)
+    """CommuteBreakdownNode takes its selectors as deps (tuple of
+    nodes); the node is fully registered and staleness-checkable
+    immediately after construction."""
+    persons = UserInputNode("cb_persons2", list)
+    pimlico = UserInputNode("Simon/Pimlico", PlaceOfInterest)
     node = CommuteBreakdownNode(
-        "cb_breakdown",
-        commute_selectors=selectors,
+        "cb_breakdown2",
+        selectors=(pimlico,),
         persons_source=persons,
     )
-    # Immediately staleness-checkable (this is what register() does):
     assert node._is_stale() in (True, False)
-
-    # The provider reads the LIVE dict: destinations added later become
-    # deps without any rebuild.
-    selectors["Simon/Pimlico"] = UserInputNode("cb_pimlico", PlaceOfInterest)
-    deps_after = node._get_active_deps()
-    assert any(getattr(d, "_id", "") == "cb_pimlico" for d in deps_after)
+    deps = node._get_active_deps()
+    assert any(getattr(d, "_id", "") == "Simon/Pimlico" for d in deps)
 
 
 def test_breakdown_total_is_the_plain_multiplication():
@@ -84,12 +97,16 @@ def test_breakdown_total_is_the_plain_multiplication():
                 has_car=True,
                 places_of_interest=(
                     PlaceOfInterest(
-                        label="Pimlico", address="SW1V 2QQ",
-                        trips_per_week=0, weeks_per_year=_WEEKS_PER_YEAR,
+                        label="Pimlico",
+                        address="SW1V 2QQ",
+                        trips_per_week=0,
+                        weeks_per_year=_WEEKS_PER_YEAR,
                     ),
                     PlaceOfInterest(
-                        label="Bracknell", address="RG12 8YA",
-                        trips_per_week=1, weeks_per_year=_WEEKS_PER_YEAR,
+                        label="Bracknell",
+                        address="RG12 8YA",
+                        trips_per_week=1,
+                        weeks_per_year=_WEEKS_PER_YEAR,
                     ),
                 ),
             )
@@ -110,11 +127,11 @@ def test_breakdown_total_is_the_plain_multiplication():
         )
         return node
 
-    pimlico = _canned(node_id="mp_pimlico", label="Pimlico", daily_gbp="18.03")
-    bracknell = _canned(node_id="mp_bracknell", label="Bracknell", daily_gbp="10.00")
+    pimlico = _canned(node_id="Simon/Pimlico", label="Pimlico", daily_gbp="18.03")
+    bracknell = _canned(node_id="Simon/Bracknell", label="Bracknell", daily_gbp="10.00")
     node = CommuteBreakdownNode(
         "mp_breakdown",
-        commute_selectors={"Simon/Pimlico": pimlico, "Simon/Bracknell": bracknell},
+        selectors=(pimlico, bracknell),
         persons_source=persons,
     )
     flush_all()
@@ -126,7 +143,5 @@ def test_breakdown_total_is_the_plain_multiplication():
     assert val is not None
     simon = val["persons"]["Simon"]
     by_label = {c["label"]: Decimal(c["yearly_gbp"]) for c in simon["commutes"]}
-    assert Decimal(by_label["Pimlico"]) == Decimal("0.00"), (
-        "a 0-trip destination contributes £0 by the multiplication"
-    )
+    assert Decimal(by_label["Pimlico"]) == Decimal("0.00"), "a 0-trip destination contributes £0 by the multiplication"
     assert Decimal(by_label["Bracknell"]) == Decimal("10.00") * _WEEKS_PER_YEAR

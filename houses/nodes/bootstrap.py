@@ -57,7 +57,6 @@ def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng:
         logger.warning("Invalid %s coords: lat=%s lng=%s (%s)", what, lat, lng, exc)
         return False
 
-
 @dataclass(frozen=True)
 class SheetRow:
     """One sheet row plus the input nodes it feeds; the push methods
@@ -130,11 +129,8 @@ class SheetRow:
         and the location node is wired."""
         lat = (self.row.get(lat_col) or "").strip()
         lng = (self.row.get(lng_col) or "").strip()
-        if (
-            lat
-            and lng
-            and source_key in self.sources
-            and _push_geo_coords(self.sources, key=source_key, lat=lat, lng=lng, what=what)
+        if lat and lng and source_key in self.sources and _push_geo_coords(
+            self.sources, key=source_key, lat=lat, lng=lng, what=what
         ):
             return 1
         return 0
@@ -175,10 +171,13 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
     return pushed
 
 
+
+
 # Rightmove property IDs are 6-10 digits; anything shorter or longer is
 # test data that must not enter the production DB.
 _RID_MIN_LENGTH = 6
 _RID_MAX_LENGTH = 10
+
 
 
 def load_property_nodes_from_db() -> int:
@@ -213,3 +212,4 @@ def load_property_nodes_from_db() -> int:
         count += 1
     logger.info("Loaded %d properties from DB", count)
     return count
+

@@ -100,9 +100,7 @@ def test_no_postcode_address_is_an_error_not_a_drive():
         flush_all()
         a = drive.latest_attempt()
         v = a.value_or_none()
-        assert a.impossible, (
-            f"an ungeocodable destination must be an error: {a!r}"
-        )
+        assert a.impossible, f"an ungeocodable destination must be an error: {a!r}"
         assert v is None
     finally:
         _sp.reset(services_token)
@@ -118,8 +116,6 @@ def test_resolvable_out_of_zone_address_keeps_its_drive():
         flush_all()
         a = drive.latest_attempt()
         v = a.value_or_none()
-        assert v is not None and not v.infeasible, (
-            f"an out-of-zone destination keeps its drive: {a!r}"
-        )
+        assert v is not None and not v.infeasible, f"an out-of-zone destination keeps its drive: {a!r}"
     finally:
         _sp.reset(services_token)

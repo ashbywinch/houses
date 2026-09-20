@@ -59,7 +59,7 @@ class EpcNode(DerivedNode[dict]):
     async def build_provenance(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
     ) -> Provenance:
-        prov = await super().build_provenance()
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         val = self._attempt.value_or_none()
         if self._attempt.succeeded and isinstance(val, dict) and val.get("band"):
             prov.value = f"Band {val['band']}"
@@ -108,7 +108,7 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
     async def build_provenance(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
     ) -> Provenance:
-        p = await super().build_provenance()
+        p = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         v = self._attempt.value_or_none()
         if self._attempt.succeeded and v is not None and v.lookup_error:
             p.description = f"Council tax estimated — {v.lookup_error}."

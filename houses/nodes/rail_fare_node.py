@@ -116,7 +116,9 @@ class RailFareNode(DerivedNode[Commute]):
         if fare is None:
             return Attempt.impossible(f"no fare {origin.crs}→{terminal_station.crs}")
         tube_fare_fn = self._tube_fare_fn or TflClient.get_tube_leg_fare
-        tube_fare = await tube_fare_fn(terminal_station, "") or Money(TflClient.FALLBACK_TUBE_SINGLE_GBP, "GBP")
+        tube_fare = await tube_fare_fn(terminal_station, "") or Money(
+            TflClient.FALLBACK_TUBE_SINGLE_GBP, "GBP"
+        )
         total = (fare + tube_fare) * 2
 
         return self._apply_fare_to_commute(commute, total)

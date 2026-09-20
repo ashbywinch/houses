@@ -771,6 +771,7 @@ class TestNationalRailFallback:
         v = a.value_or_none()
         assert v is not None and not v.infeasible
         assert v.label == "Pimlico", "the fallback label must come from the node id"
+        assert v.destination is not None, "the fallback stamps the place it was given"
         assert v.destination.label == "Pimlico"
         assert v.destination.trips_per_week == 5
 
@@ -801,3 +802,35 @@ class TestTheTwoTfLPlanNodesSayWhichPlanTheyAre:
         )
         assert "bus" in no_bus.display_name.lower()
         assert "bus" in with_bus.display_name.lower()
+
+
+class TestPlannerOriginStamp:
+    """The planned origin rides on the Commute value — a display fact.
+
+    The route planners know the origin they planned from; the value
+    must carry it (``Commute.origin``), never node memory, so
+    provenance and persisted rows record where the journey was planned
+    from.
+    """
+
+    @pytest.mark.asyncio
+    async def test_walk_value_carries_the_planned_origin(self):
+        from houses.nodes.transit import RouteOptions, WalkNode
+
+        loc = UserInputNode("oz_loc", GeoPoint)
+        loc.push(GeoPoint(51.45, -0.99), "test")
+        address = UserInputNode("oz_addr", str)
+        address.push("RG12 8YA", "test")
+
+        async def _route(location, dest, max_walk):
+            from dag.attempt import Attempt
+            from tests.unit.nodes.test_commute import _make_commute
+
+            return Attempt.succeeded(_make_commute(duration_min=25, cost_gbp=3.5))
+
+        node = WalkNode("oz_walk", options=RouteOptions(best_location=loc, poi=address, max_walk=30, route_fn=_route))
+
+        await flush_processor()
+        val = node.latest_attempt().value_or_none()
+        assert val is not None, node.latest_attempt().error
+        assert val.origin == "51.45,-0.99", f"origin must record the planned-from location: {val.origin!r}"

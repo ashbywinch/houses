@@ -6,6 +6,7 @@ debugging (observability-before-corrective-action). It is captured from
 sys.exc_info() at construction time and serialised separately as
 error_traceback, never mixed into the frontend-facing error string.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -303,7 +304,9 @@ class TestUserFacingMessages:
         from dag.attempt import AttemptError
         from dag.http_error import HttpError
 
-        raw_body = "{'$type': 'Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities', 'httpStatusCode': 404}"  # noqa: E501
+        raw_body = (
+            "{'$type': 'Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities', 'httpStatusCode': 404}"  # noqa: E501
+        )
         exc = HttpError(
             404,
             message=raw_body,

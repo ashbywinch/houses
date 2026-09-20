@@ -24,7 +24,7 @@ class YearlySinkingFundNode(DerivedNode[Money]):
     def expression(self):
         return Ref(self._deps[0]) * Ref(self._deps[1])
 
-    # lucidlint: ignore middle-man protocol/reflected-operator requirement
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     @override
     def compute(self, price: Attempt[Money], rate: Attempt) -> Attempt[Money]:
         return self.expression.evaluate()

@@ -32,9 +32,11 @@ def _mw(value: int):
     node.push(value, "test")
     return node
 
+
 # ======================================================================
 # DAG-based commute computation (replaces old houses.enricher tests)
 # ======================================================================
+
 
 def _make_commute(duration_min: int = 32, cost_gbp: str | float = "10.0") -> Commute:
     """Build a Commute suitable for feeding into a TransitNode / FakeCommuteRouter."""
@@ -54,6 +56,7 @@ def _make_commute(duration_min: int = 32, cost_gbp: str | float = "10.0") -> Com
         _details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
     )
 
+
 def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office", mode: str = "transit") -> Commute:
     """Return a Commute matching the shape TransitNode/CommuteSelectorNode produce."""
     from houses.model.domain import Commute as CommuteObj
@@ -68,7 +71,9 @@ def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office"
         mode=mode,
     )
 
+
 # ── TransitNode ──────────────────────────────────────────────────────
+
 
 class TestTransitCommute:
     """TransitNode — produces a serialised commute dict from TflTransitNode deps."""
@@ -604,7 +609,9 @@ class TestCommuteSelectorPipeline:
         assert float(val.daily_cost.amount) == 8.50
         assert val.label == "Office"
 
+
 # ── CommuteBreakdownNode ─────────────────────────────────────────────
+
 
 class TestCommuteBreakdown:
     """CommuteBreakdownNode — sums yearly commute costs."""
@@ -614,20 +621,14 @@ class TestCommuteBreakdown:
         """46wk x (15 + 10 + 2x24) = 46 x 73 = 3358"""
         from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
-        so = UserInputNode[Commute]("cbd_so1", Commute)
-        sb = UserInputNode[Commute]("cbd_sb1", Commute)
-        lo = UserInputNode[Commute]("cbd_lo1", Commute)
+        so = UserInputNode[Commute]("Simon/Pimlico", Commute)
+        sb = UserInputNode[Commute]("Simon/Bracknell", Commute)
+        lo = UserInputNode[Commute]("Lorena/Aldgate", Commute)
         persons = UserInputNode[list]("cbd_ps1", list)
-
-        selectors = {
-            "Simon/Pimlico": so,
-            "Simon/Bracknell": sb,
-            "Lorena/Aldgate": lo,
-        }
 
         node = CommuteBreakdownNode(
             "cbd1",
-            commute_selectors=selectors,
+            selectors=(so, sb, lo),
             persons_source=persons,
         )
 
@@ -669,20 +670,14 @@ class TestCommuteBreakdown:
         """When some costs are present, total includes only those."""
         from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
-        so = UserInputNode[Commute]("cbd_so2", Commute)
-        sb = UserInputNode[Commute]("cbd_sb2", Commute)
-        lo = UserInputNode[Commute]("cbd_lo2", Commute)
+        so = UserInputNode[Commute]("Simon/Pimlico", Commute)
+        sb = UserInputNode[Commute]("Simon/Bracknell", Commute)
+        lo = UserInputNode[Commute]("Lorena/Aldgate", Commute)
         persons = UserInputNode[list]("cbd_ps2", list)
-
-        selectors = {
-            "Simon/Pimlico": so,
-            "Simon/Bracknell": sb,
-            "Lorena/Aldgate": lo,
-        }
 
         node = CommuteBreakdownNode(
             "cbd2",
-            commute_selectors=selectors,
+            selectors=(so, sb, lo),
             persons_source=persons,
         )
 
@@ -737,7 +732,7 @@ class TestCommuteBreakdown:
 
         node = CommuteBreakdownNode(
             "cbd2",
-            commute_selectors={},
+            selectors=(),
             persons_source=persons,
         )
 
@@ -755,20 +750,14 @@ class TestCommuteBreakdown:
         """When some commute selectors are impossible, node still succeeds."""
         from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
-        so = UserInputNode[Commute]("cbd_so3", Commute)
-        sb = UserInputNode[Commute]("cbd_sb3", Commute)
-        lo = UserInputNode[Commute]("cbd_lo3", Commute)
+        so = UserInputNode[Commute]("Simon/Pimlico", Commute)
+        sb = UserInputNode[Commute]("Simon/Bracknell", Commute)
+        lo = UserInputNode[Commute]("Lorena/Aldgate", Commute)
         persons = UserInputNode[list]("cbd_ps3", list)
-
-        selectors = {
-            "Simon/Pimlico": so,
-            "Simon/Bracknell": sb,
-            "Lorena/Aldgate": lo,
-        }
 
         node = CommuteBreakdownNode(
             "cbd3",
-            commute_selectors=selectors,
+            selectors=(so, sb, lo),
             persons_source=persons,
         )
         # Push all deps so they're terminal (none pending)
@@ -803,10 +792,12 @@ class TestCommuteBreakdown:
         assert val is not None
         assert val["yearly_total_gbp"] == "0"
 
+
 # ======================================================================
 # Imports needed by TestParkAndRide (kept at module bottom to avoid
 # shadowing the test classes above)
 # ======================================================================
+
 
 class TestParkAndRide:
     """apply_park_and_ride_to_journeys — replaces long walks with driving.
@@ -903,9 +894,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_skips_when_drive_lookup_fails(self):
         data = copy.deepcopy(self.LONG_WALK_DATA)
-        result = await apply_park_and_ride_to_journeys(
-            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_none
-        )
+        result = await apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_none)
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "walking"
         assert legs[0]["duration"] == 35
@@ -919,6 +908,7 @@ class TestParkAndRide:
         assert "Drive to Maidenhead (10m)" in summary
         assert "Train to Paddington (20m)" in summary
         assert "walk 7m" in summary
+
 
 def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     """Build a minimal walk-check node whose ``_attempt`` is already resolved."""

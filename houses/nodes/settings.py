@@ -29,7 +29,6 @@ SIMON_BUS_WALK_PENALTY = 20
 LORENA_BUS_WALK_PENALTY = 15
 ASHBY_BUS_WALK_PENALTY = 10
 
-
 def set_app_mode() -> None:
     """Mark this process as the running app.
 
@@ -85,7 +84,6 @@ def guard_settings_write(
         "Set HOUSES_SCRIPTS_MAY_WRITE=1 to run a deliberate data-fix script."
     )
 
-
 class SettingsNode(UserInputNode):
     """A settings input node whose writes are guarded — only the app,
     pytest, or an explicitly opted-in script may change family data."""
@@ -113,9 +111,12 @@ class SettingsNode(UserInputNode):
         super().push(value, source_label)
 
 
+
 def _poi_labels(person: Any) -> set[str]:
     places = (
-        person.get("places_of_interest") if isinstance(person, dict) else getattr(person, "places_of_interest", None)
+        person.get("places_of_interest")
+        if isinstance(person, dict)
+        else getattr(person, "places_of_interest", None)
     )
     labels: set[str] = set()
     for q in places or ():
