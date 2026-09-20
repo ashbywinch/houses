@@ -85,43 +85,42 @@ if not result.succeeded:
 ### Leaf facts can fail — record the failure on the node
 
 `UserInputNode` holds a value, nothing, or a **recorded failure**. A source
-that saw data but could not read it (a scrape that parsed the page but not the
-price) MUST record it on the owning node. Recording it anywhere else makes it
-invisible to the wire, the card, and the cascade.
+that saw data but could not read it MUST record that on the owning node —
+storing it anywhere else makes it invisible: `to_json_value` emits only
+attempt state, so nobody downstream ever sees it.
 
 **To record a failure, call `node.fail(message, *, error_info=…)`.**
-`fail()` persists an `impossible` row; `attempt()` and every
-`to_json`/`to_json_value` serialization report `impossible` + the reason;
-derived nodes see a failed dependency and propagate `dep_failed`.
-`push()` clears the failure — a real value always wins.
+`fail()` persists an `impossible` row; `attempt()` and every `to_json`/
+`to_json_value` report `impossible` + the reason; derived nodes see a failed
+dependency and propagate `dep_failed`. `push()` clears a failure — a real
+value always wins.
 
 ```python
-# ✗ do NOT do this — a failure stored off-node is read by nobody
-prop = RightmoveProperty(price=None, parse_errors={"price": "..."})
-# ✓ do this — the owning node's attempt is the DAG, wire, and UI
-rightmove_price_node.fail(
-    "price value 'ask the agent' is not parseable",
-    error_info=AttemptError(code="parse_error", source="Rightmove", ...),
+# ✗ do NOT — a failure stored off-node is read by nobody
+source_result = SomeSource(result=None, errors={"price": "..."})
+# ✓ do — the owning node's attempt is the DAG, wire, and UI
+price_node.fail(
+    "price value could not be parsed",
+    error_info=AttemptError(code="parse_error", source="scraper", ...),
 )
 ```
 
 **Do:**
 
-- Record a failure when the source could not interpret a value it saw.
-- Pass `None` explicitly for every `EnrichedProperty` field the source did not
-  produce — the `is not None` cutover guard is what keeps fiction off the card.
+- Call `fail(...)` when the source saw data it could not interpret.
+- Leave a node unset (no push) when the source genuinely has no value for it.
 
 **Never:**
 
-- Carry error info outside the node: no `parse_errors` dict on a scrape
-  object, no field on `EnrichedProperty`, no extra key on a wire dict —
-  `to_json_value` emits only attempt state.
-- Record a failure for a legitimate absence. Rightmove `POA` means "no listed
-  price" — return `None` with NO error.
-- Return `None` for a value you saw but could not parse — that reads as "no
-  price" forever and hides the next page-layout change.
-- Rely on container defaults for unset fields — `EnrichedProperty.price:
-  Money | None = Money("0")` pushes a fabricated £0 if you omit the field.
+- Store error info outside the node: no `errors` dict on a source result, no
+  error field on an enriched record, no extra key on a wire dict.
+- Call `fail(...)` for a legitimate absence — a source with no value for a
+  field leaves the node unset; no value is a valid state, not an error.
+- Leave a node unset when the source SAW data but could not read it — the
+  result reads as absence and hides the failure.
+- Push placeholder values as data (`0`, `""`, a default amount) — whatever
+  is pushed IS the value; downstream cannot tell a placeholder from a real
+  fact.
 
 ## Expression System
 
