@@ -67,6 +67,7 @@ Always-loaded files (AGENTS.md, this doc, skill bodies) target **~150–200 line
 - [ ] Every sentence carries a fact, a decision, or a constraint
 - [ ] Rules are explicit negatives ("Never X"), not vague preferences
 - [ ] Commands replace descriptions where executable
+- [ ] Tables replace paragraphs where fields are consistent
 - [ ] Every rule sentence is an instruction — do/never, not mechanism narration ("X records Y")
 - [ ] Code shows a canonical ✗/✓ pair, not exhaustive cases
 - [ ] No filler, no restated motivation

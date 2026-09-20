@@ -111,16 +111,9 @@ Exception: interactive/CLI setup flows may pre-check configuration when the natu
 
 ### Never swallow errors — fail fast unless the failure surfaces
 
-An error must be **surfaced to someone who can act on it** — the user in
-the interface, a caller via an explicit error value, or a visibly degraded
-state. Raising (fail fast) is the default; surfacing-and-continuing is
-valid when the continuation is honest: the degraded outcome is visible and
-the reader can reconstruct what failed. Forbidden is the silent swallow —
-an `except` that logs into the void (or logs nothing) and continues as if
-nothing happened: the caller proceeds on a premise the operation just
-disproved, and the failure is invisible to anything that depends on the
-outcome. Bare `except: pass`, silent `except Exception:`, and
-log-only-and-continue are all forbidden without a visible surface.
+All errors must be surfaced — either to the user as part of the interface, or by raising an exception.
+Exceptions must never be swallowed.
+Logging an exception with all the relevant information is good but not enough.
 
 ```python
 # ✗ invisible
@@ -129,21 +122,24 @@ try:
 except Exception:
     pass
 # ✗ log-only — nothing surfaces to anyone who can act
+
 try:
     do_something()
 except Exception as e:
     logger.debug("do_something failed (non-fatal): %s", e)
-# ✓ surface-and-continue — the degraded state is visible to the caller
+
+# ✓ surface-and-continue — the degraded state is visible to the user
 try:
     do_something()
 except Exception as e:
     logger.error("do_something failed: %s", e)
-    return ErrorResult(f"do_something failed: {e}")  # the caller decides
+    return ErrorResult(f"Failed to do something", e)  # the caller displays the message to the user
+
 # ✓ fail fast
 try:
     do_something()
-except Exception as e:
-    raise OperationError("do_something failed") from e
+except LibrarySpecificException as e:
+    raise OperationError("Failed to do something") from e
 ```
 
 
@@ -177,12 +173,6 @@ CLI tools implement this as one helper (e.g. `_fail(user_message, dev_detail)` i
 
 - Never include API keys in cache key parameters (rotation shouldn't invalidate the cache).
 - Never cache non-OK API responses (`REQUEST_DENIED`) — a temporary key issue must not poison the cache.
-
-### Force parameter discipline
-
-- `force=true`: overwrite existing cells. Only when new data is known better.
-- `force=false` (default): fill blank cells only. Safe default for incremental enrichment.
-- `force` must reach BOTH `_batch_stream()` and `_write_backfill_cells()`. If the call chain drops it, every cell is treated as "already has data".
 
 ### Querying properties
 

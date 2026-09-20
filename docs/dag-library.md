@@ -84,10 +84,9 @@ if not result.succeeded:
 
 ### Leaf facts can fail — record the failure on the node
 
-`UserInputNode` holds a value, nothing, or a **recorded failure**. A source
-that saw data but could not read it MUST record that on the owning node —
-storing it anywhere else makes it invisible: `to_json_value` emits only
-attempt state, so nobody downstream ever sees it.
+Nodes hold a value, nothing, or a **recorded failure**. A source
+that saw data but could not read it MUST record the full error on the owning node,
+making it visible to the DAG.
 
 **To record a failure, call `node.fail(message, *, error_info=…)`.**
 `fail()` persists an `impossible` row; `attempt()` and every `to_json`/
@@ -98,7 +97,8 @@ value always wins.
 ```python
 # ✗ do NOT — a failure stored off-node is read by nobody
 source_result = SomeSource(result=None, errors={"price": "..."})
-# ✓ do — the owning node's attempt is the DAG, wire, and UI
+
+# ✓ do 
 price_node.fail(
     "price value could not be parsed",
     error_info=AttemptError(code="parse_error", source="scraper", ...),
@@ -112,13 +112,13 @@ price_node.fail(
 
 **Never:**
 
-- Store error info outside the node: no `errors` dict on a source result, no
+- Never store error info outside the node: no `errors` dict on a source result, no
   error field on an enriched record, no extra key on a wire dict.
-- Call `fail(...)` for a legitimate absence — a source with no value for a
+- Never call `fail(...)` for a legitimate absence — a source with no value for a
   field leaves the node unset; no value is a valid state, not an error.
-- Leave a node unset when the source SAW data but could not read it — the
+- Never leave a node unset when the source SAW data but could not read it — the
   result reads as absence and hides the failure.
-- Push placeholder values as data (`0`, `""`, a default amount) — whatever
+- Never push placeholder values as data (`0`, `""`, a default amount) — whatever
   is pushed IS the value; downstream cannot tell a placeholder from a real
   fact.
 
