@@ -118,7 +118,24 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
     @override
     @property
     def provenance_formula(self):
+        # Never-persisted render (live fallback): a node with no stored
+        # row has nothing frozen to violate, so the current dep states
+        # are the only truth. The persist path uses
+        # provenance_formula_for with the BOUND attempts.
+        return self._formula_for(self._mpg_node.latest_attempt(), self._cost_node.latest_attempt())
 
+    @override
+    def provenance_formula_for(self, dep_attempts, active_deps):
+        ids = {d._id: i for i, d in enumerate(active_deps)}
+        mpg_i = ids.get(self._mpg_node._id)
+        cost_i = ids.get(self._cost_node._id)
+        if mpg_i is None or cost_i is None:
+            return None
+        if mpg_i >= len(dep_attempts) or cost_i >= len(dep_attempts):
+            return None
+        return self._formula_for(dep_attempts[mpg_i], dep_attempts[cost_i])
+
+    def _formula_for(self, mpg_att, cost_att) -> Formula | None:
         commute = self._attempt.value_or_none()
         if not self._attempt.succeeded or commute is None:
             return None
@@ -133,8 +150,8 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
                 total_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
                 round_trip_km = (total_min / 60.0) * 48.0 * 2
                 lines.append(FormulaLine(label="Drive time → distance estimate", value=f"{round_trip_km:.1f} km"))
-            mpg = int(self._mpg_node.latest_attempt().value_or_none() or 45)
-            cost = float(self._cost_node.latest_attempt().value_or_none() or 1.45)
+            mpg = int(mpg_att.value_or_none() or 45)
+            cost = float(cost_att.value_or_none() or 1.45)
             fuel = _fuel_cost_for(drive_legs, mpg, cost)
             if fuel is not None:
                 lines.append(FormulaLine(label=f"Fuel: ÷ {mpg} mpg × £{cost}/litre", value=str(fuel)))

@@ -26,7 +26,7 @@ from houses.nodes.location import BestAddressNode, BestLocationNode, PostcodeNod
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
 from houses.nodes.mortgage_required_node import MortgageRequiredNode
-from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
+from houses.nodes.schools import PrimarySchoolNode, SchoolAcceptanceNode, SecondarySchoolNode
 from houses.nodes.settings_node import aggregate_dict
 from houses.nodes.stamp_duty_node import StampDutyNode
 from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode, HousingCostConfig
@@ -384,30 +384,28 @@ class PropertyNodes:
         )
         self.town_desc: TownDescNode = TownDescNode(
             f"{rid}/town_desc_v3",
-            best_location=self.best_location,
             nearest_town=self.nearest_town,
             town_name=self.town_name,
             postcode_node=self.postcode,
         )
 
         # ── School Nodes ───────────────────────────────────────────────
-        # Find the first child person's acceptable school types
-        _school_acceptable = ("mixed",)
-        for p in self._svc.persons_source._value or []:
-            if p.is_child:
-                _school_acceptable = p.acceptable_schools
-                break
+        # Acceptable school types are a PERSONS-SOURCED DEP (Part F
+        # 2.2): a filter edit changes the dep, the school nodes recompute
+        # — never a constructor snapshot frozen at property build.
+        self.school_acceptable: SchoolAcceptanceNode = SchoolAcceptanceNode(
+            f"{rid}/school_acceptable",
+            persons_source=self._svc.persons_source,
+        )
         self.primary_school: PrimarySchoolNode = PrimarySchoolNode(
             f"{rid}/primary_school",
             best_location=self.best_location,
-            best_address=self.best_address,
-            acceptable=_school_acceptable,
+            acceptable=self.school_acceptable,
         )
         self.secondary_school: SecondarySchoolNode = SecondarySchoolNode(
             f"{rid}/secondary_school",
             best_location=self.best_location,
-            best_address=self.best_address,
-            acceptable=_school_acceptable,
+            acceptable=self.school_acceptable,
         )
         # ── Commute Pipeline ────────────────────────────────────────────
         # Pipelines are materialized for the initial destination set,

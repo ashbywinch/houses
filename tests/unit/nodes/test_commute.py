@@ -2199,3 +2199,121 @@ class TestAFareNobodyKnowsIsNotShownAsFree:
     def test_a_known_fare_is_still_shown(self):
         text = self._commute(mode="transit", amount="88.20").to_provenance_value()
         assert "£88.20/day" in text, text
+
+
+class TestMergeFormulaBound:
+    @pytest.mark.asyncio
+    async def test_drive_selection_formula_excludes_the_conditional_fare(self):
+        """The fare node holds a £41 value, but a drive selection's
+        evaluation never BOUND it — its formula must name only the
+        commute. A formula that live-reads the fare would claim a rail
+        fare the compute never used."""
+        from houses.nodes.commute import MergeRailFareNode
+
+        commute_src = UserInputNode[Commute]("cmf_drive", Commute)
+        fare_src = UserInputNode[Commute]("cmf_fare", Commute)
+        node = MergeRailFareNode("cmf_node", commute_result=commute_src, rail_fare_result=fare_src)
+
+        def _fare_commute() -> Commute:
+            office = PlaceOfInterest("Office", "SW1P 1AA")
+            person = Person("Simon", True, places_of_interest=(office,))
+            leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(90, "minute"))
+            return Commute(
+                person=person,
+                label=office.label,
+                destination=office,
+                duration=Quantity(90, "minute"),
+                daily_cost=Money("41.00", "GBP"),
+                mode="transit",
+                _details=(CostGroup(legs=(leg,), operator="NR", cost=Money("41.00", "GBP")),),
+            )
+
+        commute_src.push(_drive_commute(duration_min=16, cost_gbp=5.0), "test")
+        fare_src.push(_fare_commute(), "test")
+        await flush_processor()
+
+        prov = await node.build_provenance()
+        assert prov.formula is not None
+        assert [line.label for line in prov.formula.lines] == ["Commute"], [line.label for line in prov.formula.lines]
+        assert node._get_active_deps() == (commute_src,)
+
+
+class TestCarFlipNoKeyChurn:
+    """Wave 2.1: the DriveNode is ALWAYS wired. A carless person's drive
+    node carries an infeasible 'no car available' value from its own
+    compute — the pipeline structure (and the selector's candidate set)
+    never churns on a car flip, so a settings edit re-scores instead of
+    rebuilding the commute graph."""
+
+    @pytest.mark.asyncio
+    async def test_drive_node_exists_in_both_car_states(self):
+        from dag.scheduler import flush_processor, get_scheduler
+        from houses.model.domain import Person, PlaceOfInterest
+        from houses.nodes.property_nodes import PropertyNodes
+
+        rid = "90970053"
+        prop = PropertyNodes(rid)
+        poi = PlaceOfInterest(
+            label="Office",
+            address="Bracknell Rd, London",
+            trips_per_week=2,
+            weeks_per_year=46,
+            acceptable_modes=("car",),
+        )
+
+        def push(car: bool) -> None:
+            prop._svc.persons_source.push([Person(name="Simon", has_car=car, places_of_interest=(poi,))], "test")
+
+        def drive_nodes():
+            return [
+                nid
+                for nid in get_scheduler().registered_nodes()
+                if nid.startswith(f"{rid}/") and nid.endswith("/drive")
+            ]
+
+        # Carless first: the drive node still EXISTS (structure, not a
+        # reconstruction-time decision); its VALUE is checked by the
+        # unit test below, where the deps are resolved.
+        push(car=False)
+        await flush_processor()
+        first = drive_nodes()
+        assert first, "drive node must be wired for a carless person"
+        selector_keys = set(prop.commute_selectors)
+
+        # Car flip: the SAME drive node id remains — no rebuild, no churn.
+        push(car=True)
+        await flush_processor()
+        assert drive_nodes() == first, "car flip must not rebuild the drive node"
+        assert set(prop.commute_selectors) == selector_keys
+
+    @pytest.mark.asyncio
+    async def test_carless_drive_value_is_infeasible_with_zero_calls(self):
+        from dag.user_input_node import UserInputNode
+        from houses.geopoint import GeoPoint
+        from houses.nodes.transit import DriveNode, RouteOptions
+
+        calls: list = []
+
+        async def counting_route(loc, dest, *a, **k):
+            calls.append((loc, dest))
+            return _drive_commute()
+
+        location = UserInputNode("cdp_loc", GeoPoint)
+        location.push(GeoPoint(51.45, -0.99), "test")
+        place = UserInputNode("cdp_poi", str)
+        place.push("Bracknell Rd, London", "test")
+        node = DriveNode(
+            "cdp_drive",
+            options=RouteOptions(
+                best_location=location,
+                poi=place,
+                has_car=False,
+                route_fn=counting_route,
+            ),
+        )
+        await flush_processor()
+        att = await node.attempt()
+        assert att.succeeded
+        val = att.value_or_none()
+        assert val is not None and val.infeasible
+        assert calls == [], "a carless drive must never call the route planner"

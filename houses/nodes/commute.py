@@ -441,18 +441,31 @@ class MergeRailFareNode(DerivedNode[Commute]):
     @property
     @override
     def provenance_formula(self):
+        # Never-persisted render (live fallback) — the persist path uses
+        # provenance_formula_for with the BOUND attempts.
+        return self._formula_for(self._commute_result.latest_attempt(), self._rail_fare_result.latest_attempt())
+
+    @override
+    def provenance_formula_for(self, dep_attempts, active_deps):
+        ids = {d._id: i for i, d in enumerate(active_deps)}
+        commute_i = ids.get(self._commute_result._id)
+        if commute_i is None or commute_i >= len(dep_attempts):
+            return None
+        fare_i = ids.get(self._rail_fare_result._id)
+        fare_att = dep_attempts[fare_i] if fare_i is not None and fare_i < len(dep_attempts) else None
+        return self._formula_for(dep_attempts[commute_i], fare_att)
+
+    def _formula_for(self, commute_att, fare_att) -> Formula | None:
 
         val = self._attempt.value_or_none()
         if not self._attempt.succeeded or val is None:
             return None
         lines: list[FormulaLine] = []
-        commute_att = self._commute_result.latest_attempt()
-        if commute_att.succeeded:
+        if commute_att is not None and commute_att.succeeded:
             cv = commute_att.value_or_none()
             if cv is not None:
                 lines.append(FormulaLine(label="Commute", value=str(cv.daily_cost)))
-        fare_att = self._rail_fare_result.latest_attempt()
-        if fare_att.succeeded:
+        if fare_att is not None and fare_att.succeeded:
             rf = fare_att.value_or_none()
             if rf is not None and rf.daily_cost is not None and rf.daily_cost.amount > 0 and transit_legs(val):
                 lines.append(FormulaLine(label="Rail fare", value=str(rf.daily_cost)))

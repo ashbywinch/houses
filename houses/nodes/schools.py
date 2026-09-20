@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import override
+from typing import Any, override
 
-from dag.attempt import Attempt, SourceType
+from dag.attempt import Attempt, SourceType, project_value
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geopoint import GeoPoint
@@ -42,6 +42,36 @@ class _SchoolJson:
         return d
 
 
+class SchoolAcceptanceNode(DerivedNode[tuple[str, ...]]):
+    """The acceptable school genders for the first child person — a
+    PERSONS-SOURCED dep, never a constructor snapshot, so a filter edit
+    (acceptable_schools change) recomputes the school lookup instead of
+    freezing the acceptance set at property construction (Part F 2.2)."""
+
+    provenance_source_type = SourceType.USER
+
+    def __init__(self, node_id: str, *, persons_source: Node):
+        super().__init__(node_id, tuple[str, ...], (persons_source,))
+        self.display_name: str = "School acceptance"
+
+    @override
+    async def compute(self, persons: Attempt) -> Attempt[tuple[str, ...]]:
+        val = persons.value_or_none() or []
+        for p in val:
+            if getattr(p, "is_child", False):
+                return Attempt.succeeded(tuple(p.acceptable_schools))
+        return Attempt.succeeded(("mixed",))
+
+    @override
+    def provenance_display_value(self, value: Any) -> Any:
+        # A raw string list reads as machine data in the tree;
+        # "mixed, boys, girls" is the human form. The value stays a
+        # tuple in the DAG — only its provenance rendering changes.
+        if isinstance(value, tuple):
+            return ", ".join(project_value(v) for v in value)
+        return value
+
+
 class NearestSchoolNode(DerivedNode[dict]):
     """Nearest-school lookup shared by the primary and secondary stages.
 
@@ -54,21 +84,28 @@ class NearestSchoolNode(DerivedNode[dict]):
 
     provenance_source_type = SourceType.API
 
-    def __init__(self, node_id: str, *, best_location, best_address, acceptable: tuple[str, ...] = ("mixed",)):
-        deps: tuple[Node, ...] = (best_location, best_address)
-        super().__init__(node_id, dict, deps)
-        self._acceptable: tuple[str, ...] = acceptable
+    def __init__(self, node_id: str, *, best_location, acceptable: Node | None = None):
+        deps: list[Node] = [best_location]
+        if acceptable is not None:
+            deps.append(acceptable)
+        super().__init__(node_id, dict, tuple(deps))
+        self._acceptable_source: Node | None = acceptable
 
     @override
-    async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
+    async def compute(
+        self, location: Attempt[GeoPoint], acceptable: Attempt[tuple[str, ...]] | None = None
+    ) -> Attempt[dict]:
+        # The property's best_address is NOT read here — a correction to
+        # it must not re-run the school lookup (Part F 4).
         loc = location.value_or_none()
         if loc is None:
             return self._impossible({"location": location})
+        acc_val = acceptable.value_or_none() if acceptable is not None else ("mixed",)
         svc = get_services()
         attempt = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}",
             child_age=self.child_age,
-            acceptable=tuple(SchoolGender(v) for v in self._acceptable),
+            acceptable=tuple(SchoolGender(v) for v in (acc_val or ("mixed",))),
         )
         if attempt.pending:
             return Attempt.pending()

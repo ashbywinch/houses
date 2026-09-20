@@ -29,7 +29,7 @@ async def test_school_location_node_returns_geopoint():
     addr = UserInputNode[str]("addr", str)
 
     # Create derived nodes FIRST so they connect to dep signals
-    primary = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
+    primary = PrimarySchoolNode("ps", best_location=loc)
     school_loc = SchoolLocationNode("sln", school_node=primary)
 
     # Push values — this triggers changed.emit() which queues the derived nodes
@@ -83,7 +83,7 @@ async def test_school_node_output_has_url():
     addr = UserInputNode[str]("addr2", str)
 
     # Create derived node FIRST so it connects to dep signals
-    sn = PrimarySchoolNode("ps2", best_location=loc, best_address=addr)
+    sn = PrimarySchoolNode("ps2", best_location=loc)
 
     # Push values — this triggers changed.emit() which queues the derived node
     loc.push(GeoPoint(51.5, -0.37), "test")

@@ -843,3 +843,65 @@ class TestBusRouteNodeAgainstRealTransport:
         )
 
 
+
+
+class TestBoundMaxWalkInCompute:
+    """Part F 4: the augmentation decision uses the BOUND max_walk
+    attempt, never a re-read — a 60-minute walk that is 'too long'
+    against the live 30mn tolerance stays untouched when THIS evaluation
+    bound a 120mn tolerance."""
+
+    @pytest.mark.asyncio
+    async def test_compute_honours_the_bound_max_walk(self):
+        from money import Money
+        from pint import Quantity
+
+        from dag.attempt import Attempt
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+        from houses.nodes.bus import BusLegAugmentNode
+
+        transit = UserInputNode[Commute]("t_bl_bm", Commute)
+        route = UserInputNode[dict]("r_bl_bm", dict)
+        fare = UserInputNode[dict]("f_bl_bm", dict)
+        node = BusLegAugmentNode(
+            "bla_bm",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+            max_walk_node=_mw(30),  # live tolerance: 30 minutes
+        )
+        commute = Commute(
+            person=Person(name="", has_car=False),
+            label="Test",
+            destination=PlaceOfInterest(label="", address=""),
+            duration=Quantity(90, "minute"),
+            daily_cost=Money("12.50", "GBP"),
+            mode="transit",
+            _details=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(60, "minute")),), operator="TfL"),
+            ),
+        )
+        bus_val = {"bus_stops": [{"departure_name": "X"}], "duration_minutes": 10}
+        fare_val = {"stop_fares": {"X": {"amount": 1.5, "currency": "GBP"}}}
+
+        # Bound 120: the 60mn walk is fine — NOT augmented, despite the
+        # live node holding 30.
+        wide = node.compute(
+            Attempt.succeeded(commute),
+            Attempt.succeeded(120),
+            Attempt.succeeded(bus_val),
+            Attempt.succeeded(fare_val),
+        )
+        assert wide.succeeded and wide.value_or_none() == commute
+
+        # Bound 30: the same walk is too long — augmented to the bus.
+        tight = node.compute(
+            Attempt.succeeded(commute),
+            Attempt.succeeded(30),
+            Attempt.succeeded(bus_val),
+            Attempt.succeeded(fare_val),
+        )
+        assert tight.succeeded
+        tv = tight.value_or_none()
+        assert tv is not None and tv != commute

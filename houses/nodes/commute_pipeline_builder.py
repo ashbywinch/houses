@@ -107,20 +107,20 @@ def build_commute_pipeline(prop, keys: set[str] | None = None) -> None:
                 person_name=p_info.name,
             )
 
-            # Only create a DriveNode for persons who have a car. The
-            # congestion-charge rule is enforced inside DriveNode against
-            # the destination's current address.
-            if p_info.has_car:
-                drive_node = DriveNode(
-                    f"{prop.rid}/{key}/drive",
-                    options=RouteOptions(
-                        best_location=prop.best_location,
-                        poi=address_node,
-                        has_car=True,
-                    ),
-                )
-            else:
-                drive_node = None
+            # ALWAYS wire the DriveNode — a carless person gets an
+            # infeasible "no car available" value from its own compute,
+            # so the pipeline structure (and the commute selectors'
+            # key set) never churns on a car flip. The congestion-charge
+            # rule is enforced inside DriveNode against the
+            # destination's current address.
+            drive_node = DriveNode(
+                f"{prop.rid}/{key}/drive",
+                options=RouteOptions(
+                    best_location=prop.best_location,
+                    poi=address_node,
+                    has_car=p_info.has_car,
+                ),
+            )
             no_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_no_bus",
                 options=TransitOptions(
