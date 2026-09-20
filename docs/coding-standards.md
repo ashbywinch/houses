@@ -121,8 +121,8 @@ try:
     do_something()
 except Exception:
     pass
-# ✗ log-only — nothing surfaces to anyone who can act
 
+# ✗ log-only — nothing surfaces to anyone who can act
 try:
     do_something()
 except Exception as e:
