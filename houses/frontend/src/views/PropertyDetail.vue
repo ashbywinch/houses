@@ -310,6 +310,7 @@ async function saveAddress() {
                 v-if="monthlyGroups && detail?.affordability?.group_monthly_cost?.provenance"
                 :provenance="detail.affordability.group_monthly_cost.provenance"
                 title="Total monthly housing cost"
+                popover
               />
             </span>
             <span
@@ -331,6 +332,7 @@ async function saveAddress() {
                 v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined && detail?.affordability?.group_monthly_cost?.provenance"
                 :provenance="detail.affordability.group_monthly_cost.provenance"
                 title="Total monthly housing cost"
+                popover
               />
             </span>
           </div>
@@ -609,9 +611,7 @@ async function saveAddress() {
   align-items: baseline;
   gap: 0.3rem;
 }
-.summary-monthly-row .provenance-toggle__body {
-  width: 100%;
-}
+
 
 
 /* Section nav */
