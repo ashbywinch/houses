@@ -34,7 +34,7 @@ function makeCommutes(mode: string) {
 
 async function openProvenance(wrapper: VueWrapper) {
   await wrapper.find('.commute-accordion button').trigger('click') // expand the accordion
-  await wrapper.find('.how-btn').trigger('click') // show provenance
+  await wrapper.find('.provenance-toggle__trigger').trigger('click') // show provenance
 }
 
 describe('CommuteSection provenance (round-2 walkthrough)', () => {
