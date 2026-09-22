@@ -302,7 +302,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
                 deps.append(self._bods_fare_node)
         return tuple(deps)
 
-    def _walk_too_long(self, commute: Commute) -> bool:
+    def _walk_too_long(self, commute: Commute, max_walk_value: int | None = None) -> bool:
         if commute.infeasible:
             # .details raises on infeasible commutes — and an infeasible
             # route has no walk leg to augment anyway.
@@ -314,7 +314,8 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             return False
         if first_legs[0].mode != LegMode.WALK:
             return False
-        return int(first_legs[0].duration.magnitude) > self._current_max_walk()
+        limit = max_walk_value if max_walk_value is not None else self._current_max_walk()
+        return int(first_legs[0].duration.magnitude) > limit
 
     @override
     def compute(
@@ -337,7 +338,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             # walk-replacement path below.
             return self._bus_augment(commute, bus_route_attempt, bods_fare_attempt, full_trip=True)
 
-        if not self._walk_too_long(commute):
+        if not self._walk_too_long(commute, max_walk.value_or_none() if max_walk is not None else None):
             return Attempt.succeeded(commute)
         return self._bus_augment(commute, bus_route_attempt, bods_fare_attempt, full_trip=False)
 

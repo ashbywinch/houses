@@ -100,3 +100,5 @@ terraform/*.tfstate.*
 
 # OS-licensed congestion-zone boundary polygons — machine-local, never committed
 houses/data/congestion_zone.json
+
+.venv

@@ -364,10 +364,13 @@ class TestSchoolAcceptableFromPersons:
 
         await flush_processor()
 
-        # The school nodes should have acceptable=("girls",)
-        # We can check this by examining the node's _acceptable attribute
-        assert p.primary_school._acceptable == ("girls",)
-        assert p.secondary_school._acceptable == ("girls",)
+        # The acceptable set is a PERSONS-SOURCED DEP (Part F 2.2): the
+        # school nodes depend on it, and its value follows the child.
+        await flush_processor()
+        acc = (await p.school_acceptable.attempt()).value_or_none()
+        assert acc == ("girls",)
+        assert p.primary_school._acceptable_source is p.school_acceptable
+        assert p.secondary_school._acceptable_source is p.school_acceptable
 
     @pytest.mark.asyncio
     async def test_defaults_to_mixed_when_no_child(self):
@@ -395,8 +398,10 @@ class TestSchoolAcceptableFromPersons:
 
         await flush_processor()
 
-        assert p.primary_school._acceptable == ("mixed",)
-        assert p.secondary_school._acceptable == ("mixed",)
+        acc = (await p.school_acceptable.attempt()).value_or_none()
+        assert acc == ("mixed",)
+        assert p.primary_school._acceptable_source is p.school_acceptable
+        assert p.secondary_school._acceptable_source is p.school_acceptable
 
 
 class TestReadsAreNonBlocking:

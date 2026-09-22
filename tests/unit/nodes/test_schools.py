@@ -41,7 +41,7 @@ async def test_primary_school_impossible_without_location():
     addr = UserInputNode[str]("addr_ps", str)
     addr.push("10 High St, SW1P 1AA", "test")
     await flush_processor()
-    node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
+    node = PrimarySchoolNode("ps", best_location=loc)
     await flush_processor()
     a = await node.attempt()
     assert a.impossible or a.pending  # location dep is pending → impossible or pending
@@ -55,35 +55,7 @@ async def test_secondary_school_impossible_without_location():
     addr = UserInputNode[str]("addr_ss", str)
     addr.push("10 High St, SW1P 1AA", "test")
     await flush_processor()
-    node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
-    await flush_processor()
-    a = await node.attempt()
-    assert a.impossible or a.pending
-
-
-@pytest.mark.asyncio
-async def test_primary_school_impossible_without_address():
-    from houses.nodes.schools import PrimarySchoolNode
-
-    loc = UserInputNode[GeoPoint]("loc_ps2", GeoPoint)
-    loc.push(GeoPoint(51.5, -0.1), "test")
-    await flush_processor()
-    addr = UserInputNode[str]("addr_ps2", str)
-    node = PrimarySchoolNode("ps2", best_location=loc, best_address=addr)
-    await flush_processor()
-    a = await node.attempt()
-    assert a.impossible or a.pending
-
-
-@pytest.mark.asyncio
-async def test_secondary_school_impossible_without_address():
-    from houses.nodes.schools import SecondarySchoolNode
-
-    loc = UserInputNode[GeoPoint]("loc_ss2", GeoPoint)
-    loc.push(GeoPoint(51.5, -0.1), "test")
-    await flush_processor()
-    addr = UserInputNode[str]("addr_ss2", str)
-    node = SecondarySchoolNode("ss2", best_location=loc, best_address=addr)
+    node = SecondarySchoolNode("ss", best_location=loc)
     await flush_processor()
     a = await node.attempt()
     assert a.impossible or a.pending
@@ -151,7 +123,7 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
     try:
         loc = UserInputNode[GeoPoint]("loc_ss3", GeoPoint)
         addr = UserInputNode[str]("addr_ss3", str)
-        node = SecondarySchoolNode("ss3", best_location=loc, best_address=addr)
+        node = SecondarySchoolNode("ss3", best_location=loc)
         loc.push(GeoPoint(51.5, -0.1), "test")
         addr.push("10 High St, London, SW1P 1AA", "test")
         await flush_processor()
@@ -173,7 +145,7 @@ async def test_primary_school_returns_impossible_when_no_school_found():
     try:
         loc = UserInputNode[GeoPoint]("loc_ps3", GeoPoint)
         addr = UserInputNode[str]("addr_ps3", str)
-        node = PrimarySchoolNode("ps3", best_location=loc, best_address=addr)
+        node = PrimarySchoolNode("ps3", best_location=loc)
         loc.push(GeoPoint(51.5, -0.1), "test")
         addr.push("10 High St, London, SW1P 1AA", "test")
         await flush_processor()
@@ -272,7 +244,9 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ps_acc", GeoPoint)
             addr = UserInputNode[str]("addr_ps_acc", str)
-            PrimarySchoolNode("ps_acc", best_location=loc, best_address=addr, acceptable=("boys", "girls"))
+            acc_src = UserInputNode[tuple[str, ...]]("acc_src_ps", tuple[str, ...])
+            acc_src.push(("boys", "girls"), "test")
+            PrimarySchoolNode("ps_acc", best_location=loc, acceptable=acc_src)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -303,7 +277,9 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ss_acc", GeoPoint)
             addr = UserInputNode[str]("addr_ss_acc", str)
-            SecondarySchoolNode("ss_acc", best_location=loc, best_address=addr, acceptable=("girls",))
+            acc_src = UserInputNode[tuple[str, ...]]("acc_src_ss", tuple[str, ...])
+            acc_src.push(("girls",), "test")
+            SecondarySchoolNode("ss_acc", best_location=loc, acceptable=acc_src)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -334,7 +310,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ps_def", GeoPoint)
             addr = UserInputNode[str]("addr_ps_def", str)
-            PrimarySchoolNode("ps_def", best_location=loc, best_address=addr)
+            PrimarySchoolNode("ps_def", best_location=loc)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -364,7 +340,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ss_def", GeoPoint)
             addr = UserInputNode[str]("addr_ss_def", str)
-            SecondarySchoolNode("ss_def", best_location=loc, best_address=addr)
+            SecondarySchoolNode("ss_def", best_location=loc)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -734,9 +710,7 @@ class TestFindNearestFilters:
         assert result.succeeded, "Expected a school, got None"
         school = result.value_or_none()
         assert school is not None
-        assert school.name == "Has A Name School", (
-            f"Expected Has A Name, got {school.name}"
-        )
+        assert school.name == "Has A Name School", f"Expected Has A Name, got {school.name}"
 
     @pytest.mark.asyncio
     async def test_find_nearest_filters_by_acceptable_boys_only(self):
@@ -1039,7 +1013,7 @@ class TestSchoolErrorPropagation:
         try:
             loc = UserInputNode[GeoPoint]("loc_pe1", GeoPoint)
             addr = UserInputNode[str]("addr_pe1", str)
-            node = PrimarySchoolNode("pe1", best_location=loc, best_address=addr)
+            node = PrimarySchoolNode("pe1", best_location=loc)
             loc.push(GeoPoint(51.5, -0.1), "test")
             addr.push("10 High St, London, SW1P 1AA", "test")
             await flush_processor()
@@ -1060,12 +1034,61 @@ class TestSchoolErrorPropagation:
         try:
             loc = UserInputNode[GeoPoint]("loc_pe2", GeoPoint)
             addr = UserInputNode[str]("addr_pe2", str)
-            node = PrimarySchoolNode("pe2", best_location=loc, best_address=addr)
+            node = PrimarySchoolNode("pe2", best_location=loc)
             loc.push(GeoPoint(51.5, -0.1), "test")
             addr.push("10 High St, London, SW1P 1AA", "test")
             await flush_processor()
             a = await node.attempt()
             assert not a.succeeded
             assert "no primary school found" in a.error
+        finally:
+            _sp.reset(token)
+
+
+class TestSchoolAcceptanceDep:
+    """Part F 2.2: the acceptable set is a persons-sourced DEP — a
+    filter edit recomputes the school lookup instead of being frozen
+    at property construction."""
+
+    @pytest.mark.asyncio
+    async def test_acceptable_edit_recomputes_lookup(self):
+        from houses.nodes.schools import PrimarySchoolNode, SchoolAcceptanceNode
+        from houses.school_gender import SchoolGender
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        seen: list = []
+
+        class RecordingService:
+            async def find_nearest(self, postcode, child_age, address="", acceptable=None):
+                seen.append(tuple(SchoolGender(v) for v in (acceptable or ())))
+                from dag.attempt import Attempt
+
+                return Attempt.succeeded(None)
+
+        svc = make_services(school_lookup=RecordingService())
+        token = _sp.set(svc)
+        try:
+            from houses.model.domain import Person
+
+            persons = UserInputNode("acc_persons", list)
+            persons.push([Person(name="Kid", is_child=True, has_car=False, acceptable_schools=("mixed",))], "test")
+            acc = SchoolAcceptanceNode("acc_dep", persons_source=persons)
+            loc = UserInputNode[GeoPoint]("loc_acc_dep", GeoPoint)
+            addr = UserInputNode[str]("addr_acc_dep", str)
+            PrimarySchoolNode("ps_acc_dep", best_location=loc, acceptable=acc)
+            loc.push(GeoPoint(51.5, -0.37), "test")
+            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            await flush_processor()
+            assert seen and seen[-1] == (SchoolGender.MIXED,), seen
+
+            # Filter edit: acceptable_schools change → the lookup runs
+            # again with the new set — same nodes, no rebuild.
+            persons.push(
+                [Person(name="Kid", is_child=True, has_car=False, acceptable_schools=("boys", "girls"))], "test"
+            )
+            await flush_processor()
+            assert len(seen) >= 2, "a filter edit must recompute the school lookup"
+            assert seen[-1] == (SchoolGender.BOYS, SchoolGender.GIRLS), seen
         finally:
             _sp.reset(token)

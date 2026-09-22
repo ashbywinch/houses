@@ -741,3 +741,50 @@ missing piece on pyrefly instead — and it works:
   (participant confusions gone / downgraded).
 - PR: all work lands on `feat/settings-screen` (PR #53) and goes through
   the pr-review loop until findings add little value.
+
+## Part F — DAG dep correctness (2026-09-13, PR #114 review fallout)
+
+Status: **done on 2026-09-20** (branch `fix/provenance-mobile-commute`,
+commits `ee6c725`/`e860386` + main). Rule that framed every wave:
+**a node depends only on what its `compute` reads; `compute` reads only
+its dep attempts; derived state lives on the value** (`docs/dag-library.md`
+→ Wiring rules). Working around the DAG (string-patching provenance,
+manual scheduling, side memory) is an antipattern — fix the deps. No
+`node_results` surgery, no manual scheduling, no side memory in any wave.
+
+- **Wave 0 — revert the workarounds: done.** The `DepInputs` envelope
+  (per-row projected dep-value subsets beside the frozen provenance tree)
+  is deleted; the layer serves the stored tree verbatim (main, merged via
+  #116). The inert `_restamp_*` hooks, `Commute.origin` reuse semantics
+  and the fan-out are gone; the envelope-bound tests were removed.
+- **Wave 1 — narrow the planner deps: done (main).** `DestinationAddressNode`
+  (`houses/nodes/transit.py`) projects the address; planners plan the
+  address string and are never marked stale by trips-only edits.
+- **Wave 2.1 — always wire DriveNode: done.** A carless person's drive
+  value is infeasible ("no car available") from `DriveNode.compute`
+  (`houses/nodes/transit.py`); `commute_pipeline_builder.py` no longer
+  drops the node, so a car flip never rebuilds the graph.
+- **Wave 2.2 — acceptable as a persons-sourced dep: done.**
+  `SchoolAcceptanceNode` (`houses/nodes/schools.py`) is a dependency of
+  the school nodes; a filter edit recomputes the lookup.
+- **Wave 2.3 — bound max_walk in the selector choose: done (main).**
+  `commute.py` reads `inputs.max_walk.value_or_none()`.
+- **Wave 3 — formulas from bound dep attempts: done.**
+  `DerivedNode.provenance_formula_for(dep_attempts, active_deps)` is the
+  persist-path hook; petrol, the rail-fare merge and the monthly total
+  render from the bound attempts (the merge excludes a fare outside the
+  evaluation's conditional dep set). `latest_attempt()` remains only on
+  the never-persisted render.
+- **Wave 4 — unread-dep removal: done.** `TownDescNode.best_location` and
+  `NearestSchoolNode.best_address` are gone (a location/address change
+  can no longer re-run the town description or school lookup);
+  `BusLegAugment._walk_too_long` honours the bound `max_walk` attempt.
+  `provenance_display_value()` renders raw tuples as human text in the
+  tree ("mixed, boys, girls"), enforced by the friendly-provenance API
+  test.
+
+Verification: `pytest tests/unit` 1614 passed; `ruff`, `pyrefly`, lint
+clean. lucidlint: the 4 open actions are pre-existing on base main
+(server.py record-shape + health import + swallow + stale-suppression)
+— the recalibrated baseline lands with the chore branch (PR #117); the
+PR introduces no new actions.

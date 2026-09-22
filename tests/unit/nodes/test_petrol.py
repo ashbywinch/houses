@@ -24,6 +24,7 @@ def _mw(value: int):
     node.push(value, "test")
     return node
 
+
 def _make_commute(
     duration_min: int = 32,
     cost_gbp: float = 4.50,
@@ -60,17 +61,20 @@ def _make_commute(
         _details=details,
     )
 
+
 def _petrol_mpg_node(value: int = 45) -> UserInputNode:
     """Create a petrol MPG setting node with a value."""
     node = UserInputNode("_mpg", int)
     node.push(value, "test")
     return node
 
+
 def _petrol_cost_node(value: Decimal = Decimal("1.45")) -> UserInputNode:
     """Create a petrol cost-per-litre setting node with a value."""
     node = UserInputNode("_cost", Decimal)
     node.push(value, "test")
     return node
+
 
 class TestPetrolCostAugmentNode:
     @pytest.mark.asyncio
@@ -83,7 +87,8 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(45),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
-            is_child=False,)
+            is_child=False,
+        )
         commute_in.push(
             _make_commute(
                 duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30], drive_distances_km=[24.0]
@@ -111,7 +116,8 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(),
             petrol_cost_per_litre_node=_petrol_cost_node(),
-            is_child=False,)
+            is_child=False,
+        )
         commute_in.push(_make_commute(duration_min=32, mode="transit"), "test")
         await flush_processor()
         a = await node.attempt()
@@ -130,7 +136,8 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(45),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
-            is_child=False,)
+            is_child=False,
+        )
         commute_in.push(
             _make_commute(duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30]),
             "test",
@@ -152,7 +159,8 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(45),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
-            is_child=False,)
+            is_child=False,
+        )
         commute_in.push(
             _make_commute(
                 duration_min=50,
@@ -180,7 +188,8 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(),
             petrol_cost_per_litre_node=_petrol_cost_node(),
-            is_child=False,)
+            is_child=False,
+        )
         # Don't push a value — commute remains pending
         await flush_processor()
         a = await node.attempt()
@@ -196,7 +205,8 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             petrol_mpg_node=_petrol_mpg_node(30),
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.60")),
-            is_child=False,)
+            is_child=False,
+        )
         commute_in.push(
             _make_commute(
                 duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30], drive_distances_km=[24.0]
@@ -213,6 +223,7 @@ class TestPetrolCostAugmentNode:
         assert float(val.daily_cost.amount) == expected, (
             f"Expected daily_cost {expected}, got {float(val.daily_cost.amount)}"
         )
+
 
 class TestDriveCommuteAlwaysHasCost:
     """A drive commute with a length must always carry petrol cost.
@@ -310,8 +321,12 @@ class TestDriveCommuteAlwaysHasCost:
         litre = UserInputNode("dcc_litre", float)
         litre.push(1.45, "test")
         petrol = PetrolCostAugmentNode(
-            "dcc/final_fuel", commute_node=merge, petrol_mpg_node=mpg, petrol_cost_per_litre_node=litre,
-            is_child=False,)
+            "dcc/final_fuel",
+            commute_node=merge,
+            petrol_mpg_node=mpg,
+            petrol_cost_per_litre_node=litre,
+            is_child=False,
+        )
 
         await flush_processor()
 
@@ -323,6 +338,7 @@ class TestDriveCommuteAlwaysHasCost:
         assert val.daily_cost.amount > 0, (
             f"a {val.duration.magnitude}-minute drive must have petrol cost, got £{val.daily_cost.amount}"
         )
+
 
 class TestPetrolProvenanceFormula:
     """Petrol Cost calc cards must show the fuel maths, not just a value."""
@@ -339,8 +355,13 @@ class TestPetrolProvenanceFormula:
         mpg = _petrol_mpg_node(45)
         cost = UserInputNode("pf_cost", float)
         cost.push(1.45, "test")
-        node = PetrolCostAugmentNode("pf_node", commute_node=src, petrol_mpg_node=mpg, petrol_cost_per_litre_node=cost,
-            is_child=False,)
+        node = PetrolCostAugmentNode(
+            "pf_node",
+            commute_node=src,
+            petrol_mpg_node=mpg,
+            petrol_cost_per_litre_node=cost,
+            is_child=False,
+        )
         await flush_processor()
 
         prov = await node.build_provenance()
@@ -349,6 +370,7 @@ class TestPetrolProvenanceFormula:
         assert any("Drive distance" in lab for lab in labels), labels
         assert any(lab.startswith("Fuel:") for lab in labels), labels
         assert prov.formula.result == "GBP 2.91"
+
 
 def test_person_mpg_node_reads_the_owner_s_own_economy():
     """PersonPetrolMpgNode resolves MPG from the persons node by name —
@@ -374,3 +396,44 @@ def test_person_mpg_node_reads_the_owner_s_own_economy():
     # unknown person falls back to the default
     other = PersonPetrolMpgNode("y/petrol_mpg", persons_source=persons, person_id="p_nobody")
     assert other.compute(persons.latest_attempt()).value_or_none() == 45
+
+
+class TestPetrolFormulaBound:
+    @pytest.mark.asyncio
+    async def test_fuel_line_renders_from_bound_attempts_across_two_writes(self):
+        """Two evaluations, two different mpg values: each formula line
+        states the mpg that evaluation BOUND, never a stale or live read."""
+        from houses.nodes.petrol import PetrolCostAugmentNode
+
+        commute_in = UserInputNode[Commute]("commute_in_b", Commute)
+        mpg_node = _petrol_mpg_node(45)
+        cost_node = _petrol_cost_node(Decimal("1.45"))
+        node = PetrolCostAugmentNode(
+            "petrol_f",
+            commute_node=commute_in,
+            petrol_mpg_node=mpg_node,
+            petrol_cost_per_litre_node=cost_node,
+            is_child=False,
+        )
+        commute_in.push(
+            _make_commute(
+                duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30], drive_distances_km=[24.0]
+            ),
+            "test",
+        )
+        await flush_processor()
+
+        prov = await node.build_provenance()
+        assert prov.formula is not None
+        assert "÷ 45 mpg × £1.45/litre" in "".join(line.label for line in prov.formula.lines), [
+            line.label for line in prov.formula.lines
+        ]
+
+        # Second evaluation with a NEW mpg value: the formula must show
+        # the value THIS evaluation bound.
+        mpg_node.push(50, "test")
+        await flush_processor()
+        prov = await node.build_provenance()
+        assert prov.formula is not None
+        labels = [line.label for line in prov.formula.lines]
+        assert "Fuel: ÷ 50 mpg × £1.45/litre" in labels, labels

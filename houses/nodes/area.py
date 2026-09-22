@@ -74,13 +74,15 @@ class NearestTownNode(DerivedNode[str]):
 
 
 class TownDescNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, best_location, nearest_town, town_name, postcode_node):
+    """The town narration depends on the town inputs only — the
+    property's best_location is NOT read by compute, so a location
+    refinement must not re-describe the town (Part F 4)."""
+    def __init__(self, node_id: str, *, nearest_town, town_name, postcode_node):
         self._postcode_node: Node = postcode_node
-        self.best_location: Node = best_location
         self._nearest_town: Node = nearest_town
         self._town_name: Node = town_name
-        deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
-        super().__init__(node_id, dict, deps, dep_names=("location", "nearest_town", "town_name", "postcode"))
+        deps: tuple[Node, ...] = (nearest_town, town_name, postcode_node)
+        super().__init__(node_id, dict, deps, dep_names=("nearest_town", "town_name", "postcode"))
 
     @override
     def _get_active_deps(self):
@@ -88,7 +90,7 @@ class TownDescNode(DerivedNode[dict]):
         pending/empty postcode (a property with no known postcode) must
         not stall the town description.  The describe call works with an
         empty postcode string."""
-        deps: list[Node] = [self.best_location, self._nearest_town, self._town_name]
+        deps: list[Node] = [self._nearest_town, self._town_name]
         pc = self._postcode_node.latest_attempt()
         if pc.succeeded and pc.value_or_none():
             deps.append(self._postcode_node)
@@ -97,7 +99,6 @@ class TownDescNode(DerivedNode[dict]):
     @override
     @staticmethod
     async def compute(
-        location: Attempt[GeoPoint],
         nearest_town: Attempt[str],
         town_name: Attempt[str],
         postcode: Attempt[str] | None = None,
