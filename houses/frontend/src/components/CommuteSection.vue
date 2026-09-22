@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { commuteDuration, commuteCost, pillColour } from '../formatters/commute'
 import { usePropertiesStore } from '../stores/properties'
-import ProvenanceView from './ProvenanceView.vue'
+import ProvenanceToggle from './ProvenanceToggle.vue'
 import type { Provenance } from '../types'
 
 const store = usePropertiesStore()
@@ -52,10 +52,6 @@ function toggleCommute(key: string) {
 }
 
 // ── Provenance toggle state (one at a time) ────────────
-const showProvenance = ref<string | null>(null)
-function toggleProvenance(key: string) {
-  showProvenance.value = showProvenance.value === key ? null : key
-}
 </script>
 
 <template>
@@ -108,22 +104,13 @@ function toggleProvenance(key: string) {
           </div>
         </div>
 
-        <!-- Provenance trigger -->
-        <div class="commute-provenance-trigger">
-          <button
-            class="how-btn"
-            :class="{ 'how-btn--active': showProvenance === key }"
-            @click="toggleProvenance(key as string)"
-          >
-            {{ showProvenance === key ? 'ⓘ hide source' : 'ⓘ how?' }}
-          </button>
-        </div>
-        <div v-if="showProvenance === key && c?.provenance" class="commute-provenance-tree">
-          <ProvenanceView
-            :provenance="provenanceForMode(c.provenance, c?.value?.mode)"
-            title="Commute"
-          />
-        </div>
+        <!-- Provenance: the ONE widget, same as the costs and settings
+             surfaces — no hand-rolled trigger (ⓘ-reveals-tree). -->
+        <ProvenanceToggle
+          v-if="c?.provenance"
+          :provenance="provenanceForMode(c.provenance, c?.value?.mode)"
+          title="Commute"
+        />
       </div>
     </div>
   </section>
@@ -198,32 +185,8 @@ function toggleProvenance(key: string) {
 .commute-route { font-size: var(--fs-xs); color: var(--text-muted); font-style: italic; margin-top: var(--sp-1); }
 
 /* Provenance trigger */
-.commute-provenance-trigger { margin-top: var(--sp-2); }
-.commute-provenance-tree {
-  margin-top: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--card-bg);
-  border-radius: var(--radius);
-  border: 1px solid var(--slate-200);
-}
 
 /* "How?" button */
-.how-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--fs-xs);
-  color: var(--slate-400);
-  background: none;
-  border: 1px solid var(--slate-200);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: all var(--transition);
-  font-family: var(--font);
-}
-.how-btn:hover { background: var(--slate-100); color: var(--slate-600); border-color: var(--slate-300); }
-.how-btn--active { background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue); }
 
 /* Pill */
 .pill {
