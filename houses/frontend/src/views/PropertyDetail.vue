@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { usePropertiesStore } from '../stores/properties'
+import ProvenanceToggle from '../components/ProvenanceToggle.vue'
 import Header from '../components/Header.vue'
 import MapView, { type MapMarker } from '../components/MapView.vue'
 import AnnexeSection from '../components/AnnexeSection.vue'
@@ -306,6 +307,11 @@ async function saveAddress() {
                 {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ absolute: monthlyGroups.couple, approx: monthlyGroups.approx }) }}
               </template>
             </span>
+            <ProvenanceToggle
+              v-if="monthlyGroups && detail?.affordability?.group_monthly_cost?.provenance"
+              :provenance="detail.affordability.group_monthly_cost.provenance"
+              title="Total monthly housing cost"
+            />
             <span
               v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined"
               class="summary-monthly"
@@ -319,6 +325,11 @@ async function saveAddress() {
                 {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ absolute: monthlyGroups.others, approx: monthlyGroups.approx }) }}
               </template>
             </span>
+            <ProvenanceToggle
+              v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined && detail?.affordability?.group_monthly_cost?.provenance"
+              :provenance="detail.affordability.group_monthly_cost.provenance"
+              title="Total monthly housing cost"
+            />
           </div>
         </div>
       </div>
