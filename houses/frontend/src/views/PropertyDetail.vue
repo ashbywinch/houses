@@ -294,40 +294,45 @@ async function saveAddress() {
             <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
           </div>
           <div class="summary-facts__right">
-            <span
-              v-if="monthlyGroups"
-              class="summary-monthly"
-              :title="monthlyGroups.coupleTitle ?? (monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined)"
-            >
-              <template v-if="monthlyGroups.coupleDelta !== null && monthlyGroups.vsAddress">
-                {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.couple), approx: monthlyGroups.approx } }) }}
-              </template>
-              <template v-else>
-                {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ absolute: monthlyGroups.couple, approx: monthlyGroups.approx }) }}
-              </template>
+            <span v-if="monthlyGroups" class="summary-monthly-row">
+              <span
+                class="summary-monthly"
+                :title="monthlyGroups.coupleTitle ?? (monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined)"
+              >
+                <template v-if="monthlyGroups.coupleDelta !== null && monthlyGroups.vsAddress">
+                  {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.couple), approx: monthlyGroups.approx } }) }}
+                </template>
+                <template v-else>
+                  {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ absolute: monthlyGroups.couple, approx: monthlyGroups.approx }) }}
+                </template>
+              </span>
+              <ProvenanceToggle
+                v-if="monthlyGroups && detail?.affordability?.group_monthly_cost?.provenance"
+                :provenance="detail.affordability.group_monthly_cost.provenance"
+                title="Total monthly housing cost"
+              />
             </span>
-            <ProvenanceToggle
-              v-if="monthlyGroups && detail?.affordability?.group_monthly_cost?.provenance"
-              :provenance="detail.affordability.group_monthly_cost.provenance"
-              title="Total monthly housing cost"
-            />
             <span
               v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined"
-              class="summary-monthly"
-              :title="monthlyGroups?.othersTitle ?? (monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined)"
+              class="summary-monthly-row"
             >
-              <template v-if="monthlyGroups.othersDelta !== null && monthlyGroups.vsAddress">
-                {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.others), approx: monthlyGroups.approx } }) }}
-              </template>
-              <template v-else>
-                {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ absolute: monthlyGroups.others, approx: monthlyGroups.approx }) }}
-              </template>
+              <span
+                class="summary-monthly"
+                :title="monthlyGroups?.othersTitle ?? (monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined)"
+              >
+                <template v-if="monthlyGroups.othersDelta !== null && monthlyGroups.vsAddress">
+                  {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.others), approx: monthlyGroups.approx } }) }}
+                </template>
+                <template v-else>
+                  {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ absolute: monthlyGroups.others, approx: monthlyGroups.approx }) }}
+                </template>
+              </span>
+              <ProvenanceToggle
+                v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined && detail?.affordability?.group_monthly_cost?.provenance"
+                :provenance="detail.affordability.group_monthly_cost.provenance"
+                title="Total monthly housing cost"
+              />
             </span>
-            <ProvenanceToggle
-              v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined && detail?.affordability?.group_monthly_cost?.provenance"
-              :provenance="detail.affordability.group_monthly_cost.provenance"
-              title="Total monthly housing cost"
-            />
           </div>
         </div>
       </div>
@@ -599,6 +604,14 @@ async function saveAddress() {
 .summary-price { font-size: var(--fs-base); font-weight: var(--fw-bold); color: var(--slate-800); }
 .summary-bedrooms { font-size: var(--fs-sm); color: var(--text-secondary); }
 .summary-monthly { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--green); white-space: nowrap; }
+.summary-monthly-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+.summary-monthly-row .provenance-toggle__body {
+  width: 100%;
+}
 
 
 /* Section nav */
