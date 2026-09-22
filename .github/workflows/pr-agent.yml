@@ -91,7 +91,7 @@ jobs:
           # Other bots comment during the run too (coverage), hence the
           # review-artifact patterns below rather than "any bot comment".
           RUN_STARTED=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --jq '.run_started_at' 2>/dev/null || echo "")
+            --jq -r '.run_started_at' 2>/dev/null || echo "")
           if [ -n "$RUN_STARTED" ]; then
             THIS=$(echo "$CMTS" | jq -c --arg since "$RUN_STARTED" '[.[] | select(.created_at >= $since)]')
           else
