@@ -301,7 +301,6 @@ async function saveAddress() {
             >
               <template v-if="monthlyGroups.coupleDelta !== null && monthlyGroups.vsAddress">
                 {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.couple), approx: monthlyGroups.approx } }) }}
-                <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
               </template>
               <template v-else>
                 {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ absolute: monthlyGroups.couple, approx: monthlyGroups.approx }) }}
@@ -319,7 +318,6 @@ async function saveAddress() {
             >
               <template v-if="monthlyGroups.othersDelta !== null && monthlyGroups.vsAddress">
                 {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.others), approx: monthlyGroups.approx } }) }}
-                <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
               </template>
               <template v-else>
                 {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ absolute: monthlyGroups.others, approx: monthlyGroups.approx }) }}
@@ -601,7 +599,7 @@ async function saveAddress() {
 .summary-price { font-size: var(--fs-base); font-weight: var(--fw-bold); color: var(--slate-800); }
 .summary-bedrooms { font-size: var(--fs-sm); color: var(--text-secondary); }
 .summary-monthly { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--green); white-space: nowrap; }
-.summary-monthly__vs { color: var(--muted, #667); font-weight: var(--fw-regular, 400); }
+
 
 /* Section nav */
 .section-nav-wrap {
