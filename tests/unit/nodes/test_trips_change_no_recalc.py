@@ -78,7 +78,7 @@ def _journey_snapshot(rid: str) -> dict:
     snapshot: dict = {}
     for key in ("Pimlico", "Bracknell", "Dad"):
         for sub in JOURNEY_SUBS:
-            node = get_scheduler().registered_nodes().get(f"{rid}/Simon/{key}/{sub}")
+            node = get_scheduler().registered_nodes().get(f"{rid}/simon/{key}/{sub}")
             if node is None:
                 continue
             att = node.latest_attempt()

@@ -109,9 +109,11 @@ Exception: interactive/CLI setup flows may pre-check configuration when the natu
 
 **Delete dead code, don't deprecate it.** A shim compiles, passes tests, lulls readers into thinking it's real, and never gets cleaned up. Rename/remove + update every caller in the same commit. No aliases, no re-exports, no "will remove in a future version".
 
-### Never swallow errors
+### Never swallow errors — fail fast unless the failure surfaces
 
-Every `except` block must log, re-raise, or handle observably. Bare `except: pass` / silent `except Exception:` forbidden. Safe-to-ignore errors log at `DEBUG` with an explanation.
+All errors must be surfaced — either to the user as part of the interface, or by raising an exception.
+Exceptions must never be swallowed.
+Logging an exception with all the relevant information is good but not enough.
 
 ```python
 # ✗ invisible
@@ -119,12 +121,27 @@ try:
     do_something()
 except Exception:
     pass
-# ✓ observable
+
+# ✗ log-only — nothing surfaces to anyone who can act
 try:
     do_something()
 except Exception as e:
     logger.debug("do_something failed (non-fatal): %s", e)
+
+# ✓ surface-and-continue — the degraded state is visible to the user
+try:
+    do_something()
+except Exception as e:
+    logger.error("do_something failed: %s", e)
+    return ErrorResult(f"Failed to do something", e)  # the caller displays the message to the user
+
+# ✓ fail fast
+try:
+    do_something()
+except LibrarySpecificException as e:
+    raise OperationError("Failed to do something") from e
 ```
+
 
 DAG-specific error rules (`AttemptError` contract, API services return Attempt vs pure code throw, transient re-raise/retry, nodes propagate never re-literalize) → [dag-library.md](dag-library.md) *The three-state result: `Attempt[T]`*.
 
@@ -156,12 +173,6 @@ CLI tools implement this as one helper (e.g. `_fail(user_message, dev_detail)` i
 
 - Never include API keys in cache key parameters (rotation shouldn't invalidate the cache).
 - Never cache non-OK API responses (`REQUEST_DENIED`) — a temporary key issue must not poison the cache.
-
-### Force parameter discipline
-
-- `force=true`: overwrite existing cells. Only when new data is known better.
-- `force=false` (default): fill blank cells only. Safe default for incremental enrichment.
-- `force` must reach BOTH `_batch_stream()` and `_write_backfill_cells()`. If the call chain drops it, every cell is treated as "already has data".
 
 ### Querying properties
 

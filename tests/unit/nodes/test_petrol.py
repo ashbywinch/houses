@@ -380,7 +380,7 @@ def test_person_mpg_node_reads_the_owner_s_own_economy():
 
     persons = UserInputNode("_persons_mpg", list)
     persons.push(list(make_default_persons()), "test")
-    node = PersonPetrolMpgNode("x/petrol_mpg", persons_source=persons, person_name="Simon")
+    node = PersonPetrolMpgNode("x/petrol_mpg", persons_source=persons, person_id="1")
     attempt = node.compute(persons.latest_attempt())
     assert attempt.succeeded
     assert attempt.value_or_none() == 45  # Person default
@@ -394,7 +394,7 @@ def test_person_mpg_node_reads_the_owner_s_own_economy():
     assert attempt.value_or_none() == 38
 
     # unknown person falls back to the default
-    other = PersonPetrolMpgNode("y/petrol_mpg", persons_source=persons, person_name="Nobody")
+    other = PersonPetrolMpgNode("y/petrol_mpg", persons_source=persons, person_id="p_nobody")
     assert other.compute(persons.latest_attempt()).value_or_none() == 45
 
 

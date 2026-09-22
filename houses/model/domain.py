@@ -12,6 +12,7 @@ Existing classes imported for convenience:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -31,6 +32,16 @@ _MODE_LABELS = {
     "walk": "Walking",
 }
 PERCENT = 100
+
+
+@dataclass
+class EquityInputs:
+    name: str
+    person: Person
+    contributions: dict[str, Decimal]
+    persons: list[Person]
+    cash: Decimal
+    show_cash: bool
 
 
 @dataclass(frozen=True)
@@ -127,6 +138,12 @@ class Person:
     # (unset) infers from the home fields — see ``effective_selling_home``.
     # False means no current home: the deposit is cash only.
     selling_home: bool | None = None
+    # Stable DAG identity — names and emails change; this never should.
+    # Numeric, assigned incrementally (defaults 1..N; the backfill
+    # migration assigns max+1). Empty (legacy row) falls back to the
+    # name slug via ``person_id_of`` until the backfill writes one —
+    # the slug fallback is migration-only, never a new identity.
+    person_id: str = ""
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> dict:
@@ -375,24 +392,103 @@ def home_equity_contributions(persons: list) -> dict[str, Decimal]:
     only the attribution is honest.
     """
     by_name = {p.name: p for p in persons if isinstance(p, Person) and not p.is_child}
+    id_of = {p.name: person_id_of(p) for p in by_name.values()}
     gross: dict[str, Decimal] = {}
     for p in by_name.values():
         if not effective_selling_home(p):
             continue
         sale = p.home_sale_price.amount
         mortgage = p.outstanding_mortgage.amount
-        gross[p.name] = max(Decimal(0), sale - mortgage)
+        gross[id_of[p.name]] = max(Decimal(0), sale - mortgage)
     out: dict[str, Decimal] = {}
     for name, p in by_name.items():
+        pid = id_of[name]
         mine = Decimal(0)
-        if name in gross:
+        if pid in gross:
             co_sum = Decimal(sum(co.share for co in p.home_co_owners))
-            mine += gross[name] * (Decimal(PERCENT) - co_sum) / Decimal(PERCENT)
-        for holder, equity in gross.items():
-            if holder == name:
+            mine += gross[pid] * (Decimal(PERCENT) - co_sum) / Decimal(PERCENT)
+        for holder_id, equity in gross.items():
+            if holder_id == pid:
                 continue
-            for co in by_name[holder].home_co_owners:
+            holder = next((q for q in by_name.values() if id_of[q.name] == holder_id), None)
+            if holder is None:
+                continue
+            for co in holder.home_co_owners:
                 if co.name == name:
                     mine += equity * Decimal(co.share) / Decimal(PERCENT)
-        out[name] = mine
+        out[pid] = mine
     return out
+
+
+_PERSON_ID_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(value: str) -> str:
+    """A stable key from a display name: lowercase, non-alphanumerics
+    become underscores (``Simon & Ashby`` → ``simon_ashby``)."""
+    return _PERSON_ID_SLUG_RE.sub("_", value.lower()).strip("_")
+
+
+def person_id_of(person) -> str:
+    """The person's DAG identity: the explicit ``person_id`` when set,
+    else the legacy name-slug (pre-backfill rows — migration-only, never
+    assigned as a new identity; new ids are numeric and incremental).
+    Ownership, attribution, and pipeline keys MUST read this and never
+    the mutable ``name`` — that is what makes renames stop orphaning
+    money."""
+    pid = getattr(person, "person_id", "") or ""
+    if pid:
+        return pid
+    return slugify(getattr(person, "name", "") or "")
+
+
+def _co_owner_source_line(name: str, persons: list[Person]) -> str:
+    """'<share>% of <owner>'s home (£…) ' — the equity source when this
+    person's share came from co-owning someone else's home."""
+    source = ""
+    for other in persons:
+        if getattr(other, "name", None) == name or getattr(other, "is_child", False):
+            continue
+        if not effective_selling_home(other):
+            continue
+        for co in getattr(other, "home_co_owners", ()):
+            if co.name == name:
+                gross_other = max(
+                    Decimal("0"),
+                    other.home_sale_price.amount - other.outstanding_mortgage.amount,
+                )
+                source = f"{co.share}% of {other.name}'s home (£{gross_other:,.2f}) "
+    return source
+
+
+def equity_line(options: EquityInputs) -> str:
+    """One person's equity contribution as a provenance line: sale −
+    mortgage + cash = contribution, co-owner aware.
+
+    Shared by the settings deposit breakdown and the property equity
+    node so both surfaces read the same calculation. ``show_cash`` is
+    False for owner-occupied pricing (Status=current: cash is not an
+    input to that calculation).
+    """
+    home_share = options.contributions.get(person_id_of(options.person), Decimal("0"))
+    value = home_share + options.cash
+    if home_share > 0 and effective_selling_home(options.person):
+        gross = max(Decimal("0"), options.person.home_sale_price.amount - options.person.outstanding_mortgage.amount)
+        co_sum = sum(co.share for co in options.person.home_co_owners)
+        cash_part = f" + £{options.cash:,.2f} cash" if options.show_cash else ""
+        if co_sum == 0:
+            return (
+                f"£{options.person.home_sale_price.amount:,.2f} sale − "
+                f"£{options.person.outstanding_mortgage.amount:,.2f} mortgage{cash_part} = £{value:,.2f}"
+            )
+        holder_part = f"£{gross:,.2f} home ({PERCENT - co_sum}% yours) + "
+        return f"{holder_part}£{home_share:,.2f} home share{cash_part} = £{value:,.2f}"
+    if home_share > 0:
+        # this person's share came from co-owning someone else's home
+        source = _co_owner_source_line(options.name, options.persons)
+        if options.show_cash:
+            return f"{source}+ £{options.cash:,.2f} cash = £{value:,.2f}"
+        return f"{source}= £{value:,.2f}"
+    if options.show_cash:
+        return f"£0 home + £{options.cash:,.2f} cash = £{value:,.2f}"
+    return f"£0 home = £{value:,.2f}"

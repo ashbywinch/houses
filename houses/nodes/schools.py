@@ -63,13 +63,13 @@ class SchoolAcceptanceNode(DerivedNode[tuple[str, ...]]):
         return Attempt.succeeded(("mixed",))
 
     @override
-    def provenance_display_value(self, value: Any) -> Any:
+    def provenance_display_value(self, att) -> Any:
         # A raw string list reads as machine data in the tree;
         # "mixed, boys, girls" is the human form. The value stays a
         # tuple in the DAG — only its provenance rendering changes.
-        if isinstance(value, tuple):
-            return ", ".join(project_value(v) for v in value)
-        return value
+        if att.succeeded and isinstance(att.value, tuple):
+            return ", ".join(project_value(v) for v in att.value)
+        return att.value
 
 
 class NearestSchoolNode(DerivedNode[dict]):

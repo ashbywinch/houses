@@ -61,14 +61,14 @@ def test_added_destination_gains_a_pipeline():
     prop = PropertyNodes(rid)
     register_property(rid, prop)
 
-    assert "Simon/Pimlico" in prop.commute_selectors
-    assert "Simon/Bracknell" not in prop.commute_selectors
+    assert "simon/Pimlico" in prop.commute_selectors
+    assert "simon/Bracknell" not in prop.commute_selectors
 
     _push(_persons("Pimlico", "Bracknell"))
     prop._on_persons_changed()
 
-    assert "Simon/Bracknell" in prop.commute_selectors
-    assert f"{rid}/Simon/Bracknell/commute" in get_scheduler().registered_nodes()
+    assert "simon/Bracknell" in prop.commute_selectors
+    assert f"{rid}/simon/Bracknell/commute" in get_scheduler().registered_nodes()
 
 
 def test_removed_destination_loses_its_pipeline():
@@ -76,16 +76,16 @@ def test_removed_destination_loses_its_pipeline():
     rid = "42424243"
     prop = PropertyNodes(rid)
     register_property(rid, prop)
-    assert "Simon/Bracknell" in prop.commute_selectors
+    assert "simon/Bracknell" in prop.commute_selectors
 
     _push(_persons("Pimlico"))
     prop._on_persons_changed()
 
-    assert "Simon/Bracknell" not in prop.commute_selectors
-    leftovers = [nid for nid in get_scheduler().registered_nodes() if nid.startswith(f"{rid}/Simon/Bracknell/")]
+    assert "simon/Bracknell" not in prop.commute_selectors
+    leftovers = [nid for nid in get_scheduler().registered_nodes() if nid.startswith(f"{rid}/simon/Bracknell/")]
     assert leftovers == [], f"torn-down pipeline nodes linger: {leftovers}"
     # the surviving destination keeps its pipeline
-    assert "Simon/Pimlico" in prop.commute_selectors
+    assert "simon/Pimlico" in prop.commute_selectors
 
 
 def test_rebuild_keeps_finances_and_co_ownership_intact():
@@ -219,8 +219,8 @@ def test_renamed_destination_moves_the_pipeline():
     _push(_persons("Pimlico Office"))
     flush_all()
 
-    assert "Simon/Pimlico" not in prop.commute_selectors
-    assert "Simon/Pimlico Office" in prop.commute_selectors
+    assert "simon/Pimlico" not in prop.commute_selectors
+    assert "simon/Pimlico Office" in prop.commute_selectors
     yearly = _simon_yearly(prop)
     assert yearly == {"Pimlico Office": Decimal("5.50") * 46}
     ga = prop.group_monthly_cost.latest_attempt()
@@ -270,7 +270,44 @@ def test_moved_destination_replans_route_and_respects_the_zone():
     # congestion-charge destination (10-min walk tolerance leaves the
     # 30-min fake walk unacceptable and transit has no unit-test plan,
     # so a surviving drive would prove the address went stale).
-    val = prop.commute_selectors["Simon/Pimlico"].latest_attempt().value_or_none()
+    val = prop.commute_selectors["simon/Pimlico"].latest_attempt().value_or_none()
     assert val is None or val.mode != "drive", (
         f"driving into the congestion zone must never be selected: {val}"
+    )
+
+
+def test_renamed_person_keeps_the_pipelines():
+    """Rename-stability (person_id): changing a person's NAME must not
+    tear down and re-materialize their commute pipelines — the selector
+    keys carry the stable id, so the route-planning nodes keep their
+    computed attempts (no replan) and the group slices keep pricing."""
+
+    rid = "42424260"
+    _push([Person(name="Simon", has_car=True,
+                  person_id="1",
+                  places_of_interest=(PlaceOfInterest(
+                      label="Pimlico", address="1 Drummond Gate, London SW1V 2QQ",
+                      trips_per_week=1, weeks_per_year=46, acceptable_modes=("transit",),
+                  ),))])
+    prop = PropertyNodes(rid)
+    _prime_location(prop)
+    register_property(rid, prop)
+    before_keys = set(prop.commute_selectors)
+    before_node = prop.commute_selectors["1/Pimlico"]
+
+    _push([
+        Person(name="Simon & Ashby", has_car=True,
+               person_id="1",
+               places_of_interest=(PlaceOfInterest(
+                   label="Pimlico", address="1 Drummond Gate, London SW1V 2QQ",
+                   trips_per_week=1, weeks_per_year=46, acceptable_modes=("transit",),
+               ),)),
+    ])
+    flush_all()
+
+    assert set(prop.commute_selectors) == before_keys, (
+        f"rename must not re-key the pipelines: {set(prop.commute_selectors)}"
+    )
+    assert prop.commute_selectors["1/Pimlico"] is before_node, (
+        "rename must not re-materialize the pipeline (no replan)"
     )

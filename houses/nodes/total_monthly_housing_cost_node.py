@@ -282,15 +282,12 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             allocated = (val.get("couple_breakdown") or {}).get("annexe_council_tax") or (
                 val.get("others_breakdown") or {}
             ).get("annexe_council_tax")
+            annexe_note = None
             if allocated and self._annexe_payers_node is not None:
                 payer_att = self._bound_attempt(by_id, self._annexe_payers_node)
                 payers = payer_att.value_or_none() if payer_att is not None else None
                 if payers:
                     annexe_note = "includes annexe council tax (second dwelling) split between: " + ", ".join(payers)
-                    if prov.description is None:
-                        prov.description = annexe_note
-                    else:
-                        prov.description = f"{prov.description} — {annexe_note}"
             # THE APPORTIONMENT, stated for the reader: which bills, and
             # who pays them (P2 — explainable one step away).
             council_node = self._council_tax_node
@@ -329,10 +326,13 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                             ", ".join(annexe_payers) or "all adults",
                             ignored=ignored,
                         )
-                    )
+                        )
                 if parts:
                     line = "Council tax — " + "; ".join(parts)
-                    prov.description = f"{prov.description} — {line}" if prov.description else line
+                    # The band lines already name the annexe bill and its
+                    # payers — a separate annexe note would repeat them.
+                    note = annexe_note if not any("annexe" in p for p in parts) else None
+                    prov.description = " — ".join(filter(None, [note, line]))
         return prov
 
 

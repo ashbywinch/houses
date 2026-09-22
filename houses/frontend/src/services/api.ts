@@ -37,7 +37,10 @@ async function parseJson<T>(r: Response): Promise<T> {
 function authHeaders(): Record<string, string> {
   try {
     const store = useAuthStore()
-    if (store.impersonating) {
+    // The store's isImpersonating is the ONE decision (mode AND a
+    // selected person) — a cookie-borne claim with the mode off must
+    // not reach the server.
+    if (store.isImpersonating && store.impersonating) {
       return { 'X-Impersonate-Person': store.impersonating }
     }
   } catch {

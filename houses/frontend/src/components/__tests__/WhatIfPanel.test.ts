@@ -270,6 +270,21 @@ describe('WhatIfPanel', () => {
     expect(store.whatIfActive).toBe(true)
   })
 
+  it('refetches the property summaries after applying, so the cards show the scenario monthly payment', async () => {
+    // The cards render the monthly payment from the server-side
+    // summaries — a what-if that lands server-side but never refetches
+    // them leaves the OLD payment on the card (the live report: a
+    // lower selling price did not change the monthly payment at all).
+    const { wrapper, store } = await mountOpenPanel()
+    expect(store.whatIfActive).toBe(false)
+
+    await findButton(wrapper, 'Try scenario').trigger('click')
+    await flushPromises()
+
+    expect(api.applyWhatIf).toHaveBeenCalledTimes(1)
+    expect(api.fetchAllSummaries).toHaveBeenCalled()
+  })
+
   it('shows an error line and keeps the flag when Apply fails', async () => {
     vi.mocked(api.applyWhatIf).mockRejectedValueOnce(new Error('500'))
     const { wrapper, store } = await mountOpenPanel()

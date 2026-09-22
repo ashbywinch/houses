@@ -25,6 +25,7 @@ interface MoneyValue {
 
 interface PersonSettings {
   name: string
+  person_id: string
   has_car: boolean
   is_child: boolean
   email: string
@@ -74,31 +75,30 @@ const auth = useAuthStore()
 const activeTab = ref<'finances' | 'commutes'>('finances')
 
 /** The settings page shows YOUR settings: the person you're acting as.
- *  Resolution: impersonated person (superuser mode) → the session's
- *  linked person (server matches by email) → the session's display
- *  name. The DAG keys people BY NAME, so the Google/device profile
- *  name is the identity when the email isn't linked yet. */
+ *  The store owns the impersonation precedence (impersonated person →
+ *  linked person); only the unlinked-account fallback stays here: the
+ *  DAG keys people BY NAME, so a Google/device profile name whose
+ *  email isn't linked yet still matches a person. */
 const me = computed(() => {
-  if (auth.superuserMode && auth.impersonating) return auth.impersonating
+  if (auth.actingAs) return auth.actingAs
   const user = auth.user
-  if (user?.person) return user.person
   const byName = user?.name ? persons.value.find(p => p.name === user.name) : undefined
-  return byName?.name ?? ''
+  return byName?.person_id ?? ''
 })
 const visiblePersons = computed(() => {
   if (!me.value) return persons.value // unlinked session — show everyone read-only
-  return persons.value.filter(p => p.name === me.value)
+  return persons.value.filter(p => p.person_id === me.value)
 })
 const ownPerson = computed(() => visiblePersons.value.find(isOwn) ?? null)
-const loading = ref(true)
-const error = ref('')
 const persons = ref<PersonSettings[]>([])
 const thresholds = ref<Record<string, Thresholds>>({})
 const deposit = ref<HouseholdDeposit | null>(null)
 const currentHomes = ref<{ rid: string; address: string }[]>([])
+const loading = ref(true)
+const error = ref('')
+
 const coOwnerDraft = ref<{ name: string; share: number }>({ name: '', share: 50 })
 const financial = ref<FinancialSettings | null>(null)
-
 // Display-form copies of the finance fields (rates shown as
 // percentages); converted back to stored fractions on save.
 const fin = ref<Record<string, string>>({})
@@ -194,7 +194,7 @@ async function save(person: PersonSettings) {
   const body = buildSaveBody(person)
   saveState.value[person.name] = 'saving'
   try {
-    await api.patchPerson(person.name, body)
+    await api.patchPerson(person.person_id, body)
     undoSnap.value[person.name] = body
     saveState.value[person.name] = 'saved'
     await refresh()
@@ -212,7 +212,7 @@ async function undo(person: PersonSettings) {
   if (!snap) return
   saveState.value[person.name] = 'saving'
   try {
-    await api.patchPerson(person.name, snap)
+    await api.patchPerson(person.person_id, snap)
     saveState.value[person.name] = 'saved'
   } catch {
     saveState.value[person.name] = 'error'
@@ -334,9 +334,11 @@ function removeCoOwner(person: PersonSettings, index: number) {
 /** The session person co-owns someone else's declared home → read-only note. */
 const coOwnerInfo = computed(() => {
   if (!me.value) return null
+  const meName = persons.value.find(p => p.person_id === me.value)?.name
+  if (!meName) return null
   for (const p of persons.value) {
-    if (p.name === me.value) continue
-    const co = (p.home_co_owners ?? []).find(c => c.name === me.value)
+    if (p.person_id === me.value) continue
+    const co = (p.home_co_owners ?? []).find(c => c.name === meName)
     if (co) return { owner: p.name, share: co.share }
   }
   return null
@@ -424,9 +426,9 @@ const depositRows = computed(() => {
         <header
           v-for="person in visiblePersons"
           :key="person.name"
-          :id="'person-' + encodeURIComponent(person.name)"
+          :id="'person-' + encodeURIComponent(person.person_id)"
           class="settings-person__header settings-person__strip"
-          :class="{ 'settings-person--target': targetPerson === person.name }"
+          :class="{ 'settings-person--target': targetPerson === person.person_id }"
         >
           <h2 class="settings-person__name">{{ person.name }}</h2>
           <span v-if="isOwn(person)" class="settings-person__badge">you</span>

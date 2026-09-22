@@ -82,6 +82,46 @@ if not result.succeeded:
 
 `Node._impossible(deps)` and the dep-failure path build `code=dep_failed` with a `causes` chain — traverse structurally, never by string match.
 
+### Leaf facts can fail — record the failure on the node
+
+Nodes hold a value, nothing, or a **recorded failure**. A source
+that saw data but could not read it MUST record the full error on the owning node,
+making it visible to the DAG.
+
+**To record a failure, call `node.fail(message, *, error_info=…)`.**
+`fail()` persists an `impossible` row; `attempt()` and every `to_json`/
+`to_json_value` report `impossible` + the reason; derived nodes see a failed
+dependency and propagate `dep_failed`. `push()` clears a failure — a real
+value always wins.
+
+```python
+# ✗ do NOT — a failure stored off-node is read by nobody
+source_result = SomeSource(result=None, errors={"price": "..."})
+
+# ✓ do 
+price_node.fail(
+    "price value could not be parsed",
+    error_info=AttemptError(code="parse_error", source="scraper", ...),
+)
+```
+
+**Do:**
+
+- Call `fail(...)` when the source saw data it could not interpret.
+- Leave a node unset (no push) when the source genuinely has no value for it.
+
+**Never:**
+
+- Never store error info outside the node: no `errors` dict on a source result, no
+  error field on an enriched record, no extra key on a wire dict.
+- Never call `fail(...)` for a legitimate absence — a source with no value for a
+  field leaves the node unset; no value is a valid state, not an error.
+- Never leave a node unset when the source SAW data but could not read it — the
+  result reads as absence and hides the failure.
+- Never push placeholder values as data (`0`, `""`, a default amount) — whatever
+  is pushed IS the value; downstream cannot tell a placeholder from a real
+  fact.
+
 ## Expression System
 
 Nodes can declare `expression` (an `Expression` tree in `dag/expression.py`) instead of an imperative `compute()`; the base class evaluates and auto-generates provenance. Node objects work directly in expressions via `__add__`/`__sub__`/`__mul__`/`__truediv__`/`__neg__`.

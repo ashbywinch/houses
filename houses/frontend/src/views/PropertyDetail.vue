@@ -8,6 +8,7 @@ import MapView, { type MapMarker } from '../components/MapView.vue'
 import AnnexeSection from '../components/AnnexeSection.vue'
 import CommuteSection from '../components/CommuteSection.vue'
 import CostsSection from '../components/CostsSection.vue'
+import { signedPounds } from '../formatters/money'
 import SchoolsSection from '../components/SchoolsSection.vue'
 import NotesSection from '../components/NotesSection.vue'
 import * as api from '../services/api'
@@ -16,7 +17,9 @@ const router = useRouter()
 const store = usePropertiesStore()
 const auth = useAuthStore()
 
-const currentPerson = computed(() => auth.user?.person ?? null)
+// The session's acting identity — owned by the auth store
+// (impersonation first), never re-derived per view.
+const currentPerson = computed(() => auth.actingAs)
 
 const rid = computed(() => route.params.rid as string)
 const detail = computed(() => store.details[rid.value])
@@ -69,8 +72,18 @@ const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
 const monthlyGroups = computed(() => {
   const g = detail.value?.affordability?.group_monthly_cost
   if (!g?.succeeded || !g.value?.couple) return null
-  const couple = Number(g.value.couple.value)
-  const others = g.value.others ? Number(g.value.others.value) : null
+  // The top numbers are the deltas vs the current home (approved deltas
+  // design): the current home itself keeps its absolute totals, and a
+  // property with no baseline shows absolutes too.
+  const delta = g.value.delta_vs_home
+  const coupleDelta = !detail.value?.is_current_home && delta?.couple
+    ? Number(delta.couple.value)
+    : null
+  const othersDelta = !detail.value?.is_current_home && delta?.others && g.value.others
+    ? Number(delta.others.value)
+    : null
+  const couple = coupleDelta ?? Number(g.value.couple.value)
+  const others = othersDelta ?? (g.value.others ? Number(g.value.others.value) : null)
   const approx = (g.value.couple.stddev ?? 0) > 0
   return {
     coupleLabel: g.value.couple_label || 'S+L',
@@ -78,8 +91,26 @@ const monthlyGroups = computed(() => {
     othersLabel: g.value.others_label || 'A',
     others,
     approx,
+    coupleDelta,
+    othersDelta,
+    vsAddress: (detail.value?.monthly_baseline as { address?: string } | undefined)?.address ?? '',
+    coupleTitle: deltaTitle(
+      g.value.couple?.value,
+      (detail.value?.monthly_baseline as { couple?: { value?: string } } | undefined)?.couple?.value,
+      coupleDelta,
+    ),
+    othersTitle: deltaTitle(
+      g.value.others?.value,
+      (detail.value?.monthly_baseline as { others?: { value?: string } } | undefined)?.others?.value,
+      othersDelta,
+    ),
   }
 })
+// The delta tooltip states the arithmetic: candidate − baseline = delta.
+function deltaTitle(raw: string | undefined, base: string | undefined, delta: number | null): string | undefined {
+  if (delta === null || delta === undefined || raw === undefined || base === undefined) return undefined
+  return `£${Number(raw).toLocaleString()} − £${Number(base).toLocaleString()} = ${delta.toLocaleString()}`
+}
 
 // ── Surface existing data ────────────────────────────
 const townDescription = computed(() => {
@@ -265,16 +296,28 @@ async function saveAddress() {
             <span
               v-if="monthlyGroups"
               class="summary-monthly"
-              :title="monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined"
+              :title="monthlyGroups.coupleTitle ?? (monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined)"
             >
-              {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
+              <template v-if="monthlyGroups.coupleDelta !== null && monthlyGroups.vsAddress">
+                {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(String(monthlyGroups.couple)) }}/mo
+                <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
+              </template>
+              <template v-else>
+                {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
+              </template>
             </span>
             <span
               v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined"
               class="summary-monthly"
-              :title="monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined"
+              :title="monthlyGroups?.othersTitle ?? (monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined)"
             >
-              {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
+              <template v-if="monthlyGroups.othersDelta !== null && monthlyGroups.vsAddress">
+                {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(String(monthlyGroups.others)) }}/mo
+                <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
+              </template>
+              <template v-else>
+                {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
+              </template>
             </span>
           </div>
         </div>
@@ -547,6 +590,7 @@ async function saveAddress() {
 .summary-price { font-size: var(--fs-base); font-weight: var(--fw-bold); color: var(--slate-800); }
 .summary-bedrooms { font-size: var(--fs-sm); color: var(--text-secondary); }
 .summary-monthly { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--green); white-space: nowrap; }
+.summary-monthly__vs { color: var(--muted, #667); font-weight: var(--fw-regular, 400); }
 
 /* Section nav */
 .section-nav-wrap {

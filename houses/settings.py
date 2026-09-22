@@ -22,11 +22,14 @@ def _parse_quantity(v: object, default_unit: str) -> Quantity:
     if isinstance(v, (int, float)):
         return Quantity(v, default_unit)
     if isinstance(v, str):
+        # One honest parse: a settings value pint cannot read is an invalid
+        # settings value — raise, never guess a fallback unit from float(v)
+        # (which silently mangles "10 km" into "10 unit" failures and hides
+        # the original value from every log).
         try:
             return Quantity(v)
-        # lucidlint: ignore broad-except non-numeric settings value falls back to the Quantity default unit parse
-        except Exception:
-            return Quantity(float(v), default_unit)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Cannot convert settings value {v!r} to Quantity") from exc
     if isinstance(v, dict):
         return Quantity(v["value"], v.get("unit", default_unit))
     raise TypeError(f"Cannot convert {type(v).__name__} to Quantity")
@@ -92,4 +95,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

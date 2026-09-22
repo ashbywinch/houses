@@ -212,14 +212,6 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
     #: parsing the node id. ``None`` = not a property view.
     property_rid: str | None = None
 
-    def provenance_display_value(self, value: Any) -> Any:
-        """The human form of this node's value for the provenance tree.
-
-        Defaults to the raw value (``project_value`` handles the
-        canonical shapes). Nodes whose value reads as machine data
-        override this — see DerivedNode for the contract.
-        """
-        return value
 
     def __init__(self, node_id: str, value_type: type[T], source_url: str = "") -> None:
         self._id: str = node_id
@@ -261,6 +253,17 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         path — build fresh from this evaluation.
         """
         ...
+
+    @staticmethod
+    def provenance_display_value(att: Attempt[Any]) -> Any:
+        """The value a PARENT tree states for this node's bound attempt.
+
+        Defaults to the raw attempt value. Nodes whose value is a machine
+        dict (commute breakdowns, route plans) override this with a human
+        summary — without it, every parent's provenance embeds the raw
+        dump and the same dict repeats through the whole tree.
+        """
+        return att.value
 
     # lucidlint: ignore record-shape to_json returns the serialized node record (coding-standards.md)
     async def to_json(

@@ -204,10 +204,13 @@ class ApcoaCarParkLookup:
                     result = self._apcoa_scraper._parse_apcoa_location_page(page_text, title)
                     if result is not None:
                         return _log_apcoa_find(result, "location page", station)
-                # lucidlint: ignore broad-except one APCOA location page failure continues to the next station
-                except Exception as e:
-                    logger.debug("APCOA location page failed for %s: %s", station.name, e)
-                    continue
+                # Fail fast: re-raise the ORIGINAL exception so the DAG's
+                # single classifier (_compute_attempt) decides retry vs
+                # impossible — a RuntimeError wrapper would hide the
+                # network type and kill the retry (2026-09-19).
+                except Exception:
+                    logger.warning("APCOA lookup failed for %s (url=%s)", station.name, url)
+                    raise
 
             # ── Strategy 2: Prebook listing page ─────────────
             lat, lng = station.location.lat, station.location.lon
@@ -362,7 +365,6 @@ class CarParkRegistry:
 
         return None
 
-
     # ── Persistence ────────────────────────────────────────────────
 
     def _persist_results(self, station: Station, car_park: CarPark) -> None:
@@ -427,4 +429,3 @@ class CarParkRegistry:
         # Force reload on next query
         self._by_name = None
         self._by_crs = None
-

@@ -27,14 +27,24 @@ logger = logging.getLogger(__name__)
 
 _broadcast_queue: asyncio.Queue[str] = asyncio.Queue()
 _websocket_clients: set[WebSocket] = set()
+_stale_push_rids: set[str] = set()
+"""Properties whose broadcast push failed — their cards are silently
+stale until a later push succeeds. Surfaced on the listing wire so the
+frontend can mark the card 'not being updated'."""
+
+
+def stale_push_rids() -> frozenset[str]:
+    """Rids whose last broadcast push failed (frontend staleness marker)."""
+    return frozenset(_stale_push_rids)
 
 
 def _reset():
     """Reset broadcast state for test isolation."""
-    global _broadcast_queue, _pending_notify_rids, _notify_debounce_task
+    global _broadcast_queue, _pending_notify_rids, _notify_debounce_task, _stale_push_rids
     _broadcast_queue = asyncio.Queue()
     _pending_notify_rids = set()
     _notify_debounce_task = None
+    _stale_push_rids = set()
     _websocket_clients.clear()
 
 
@@ -66,7 +76,6 @@ class _PropertyUpdatedEnvelope:
         return dict(type="property_updated", rid=self.rid, data=self.data)
 
 
-
 @dataclass(frozen=True)
 class _SettingsUpdatedEnvelope:
     """The settings_updated websocket message envelope (wire shape)."""
@@ -77,6 +86,7 @@ class _SettingsUpdatedEnvelope:
     def to_dict(self) -> dict:
         # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
         return dict(type="settings_updated", data=self.data.to_dict())
+
 
 async def _push_summary(rid: str) -> SummaryJson | None:
     """Build, delta-attach, and push one property's summary to all clients.
@@ -131,19 +141,24 @@ async def _broadcaster() -> None:
             continue
         try:
             summary = await _push_summary(rid)
-            if summary is not None and _is_current_home(rid):
+            if summary is not None:
+                _stale_push_rids.discard(rid)
+            if _is_current_home(rid):
                 for other_rid in get_services().property_registry.list_properties():
                     if other_rid == rid:
                         continue
                     try:
-                        await _push_summary(other_rid)
+                        if await _push_summary(other_rid) is not None:
+                            _stale_push_rids.discard(other_rid)
                     # lucidlint: ignore broad-except loop boundary — one stale summary must not kill the sweep
                     except Exception as exc:
                         logger.warning("Broadcast failed for %s: %s", other_rid, exc)
+                        _stale_push_rids.add(other_rid)
                         continue
         # lucidlint: ignore broad-except loop boundary — one property's broadcast failure must not kill the broadcaster
         except Exception as exc:
             logger.warning("Broadcast failed for %s: %s", rid, exc)
+            _stale_push_rids.add(rid)
             continue
 
 

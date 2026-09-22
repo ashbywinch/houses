@@ -1866,7 +1866,7 @@ class TestCommuteChainProvenanceFormula:
             ],
             "test",
         )
-        commute_src = FixedCommuteNode("Simon/Bracknell")
+        commute_src = FixedCommuteNode("simon/Bracknell")
         commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
         node = CommuteBreakdownNode("bf_node", selectors=(commute_src,), persons_source=persons_src)
         await flush_processor()
@@ -1892,7 +1892,7 @@ class TestCommuteChainProvenanceFormula:
             ],
             "test",
         )
-        commute_src = FixedCommuteNode("Simon/Bracknell")
+        commute_src = FixedCommuteNode("simon/Bracknell")
         commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
         node = CommuteBreakdownNode("bf_node2", selectors=(commute_src,), persons_source=persons_src)
         await flush_processor()
@@ -1943,7 +1943,7 @@ async def test_max_walk_what_if_rescores_without_replanning():
     def build(penalty_minutes: int) -> CommuteSelectorNode:
         pen = _Quantity(penalty_minutes, "minute")
         persons.push([Person(name="Simon", has_car=False, bus_walk_penalty=pen)], "test")
-        max_walk = PersonMaxWalkNode("mwp_mw", persons_source=persons, person_name="Simon")
+        max_walk = PersonMaxWalkNode("mwp_mw", persons_source=persons, person_id="simon")
         return CommuteSelectorNode(
             "mwp_sel",
             options=CommuteSelectorOptions(
@@ -2006,9 +2006,9 @@ class TestZeroTripsNotCommuted:
         prop = PropertyNodes("42424246")
         register_property("42424246", prop)
         # the pipeline exists (structure is per destination)…
-        assert "Simon/Bracknell" in prop.commute_selectors
+        assert "simon/Bracknell" in prop.commute_selectors
         # …but the pill is omitted for a 0-trip destination
-        assert prop._commuted_destinations() == {"Simon/Pimlico"}
+        assert prop._commuted_destinations() == {"simon/Pimlico"}
 
     def test_commuted_destinations_excludes_zero_weeks(self):
         from houses.nodes.property_nodes import PropertyNodes
@@ -2031,9 +2031,9 @@ class TestZeroTripsNotCommuted:
         )
         prop = PropertyNodes("42424248")
         register_property("42424248", prop)
-        assert "Simon/Bracknell" in prop.commute_selectors
+        assert "simon/Bracknell" in prop.commute_selectors
         # zero weeks a year is not commuted either: no pill for Pimlico
-        assert prop._commuted_destinations() == {"Simon/Bracknell"}
+        assert prop._commuted_destinations() == {"simon/Bracknell"}
 
 
 class TestCongestionZoneAndProvenanceFrequency:
@@ -2103,7 +2103,7 @@ class TestCongestionZoneAndProvenanceFrequency:
         )
         location = UserInputNode("czf_loc", GeoPoint)
         location.push(GeoPoint(51.45, -0.99), "test")
-        place = DestinationPlaceNode("czf_place", persons_source=persons, person_name="Test", label="Bracknell")
+        place = DestinationPlaceNode("czf_place", persons_source=persons, person_id="test", label="Bracknell")
         address = DestinationAddressNode("czf_address", place=place)
         planner_calls: list = []
         planner = get_services().route_planner
