@@ -22,8 +22,9 @@ describe('WebSocket message handler', () => {
     setActivePinia(createPinia())
   })
 
-  it('handles property_updated message without throwing', () => {
+  it('handles property_updated message without throwing', async () => {
     const store = usePropertiesStore()
+    let deliver: ((msg: { data: string }) => void) | undefined
     const { connect, disconnect } = useWebSocket((_url: string) => {
       const ws = {
         onopen: null as any,
@@ -31,10 +32,13 @@ describe('WebSocket message handler', () => {
         onmessage: null as any,
         close() { this.onclose?.() },
       }
-      // Capture onmessage for direct invocation
-      setTimeout(() => {
-        ws.onmessage?.({
-          data: JSON.stringify({
+      deliver = (msg: { data: string }) => ws.onmessage?.(msg)
+      return ws as any
+    })
+
+    connect('ws://localhost/api/ws')
+    deliver!({
+      data: JSON.stringify({
             type: 'property_updated',
             rid: 'test-rid',
             data: {
@@ -46,26 +50,21 @@ describe('WebSocket message handler', () => {
               },
             },
           }),
-        })
-      }, 0)
-      return ws as any
     })
 
-    connect('ws://localhost/api/ws')
-
-    // Wait for the microtask that processes the WS message
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(store.summaries['test-rid']).toBeDefined()
-        expect(store.rids).toContain('test-rid')
-        disconnect()
-        resolve()
-      }, 10)
-    })
+    // The burst buffer applies on the next macrotask; the handler's own
+    // awaits land as microtasks — both drained deterministically, no
+    // wall-clock races.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    await flushPromises()
+    expect(store.summaries['test-rid']).toBeDefined()
+    expect(store.rids).toContain('test-rid')
+    disconnect()
   })
 
-  it('processes empty ofsted from WebSocket without crashing', () => {
+  it('processes empty ofsted from WebSocket without crashing', async () => {
     const store = usePropertiesStore()
+    let deliver: ((msg: { data: string }) => void) | undefined
     const { connect, disconnect } = useWebSocket((_url: string) => {
       const ws = {
         onopen: null as any,
@@ -73,11 +72,15 @@ describe('WebSocket message handler', () => {
         onmessage: null as any,
         close() { this.onclose?.() },
       }
-      setTimeout(() => {
-        ws.onmessage?.({
-          data: JSON.stringify({
-            type: 'property_updated',
-            rid: 'empty-ofsted',
+      deliver = (msg: { data: string }) => ws.onmessage?.(msg)
+      return ws as any
+    })
+    connect('ws://localhost/api/ws')
+
+    deliver!({
+      data: JSON.stringify({
+        type: 'property_updated',
+        rid: 'empty-ofsted',
             data: {
               rid: 'empty-ofsted',
               best_address: { succeeded: true, value: '2 School Ln', error: null, provenance: { label: 'ws' } },
@@ -86,21 +89,13 @@ describe('WebSocket message handler', () => {
               },
             },
           }),
-        })
-      }, 0)
-      return ws as any
     })
 
-    connect('ws://localhost/api/ws')
-
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        const summary = store.summaries['empty-ofsted']
-        expect(summary?.schools?.primary?.school?.value?.ofsted).toBe('')
-        disconnect()
-        resolve()
-      }, 10)
-    })
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    await flushPromises()
+    const summary = store.summaries['empty-ofsted']
+    expect(summary?.schools?.primary?.school?.value?.ofsted).toBe('')
+    disconnect()
   })
 })
 
@@ -168,7 +163,7 @@ describe('WebSocket settings broadcast', () => {
     setActivePinia(createPinia())
   })
 
-  it('refreshes cached settings when the DAG broadcasts a settings node update', () => {
+  it('refreshes cached settings when the DAG broadcasts a settings node update', async () => {
     const store = usePropertiesStore()
     store.commuteGoods = { Simon: 30 }
     store.commuteCeilings = { Simon: { fine: 45, isChild: false } }
@@ -182,6 +177,7 @@ describe('WebSocket settings broadcast', () => {
       },
     } as unknown as Record<string, unknown>)
 
+    let deliver: ((msg: { data: string }) => void) | undefined
     const { connect, disconnect } = useWebSocket((_url: string) => {
       const ws = {
         onopen: null as any,
@@ -189,35 +185,32 @@ describe('WebSocket settings broadcast', () => {
         onmessage: null as any,
         close() { this.onclose?.() },
       }
-      setTimeout(() => {
-        ws.onmessage?.({
-          data: JSON.stringify({
-            type: 'settings_updated',
-            data: {
-              persons: { value: [] },
-              commute_thresholds: { value: { Simon: { good_max_minutes: 35, fine_max_minutes: 50 } } },
-            },
-          }),
-        })
-      }, 0)
+      deliver = (msg: { data: string }) => ws.onmessage?.(msg)
       return ws as any
     })
 
     connect('ws://localhost/api/ws')
-
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(store.commuteGoods['Simon']).toBe(35)
-        expect(store.commuteCeilings['Simon'].fine).toBe(50)
-        disconnect()
-        resolve()
-      }, 10)
+    deliver!({
+      data: JSON.stringify({
+        type: 'settings_updated',
+        data: {
+          persons: { value: [] },
+          commute_thresholds: { value: { Simon: { good_max_minutes: 35, fine_max_minutes: 50 } } },
+        },
+      }),
     })
+
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    await flushPromises()
+    expect(store.commuteGoods['Simon']).toBe(35)
+    expect(store.commuteCeilings['Simon'].fine).toBe(50)
+    disconnect()
   })
 
-  it('ignores node_updated messages for property nodes', () => {
+  it('ignores node_updated messages for property nodes', async () => {
     const fetchSpy = vi.mocked(fetchSettings)
 
+    let deliver: ((msg: { data: string }) => void) | undefined
     const { connect, disconnect } = useWebSocket((_url: string) => {
       const ws = {
         onopen: null as any,
@@ -225,25 +218,21 @@ describe('WebSocket settings broadcast', () => {
         onmessage: null as any,
         close() { this.onclose?.() },
       }
-      setTimeout(() => {
-        ws.onmessage?.({
-          data: JSON.stringify({ type: 'node_updated', node_id: 'some-rid/commute/total_monthly', data: {} }),
-        })
-      }, 0)
+      deliver = (msg: { data: string }) => ws.onmessage?.(msg)
       return ws as any
     })
 
     connect('ws://localhost/api/ws')
     // the store loaded settings at init — count from here
     const callsBefore = fetchSpy.mock.calls.length
-
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(fetchSpy.mock.calls.length).toBe(callsBefore)
-        disconnect()
-        resolve()
-      }, 10)
+    deliver!({
+      data: JSON.stringify({ type: 'node_updated', node_id: 'some-rid/commute/total_monthly', data: {} }),
     })
+
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    await flushPromises()
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore)
+    disconnect()
   })
 
   it('refreshes the what-if mode when the DAG broadcasts a settings node update', async () => {
