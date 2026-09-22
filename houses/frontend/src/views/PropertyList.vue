@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { monthlyFigure } from '../formatters/money'
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
 import Header from '../components/Header.vue'
@@ -383,7 +384,7 @@ const ceilingLimitText = computed(() => {
     <p v-if="store.baseline" class="baseline-legend" role="note" style="margin-top: var(--sp-4);">
       Monthly figures are the change vs your home — {{ store.baseline.address }}
       ({{ store.groupLabels.coupleLabel }} £{{ Math.round(Number(store.baseline.couple.value)).toLocaleString() }}/mo ·
-      {{ store.groupLabels.othersLabel }} {{ store.baseline.others ? '£' + Math.round(Number(store.baseline.others.value)).toLocaleString() + '/mo' : '£—/mo' }}).
+      {{ store.groupLabels.othersLabel }} {{ monthlyFigure({ absolute: store.baseline.others ? Math.round(Number(store.baseline.others.value)) : null }) }}).
       Full totals and breakdowns live on each property's page.
     </p>
 
