@@ -840,8 +840,12 @@ class DerivedNode(Node[T], Generic[T]):
             att = bound[i] if bound is not None and i < len(bound) else None
             sources[dep._id] = await self._dep_provenance(dep, att)
 
-        # Use expression system for formula if available
-        formula = self.provenance_formula
+        # The persist path renders the formula from the BOUND attempts —
+        # a formula that reads dep state via latest_attempt() can report
+        # values the compute never bound. Nodes whose formula reads dep
+        # values override provenance_formula_for; the default property
+        # stays for self-only formulas and never-persisted renders.
+        formula = self.provenance_formula_for(bound, deps) if bound is not None else self.provenance_formula
         if formula is None:
             formula = self._build_formula_from_expression()
 
@@ -989,9 +993,27 @@ class DerivedNode(Node[T], Generic[T]):
     Default is CALC — override in subclasses that source from
     APIs, geocoding, config, or user input."""
 
+
     provenance_formula: Formula | None = None
     """Override to return a Formula for computed values.
-    Default is None — no formula."""
+    Default is None — no formula. Used for self-only formulas and the
+    never-persisted render; the persist path calls
+    ``provenance_formula_for`` when it can hand over the bound attempts."""
+
+    def provenance_formula_for(
+        self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]
+    ) -> Formula | None:
+        """Formula rendered from the BOUND calculating attempts.
+
+        The persist path passes the attempts this evaluation computed
+        from. A formula that READs dep values (fuel, rail-fare merge,
+        monthly apportionment) MUST override this and read the bound
+        attempts — never ``latest_attempt()``, which can report a value
+        the compute never bound (and, for CONDITIONAL deps, a value
+        outside this evaluation's dep set entirely). Default delegates
+        to ``provenance_formula`` for self-only formulas.
+        """
+        return self.provenance_formula
 
     # lucidlint: ignore record-shape result is the base serialization dict extended in place — wire format
     def _enrich_json(self, result: dict) -> None:

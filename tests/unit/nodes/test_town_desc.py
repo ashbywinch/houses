@@ -32,7 +32,6 @@ def _node(node_id: str, *, postcode_node):
     town = UserInputNode[str](f"{node_id}_town", str)
     node = TownDescNode(
         node_id,
-        best_location=loc,
         nearest_town=nearest,
         town_name=town,
         postcode_node=postcode_node,
@@ -88,3 +87,19 @@ class TestTownDescNode:
             assert fake.calls == [("Maidenhead", "SL6 3YZ")]
         finally:
             _request_services.reset(token)
+
+
+class TestTownDescDeps:
+    """Part F 4: TownDescNode depends only on what compute reads —
+    best_location was removed, so a location refinement cannot
+    re-describe the town."""
+
+    def test_active_deps_are_town_inputs_only(self):
+        from houses.nodes.area import TownDescNode
+
+        nearest = UserInputNode[str]("dp_nearest", str)
+        town = UserInputNode[str]("dp_town", str)
+        pc = UserInputNode[str]("dp_pc", str)
+        node = TownDescNode("dp_td", nearest_town=nearest, town_name=town, postcode_node=pc)
+        active = node._get_active_deps()
+        assert active == (nearest, town)

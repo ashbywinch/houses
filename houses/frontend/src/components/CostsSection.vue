@@ -3,12 +3,7 @@ import { computed, ref } from 'vue'
 import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
 import type { MonthlyBaseline, Provenance } from '../types'
-import {
-  blockWholePoundsKey,
-  rejectWholePoundsPaste,
-  signedPounds,
-  wholePoundsValue,
-} from '../formatters/money'
+import { blockWholePoundsKey, monthlyFigure, rejectWholePoundsPaste, wholePoundsValue } from '../formatters/money'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 
@@ -119,7 +114,7 @@ function vsRow(side: 'couple' | 'others'): { label: string; value: string; title
   const base = props.monthlyBaseline?.[side]?.value
   return {
     label: `vs your home (${homeShortAddress.value})`,
-    value: `${d.approx ? '≈ ' : ''}${signedPounds(d.value)}/mo`,
+    value: monthlyFigure({ delta: d }),
     title: `£${total} − £${base} = ${d.value}. ≈ = council tax estimated.`,
     provenance: (d as { provenance?: Provenance }).provenance,
   }
@@ -337,7 +332,7 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
             <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
           </span>
           <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">
-            {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.couple.value }}/mo
+            {{ monthlyFigure({ absolute: Number(affordability.group_monthly_cost.value.couple.value), approx: totalMonthlyApprox }) }}
           </span>
         </div>
         <div v-if="coupleVsRow" class="costs-row costs-row--sub costs-row--vs" :title="coupleVsRow.title">
@@ -366,7 +361,7 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
             <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
           </span>
           <span class="costs-value">
-            {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.others.value }}/mo
+            {{ monthlyFigure({ absolute: Number(affordability.group_monthly_cost.value.others.value), approx: totalMonthlyApprox }) }}
           </span>
         </div>
         <div v-if="othersVsRow" class="costs-row costs-row--sub costs-row--vs" :title="othersVsRow.title">

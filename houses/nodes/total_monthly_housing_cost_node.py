@@ -234,6 +234,22 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
     def compute(**kwargs) -> Attempt[dict]:
         return _compute_group_costs(GroupCostInputs(**kwargs))
 
+    @staticmethod
+    def _bound_attempt(by_id, node):
+        """The attempt this evaluation bound when one is being recorded;
+        the live attempt only for a never-persisted render (nothing
+        frozen exists to violate)."""
+        if node is None:
+            return None
+        if by_id is not None:
+            return by_id.get(node._id)
+        return node.latest_attempt()
+
+    @staticmethod
+    def _stored_names(by_id, node):
+        att = GroupMonthlyCostNode._bound_attempt(by_id, node)
+        return set(att.value_or_none() or []) if att is not None else set()
+
     @override
     async def build_provenance(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
@@ -245,6 +261,11 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         dumping the dict read "couple: value: 3753.21, stddev: …".
         """
         prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
+        if dep_attempts is not None:
+            by_id = {d._id: a for d, a in zip(active_deps or self._get_active_deps(), dep_attempts, strict=False)}
+        else:
+            by_id = None
+
         val = self._attempt.value_or_none()
         if isinstance(val, dict):
             couple = val.get("couple") or {}
@@ -263,33 +284,26 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             ).get("annexe_council_tax")
             annexe_note = None
             if allocated and self._annexe_payers_node is not None:
-                payer_att = self._annexe_payers_node.latest_attempt()
+                payer_att = self._bound_attempt(by_id, self._annexe_payers_node)
                 payers = payer_att.value_or_none() if payer_att is not None else None
                 if payers:
                     annexe_note = "includes annexe council tax (second dwelling) split between: " + ", ".join(payers)
             # THE APPORTIONMENT, stated for the reader: which bills, and
             # who pays them (P2 — explainable one step away).
             council_node = self._council_tax_node
-            council_att = council_node.latest_attempt() if council_node is not None else None
+            council_att = self._bound_attempt(by_id, council_node)
             council_val = council_att.value_or_none() if council_att is not None else None
             persons_source = self._config.persons_source
-            persons_att = persons_source.latest_attempt() if persons_source is not None else None
+            persons_att = self._bound_attempt(by_id, persons_source)
             persons_value = persons_att.value_or_none() if persons_att is not None else []
             adults = [p.name for p in (persons_value or []) if not getattr(p, "is_child", False)]
 
-            def _stored_names(node):
-                att = node.latest_attempt() if node is not None else None
-                return set(att.value_or_none() or []) if att is not None else set()
-
-            stored_main = _stored_names(self._config.council_tax_payers_node)
+            stored_main = self._stored_names(by_id, self._config.council_tax_payers_node)
             main_payers = sorted((stored_main & set(adults)) or adults)
-            stored_annexe = _stored_names(self._annexe_payers_node)
+            stored_annexe = self._stored_names(by_id, self._annexe_payers_node)
             annexe_payers = sorted((stored_annexe & set(adults)) or adults)
-            ignored = (
-                bool(self._annexe_ignored_node.latest_attempt().value_or_none())
-                if self._annexe_ignored_node is not None
-                else False
-            )
+            ignored_att = self._bound_attempt(by_id, self._annexe_ignored_node)
+            ignored = bool(ignored_att.value_or_none()) if ignored_att is not None else False
             if council_val is not None:
                 parts = []
                 if council_val.yearly_cost is not None:

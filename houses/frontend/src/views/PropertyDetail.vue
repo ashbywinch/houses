@@ -8,7 +8,7 @@ import MapView, { type MapMarker } from '../components/MapView.vue'
 import AnnexeSection from '../components/AnnexeSection.vue'
 import CommuteSection from '../components/CommuteSection.vue'
 import CostsSection from '../components/CostsSection.vue'
-import { signedPounds } from '../formatters/money'
+import { monthlyFigure } from '../formatters/money'
 import SchoolsSection from '../components/SchoolsSection.vue'
 import NotesSection from '../components/NotesSection.vue'
 import * as api from '../services/api'
@@ -299,11 +299,11 @@ async function saveAddress() {
               :title="monthlyGroups.coupleTitle ?? (monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined)"
             >
               <template v-if="monthlyGroups.coupleDelta !== null && monthlyGroups.vsAddress">
-                {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(String(monthlyGroups.couple)) }}/mo
+                {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.couple), approx: monthlyGroups.approx } }) }}
                 <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
               </template>
               <template v-else>
-                {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
+                {{ monthlyGroups.coupleLabel }} {{ monthlyFigure({ absolute: monthlyGroups.couple, approx: monthlyGroups.approx }) }}
               </template>
             </span>
             <span
@@ -312,11 +312,11 @@ async function saveAddress() {
               :title="monthlyGroups?.othersTitle ?? (monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined)"
             >
               <template v-if="monthlyGroups.othersDelta !== null && monthlyGroups.vsAddress">
-                {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}{{ signedPounds(String(monthlyGroups.others)) }}/mo
+                {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ delta: { value: String(monthlyGroups.others), approx: monthlyGroups.approx } }) }}
                 <span class="summary-monthly__vs">vs {{ monthlyGroups.vsAddress }}</span>
               </template>
               <template v-else>
-                {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
+                {{ monthlyGroups.othersLabel }} {{ monthlyFigure({ absolute: monthlyGroups.others, approx: monthlyGroups.approx }) }}
               </template>
             </span>
           </div>

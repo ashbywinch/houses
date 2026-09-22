@@ -212,6 +212,7 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
     #: parsing the node id. ``None`` = not a property view.
     property_rid: str | None = None
 
+
     def __init__(self, node_id: str, value_type: type[T], source_url: str = "") -> None:
         self._id: str = node_id
         self._value_type: type[T] = value_type

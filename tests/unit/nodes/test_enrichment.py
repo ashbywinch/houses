@@ -263,11 +263,10 @@ class TestTownDescNode:
     async def test_impossible_without_deps(self):
         from houses.nodes.area import TownDescNode
 
-        loc = UserInputNode[dict]("loc_td2", dict)
         nearest = UserInputNode[str]("nearest_td2", str)
         addr_town = UserInputNode[str]("addr_td2", str)
         pc = UserInputNode[str]("pc_td2", str)
-        node = TownDescNode("td2", best_location=loc, nearest_town=nearest, town_name=addr_town, postcode_node=pc)
+        node = TownDescNode("td2", nearest_town=nearest, town_name=addr_town, postcode_node=pc)
         a = await node.attempt()
         assert not a.succeeded
 
@@ -291,11 +290,11 @@ class TestTownDescNode:
 
         token = _sp.set(make_services(town_desc_service=_RecordingTownDesc()))
         try:
-            loc = UserInputNode[GeoPoint]("loc_td3", GeoPoint)
             nearest = UserInputNode[str]("nearest_td3", str)
             addr_town = UserInputNode[str]("addr_td3", str)
             pc = UserInputNode[str]("pc_td3", str)
-            node = TownDescNode("td3", best_location=loc, nearest_town=nearest, town_name=addr_town, postcode_node=pc)
+            node = TownDescNode("td3", nearest_town=nearest, town_name=addr_town, postcode_node=pc)
+            loc = UserInputNode[GeoPoint]("loc_td3", GeoPoint)
             loc.push(GeoPoint(lat=51.5, lon=-0.1), "test")
             nearest.push("London", "test")
             addr_town.push("Southall", "test")
@@ -331,7 +330,7 @@ class TestTownDescNode:
             nearest = UserInputNode[str]("nearest_td4", str)
             addr_town = UserInputNode[str]("addr_td4", str)
             pc = UserInputNode[str]("pc_td4", str)
-            node = TownDescNode("td4", best_location=loc, nearest_town=nearest, town_name=addr_town, postcode_node=pc)
+            node = TownDescNode("td4", nearest_town=nearest, town_name=addr_town, postcode_node=pc)
             loc.push(GeoPoint(lat=51.5, lon=-0.1), "test")
             nearest.push("Pangbourne", "test")
             addr_town.push("", "test")  # empty string = no town found in address

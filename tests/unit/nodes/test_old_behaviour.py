@@ -31,7 +31,7 @@ class TestSchoolNodes:
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         addr = UserInputNode[str]("addr", str)
-        node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
+        node = SecondarySchoolNode("ss", best_location=loc)
         loc.push(GeoPoint(51.5, -0.37), "test")
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
@@ -62,7 +62,7 @@ class TestSchoolNodes:
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         addr = UserInputNode[str]("addr", str)
-        node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
+        node = PrimarySchoolNode("ps", best_location=loc)
         loc.push(GeoPoint(51.5, -0.37), "test")
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 

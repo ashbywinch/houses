@@ -258,7 +258,7 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
       },
     })
     const groupRows = wrapper.findAll('.costs-row--group')
-    expect(groupRows[0].text()).toContain('≈ £1100/mo')
+    expect(groupRows[0].text()).toContain('≈£1,100/mo')
   })
 
   it('renders the couple and others as SEPARATE blocks with split components', () => {
@@ -300,7 +300,7 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
     const text = wrapper.text()
     expect(text).toContain('S+L')
     expect(text).toContain('Ashby')
-    expect(text).toContain('£1548.67/mo')
+    expect(text).toContain('£1,548.67/mo')
     expect(text).toContain('£322.5/mo')
     expect(text).not.toContain('the joint owners')
     // Council tax and sinking fund are separate rows, not merged
@@ -435,7 +435,7 @@ describe('CostsSection — vs your home rows', () => {
     const rows = wrapper.findAll('.costs-row--vs')
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('vs your home (31 Isambard Road)')
-    expect(rows[0].text()).toContain('≈ +£1,308/mo')
+    expect(rows[0].text()).toContain('≈+£1,308/mo')
     expect(rows[0].attributes('title')).toBe('£3091.67 − £1783.61 = +1308.06. ≈ = council tax estimated.')
     expect(rows[1].text()).toContain('−£411/mo')
     expect(rows[1].attributes('title')).toBe('£241.64 − £652.92 = -411.28. ≈ = council tax estimated.')
