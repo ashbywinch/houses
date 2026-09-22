@@ -455,14 +455,12 @@ class TestPickBestJourney:
         assert summary.cost == 16.0
         assert isinstance(summary.route_summary, str)
 
-
     def test_empty_journeys_returns_none(self):
         from houses.tfl_client import TflClient
 
         summary = TflClient._pick_best_journey({"journeys": []})
         assert summary.duration is None
         assert summary.cost is None
-
 
     def test_none_data_returns_none(self):
         from houses.tfl_client import TflClient
@@ -631,12 +629,10 @@ class TestGoogleTransitFallback:
         )
         assert commute is not None
         train_legs = [leg for cg in commute.details for leg in cg.legs if leg.mode.name == "TRAIN"]
-        assert train_legs and all(
-            leg.end_station == "London Paddington Rail Station" for leg in train_legs
-        ), "GWR journeys name Paddington as the London terminus"
-        bus_leg = [
-            leg for cg in commute.details for leg in cg.legs if leg.mode.name == "BUS"
-        ][0]
+        assert train_legs and all(leg.end_station == "London Paddington Rail Station" for leg in train_legs), (
+            "GWR journeys name Paddington as the London terminus"
+        )
+        bus_leg = [leg for cg in commute.details for leg in cg.legs if leg.mode.name == "BUS"][0]
         assert bus_leg.line_name == "36" and bus_leg.end_station == ""
 
     @pytest.mark.asyncio
@@ -664,3 +660,31 @@ class TestGoogleTransitFallback:
             PlaceOfInterest(label="Pimlico", address="1 Example Street, London SW1P 1AA"),
         )
         assert result is None
+
+
+@pytest.mark.asyncio
+async def test_park_and_ride_ors_failure_fails_fast(monkeypatch):
+    """A failing ORS lookup must not silently keep the walk leg — it
+    propagates so the DAG classifies it (transient → pending, permanent
+    → impossible) instead of masking a broken journey. The real wrapper
+    adds the 'ORS lookup failed' context around the underlying error."""
+    from houses.transit_route import apply_park_and_ride_to_journeys
+
+    async def boom(origin_postcode: str, station_name: str) -> int | None:
+        raise RuntimeError("ors down")
+
+    journeys = {
+        "journeys": [
+            {
+                "legs": [
+                    {
+                        "mode": {"name": "walking"},
+                        "duration": 40,
+                        "arrivalPoint": {"commonName": "Paddington Station"},
+                    }
+                ]
+            }
+        ]
+    }
+    with pytest.raises(RuntimeError, match="ors down"):
+        await apply_park_and_ride_to_journeys(journeys, "RG17 0LA", 15, _drive_fn=boom)

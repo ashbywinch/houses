@@ -200,15 +200,19 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
             set_cached("POST", ORS_DIRECTIONS_URL, None, key, data)
             response = _DirectionsResponseJson.from_dict(data)
             return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
-    # lucidlint: ignore broad-except ORS park-and-ride lookup logs and falls back
-    except Exception:
+    except Exception as exc:
+        # Log and re-raise the ORIGINAL exception: _compute_attempt is the
+        # single classifier (transient → retry + pending, permanent →
+        # impossible). Wrapping in RuntimeError would hide the httpx type
+        # and lose the retry decision (2026-09-19).
         logger.warning(
-            "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s)",
+            "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s): %s",
             origin_coords,
             station_name,
             ORS_DIRECTIONS_URL,
+            exc,
         )
-        return None
+        raise
 
 
 # lucidlint: ignore record-shape consumes the TfL journeys provider payload — provider wire shape (coding-standards.md)
@@ -269,4 +273,3 @@ async def apply_park_and_ride_to_journeys(
         old_duration = journey.get("duration", 0)
         journey["duration"] = old_duration - walk_duration + drive_minutes
     return data
-

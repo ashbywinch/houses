@@ -253,7 +253,6 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     return _fetch_latest_row(node_id)
 
 
-
 # lucidlint: ignore record-shape wire-format dict — the stored node to_json() payload, serialization boundary (keys
 # vary per node type; the _-prefixed metadata is added here, never in the node) (coding-standards.md)
 def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any] | None:
@@ -268,7 +267,7 @@ def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any]
     if before is None:
         row = conn.execute(
             "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
-            " WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
+            " WHERE node_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (node_id,),
         ).fetchone()
     else:
@@ -284,6 +283,7 @@ def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any]
     result["_persisted_at"] = row["created_at"]
     result["_code_version"] = row["code_version"]
     return result
+
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary (same stored node payload as
 # latest_node_result, read strictly-before a timestamp) (coding-standards.md)

@@ -12,7 +12,7 @@ from pint import Quantity
 from pydantic_core import core_schema
 
 import dag.persistence as _per
-from dag.attempt import Attempt, Provenance, SourceType, project_value
+from dag.attempt import Attempt, AttemptError, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
 from dag.node import Node
 from dag.persistence import latest_node_result
@@ -184,10 +184,15 @@ class UserInputNode(Node[T], Generic[T]):
         self._value: T | None = None
         self._push_timestamp: datetime | None = None
         self._source_label: str = ""
+        self._impossible_info: AttemptError | None = None
         loaded = self._load_attempt_from_db()
         if loaded is not None and loaded.succeeded:
             self._value = loaded.value_or_none()
             self._source_label = self._load_persisted_label()
+        elif loaded is not None and loaded.impossible:
+            self._impossible_info = loaded.error_info or AttemptError(
+                code="error", source=self._id, message=loaded.error
+            )
 
     def _load_persisted_label(self) -> str:
         result = latest_node_result(self._id)
@@ -229,22 +234,21 @@ class UserInputNode(Node[T], Generic[T]):
             )
 
         self._value = validated
+        self._impossible_info = None
         self._push_timestamp = datetime.now(UTC)
         self._source_label = source_label
-
         # lucidlint: ignore record-shape wire-format dict — serialization boundary
         result_dict: dict[str, Any] = {
             "status": "succeeded",
             "value": self._adapter.dump_python(validated),
             "source_label": source_label,
         }
-        submit_to_processor(lambda: self._apply_push(result_dict))
+        submit_to_processor(lambda: self._apply_result(result_dict))
 
     # lucidlint: ignore record-shape the node-result persist payload crosses the processor seam as a wire dict —
     # serialization boundary (the value field is node-generic; _persist writes it verbatim) (coding-standards.md)
-    def _apply_push(self, result_dict: dict[str, Any]) -> None:
-        """The queued half of a push — persist the row and notify dependents.
-
+    def _apply_result(self, result_dict: dict[str, Any]) -> None:
+        """The queued half of a push/fail — persist the row and notify dependents.
         Runs on the processor thread: the guard is an invariant check here,
         never something a caller has to satisfy.
         """
@@ -252,8 +256,37 @@ class UserInputNode(Node[T], Generic[T]):
         self._persist(result_dict)
         self.changed.emit()
 
+    def fail(self, message: str, *, error_info: AttemptError | None = None) -> None:
+        """Record an impossible attempt on this leaf fact.
+
+        A source that claims to have data but cannot produce a value
+        (e.g. a scrape that saw a page but could not parse the price)
+        records the failure here — the DAG's error mechanism — so the
+        node renders ``impossible`` with the reason and downstream
+        derived nodes propagate ``dep_failed`` instead of showing a
+        half-known state.
+
+        A later ``push`` supersedes the failure (a real value wins).
+        """
+        self._value = None
+        self._push_timestamp = None
+        self._source_label = ""
+        self._impossible_info = error_info or AttemptError(code="error", source=self._id, message=message)
+        # lucidlint: ignore record-shape the node-result persist payload crosses the processor seam as a wire dict
+        result_dict: dict[str, Any] = {
+            "status": "impossible",
+            "error": message,
+            "error_detail": self._impossible_info.to_dict(),
+        }
+        submit_to_processor(lambda: self._apply_result(result_dict))
+
     @override
     async def attempt(self) -> Attempt[T]:
+        if self._impossible_info is not None:
+            return Attempt.impossible(
+                self._impossible_info.display_message,
+                error_info=self._impossible_info,
+            )
         if self._value is not None:
             return Attempt.succeeded(self._value)
         return Attempt.pending()
@@ -265,6 +298,11 @@ class UserInputNode(Node[T], Generic[T]):
         staged = staged_attempt(self._id)
         if staged is not None:
             return staged
+        if self._impossible_info is not None:
+            return Attempt.impossible(
+                self._impossible_info.display_message,
+                error_info=self._impossible_info,
+            )
         if self._value is not None:
             return Attempt.succeeded(self._value)
         return Attempt.pending()
@@ -310,15 +348,3 @@ class UserInputNode(Node[T], Generic[T]):
     def _provenance_value(self):
         """JSON-safe projection of the stored value for provenance."""
         return project_value(self._value)
-
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    @override
-    async def to_json_value(self) -> dict[str, Any]:
-        """Return a JSON-safe dict without provenance."""
-        if self._value is None:
-            return {"status": "pending", "value": None}
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {
-            "status": "succeeded",
-            "value": self._adapter.dump_python(self._value),
-        }

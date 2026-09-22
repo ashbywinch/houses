@@ -19,7 +19,7 @@ from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import JourneyLeg, LegMode
-from houses.model.domain import Commute
+from houses.model.domain import Commute, person_id_of
 
 MINUTES_PER_HOUR = 60.0
 AVERAGE_DRIVE_SPEED_KMH = 48.0
@@ -58,8 +58,8 @@ class PersonPetrolMpgNode(DerivedNode[int]):
     a rebuild (provenance shows the persons source).
     """
 
-    def __init__(self, node_id: str, *, persons_source, person_name: str):
-        self._person_name: str = person_name
+    def __init__(self, node_id: str, *, persons_source, person_id: str):
+        self._person_id: str = person_id
         super().__init__(node_id, int, (persons_source,))
         self.display_name: str = "Petrol MPG"
 
@@ -68,7 +68,7 @@ class PersonPetrolMpgNode(DerivedNode[int]):
         if not persons.succeeded:
             return Attempt.impossible(persons.error)
         for p in persons.value_or_none() or []:
-            if getattr(p, "name", None) == self._person_name:
+            if person_id_of(p) == self._person_id:
                 return Attempt.succeeded(int(getattr(p, "petrol_mpg", 45)))
         return Attempt.succeeded(45)
 

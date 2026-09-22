@@ -7,6 +7,7 @@ from money import Money
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from houses.model.domain import person_id_of
 
 
 class TotalWorksNode(DerivedNode[Money]):
@@ -23,11 +24,13 @@ class TotalWorksNode(DerivedNode[Money]):
             return None
         lines = []
         wd = self._works_estimates_node.latest_attempt().value_or_none() or {}
-        for name, val in wd.items():
+        ps = self._persons_source.latest_attempt().value_or_none() or []
+        by_id = {person_id_of(p): getattr(p, "name", "?") for p in ps}
+        for pid, val in wd.items():
             if val is None:
                 continue
             amt = val.amount if isinstance(val, Money) else str(val)
-            lines.append(FormulaLine(label=f"{name}’s renovation estimate", value=f"£{amt:,.2f}"))
+            lines.append(FormulaLine(label=f"{by_id.get(pid, pid)}’s renovation estimate", value=f"£{amt:,.2f}"))
         if not lines:
             lines.append(FormulaLine(label="Total Works", value=str(self._attempt.value)))
         return Formula(lines=lines, result=str(self._attempt.value))
@@ -51,7 +54,8 @@ class TotalWorksNode(DerivedNode[Money]):
         missing = [
             p
             for p in buyers
-            if getattr(p, "works_estimate_required", False) and (p.name not in wd or wd[p.name] is None)
+            if getattr(p, "works_estimate_required", False)
+            and (person_id_of(p) not in wd or wd[person_id_of(p)] is None)
         ]
         if missing:
             names = ", ".join(p.name for p in missing)

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { useAuthStore } from '../../stores/auth'
+import type { AuthUser } from '../../stores/auth'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyDetail from '../PropertyDetail.vue'
 import type { AnnexeValue, PropertyDetail as PropertyDetailType } from '../../types'
@@ -294,7 +296,7 @@ describe('PropertyDetail town description', () => {
       value: { description: 'Leafy and affluent with village-like charm.' },
       error: null,
       provenance: { label: 'llm' },
-    } as any
+    } as never
     store.details['123'] = detail
     store.loading = false
 
@@ -330,13 +332,13 @@ describe('PropertyDetail town description', () => {
       value: { description: 'Quiet village.' },
       error: null,
       provenance: { label: 'llm' },
-    } as any
+    } as never
     detail.area.walkability = {
       succeeded: true,
       value: { walk_to_town: { value: 10, unit: 'minute' }, amenities: 'Village Shop (2m) | Recreation Ground (5m)' },
       error: null,
       provenance: { label: 'api' },
-    } as any
+    } as never
     store.details['123'] = detail
     store.loading = false
 
@@ -691,7 +693,7 @@ describe('PropertyDetail commute settings link (D2)', () => {
 
     const { useAuthStore } = await import('../../stores/auth')
     const auth = useAuthStore()
-    auth.user = { email: 'simon@example.com', name: 'Simon', picture: '', person: 'Simon', is_superuser: false } as any
+    auth.user = { email: 'simon@example.com', name: 'Simon', picture: '', person: 'Simon', person_id: '1', is_superuser: false } as unknown as AuthUser
 
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
@@ -699,7 +701,7 @@ describe('PropertyDetail commute settings link (D2)', () => {
     const link = wrapper.find('a.change-destinations')
     expect(link.exists()).toBe(true)
     expect(link.attributes('href') ?? '').toContain('#/settings')
-    expect(link.attributes('href') ?? '').toContain('person=Simon')
+    expect(link.attributes('href') ?? '').toContain('person=1')
   })
 })
 
@@ -795,5 +797,75 @@ describe('PropertyDetail council-tax apportionment (AnnexeSection wiring)', () =
     expect(text).not.toContain('Main house — Band')
     expect(text).not.toContain('all adults — default')
     expect(wrapper.find('#section-council-tax').exists()).toBe(false)
+  })
+})
+
+describe('PropertyDetail impersonation targets the impersonated person', () => {
+  async function mountWithImpersonation(): Promise<VueWrapper> {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const pinia = createPinia()
+    const wrapper = mount(PropertyDetail, { global: { plugins: [pinia, router] } })
+    const auth = useAuthStore()
+    auth.superuserMode = true
+    auth.impersonating = '1'
+    auth.user = {
+      email: 'emily.winch@gmail.com',
+      name: 'Ashby',
+      picture: '',
+      person: 'Ashby',
+      person_id: '3',
+      is_superuser: true,
+      impersonating: '1',
+      authenticated: true,
+    } as never
+
+    const store = usePropertiesStore()
+    const detail = makeDetail()
+    detail.settings = {
+      persons: {
+        succeeded: true,
+        value: [
+          { name: 'Simon', person_id: '1', is_child: false, works_estimate_required: true },
+          { name: 'Ashby', person_id: '3', is_child: false },
+        ] as never,
+        error: null,
+        provenance: { label: 'test' },
+      },
+      financial: detail.settings?.financial ?? { succeeded: true, value: {}, error: null, provenance: { label: 'test' } },
+    }
+    detail.affordability.works_estimates = {
+      succeeded: true,
+      value: { 1: 15000 },
+      error: null,
+      provenance: { label: 'test' },
+    }
+    detail.affordability.total_works = {
+      succeeded: true,
+      value: { amount: '15000', currency: 'GBP' },
+      error: null,
+      provenance: { label: 'test' },
+    }
+    store.details['123'] = detail
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  it('lets the superuser edit the impersonated person\'s works figure', async () => {
+    // The works figure belongs to whoever the session is ACTING AS —
+    // impersonating Simon must make Simon's row editable, never the
+    // real account's person.
+    const wrapper = await mountWithImpersonation()
+    const simonRow = wrapper.findAll('.costs-row--sub')
+      .find(r => r.find('.costs-label').text() === 'Simon')
+    expect(simonRow).toBeDefined()
+    expect(simonRow!.find('.costs-value').text()).toContain('✎')
   })
 })

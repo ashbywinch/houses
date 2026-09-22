@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import type { AuthUser } from '../../stores/auth'
 import SettingsView from '../SettingsView.vue'
 
 // Determinism guarantees:
@@ -36,6 +37,7 @@ function makeSettings() {
       value: [
         {
           name: 'Simon',
+          person_id: '1',
           has_car: true,
           is_child: false,
           email: 'simon@example.com',
@@ -69,7 +71,7 @@ function makeSettings() {
         },
         {
           name: 'Lorena',
-          has_car: false,
+          person_id: '2',
           is_child: false,
           email: 'lorena@example.com',
           is_superuser: false,
@@ -91,6 +93,7 @@ function makeSettings() {
           is_child: false,
           email: 'emily.winch@gmail.com',
           is_superuser: false,
+          person_id: '3',
           editable_by: ['Ashby'],
           editable_by_me: true,
           selling_home: false,
@@ -99,6 +102,7 @@ function makeSettings() {
         },
         {
           name: 'George',
+          person_id: '4',
           has_car: false,
           is_child: true,
           email: '',
@@ -160,7 +164,7 @@ function makeSettings() {
 async function mountView(query = '', personName = 'Simon') {
   setActivePinia(createPinia())
   const auth = useAuthStore()
-  auth.user = { email: `${personName.toLowerCase()}@example.com`, name: personName, picture: '', person: personName, is_superuser: personName === 'Simon' } as any
+  auth.user = { email: `${personName.toLowerCase()}@example.com`, name: personName, picture: '', person: personName, person_id: ['1','2','3','4'][['simon','lorena','ashby','george'].indexOf(personName.toLowerCase())] ?? null, is_superuser: personName === 'Simon' } as unknown as AuthUser
   ;(api.fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue(makeSettings())
   const router = createRouter({
     history: createMemoryHistory(),
@@ -415,7 +419,7 @@ describe('SettingsView — saving', () => {
     await flush()
     expect(api.patchPerson).toHaveBeenCalledTimes(1)
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(name).toBe('Simon')
+    expect(name).toBe('1')
     const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
     expect(pimlico.acceptable_modes).toContain('walk')
     expect(body.thresholds).toEqual({ good_max_minutes: 30, fine_max_minutes: 45 })
@@ -493,7 +497,7 @@ describe('SettingsView — destination fields and person-scroll (A6, D2)', () =>
   })
 
   it('highlights and scrolls to the session person named in the URL', async () => {
-    const { wrapper, flush } = await mountView('?person=Simon')
+    const { wrapper, flush } = await mountView('?person=1')
     await flush()
     expect(strip(wrapper).classes()).toContain('settings-person--target')
   })
@@ -606,7 +610,7 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     await simon.trigger('focusout')  // blur autosaves the added row
     await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(name).toBe('Simon')
+    expect(name).toBe('1')
     expect(body.places_of_interest.length).toBe(3)
     expect(body.places_of_interest[2].label).toBe('')
   })
@@ -649,7 +653,7 @@ describe('SettingsView — selling-home persists on save (B7)', () => {
     await ashby.trigger('focusout')
     await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(name).toBe('Ashby')
+    expect(name).toBe('3')
     expect(body.selling_home).toBe(true)
   })
 })
@@ -671,7 +675,7 @@ describe('SettingsView — acceptable modes keep at least one (P7)', () => {
     await simon.trigger('focusout')
     await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(name).toBe('Simon')
+    expect(name).toBe('1')
     const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
     expect(pimlico.acceptable_modes).toContain('transit')
   })

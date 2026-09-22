@@ -269,6 +269,9 @@ export interface PropertySummary {
   }
   is_current_home?: boolean
   monthly_baseline?: MonthlyBaseline | null
+  /** The websocket summary push for this rid failed — the card may be
+   *  showing values older than the DAG's current rows. */
+  push_stale?: boolean
 }
 
 export interface PropertyDetail {

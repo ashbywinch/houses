@@ -216,6 +216,7 @@ def make_default_persons() -> list[Person]:
     return [
         Person(
             name="Simon",
+            person_id="1",
             email="",
             is_superuser=False,
             has_car=True,
@@ -250,6 +251,7 @@ def make_default_persons() -> list[Person]:
         ),
         Person(
             name="Lorena",
+            person_id="2",
             email="",
             is_superuser=False,
             selling_home=False,
@@ -267,12 +269,11 @@ def make_default_persons() -> list[Person]:
         ),
         Person(
             name="Ashby",
+            person_id="3",
             email="",
             is_superuser=False,
             selling_home=False,
             has_car=True,
-            bus_walk_penalty=Quantity(ASHBY_BUS_WALK_PENALTY, "minute"),
-            cash_contribution=Money(amount="300000", currency="GBP"),
             works_estimate_required=True,
             places_of_interest=(),
         ),

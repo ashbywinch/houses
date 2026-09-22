@@ -54,6 +54,10 @@ type FlatNode = {
   status: string
   error: string
   expressionType: string
+  /** The calc's own formula — carried so the full-detail tree can show
+   *  multi-line breakdowns (per-person equity shares, commute legs)
+   *  where they actually sit, not just at the root. */
+  formula: NonNullable<Provenance['formula']> | null
 }
 
 function daysSince(dateStr: string): number | null {
@@ -231,6 +235,7 @@ function buildFlattenedTree(root: Provenance): FlatNode[] {
       status: n.status ?? '',
       error: n.error ?? '',
       expressionType: n.expressionType ?? '',
+      formula: n.formula ?? null,
     })
     if (!isRepeat) {
       for (const [childId, child] of childrenById.get(nodeId) ?? []) {
@@ -705,6 +710,22 @@ const sharedRefsList = computed(() =>
           <span v-if="node.expressionType" class="detail-node__expr">{{ node.expressionType }}</span>
           <span v-if="node.status === 'impossible'" class="detail-node__err" role="alert">⚠ {{ node.error || 'Unavailable' }}</span>
           <span v-else-if="node.value" class="detail-node__value">{{ node.value }}</span>
+          <!-- A multi-line formula is a real breakdown (per-person equity
+               shares, commute legs) — each figure on its OWN line so it
+               survives phone widths; never a joined narrative string. -->
+          <div
+            v-if="activeLevel === 'detail' && !node.isRepeat && (node.formula?.lines?.length ?? 0) > 1"
+            class="detail-node__formula"
+          >
+            <div
+              v-for="(line, li) in node.formula!.lines"
+              :key="li"
+              class="detail-node__formula-line"
+            >
+              <span class="detail-node__formula-label">{{ line.label }}</span>
+              <span class="detail-node__formula-value">{{ line.value }}</span>
+            </div>
+          </div>
           <span v-if="node.desc" class="detail-node__desc">— {{ node.desc }}</span>
           <a
             v-if="node.isRepeat"
@@ -1066,6 +1087,7 @@ const sharedRefsList = computed(() =>
 }
 .formula-explain__step {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--sp-3);
   font-size: var(--fs-sm);
@@ -1095,7 +1117,9 @@ const sharedRefsList = computed(() =>
   font-weight: var(--fw-semibold);
   color: var(--slate-800);
   margin-left: auto;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .formula-explain__result {
   margin-top: var(--sp-3);
@@ -1124,6 +1148,7 @@ const sharedRefsList = computed(() =>
 }
 .detail-node {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
@@ -1138,14 +1163,37 @@ const sharedRefsList = computed(() =>
   border-radius: var(--radius-full);
   flex-shrink: 0;
 }
-.detail-node__label {
-  font-weight: var(--fw-semibold);
-  color: var(--slate-700);
-  font-size: var(--fs-xs);
+.detail-node__formula {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0 0.4rem;
+  margin-left: 1rem;
+  border-top: 1px dashed var(--slate-200, #e2e8f0);
 }
-.detail-node__desc {
-  color: var(--text-muted);
+.detail-node__formula-line {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.detail-node__formula-label {
+  color: var(--text-secondary);
   font-size: var(--fs-xs);
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.detail-node__formula-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.detail-node__formula-value {
+  font-size: var(--fs-xs);
+  color: var(--slate-700);
+  min-width: 0;
 }
 /* Shared nodes: the full copy links out, every other occurrence links
    back to it — never a dead-end badge. */

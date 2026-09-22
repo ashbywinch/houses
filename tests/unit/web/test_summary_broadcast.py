@@ -354,3 +354,57 @@ async def test_scenario_apply_pushes_updated_summary_to_websocket_clients():
         broadcaster_task.cancel()
         bcast._pending_notify_rids.clear()
         server_mod._main_loop = None
+
+
+@pytest.mark.asyncio
+async def test_failed_push_marks_the_rid_stale_on_the_listing_wire():
+    """A summary-push build failure must surface on the card — the
+    listing wire marks the rid push_stale until a later push succeeds.
+
+    A dead CLIENT is not a stale card (the remaining clients got the
+    push; the dead one is discarded) — only a push that fails to build
+    means nobody saw the new figures."""
+    import houses.web.broadcaster as bcast
+    from houses.web import api_router
+
+    rid = "stale-rid"
+    await _prime_property(rid)
+    fake = _FakeWsClient()
+    bcast._websocket_clients.add(cast(Any, fake))
+
+    real_push = bcast._push_summary
+
+    async def boom(_rid: str):
+        if _rid == rid:
+            raise RuntimeError("summary build failed")
+        return await real_push(_rid)
+
+    bcast._push_summary = cast(Any, boom)
+    task = asyncio.create_task(bcast._broadcaster())
+    try:
+        bcast._broadcast_queue.put_nowait(rid)
+        for _ in range(50):
+            if rid in bcast.stale_push_rids():
+                break
+            await asyncio.sleep(0.05)
+        assert rid in bcast.stale_push_rids(), "a failed push must mark the rid stale"
+
+        wire = await api_router.get_all_properties()
+        assert wire[rid].get("push_stale") is True, "the listing wire must carry push_stale"
+
+        # A later SUCCESSFUL push clears the marker.
+        def no_boom(_rid: str):
+            return real_push(_rid)
+
+        bcast._push_summary = cast(Any, no_boom)
+        bcast._broadcast_queue.put_nowait(rid)
+        for _ in range(50):
+            if rid not in bcast.stale_push_rids():
+                break
+            await asyncio.sleep(0.05)
+        assert rid not in bcast.stale_push_rids(), "a successful push must clear the marker"
+        wire2 = await api_router.get_all_properties()
+        assert "push_stale" not in wire2[rid], "the cleared marker must drop off the wire"
+    finally:
+        bcast._push_summary = cast(Any, real_push)
+        await _stop_broadcasts(fake, task)

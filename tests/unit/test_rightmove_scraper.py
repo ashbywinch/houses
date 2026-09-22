@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -120,7 +121,7 @@ class TestScrapeWithSamplePage:
         saved = settings.rightmove_scraper_offline
         settings.rightmove_scraper_offline = True
         try:
-            result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/00000000"))
+            result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/99999999"))
             assert result is None, f"Expected None, got {result}"
         finally:
             settings.rightmove_scraper_offline = saved
@@ -129,3 +130,73 @@ class TestScrapeWithSamplePage:
     async def test_unknown_url_rid_returns_none(self):
         result = await scrape("https://example.com/no-rid-here", _page_path=str(SAMPLE_HTML))
         assert result is None
+
+
+class TestPageModelErrorVsAbsence:
+    """The scrape parser distinguishes a page-model STRUCTURE mismatch
+    (Rightmove changed the layout — a typed error, logged and recorded)
+    from a field that is genuinely ABSENT (None, no error)."""
+
+    def _model(self, data_list: list) -> dict:
+        # Page model: "data" is a JSON string over a FLAT array; data[0] is
+        # the schema whose propertyData key indexes the property entry, and
+        # the property's field keys are INDICES into the same array.
+        return {"data": json.dumps(data_list, separators=(",", ":"))}
+
+    def _html(self, data_list: list) -> str:
+        return f"<script>window.__PAGE_MODEL={json.dumps(self._model(data_list))};</script>"
+
+    def test_schema_mismatch_is_recorded_not_swallowed(self):
+        """The prices schema key is missing from the property entry → a
+        typed parse error is recorded on the extract (value stays None)."""
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"address": 2}, {"foo": "bar"}]
+        result = _parse_page_model(self._html(data))
+        assert isinstance(result.parse_errors.get("price"), str)
+        assert "prices" in result.parse_errors["price"]
+        assert result.price is None
+
+    def test_unparseable_value_is_genuine_absence(self):
+        """The prices schema EXISTS and 'POA' sits in the value slot — a
+        genuine absence: None, and NO parse error."""
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "POA"]
+        result = _parse_page_model(self._html(data))
+        assert result.price is None
+        assert "price" not in result.parse_errors
+
+
+class TestPriceErrorVsPoa:
+    """A price VALUE the parser cannot interpret is a typed parse error;
+    POA is a legitimate None — never the same thing."""
+
+    def _html(self, data_list: list) -> str:
+        import json
+
+        model = {"data": json.dumps(data_list, separators=(",", ":"))}
+        return f"<script>window.__PAGE_MODEL={json.dumps(model)};</script>"
+
+    def test_poa_is_a_legitimate_none_not_an_error(self):
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "POA"]
+        result = _parse_page_model(self._html(data))
+        assert result.price is None
+        assert "price" not in result.parse_errors
+
+    def test_garbage_price_value_is_a_parse_error(self):
+        from houses.rightmove_scraper import _parse_page_model
+
+        data = [{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "ask the agent"]
+        result = _parse_page_model(self._html(data))
+        assert result.price is None
+        assert "not parseable" in result.parse_errors["price"]
+
+    def test_parse_errors_ride_onto_the_property(self):
+        from houses.rightmove_scraper import _parse_html
+
+        html = self._html([{"propertyData": 1}, {"prices": 2}, {"primaryPrice": 3}, "ask the agent"])
+        prop = _parse_html(html, "https://www.rightmove.co.uk/properties/77777777")
+        assert prop is not None and prop.parse_errors.get("price", "").startswith("price value")

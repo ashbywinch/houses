@@ -19,6 +19,7 @@ import houses.scrape_queue as _scrape_queue
 import houses.services as _services_mod
 import houses.services_provider as _sp
 import houses.town_desc as _town_desc
+import houses.web.api_router as _api_mod
 import houses.web.broadcaster as _broadcaster_mod
 from dag.persistence import delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
@@ -54,6 +55,15 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 hands broadcaster pushes to it (see _on_node_refreshed)."""
 
 
+def _log_prewarm_failure(task: asyncio.Task) -> None:
+    """The listing pre-warm's only error surface: the producer (lifespan)
+    has already moved on, so the failure is logged for the operator here —
+    the first live request simply rebuilds the listing, which it always could."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("listing pre-warm failed; the first request will pay it: %s", exc)
 
 
 def _on_node_refreshed(node):
@@ -76,9 +86,7 @@ def _on_node_refreshed(node):
         return
     kind = getattr(node, "refresh_kind", None)
     if kind == "property":
-        asyncio.run_coroutine_threadsafe(
-            _broadcaster_mod.notify_node_refreshed_async(node), _main_loop
-        )
+        asyncio.run_coroutine_threadsafe(_broadcaster_mod.notify_node_refreshed_async(node), _main_loop)
         return
     if kind == "settings":
         asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
@@ -93,8 +101,6 @@ def _on_node_refreshed(node):
     )
 
 
-
-
 def _deploy_hash() -> str:
     """Return the short git HEAD hash, or ``""`` when git is unavailable."""
     try:
@@ -106,9 +112,8 @@ def _deploy_hash() -> str:
     return ""
 
 
-def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
+def _seed_dag(rid2: str, enriched: EnrichedProperty, scrape_errors: dict[str, str] | None = None) -> bool:
     """Seed the DAG for *rid2*; returns True on success.
-
     Reuses the registry's existing PropertyNodes when present (re-seeding
     after a scrape report must push onto the SAME nodes — a second
     PropertyNodes instance collides by node-id in the scheduler and its
@@ -128,6 +133,7 @@ def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
                 "rightmove_price": prop.rightmove_price,
                 "rightmove_location": prop.rightmove_location,
             },
+            scrape_errors=scrape_errors,
         )
         registry.register(rid2, prop)
         logger.info("Seeded DAG for %s", rid2)
@@ -190,8 +196,12 @@ async def lifespan(_app: FastAPI):
     _main_loop = asyncio.get_running_loop()
     set_after_refresh(_on_node_refreshed)
     start_processor()
+    # Pre-warm the front-page listing: the first real request after a
+    # reload would otherwise pay the whole ~1000-node serialization plus
+    # cold DB page reads (measured 1-6s) while the page cache is cold.
+    _prewarm = asyncio.create_task(_api_mod.get_all_properties())
+    _prewarm.add_done_callback(_log_prewarm_failure)
     _bc_task = asyncio.create_task(_broadcaster_mod._broadcaster())
-
     logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))
     yield
     _bc_task.cancel()
@@ -439,8 +449,9 @@ async def upsert_property(
     enriched = _build_enriched(SeedFacts(payload=payload, scraped=scraped), address, postcode)
     rid2 = rid or enriched.rid
     if rid2:
-        # Mutations run on the processor thread — never on the event loop.
-        await run_on_processor(lambda: _seed_dag(rid2, enriched))
+        await run_on_processor(
+            lambda: _seed_dag(rid2, enriched, scrape_errors=(scraped.parse_errors if scraped else None))
+        )
 
     dump = asdict_serializable(enriched)
     # The postcode is no longer an EnrichedProperty field (the address
@@ -688,9 +699,7 @@ async def health() -> JSONResponse:
     try:
         from houses.database import get_connection
 
-        row = get_connection().execute(
-            "SELECT MAX(created_at) AS last_write FROM node_results"
-        ).fetchone()
+        row = get_connection().execute("SELECT MAX(created_at) AS last_write FROM node_results").fetchone()
         last_write = row["last_write"] or "" if row is not None else ""
     except Exception:  # lucidlint: ignore broad-except boundary — a health probe never takes the app down
         db = "error"

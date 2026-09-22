@@ -16,7 +16,7 @@ from houses.commute import LegMode
 from houses.commute_router import CommuteRouter as _CommuteRouter
 from houses.geopoint import GeoPoint
 from houses.location import extract_postcode
-from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.model.domain import Commute, Person, PlaceOfInterest, person_id_of
 from houses.services_provider import get_services
 from houses.tfl_client import TflRouteOptions
 
@@ -144,8 +144,8 @@ class PersonMaxWalkNode(DerivedNode[int]):
     the incremental evaluator re-scores the same planned routes.
     """
 
-    def __init__(self, node_id: str, *, persons_source, person_name: str):
-        self._person_name: str = person_name
+    def __init__(self, node_id: str, *, persons_source, person_id: str):
+        self._person_id: str = person_id
         super().__init__(node_id, int, (persons_source,))
         self.display_name: str = "Max walk"
 
@@ -154,7 +154,7 @@ class PersonMaxWalkNode(DerivedNode[int]):
         if not persons.succeeded:
             return Attempt.impossible(persons.error)
         for p in persons.value_or_none() or []:
-            if getattr(p, "name", None) == self._person_name:
+            if person_id_of(p) == self._person_id:
                 penalty = getattr(p, "bus_walk_penalty", None)
                 if penalty is not None:
                     return Attempt.succeeded(int(penalty.magnitude))
@@ -246,21 +246,21 @@ class DestinationPlaceNode(DerivedNode[PlaceOfInterest]):
     normal DAG staleness — no rebuild, no rewiring, nothing frozen.  If
     the destination is removed from persons, the node is impossible."""
 
-    def __init__(self, node_id: str, *, persons_source: Node, person_name: str, label: str):
+    def __init__(self, node_id: str, *, persons_source: Node, person_id: str, label: str):
         super().__init__(node_id, PlaceOfInterest, (persons_source,))
         self._persons_source: Node = persons_source
-        self._person_name: str = person_name
+        self._person_id: str = person_id
         self._label: str = label
 
     @override
     def compute(self, persons: Attempt[list]) -> Attempt[PlaceOfInterest]:
         for p in persons.value_or_none() or []:
-            if getattr(p, "name", None) != self._person_name:
+            if person_id_of(p) != self._person_id:
                 continue
             for q in getattr(p, "places_of_interest", None) or ():
                 if q.label == self._label:
                     return Attempt.succeeded(q)
-        return Attempt.impossible(f"{self._person_name}/{self._label} is not a current destination")
+        return Attempt.impossible(f"{self._person_id}/{self._label} is not a current destination")
 
 
 class DriveNode(DerivedNode[Commute]):
@@ -483,14 +483,23 @@ class TransitNode(DerivedNode[Commute]):
             # (the accessor raises).
             fallback = await self._nr_fallback(location, poi)
             if fallback is not None:
-                # Same label/destination fixups as the normal path — the
-                # router only knows the address; the summary/provenance
-                # must show the POI label + trips (PR #68 review).
-                parts = self._id.split("/")
-                label = parts[2] if len(parts) >= 3 else (fallback.destination.label if fallback.destination else "")
-                fallback = replace(fallback, label=label)
-                fallback = _with_poi_destination(fallback, poi_val)
-                return Attempt.succeeded(fallback)
+                if fallback.succeeded:
+                    fb = fallback.value_or_none()
+                    if fb is None:
+                        return fallback
+                    # Same label/destination fixups as the normal path — the
+                    # router only knows the address; the summary/provenance
+                    # must show the POI label + trips (PR #68 review).
+                    parts = self._id.split("/")
+                    label = parts[2] if len(parts) >= 3 else (fb.destination.label if fb.destination else "")
+                    fb = replace(fb, label=label)
+                    fb = _with_poi_destination(fb, poi_val)
+                    return Attempt.succeeded(fb)
+                # The fallback API failed: propagate the typed failure. An
+                # impossible journey stays impossible (retried when pending) —
+                # never present the failed fallback as a plain
+                # 'TfL had no route' infeasible success (2026-09-19).
+                return fallback
             return Attempt.succeeded(val)
 
         parts = self._id.split("/")
@@ -517,14 +526,16 @@ class TransitNode(DerivedNode[Commute]):
         self,
         location: Attempt[GeoPoint],
         poi: Attempt[PlaceOfInterest],
-    ) -> Commute | None:
+    ) -> Attempt[Commute] | None:
         """National Rail fallback for origins beyond TfL coverage.
 
         Calls the wired transit_route_fn (Google Routes TRANSIT) with the
-        property's location and the destination POI.  Returns the Commute
-        on success, None when unwired, unroutable, or failed — the
-        caller keeps the succeeded-infeasible result, so the commute
-        selector still falls back to drive/walk.
+        property's location and the destination POI.  None when no
+        fallback applies (unwired, unroutable inputs) — the caller keeps
+        the succeeded-infeasible TfL result.  An API failure is typed:
+        temporary → pending (retried), permanent → impossible.  The
+        journey is ALREADY broken when the only transit option depends on
+        a failed API — it must not be masked as a plain 'TfL no route'.
         """
         if self._transit_route_fn is None:
             return None
@@ -541,16 +552,26 @@ class TransitNode(DerivedNode[Commute]):
             return None
         try:
             fallback = await self._transit_route_fn(location_val, poi_val)
-        except Exception as e:  # lucidlint: ignore broad-except — the fallback must never mask drive/walk
+        except Exception as e:
             logging.getLogger(__name__).warning("National Rail fallback failed: %s", e)
             self._last_fallback_detail = f"National Rail fallback failed: {e}"
+            raise
+        if fallback is None:
             return None
-        if fallback is None or fallback.infeasible:
-            return None
+        if fallback.infeasible:
+            self._last_fallback_detail = "TfL found no route — National Rail fallback was not routable either"
+            return Attempt.impossible(
+                "no route available",
+                error_info=AttemptError(
+                    code="no_data",
+                    message="no route available",
+                    user_message="Couldn't find a route to this destination — check the address.",
+                ),
+            )
         self._last_fallback_detail = (
             "TfL found no route for this journey — National Rail fallback (Google transit) used"
         )
-        return fallback
+        return Attempt.succeeded(fallback)
 
     @override
     async def build_provenance(

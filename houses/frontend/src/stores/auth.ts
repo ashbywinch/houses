@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import * as api from '../services/api'
 
 export interface AuthUser {
@@ -7,6 +7,7 @@ export interface AuthUser {
   name: string
   picture: string
   person: string | null
+  person_id: string | null
   is_superuser: boolean
 }
 
@@ -17,6 +18,21 @@ export const useAuthStore = defineStore('auth', () => {
   // Superuser mode — when active, a header bar shows with an impersonation dropdown
   const superuserMode = ref(false)
   const impersonating = ref<string | null>(null) // Person name being impersonated
+
+  /** The person the session is ACTING AS — the single resolution point.
+   *  Every view reads this one getter; no view re-derives the
+   *  precedence (impersonated person while a superuser impersonates,
+   *  else the session's linked person). */
+  const actingAs = computed<string | null>(() => {
+    if (superuserMode.value && impersonating.value) return impersonating.value
+    return user.value?.person_id ?? null
+  })
+
+  /** The one place that decides "the wire must impersonate": the mode
+   *  AND an impersonated person. authHeaders() reads only this — a
+   *  cookie-borne impersonating claim with the mode off must never
+   *  reach the server (silent impersonation after reload). */
+  const isImpersonating = computed(() => superuserMode.value && impersonating.value !== null)
 
   let _pendingCheck: Promise<void> | null = null
 
@@ -41,10 +57,14 @@ export const useAuthStore = defineStore('auth', () => {
       const data = await r.json()
       if (data.authenticated) {
         user.value = data
-        // Exit superuser mode if user is no longer a superuser
         if (!data.is_superuser) {
+          // Exit superuser mode if user is no longer a superuser
           superuserMode.value = false
           impersonating.value = null
+        } else {
+          // The session claim survives restarts — adopt it. The gate
+          // (isImpersonating) keeps it inert until the mode is on.
+          impersonating.value = data.impersonating ?? null
         }
       } else {
         user.value = null
@@ -113,6 +133,8 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     superuserMode,
     impersonating,
+    actingAs,
+    isImpersonating,
     toggleSuperuser,
     setImpersonating,
     checkAuth,

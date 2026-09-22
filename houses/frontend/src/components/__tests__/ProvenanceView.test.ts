@@ -661,3 +661,43 @@ describe('ProvenanceView — depth is visible however deep the tree goes', () =>
     expect(levels).toEqual(['1', '2', '3', '4', '5', '6'])
   })
 })
+
+describe('ProvenanceView — multi-line formula breakdown (per-person equity)', () => {
+  const equityBreakdown: Provenance = {
+    label: 'Total Monthly Cost',
+    value: '£3,755.25/mo',
+    sourceType: 'calc',
+    sources: {
+      'x/total_equity': {
+        label: 'Total Equity',
+        value: '£477,000.00',
+        sourceType: 'calc',
+        formula: {
+          lines: [
+            { label: 'Simon', value: '£177,000.00 home (50% yours) + £88,500.00 home share + £0.00 cash = £88,500.00' },
+            { label: 'Lorena', value: "50% of Simon's home (£177,000.00) + £0.00 cash = £88,500.00" },
+            { label: 'Ashby', value: '£0 home + £300,000.00 cash = £300,000.00' },
+          ],
+          result: '£477,000.00',
+        },
+      },
+    },
+  }
+
+  it('renders each figure on its OWN line, never a joined narrative', () => {
+    const w = mountView(equityBreakdown, { detailLevel: 'detail' })
+    const eq = w.findAll('.detail-node').find(n => n.find('.detail-node__label').text() === 'Total Equity')
+    expect(eq).toBeDefined()
+    const lines = eq!.findAll('.detail-node__formula-line')
+    expect(lines).toHaveLength(3)
+    const labels = lines.map(l => l.find('.detail-node__formula-label').text())
+    expect(labels).toEqual(['Simon', 'Lorena', 'Ashby'])
+    // no single line carries two figures, and the row is not one
+    // ' · '-joined narrative string (the phone cut-off regression).
+    for (const line of lines) {
+      expect(line.text()).not.toMatch(/Simon.*(Lorena|Ashby)/)
+      expect(line.text()).not.toMatch(/Lorena.*Ashby/)
+    }
+    expect(eq!.text()).not.toContain(' · ')
+  })
+})
