@@ -5,7 +5,7 @@ import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
 import { simpleOfsted, ofstedClass } from '../formatters/format'
 import { schoolWalkMin } from '../formatters/school'
-import { signedPounds } from '../formatters/money'
+import { monthlyFigure } from '../formatters/money'
 
 const store = usePropertiesStore()
 const props = defineProps<{
@@ -124,7 +124,7 @@ const othersDelta = computed(() => (showDeltas.value ? store.deltaFor(props.rid)
 
 function deltaLineText(d: { value: string; approx: boolean } | null): string {
   if (!d) return '—'
-  return `${d.approx ? '≈' : ''}${signedPounds(d.value)}/mo`
+  return monthlyFigure({ delta: d })
 }
 
 /** Why a delta group is '—': the candidate side's uncomputable reason
@@ -404,11 +404,11 @@ async function toggleViewed() {
             <template v-else>
               <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
                 <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
-                {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
+                {{ monthlyFigure({ absolute: coupleCost, approx: monthlyCostApprox }) }}
               </span>
               <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
                 <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
-                {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
+                {{ monthlyFigure({ absolute: othersCost }) }}
               </span>
             </template>
           </span>
@@ -416,7 +416,7 @@ async function toggleViewed() {
             v-else
             class="card__monthly-cost card__monthly-cost--unknown"
             :title="uncomputableReason(data.group_monthly_cost) || 'Not computed yet'"
-          >£—/mo</span>
+          >{{ monthlyFigure(null) }}</span>
         </div>
       </div>
 

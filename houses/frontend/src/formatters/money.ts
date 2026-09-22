@@ -15,6 +15,25 @@ export function integerPounds(value: string | undefined): string {
   return dot === -1 ? value : value.slice(0, dot)
 }
 
+/** The monthly figure line, ONE spelling: the delta mode shows the
+ *  signed whole-pound increment, the absolute mode the pound total,
+ *  and a missing figure the em-dash. Approximate totals carry the
+ *  leading "≈" — never a space after it, never a second spelling.
+ *  Used by the card, the property detail, the favourites legend and
+ *  the costs section, so all four render identical figures. */
+export function monthlyFigure(opts: {
+  delta?: { value: string; approx?: boolean } | null
+  absolute?: number | null
+  approx?: boolean
+} | null | undefined): string {
+  if (!opts) return '£—/mo'
+  if (opts.delta) return `${opts.delta.approx ? '≈' : ''}${signedPounds(opts.delta.value)}/mo`
+  if (opts.absolute !== null && opts.absolute !== undefined) {
+    return `${opts.approx ? '≈' : ''}£${opts.absolute.toLocaleString()}/mo`
+  }
+  return '£—/mo'
+}
+
 /** Signed whole-pound delta for the "extra vs your home" figures —
  *  the server sends a 2dp explicit-sign string ("+1308.06"); the card
  *  shows whole pounds ("+£1,308"), negative with U+2212 ("−£411") as
