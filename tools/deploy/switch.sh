@@ -34,6 +34,40 @@ prune_logs() {
     | xargs -r rm -f
 }
 
+if [ "$ACTION" = "--diagnose" ]; then
+  # READ-ONLY box state dump (incident diagnostics). Prints to stdout —
+  # the deploy key's forced command relays release.sh/switch.sh stdout, so
+  # the workflow log receives this. Never mutates anything; exits before
+  # ACTIVE/snapshot logic. Sanctioned command shape: the authorized_keys
+  # allowlist is release.sh/switch.sh only.
+  echo "===== tooling (sha256) ====="
+  sha256sum "$ROOT/release.sh" "$ROOT/switch.sh" "$ROOT/run-migration.sh" 2>&1
+  echo "===== /opt/houses/migrations.list ====="
+  if [ -f "$ROOT/migrations.list" ]; then cat "$ROOT/migrations.list"; else echo "MISSING (fail-fast guard will refuse flips)"; fi
+  echo "===== ACTIVE/PREVIOUS markers ====="
+  cat "$ROOT/ACTIVE" 2>&1; cat "$ROOT/PREVIOUS" 2>&1
+  echo "===== unit states ====="
+  systemctl is-active houses-blue houses-green 2>&1
+  echo "===== release marks (newest 12) ====="
+  ls -lat "$LOG_DIR"/ 2>&1 | head -13
+  echo "----- newest switch log -----"
+  tail -n 45 "$(ls -t "$LOG_DIR"/switch-*.log 2>/dev/null | head -1)" 2>&1
+  echo "----- newest run-migration log -----"
+  tail -n 25 "$(ls -t "$LOG_DIR"/run-migration-*.log 2>/dev/null | head -1)" 2>&1
+  echo "===== snapshots ====="
+  ls -la /var/backups/ 2>&1
+  echo "===== live DB + WAL ====="
+  wc -c "$ROOT/data/houses.db" "$ROOT/data/houses.db-wal" "$ROOT/data/houses.db-shm" 2>&1
+  stat -c '%y %s %n' "$ROOT/data/houses.db" 2>&1
+  echo "===== sides ====="
+  ls -la "$ROOT"/ 2>&1 | head -20
+  echo "===== journal houses-blue (last 40) ====="
+  journalctl -u houses-blue -n 40 --no-pager 2>&1
+  echo "===== journal houses-green (last 80) ====="
+  journalctl -u houses-green -n 80 --no-pager 2>&1
+  exit 0
+fi
+
 CURRENT=$(cat "$ROOT/ACTIVE")
 
 if [ "$ACTION" = "--rollback" ]; then
