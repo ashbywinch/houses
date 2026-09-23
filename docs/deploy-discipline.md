@@ -191,6 +191,40 @@ Until the next release, a rollback runs the box's older `switch.sh`
    first-boot cascade converges (Sep-5 precedent: ~1 h).
 5. Record the outcome here.
 
+## Data migrations ride the release (generic)
+
+A data migration is a ref-shipped script executed by the ONE generic
+step `tools/deploy/run-migration.sh` on the **standby's smoke copy**
+before the standby boots. The live DB is never touched; a failed
+migration aborts the release with prod untouched. Adding a future
+migration = shipping the script + one line in release.sh's `MIGRATIONS`
+ordered list — no new deployment machinery.
+
+**Migration script contract** (reference: `scripts/backfill_person_ids.py`):
+
+- Dry-run by default with NO arguments (read-only; prints what the apply
+  would do). `--apply` writes (honours `HOUSES_SCRIPTS_MAY_WRITE=1`);
+  `--backup` writes a `<db>.pre-<migration>` copy first; `--verify`
+  re-scans after apply and must find nothing left to do.
+- Idempotent: a re-release after adoption finds zero work and writes
+  nothing.
+- Batched commits: a single-transaction run needed a ~2.4 GB rollback
+  journal and crashed the box out-of-disk (2026-09-18). The step also
+  refuses to start below DB size + 1 GiB free.
+
+**Revert layers** (all independent, all verified): the migration's own
+pre-migration backup on the smoke copy, the pre-flip snapshot written by
+`switch.sh` (`/var/backups/houses-pre-flip-*.db`, safe pattern: write-capable
+connection + `wal_checkpoint(PASSIVE)` + deadline + `node_results` sanity),
+and `switch.sh --rollback`, which restores the newest pre-flip snapshot
+unconditionally.
+
+**Verification before trusting a backup**: `PRAGMA integrity_check` on the
+copy; row counts equal between live and backup; the persons row present;
+`sha256sum` + size recorded in the release transcript. Prove the backup
+restores by booting it against the app's startup guard before it is ever
+needed.
+
 ## Release log retention
 
 `/opt/houses/logs/releases/` keeps the newest 32 runs of each of
