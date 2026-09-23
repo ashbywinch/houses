@@ -52,7 +52,7 @@ on:
         required: false
         default: 'deploy'
         type: choice
-        options: ['provision', 'deploy', 'switch', 'rollback', 'diagnose']
+        options: ['provision', 'deploy', 'cutover', 'switch', 'rollback', 'diagnose']
 
 jobs:
   provision:
@@ -149,7 +149,12 @@ jobs:
             gh api -X POST "repos/$GITHUB_REPOSITORY/actions/variables" -f name=BOX_HOST -f value="$IP" >/dev/null
           fi
           echo "BOX_HOST variable set to $IP"
-          echo "OLD instance 'houses' is untouched and still serving — retire it (gcloud compute instances delete houses) only after the new box passes deploy+switch."
+          # 100% automated chain: this run hands off to the deploy (which
+          # smoke-tests the standby on the NEW box) and that run hands off
+          # to the gated cutover (IP swap + flip + verify + retire old).
+          sleep 5
+          gh workflow run Release --ref main -f action=deploy
+          echo "chained: deploy dispatched (standby smoke on the new box)"
         env:
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
           ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
@@ -259,9 +264,95 @@ jobs:
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose" \
-            || echo "box unreachable — check the OCI console"
+            || echo "box unreachable — check the console"
         timeout-minutes: 3
 
+      - name: Chain to the gated cutover
+        run: |
+          gh workflow run Release --ref main -f action=cutover
+          echo "chained: cutover dispatched — it waits at the production environment approval"
+
+      - name: Chain to the gated cutover
+        run: |
+          gh workflow run Release --ref main -f action=cutover
+          echo "chained: cutover dispatched — it waits at the production environment approval"
+
+
+  cutover:
+    if: inputs.action == 'cutover'
+    runs-on: ubuntu-latest
+    # The traffic move (the ONE human gate): the static origin IP moves to
+    # the new box, the app flips, public health is verified, then the old
+    # instance is retired — all in this one job once you approve it.
+    environment: production
+    env:
+      BOX_USER: ${{ secrets.BOX_USER }}
+      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Move the static origin IP to the new box
+        run: |
+          set -euo pipefail
+          PROJECT=$(sed -n 's/^project *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          ZONE=$(sed -n 's/^zone *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          STATIC=$(gcloud compute addresses describe houses-static --region us-west1 \
+            --project "$PROJECT" --format='value(address)')
+          # detach from the OLD box, attach to the new — origin IP unchanged,
+          # so DNS/Cloudflare proxy need no edits
+          gcloud compute instances delete-access-config houses --access-config-name=external-nat \
+            --zone "$ZONE" --project "$PROJECT" || true
+          gcloud compute instances add-access-config houses-rebuild --access-config-name=external-nat \
+            --address "$STATIC" --zone "$ZONE" --project "$PROJECT"
+          echo "static origin $STATIC now on houses-rebuild"
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Flip the app to the migrated seed on the new box
+        run: |
+          set -euo pipefail
+          IP="${{ vars.BOX_HOST || secrets.BOX_HOST }}"
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+          -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$IP" "sudo /opt/houses/switch.sh"
+        timeout-minutes: 20
+      - name: Verify the PUBLIC health on the new origin
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 15); do
+            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
+            LW=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("last_write", ""))' 2>/dev/null || true)
+            if [ -n "$LW" ]; then
+              AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
+              if [ "$AGE" -lt 300 ]; then
+                echo "CUTOVER VERIFIED: https://houses.blueumbrella.net last_write=$LW"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::cutover ran but public health did not come up on the new box — OLD box still exists; re-attach houses-static to 'houses' to roll back"
+          exit 1
+      - name: Retire the old instance (only after verification)
+        run: |
+          set -euo pipefail
+          PROJECT=$(sed -n 's/^project *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          ZONE=$(sed -n 's/^zone *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          gcloud compute instances delete houses --zone "$ZONE" --project "$PROJECT" --quiet
+          echo "old instance 'houses' retired"
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
   switch:
     if: inputs.action == 'switch'
     runs-on: ubuntu-latest
