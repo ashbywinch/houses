@@ -1,0 +1,17 @@
+[Unit]
+Description=Push the houses backup off-box
+After=houses-backup.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/houses-backup.env
+# The push requires the snapshot produced by TONIGHT'S run: the backup
+# unit writes /var/backups/last-backup-ts only on success, and a failed
+# snapshot must not silently re-push yesterday's stale copy (Wants= does
+# not gate on the dependee's exit status). %% escaping: systemd expands
+# %% to a literal % before the shell runs, so the freshness guard the
+# shell executes is [ "${ts%-*}" = "$(date +%F)" ].
+ExecStart=/bin/sh -c 'ts=$(cat /var/backups/last-backup-ts); newest=/var/backups/houses-${ts}.db; envfile=/var/backups/houses-${ts}.env.age; [ "${ts%%-*}" = "$(date +%F)" ] || { echo "no snapshot from tonight (last: ${ts}) — backup failed"; exit 1; }; [ -f "$newest" ] && [ -f "$envfile" ] || { echo "snapshot ${ts} missing"; exit 1; }; age -e -r "$${RECIPIENT}" -o "${newest}.age" "$newest" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "$envfile" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && rclone delete houses:backups/ --min-age 31d && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
+
+[Install]
+WantedBy=timers.target

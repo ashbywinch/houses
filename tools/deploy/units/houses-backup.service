@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly houses backup (on-box snapshot)
+Wants=houses-backup-push.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/houses-backup.env
+ExecStart=/bin/sh -c 'ts=$(date +%F-%H%M%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && age -e -r "$${RECIPIENT}" -o /var/backups/houses-${ts}.env.age /var/backups/houses-${ts}.env && rm /var/backups/houses-${ts}.env && echo ${ts} > /var/backups/last-backup-ts && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
+
+[Install]
+WantedBy=timers.target
