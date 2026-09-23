@@ -1,5 +1,11 @@
 name: Release
 
+# the chain self-dispatches deploy/cutover — the default token needs
+# actions: write, else gh workflow run dies (exit 4)
+permissions:
+  actions: write
+  contents: read
+
 # Blue/green release + REPLACE-NOT-REPAIR provisioning, driven from GitHub.
 #
 #   provision — build a FRESH box as code from cloud-init userdata
