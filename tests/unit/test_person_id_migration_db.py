@@ -13,7 +13,12 @@ import json
 import sqlite3
 import zlib
 
-from scripts.backfill_person_ids import apply_migration, collect_mapping, rows_to_remap
+from scripts.backfill_person_ids import (
+    _read_persons,
+    apply_migration,
+    collect_mapping,
+    rows_to_remap,
+)
 
 SCHEMA = """
 CREATE TABLE node_results (
@@ -193,3 +198,30 @@ def test_apply_bumps_only_the_current_persons_row():
     current_names = [p["name"] for p in current]
     assert current_names == ["Simon", "Lorena", "Ashby", "George"]
 
+
+
+def test_apply_reports_the_real_applied_count():
+    """The 2026-09-23 regression: after the apply, a post-apply scan on the
+    same connection sees migrated rows and reports zero — the run printed
+    'rows remapped: 0 (applied)' while rewrites had happened. The count
+    must come from the apply generator's own consumption."""
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE node_results (id INTEGER PRIMARY KEY, node_id TEXT, result_json BLOB,\n"
+        " dep_timestamps TEXT, created_at TEXT, code_version TEXT)"
+    )
+    _seed(conn)
+    found = _read_persons(conn)
+    assert found is not None, "seed must have a persons row"
+    persons_id, data = found
+    value = data.get("value") or []
+    mapping = collect_mapping(value)
+    assert mapping, "seed must have persons"
+    result = apply_migration(
+        conn, "seed.db", persons_id, data, mapping,
+        rows_to_remap(conn, mapping), use_backup=False, verify=True,
+    )
+    assert result.ok
+    assert result.applied > 0, "the apply generator itself must report rows rewritten"

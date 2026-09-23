@@ -35,9 +35,8 @@ name: Release
 # back to the BOX_HOST secret (the pre-provision current box).
 #
 # Requires GitHub secrets: BOX_HOST (fallback IP), BOX_USER, BOX_SSH_KEY
-# (restricted deploy key), DEPLOY_PUBKEY, OPERATOR_PUBKEY, AGE_KEY,
-# AGE_RECIPIENT, CF_TUNNEL_TOKEN, RCLONE_CONFIG, and the OCI_* set for
-# provisioning (see tools/deploy/provision.md).
+# (restricted deploy key), DEPLOY_PUBKEY, OPERATOR_PUBKEY, GOOGLE_SA_KEY
+# (see tools/deploy/provision.md §5c — no OCI, no tunnel, no age).
 
 on:
   push:
@@ -54,97 +53,76 @@ on:
         default: 'deploy'
         type: choice
         options: ['provision', 'deploy', 'switch', 'rollback', 'diagnose']
-      shape:
-        description: 'OCI instance shape (provision only)'
-        required: false
-        default: 'VM.Standard.E2.1.Micro'
-      ocpus:
-        description: 'OCPUs (A1.Flex provision only)'
-        required: false
-        default: '1'
-      memory:
-        description: 'Memory in GB (A1.Flex provision only)'
-        required: false
-        default: '6'
 
 jobs:
   provision:
     if: inputs.action == 'provision'
     runs-on: ubuntu-latest
     env:
-      OCI_CLI_USER: ${{ secrets.OCI_USER_OCID }}
-      OCI_CLI_TENANCY: ${{ secrets.OCI_TENANCY_OCID }}
-      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
-      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_API_KEY }}
-      OCI_CLI_REGION: ${{ secrets.OCI_REGION }}
       BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
       BOX_USER: ${{ secrets.BOX_USER }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: main
-      # The ENTIRE box is code: cloud-init userdata rendered from
-      # tools/deploy/box-bootstrap.sh with the secrets baked in (they live
-      # in Oracle instance metadata — readable only inside the instance;
-      # the bootstrap shreds its own copy after running).
-      - name: Render cloud-init userdata
+      # Rebuild the box as code (replace-not-repair): GCP startup-script
+      # rendered from tools/deploy/box-bootstrap.sh (see that file — the
+      # SSH paths are installed FIRST so even a half-built box is ssh-able
+      # and troubleshootable). The old instance keeps serving until this
+      # one passes the bootstrap probe; retire it explicitly afterwards.
+      - name: Render the GCP startup-script
         env:
           PROVISION_REF: ${{ inputs.ref || 'main' }}
           DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
           OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
-          AGE_KEY: ${{ secrets.AGE_KEY }}
-          AGE_RECIPIENT: ${{ secrets.AGE_RECIPIENT }}
-          CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
-          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
-        run: tools/deploy/provision-box.sh > /tmp/houses-userdata.sh
-      - name: Install oci-cli
-        run: pip install -q oci-cli
-      - name: Launch the instance
-        env:
-          COMPARTMENT: ${{ secrets.OCI_COMPARTMENT_OCID }}
-          SUBNET: ${{ secrets.OCI_SUBNET_OCID }}
-          IMAGE: ${{ secrets.OCI_IMAGE_OCID }}
-          SHAPE: ${{ inputs.shape }}
+          SEED_SA_KEY: ${{ secrets.SEED_SA_KEY }}
         run: |
           set -euo pipefail
-          AD=$(oci iam availability-domain list --compartment-id "$COMPARTMENT" \
-            --query 'data[0].name' --raw-output)
-          [ -n "$AD" ] && [ "$AD" != "null" ] || { echo "no availability domain" >&2; exit 1; }
-          oci compute instance launch \
-            --availability-domain "$AD" \
-            --compartment-id "$COMPARTMENT" \
-            --shape "$SHAPE" \
-            --subnet-id "$SUBNET" \
-            --image-id "$IMAGE" \
-            --assign-public-ip true \
-            --display-name "houses-$(date +%Y%m%d-%H%M%S)" \
-            --user-data-file /tmp/houses-userdata.sh \
-            --wait-for-state RUNNING \
-            --query 'data."id"'
-      - name: Resolve the public IP and wait for the bootstrap
-        env:
-          COMPARTMENT: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          PROVISION_REF="${{ inputs.ref || 'main' }}" \
+          DEPLOY_PUBKEY="${{ secrets.DEPLOY_PUBKEY }}" \
+          OPERATOR_PUBKEY="${{ secrets.OPERATOR_PUBKEY }}" \
+          SEED_SA_KEY="${{ secrets.SEED_SA_KEY }}" \
+          tools/deploy/provision-box.sh > /tmp/houses-startup.sh
+      - name: Authenticate gcloud
         run: |
           set -euo pipefail
-          IID=$(oci compute instance list --compartment-id "$COMPARTMENT" \
-            --query 'sort_by(data, &"time-created")[-1]."id"' --raw-output)
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Prepare the operator key for instance metadata
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
+        env:
+          OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
+      - name: Launch the fresh instance
+        run: |
+          set -euo pipefail
+          project=$(sed -n 's/^project *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          zone=$(sed -n 's/^zone *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          gcloud compute instances create houses-rebuild \
+            --project "$project" --zone "$zone" \
+            --machine-type e2-micro --tags houses \
+            --image-project ubuntu-os-cloud --image-family ubuntu-2404-lts-amd64 \
+            --boot-disk-size=30 --boot-disk-type=pd-standard \
+            --metadata-from-file=startup-script=/tmp/houses-startup.sh \
+            --metadata "ssh-keys=ubuntu:$(cat /tmp/operator.pub)" \
+            --format='value(name)'
+        # the operator key also lands via the bootstrap; this metadata copy
+        # makes the box ssh-able even before the bootstrap finishes
+      - name: Wait for the bootstrap (banner probe via the deploy key)
+        run: |
+          set -euo pipefail
+          # The box's allowlist silently no-ops until the bootstrap installs
+          # it — the tooling banner can never be a false positive.
           IP=""
-          for attempt in $(seq 1 90); do
-            IP=$(oci compute instance list-vnics --instance-id "$IID" \
-              --query 'data[0]."public-ip"' --raw-output 2>/dev/null || true)
-            [ -n "$IP" ] && [ "$IP" != "null" ] && break
-            sleep 10
-          done
-          [ -n "$IP" ] && [ "$IP" != "null" ] || { echo "no public IP after 15m" >&2; exit 1; }
-          echo "instance=$IID ip=$IP"
-          # The bootstrap uses the SAME allowlisted deploy key: probe
-          # `switch.sh --diagnose` until it answers with the tooling banner
-          # (the allowlist + tooling exist only AFTER box-setup + allowlist
-          # install — before that the forced command silently no-ops, so a
-          # banner can never be a false positive).
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          for attempt in $(seq 1 120); do
+          for attempt in $(seq 1 180); do
+            [ -n "$IP" ] && [ "$IP" != "null" ] || \
+              IP=$(gcloud compute instances describe houses-rebuild --project "$PROJECT" --zone "$ZONE" \
+                --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || true)
             OUT=$(ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
               -o ServerAliveInterval=15 -o ServerAliveCountMax=40 \
               "$BOX_USER@$IP" "sudo /opt/houses/switch.sh --diagnose" 2>/dev/null || true)
@@ -153,23 +131,28 @@ jobs:
             esac
             sleep 10
           done
-          echo "bootstrap did not complete in 20m — check the OCI console/cloud-init" >&2
+          echo "bootstrap did not complete in 30m — check the GCP console (serial output)" >&2
           exit 1
-      - name: Register the new box as BOX_HOST
         env:
-          COMPARTMENT: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
+          ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
+      - name: Register the fresh box as BOX_HOST
         run: |
           set -euo pipefail
-          IID=$(oci compute instance list --compartment-id "$COMPARTMENT" \
-            --query 'sort_by(data, &"time-created")[-1]."id"' --raw-output)
-          IP=$(oci compute instance list-vnics --instance-id "$IID" \
-            --query 'data[0]."public-ip"' --raw-output)
+          IP=$(gcloud compute instances describe houses-rebuild --project "$PROJECT" --zone "$ZONE" \
+            --format='value(networkInterfaces[0].accessConfigs[0].natIP)')
           if gh api "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" >/dev/null 2>&1; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" -f value="$IP" >/dev/null
           else
             gh api -X POST "repos/$GITHUB_REPOSITORY/actions/variables" -f name=BOX_HOST -f value="$IP" >/dev/null
           fi
           echo "BOX_HOST variable set to $IP"
+          echo "OLD instance 'houses' is untouched and still serving — retire it (gcloud compute instances delete houses) only after the new box passes deploy+switch."
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
+          ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
 
   deploy:
     if: github.event_name == 'push' || inputs.action == 'deploy'
@@ -342,4 +325,21 @@ jobs:
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --rollback"
+          # VERIFY the rollback actually took: the public /health must
+          # resume advancing last_write within 2m, or the run fails loudly
+          # (a silent rollback was the 2026-09-23 failure mode).
+          for attempt in $(seq 1 12); do
+            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
+            LW=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("last_write", ""))' 2>/dev/null || true)
+            if [ -n "$LW" ]; then
+              AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
+              if [ "$AGE" -lt 600 ]; then
+                echo "rollback verified: last_write=$LW"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::rollback ran but prod health did not recover — check the box via action=diagnose"
+          exit 1
         timeout-minutes: 20
