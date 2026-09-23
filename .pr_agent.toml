@@ -36,6 +36,13 @@ repo_context_files = [
 extra_headers = '{"cf-aig-request-timeout": "1800000", "cf-aig-max-attempts": "0", "cf-aig-backoff": "exponential"}'
 
 [pr_reviewer]
+# Key review findings post INLINE as GitHub review threads (resolvable).
+# main's branch protection has required_conversation_resolution — the PR
+# cannot merge until every bot thread is resolved. Requires the pinned
+# pr-agent >= d265b4250d (GitHub inline verification); older pins silently
+# keep findings in the summary. The suggestions table (/improve) has no
+# inline mode in any pr-agent version — it stays a summary comment.
+inline_key_issues = true
 require_tests_review = true
 require_security_review = true
 require_estimate_effort_to_review = true
