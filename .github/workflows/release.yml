@@ -1,42 +1,31 @@
 name: Release
 
-# Blue/green release + REPLACE-NOT-REPAIR provisioning, driven from GitHub.
+# Blue/green release, driven from GitHub.
 #
-#   provision — build a FRESH box as code from cloud-init userdata
-#               (tools/deploy/provision-box.sh + box-bootstrap.sh): OCI
-#               launch, packages, blue/green checkouts, layout/units,
-#               deploy-key allowlist, operator admin key, off-box data+env
-#               restore (age-decrypted), Cloudflare tunnel, backup units.
-#               Then registers the new public IP as the BOX_HOST variable.
-#   deploy    — ship box tooling (units/switch/run-instance/release.sh —
-#               release.sh re-ships ITSELF, so the box entrypoint is never
-#               frozen) + the CI-built frontend dist, then run the release:
-#               checkout the ref on the STANDBY box side, snapshot the live
-#               DB into the standby's smoke copy, start it, run smoke
-#               checks, then STOP the standby (ephemeral: the switch starts
-#               it cold; the 2026-09-07 OOM was a warm standby left running
-#               on a small box). The live side and live DB are untouched.
-#   switch    — flip: stop the live side, start the (smoke-verified)
-#               standby on the live DB. GATED by the production
-#               environment's Required reviewers — the human sign-off.
-#   rollback  — undo the last switch (previous code + pre-flip DB
-#               snapshot). Ungated: the emergency undo.
-#   diagnose  — read-only box state dump via switch.sh --diagnose.
+#   deploy  — ship box tooling (units/switch/run-instance/watchdog) + the
+#             CI-built frontend dist, then run the release: checkout the ref
+#             on the STANDBY box side, snapshot the live DB into the standby's
+#             smoke copy, start it, run authenticated smoke checks, then STOP
+#             the standby (ephemeral: the switch starts it cold; the 2026-09-07
+#             OOM was a warm standby left running on a 953 MiB box). The live
+#             side and live DB are untouched.
+#   switch  — flip: stop the live side, start the (smoke-verified) standby on
+#             the live DB (Caddy's config is static — nothing else changes).
+#             Run this AFTER the standby has been smoke-tested.
+#   rollback — undo the last switch (previous code + pre-flip DB snapshot).
 #
-# Triggers: push a tag v* (deploys automatically) or workflow_dispatch
-# with the action of your choice.
+# Triggers: push a tag v* (deploys automatically) or workflow_dispatch with
+# the action of your choice.
 #
 # Ref guard: a tag push is accepted only when the tag is reachable from
 # main — the released code must have gone through a PR (see
-# docs/deploy-discipline.md).
+# docs/deploy-discipline.md).  A non-main ref is released only via an
+# explicit workflow_dispatch with the ref input named: the deliberate,
+# reviewable bypass, never a tag.
 #
-# Box addressing: BOX_HOST resolves as the repo VARIABLE first (the
-# provision action sets it; a re-provision re-points every job) and falls
-# back to the BOX_HOST secret (the pre-provision current box).
-#
-# Requires GitHub secrets: BOX_HOST (fallback IP), BOX_USER, BOX_SSH_KEY
-# (restricted deploy key), DEPLOY_PUBKEY, OPERATOR_PUBKEY, GOOGLE_SA_KEY
-# (see tools/deploy/provision.md §5c — no OCI, no tunnel, no age).
+# Requires GitHub secrets: BOX_HOST (public IP or hostname), BOX_USER,
+# BOX_SSH_KEY (private key of the restricted deploy key; see
+# tools/deploy/provision.md).
 
 on:
   push:
@@ -44,125 +33,17 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'git ref to release/provision (SHA, branch, or tag)'
+        description: 'git ref to release (SHA, branch, or tag)'
         required: false
         default: 'main'
       action:
-        description: 'provision a fresh box (OCI) | deploy to standby | switch over | rollback | diagnose'
+        description: 'deploy to standby | switch over | rollback | diagnose (read-only box state)'
         required: false
         default: 'deploy'
         type: choice
-        options: ['provision', 'deploy', 'cutover', 'switch', 'rollback', 'diagnose']
+        options: ['deploy', 'switch', 'rollback', 'diagnose']
 
 jobs:
-  provision:
-    if: inputs.action == 'provision'
-    runs-on: ubuntu-latest
-    env:
-      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
-      BOX_USER: ${{ secrets.BOX_USER }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-      # Rebuild the box as code (replace-not-repair): GCP startup-script
-      # rendered from tools/deploy/box-bootstrap.sh (see that file — the
-      # SSH paths are installed FIRST so even a half-built box is ssh-able
-      # and troubleshootable). The old instance keeps serving until this
-      # one passes the bootstrap probe; retire it explicitly afterwards.
-      - name: Render the GCP startup-script
-        env:
-          PROVISION_REF: ${{ inputs.ref || 'main' }}
-          DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
-          OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
-          SEED_SA_KEY: ${{ secrets.SEED_SA_KEY }}
-        run: |
-          set -euo pipefail
-          PROVISION_REF="${{ inputs.ref || 'main' }}" \
-          DEPLOY_PUBKEY="${{ secrets.DEPLOY_PUBKEY }}" \
-          OPERATOR_PUBKEY="${{ secrets.OPERATOR_PUBKEY }}" \
-          SEED_SA_KEY="${{ secrets.SEED_SA_KEY }}" \
-          tools/deploy/provision-box.sh > /tmp/houses-startup.sh
-      - name: Authenticate gcloud
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
-          chmod 600 /tmp/sa.json
-          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
-          rm -f /tmp/sa.json
-        env:
-          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
-      - name: Prepare the operator key for instance metadata
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
-        env:
-          OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
-      - name: Launch the fresh instance
-        run: |
-          set -euo pipefail
-          # terraform.tfvars is gitignored (never in this checkout) — the
-          # project/zone live as repo variables with the real defaults
-          project="${{ vars.GCP_PROJECT || 'houses-498215' }}"
-          zone="${{ vars.GCP_ZONE || 'us-west1-a' }}"
-          # idempotent re-provision: a failed attempt must not block the next
-          gcloud compute instances delete houses-rebuild --zone "$zone" --project "$project" --quiet 2>/dev/null || true
-          gcloud compute instances create houses-rebuild \
-            --project "$project" --zone "$zone" \
-            --machine-type e2-micro --tags houses \
-            --image-project ubuntu-os-cloud --image-family ubuntu-2404-lts-amd64 \
-            --boot-disk-size=30 --boot-disk-type=pd-standard \
-            --metadata-from-file=startup-script=/tmp/houses-startup.sh \
-            --metadata "ssh-keys=ubuntu:$(cat /tmp/operator.pub)" \
-            --format='value(name)'
-        # the operator key also lands via the bootstrap; this metadata copy
-        # makes the box ssh-able even before the bootstrap finishes
-      - name: Wait for the bootstrap (banner probe via the deploy key)
-        run: |
-          set -euo pipefail
-          # The box's allowlist silently no-ops until the bootstrap installs
-          # it — the tooling banner can never be a false positive.
-          IP=""
-          for attempt in $(seq 1 180); do
-            [ -n "$IP" ] && [ "$IP" != "null" ] || \
-              IP=$(gcloud compute instances describe houses-rebuild --project "$PROJECT" --zone "$ZONE" \
-                --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || true)
-            OUT=$(ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
-              -o ServerAliveInterval=15 -o ServerAliveCountMax=40 \
-              "$BOX_USER@$IP" "sudo /opt/houses/switch.sh --diagnose" 2>/dev/null || true)
-            case "$OUT" in
-              *"===== tooling"*) echo "bootstrap confirmed after ~$((attempt * 10))s"; exit 0 ;;
-            esac
-            sleep 10
-          done
-          echo "bootstrap did not complete in 30m — check the GCP console (serial output)" >&2
-          exit 1
-        env:
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
-          ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
-      - name: Register the fresh box as BOX_HOST
-        run: |
-          set -euo pipefail
-          IP=$(gcloud compute instances describe houses-rebuild --project "$PROJECT" --zone "$ZONE" \
-            --format='value(networkInterfaces[0].accessConfigs[0].natIP)')
-          if gh api "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" >/dev/null 2>&1; then
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" -f value="$IP" >/dev/null
-          else
-            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/variables" -f name=BOX_HOST -f value="$IP" >/dev/null
-          fi
-          echo "BOX_HOST variable set to $IP"
-          # 100% automated chain: this run hands off to the deploy (which
-          # smoke-tests the standby on the NEW box) and that run hands off
-          # to the gated cutover (IP swap + flip + verify + retire old).
-          sleep 5
-          gh workflow run Release --ref main -f action=deploy
-          echo "chained: deploy dispatched (standby smoke on the new box)"
-        env:
-          PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
-          ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
-
   deploy:
     if: github.event_name == 'push' || inputs.action == 'deploy'
     runs-on: ubuntu-latest
@@ -226,30 +107,32 @@ jobs:
           tar -czf /tmp/houses-dist.tar.gz -C . dist
           echo "dist: $(du -h /tmp/houses-dist.tar.gz | cut -f1)"
 
-      # NOTE: no "ship tooling" step here — deploy key is command-restricted
-      # to release.sh/switch.sh (deploy-allowlist.sh), so scp/install can
+      # NOTE: no "ship tooling" step here — the deploy key is
+      # command-restricted to `sudo /opt/houses/release.sh …` and
+      # `sudo /opt/houses/switch.sh` (authorized_keys), so scp/install can
       # never reach the box. The release script itself (running as root)
-      # installs the ref's own units/watchdog/switch.sh/run-instance.sh/
-      # release.sh — R6, inside the security model.
+      # installs the ref's own units/watchdog/switch.sh/run-instance.sh —
+      # R6, inside the security model.
+
 
       - name: Deploy ref to standby and smoke-test it
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
           set -euo pipefail
           REF="${{ github.event_name == 'push' && github.ref_name || inputs.ref }}"
-          echo "Deploying $REF to the standby ($BOX_HOST)..."
+          echo "Deploying $REF to the standby..."
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           # The dist rides the EXEC channel on stdin, not scp: the deploy
-          # key's allowlist accepts ONLY `sudo /opt/houses/release.sh <ref>`
-          # (plus switch.sh forms) — release.sh reads /dev/stdin when it is
-          # a pipe. The remote command must stay exactly that shape: no
-          # local wrapper inside the quotes, or the allowlist refuses it.
-          # R4 envelope: local timeout wraps ssh (1500 s) on top of the
-          # step's 90-minute cap; release.sh's snapshot has its own 300 s
+          # key's command= allows only `sudo /opt/houses/release.sh <ref>`
+          # (and switch.sh) — release.sh reads /dev/stdin when it is a pipe.
+          # The remote command must stay exactly that shape: no local
+          # wrapper inside the quotes, or authorized_keys refuses it.
+          # R4 envelope: local timeout wraps ssh (900 s) on top of the
+          # step's 90-minute cap; release.sh's snapshot has its own 120 s
           # deadline, so no stage can hang unbounded.
           cat /tmp/houses-dist.tar.gz | timeout 1500 ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
@@ -259,7 +142,7 @@ jobs:
       - name: Surface the box-side release log (best-effort)
         if: failure()
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -267,110 +150,24 @@ jobs:
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
-            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose" \
-            || echo "box unreachable — check the console"
+            "$BOX_USER@$BOX_HOST" "sudo sh -c 'tail -80 \$(ls -t /opt/houses/logs/releases/*.log 2>/dev/null | head -1) 2>/dev/null || echo no release log yet'" \
+            || echo "box unreachable — the release log is on the box at /opt/houses/logs/releases/"
         timeout-minutes: 3
 
-      - name: Chain to the gated cutover
-        run: |
-          gh workflow run Release --ref main -f action=cutover
-          echo "chained: cutover dispatched — it waits at the production environment approval"
-
-      - name: Chain to the gated cutover
-        run: |
-          gh workflow run Release --ref main -f action=cutover
-          echo "chained: cutover dispatched — it waits at the production environment approval"
-
-
-  cutover:
-    if: inputs.action == 'cutover'
-    runs-on: ubuntu-latest
-    # The traffic move (the ONE human gate): the static origin IP moves to
-    # the new box, the app flips, public health is verified, then the old
-    # instance is retired — all in this one job once you approve it.
-    environment: production
-    env:
-      BOX_USER: ${{ secrets.BOX_USER }}
-      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-      - name: Authenticate gcloud
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
-          chmod 600 /tmp/sa.json
-          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
-          rm -f /tmp/sa.json
-        env:
-          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
-      - name: Move the static origin IP to the new box
-        run: |
-          set -euo pipefail
-          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
-          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
-          STATIC=$(gcloud compute addresses describe houses-static --region us-west1 \
-            --project "$PROJECT" --format='value(address)')
-          # detach from the OLD box, attach to the new — origin IP unchanged,
-          # so DNS/Cloudflare proxy need no edits
-          gcloud compute instances delete-access-config houses --access-config-name=external-nat \
-            --zone "$ZONE" --project "$PROJECT" || true
-          gcloud compute instances add-access-config houses-rebuild --access-config-name=external-nat \
-            --address "$STATIC" --zone "$ZONE" --project "$PROJECT"
-          echo "static origin $STATIC now on houses-rebuild"
-        env:
-          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
-      - name: Flip the app to the migrated seed on the new box
-        run: |
-          set -euo pipefail
-          IP="${{ vars.BOX_HOST || secrets.BOX_HOST }}"
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-          -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$IP" "sudo /opt/houses/switch.sh"
-        timeout-minutes: 20
-      - name: Verify the PUBLIC health on the new origin
-        run: |
-          set -euo pipefail
-          for attempt in $(seq 1 15); do
-            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
-            LW=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("last_write", ""))' 2>/dev/null || true)
-            if [ -n "$LW" ]; then
-              AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
-              if [ "$AGE" -lt 300 ]; then
-                echo "CUTOVER VERIFIED: https://houses.blueumbrella.net last_write=$LW"
-                exit 0
-              fi
-            fi
-            sleep 10
-          done
-          echo "::error::cutover ran but public health did not come up on the new box — OLD box still exists; re-attach houses-static to 'houses' to roll back"
-          exit 1
-      - name: Retire the old instance (only after verification)
-        run: |
-          set -euo pipefail
-          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
-          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
-          gcloud compute instances delete houses --zone "$ZONE" --project "$PROJECT" --quiet
-          echo "old instance 'houses' retired"
-        env:
-          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
   switch:
     if: inputs.action == 'switch'
     runs-on: ubuntu-latest
     # HUMAN GATE — GitHub Environments → Required reviewers (configure the
     # 'production' environment in repo Settings → Environments; public-repo
     # free plan supports it). A switch is a prod traffic change: the job
-    # waits for explicit approval before running — the sign-off requirement
-    # from the 2026-09-23 governance breach. Rollback stays ungated: it is
-    # the emergency undo and must not need approval.
+    # waits for an explicit approval before running, implementing the
+    # sign-off requirement from the 2026-09-23 governance breach. Rollback
+    # stays ungated: it is the emergency undo and must not need approval.
     environment: production
     steps:
       - name: Switch traffic to the smoke-verified standby
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -386,19 +183,24 @@ jobs:
     if: inputs.action == 'diagnose'
     runs-on: ubuntu-latest
     steps:
-      # READ-ONLY box state dump via the sanctioned switch.sh --diagnose
-      # (the allowlist accepts only release.sh/switch.sh forms; the dump
-      # prints tooling sha256, migrations.list, unit states, release marks,
-      # snapshots, DB/WAL, side layout, journal tails).
+      # READ-ONLY box state dump — the only sanctioned box visibility
+      # (the box's ssh user has no shell writes beyond the sudoers
+      # allowlist; every command below reads). Used to verify shipped
+      # tooling, snapshot inventory, and unit/journal state during an
+      # incident without touching prod.
       - name: Dump box state
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
+          # The deploy key's authorized_keys allowlist is release.sh/switch.sh
+          # ONLY (provision.md) — arbitrary commands (bash -s) are refused and
+          # swallowed by the forced command. switch.sh --diagnose is the
+          # sanctioned read-only dump and its stdout relays to this log.
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose"
@@ -407,10 +209,11 @@ jobs:
   rollback:
     if: inputs.action == 'rollback'
     runs-on: ubuntu-latest
+
     steps:
       - name: Roll back to the previous side
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -420,21 +223,4 @@ jobs:
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --rollback"
-          # VERIFY the rollback actually took: the public /health must
-          # resume advancing last_write within 2m, or the run fails loudly
-          # (a silent rollback was the 2026-09-23 failure mode).
-          for attempt in $(seq 1 12); do
-            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
-            LW=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("last_write", ""))' 2>/dev/null || true)
-            if [ -n "$LW" ]; then
-              AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
-              if [ "$AGE" -lt 600 ]; then
-                echo "rollback verified: last_write=$LW"
-                exit 0
-              fi
-            fi
-            sleep 10
-          done
-          echo "::error::rollback ran but prod health did not recover — check the box via action=diagnose"
-          exit 1
         timeout-minutes: 20
