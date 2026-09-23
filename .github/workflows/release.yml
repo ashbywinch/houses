@@ -166,6 +166,10 @@ jobs:
           gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=deploy -f ip="$IP"
           echo "chained: deploy dispatched (standby smoke on the new box)"
         env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
+          ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}"
+        env:
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
           ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
 
@@ -281,6 +285,8 @@ jobs:
         run: |
           gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover -f ip="$BOX_HOST"
           echo "chained: cutover dispatched — it waits at the production environment approval"
+        env:
+          GH_TOKEN: ${{ github.token }}"
 
 
   cutover:
