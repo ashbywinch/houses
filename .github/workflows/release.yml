@@ -276,11 +276,6 @@ jobs:
           gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover
           echo "chained: cutover dispatched — it waits at the production environment approval"
 
-      - name: Chain to the gated cutover
-        run: |
-          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover
-          echo "chained: cutover dispatched — it waits at the production environment approval"
-
 
   cutover:
     if: inputs.action == 'cutover'
