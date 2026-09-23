@@ -1,31 +1,43 @@
 name: Release
 
-# Blue/green release, driven from GitHub.
+# Blue/green release + REPLACE-NOT-REPAIR provisioning, driven from GitHub.
 #
-#   deploy  — ship box tooling (units/switch/run-instance/watchdog) + the
-#             CI-built frontend dist, then run the release: checkout the ref
-#             on the STANDBY box side, snapshot the live DB into the standby's
-#             smoke copy, start it, run authenticated smoke checks, then STOP
-#             the standby (ephemeral: the switch starts it cold; the 2026-09-07
-#             OOM was a warm standby left running on a 953 MiB box). The live
-#             side and live DB are untouched.
-#   switch  — flip: stop the live side, start the (smoke-verified) standby on
-#             the live DB (Caddy's config is static — nothing else changes).
-#             Run this AFTER the standby has been smoke-tested.
-#   rollback — undo the last switch (previous code + pre-flip DB snapshot).
+#   provision — build a FRESH box as code from cloud-init userdata
+#               (tools/deploy/provision-box.sh + box-bootstrap.sh): OCI
+#               launch, packages, blue/green checkouts, layout/units,
+#               deploy-key allowlist, operator admin key, off-box data+env
+#               restore (age-decrypted), Cloudflare tunnel, backup units.
+#               Then registers the new public IP as the BOX_HOST variable.
+#   deploy    — ship box tooling (units/switch/run-instance/release.sh —
+#               release.sh re-ships ITSELF, so the box entrypoint is never
+#               frozen) + the CI-built frontend dist, then run the release:
+#               checkout the ref on the STANDBY box side, snapshot the live
+#               DB into the standby's smoke copy, start it, run smoke
+#               checks, then STOP the standby (ephemeral: the switch starts
+#               it cold; the 2026-09-07 OOM was a warm standby left running
+#               on a small box). The live side and live DB are untouched.
+#   switch    — flip: stop the live side, start the (smoke-verified)
+#               standby on the live DB. GATED by the production
+#               environment's Required reviewers — the human sign-off.
+#   rollback  — undo the last switch (previous code + pre-flip DB
+#               snapshot). Ungated: the emergency undo.
+#   diagnose  — read-only box state dump via switch.sh --diagnose.
 #
-# Triggers: push a tag v* (deploys automatically) or workflow_dispatch with
-# the action of your choice.
+# Triggers: push a tag v* (deploys automatically) or workflow_dispatch
+# with the action of your choice.
 #
 # Ref guard: a tag push is accepted only when the tag is reachable from
 # main — the released code must have gone through a PR (see
-# docs/deploy-discipline.md).  A non-main ref is released only via an
-# explicit workflow_dispatch with the ref input named: the deliberate,
-# reviewable bypass, never a tag.
+# docs/deploy-discipline.md).
 #
-# Requires GitHub secrets: BOX_HOST (public IP or hostname), BOX_USER,
-# BOX_SSH_KEY (private key of the restricted deploy key; see
-# tools/deploy/provision.md).
+# Box addressing: BOX_HOST resolves as the repo VARIABLE first (the
+# provision action sets it; a re-provision re-points every job) and falls
+# back to the BOX_HOST secret (the pre-provision current box).
+#
+# Requires GitHub secrets: BOX_HOST (fallback IP), BOX_USER, BOX_SSH_KEY
+# (restricted deploy key), DEPLOY_PUBKEY, OPERATOR_PUBKEY, AGE_KEY,
+# AGE_RECIPIENT, CF_TUNNEL_TOKEN, RCLONE_CONFIG, and the OCI_* set for
+# provisioning (see tools/deploy/provision.md).
 
 on:
   push:
@@ -33,17 +45,132 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'git ref to release (SHA, branch, or tag)'
+        description: 'git ref to release/provision (SHA, branch, or tag)'
         required: false
         default: 'main'
       action:
-        description: 'deploy to standby | switch over | rollback | diagnose (read-only box state)'
+        description: 'provision a fresh box (OCI) | deploy to standby | switch over | rollback | diagnose'
         required: false
         default: 'deploy'
         type: choice
-        options: ['deploy', 'switch', 'rollback', 'diagnose']
+        options: ['provision', 'deploy', 'switch', 'rollback', 'diagnose']
+      shape:
+        description: 'OCI instance shape (provision only)'
+        required: false
+        default: 'VM.Standard.E2.1.Micro'
+      ocpus:
+        description: 'OCPUs (A1.Flex provision only)'
+        required: false
+        default: '1'
+      memory:
+        description: 'Memory in GB (A1.Flex provision only)'
+        required: false
+        default: '6'
 
 jobs:
+  provision:
+    if: inputs.action == 'provision'
+    runs-on: ubuntu-latest
+    env:
+      OCI_CLI_USER: ${{ secrets.OCI_USER_OCID }}
+      OCI_CLI_TENANCY: ${{ secrets.OCI_TENANCY_OCID }}
+      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_API_KEY }}
+      OCI_CLI_REGION: ${{ secrets.OCI_REGION }}
+      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+      BOX_USER: ${{ secrets.BOX_USER }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      # The ENTIRE box is code: cloud-init userdata rendered from
+      # tools/deploy/box-bootstrap.sh with the secrets baked in (they live
+      # in Oracle instance metadata — readable only inside the instance;
+      # the bootstrap shreds its own copy after running).
+      - name: Render cloud-init userdata
+        env:
+          PROVISION_REF: ${{ inputs.ref || 'main' }}
+          DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
+          OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
+          AGE_KEY: ${{ secrets.AGE_KEY }}
+          AGE_RECIPIENT: ${{ secrets.AGE_RECIPIENT }}
+          CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+        run: tools/deploy/provision-box.sh > /tmp/houses-userdata.sh
+      - name: Install oci-cli
+        run: pip install -q oci-cli
+      - name: Launch the instance
+        env:
+          COMPARTMENT: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          SUBNET: ${{ secrets.OCI_SUBNET_OCID }}
+          IMAGE: ${{ secrets.OCI_IMAGE_OCID }}
+          SHAPE: ${{ inputs.shape }}
+        run: |
+          set -euo pipefail
+          AD=$(oci iam availability-domain list --compartment-id "$COMPARTMENT" \
+            --query 'data[0].name' --raw-output)
+          [ -n "$AD" ] && [ "$AD" != "null" ] || { echo "no availability domain" >&2; exit 1; }
+          oci compute instance launch \
+            --availability-domain "$AD" \
+            --compartment-id "$COMPARTMENT" \
+            --shape "$SHAPE" \
+            --subnet-id "$SUBNET" \
+            --image-id "$IMAGE" \
+            --assign-public-ip true \
+            --display-name "houses-$(date +%Y%m%d-%H%M%S)" \
+            --user-data-file /tmp/houses-userdata.sh \
+            --wait-for-state RUNNING \
+            --query 'data."id"'
+      - name: Resolve the public IP and wait for the bootstrap
+        env:
+          COMPARTMENT: ${{ secrets.OCI_COMPARTMENT_OCID }}
+        run: |
+          set -euo pipefail
+          IID=$(oci compute instance list --compartment-id "$COMPARTMENT" \
+            --query 'sort_by(data, &"time-created")[-1]."id"' --raw-output)
+          IP=""
+          for attempt in $(seq 1 90); do
+            IP=$(oci compute instance list-vnics --instance-id "$IID" \
+              --query 'data[0]."public-ip"' --raw-output 2>/dev/null || true)
+            [ -n "$IP" ] && [ "$IP" != "null" ] && break
+            sleep 10
+          done
+          [ -n "$IP" ] && [ "$IP" != "null" ] || { echo "no public IP after 15m" >&2; exit 1; }
+          echo "instance=$IID ip=$IP"
+          # The bootstrap uses the SAME allowlisted deploy key: probe
+          # `switch.sh --diagnose` until it answers with the tooling banner
+          # (the allowlist + tooling exist only AFTER box-setup + allowlist
+          # install — before that the forced command silently no-ops, so a
+          # banner can never be a false positive).
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          for attempt in $(seq 1 120); do
+            OUT=$(ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+              -o ServerAliveInterval=15 -o ServerAliveCountMax=40 \
+              "$BOX_USER@$IP" "sudo /opt/houses/switch.sh --diagnose" 2>/dev/null || true)
+            case "$OUT" in
+              *"===== tooling"*) echo "bootstrap confirmed after ~$((attempt * 10))s"; exit 0 ;;
+            esac
+            sleep 10
+          done
+          echo "bootstrap did not complete in 20m — check the OCI console/cloud-init" >&2
+          exit 1
+      - name: Register the new box as BOX_HOST
+        env:
+          COMPARTMENT: ${{ secrets.OCI_COMPARTMENT_OCID }}
+        run: |
+          set -euo pipefail
+          IID=$(oci compute instance list --compartment-id "$COMPARTMENT" \
+            --query 'sort_by(data, &"time-created")[-1]."id"' --raw-output)
+          IP=$(oci compute instance list-vnics --instance-id "$IID" \
+            --query 'data[0]."public-ip"' --raw-output)
+          if gh api "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" -f value="$IP" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/variables" -f name=BOX_HOST -f value="$IP" >/dev/null
+          fi
+          echo "BOX_HOST variable set to $IP"
+
   deploy:
     if: github.event_name == 'push' || inputs.action == 'deploy'
     runs-on: ubuntu-latest
@@ -107,32 +234,30 @@ jobs:
           tar -czf /tmp/houses-dist.tar.gz -C . dist
           echo "dist: $(du -h /tmp/houses-dist.tar.gz | cut -f1)"
 
-      # NOTE: no "ship tooling" step here — the deploy key is
-      # command-restricted to `sudo /opt/houses/release.sh …` and
-      # `sudo /opt/houses/switch.sh` (authorized_keys), so scp/install can
+      # NOTE: no "ship tooling" step here — deploy key is command-restricted
+      # to release.sh/switch.sh (deploy-allowlist.sh), so scp/install can
       # never reach the box. The release script itself (running as root)
-      # installs the ref's own units/watchdog/switch.sh/run-instance.sh —
-      # R6, inside the security model.
-
+      # installs the ref's own units/watchdog/switch.sh/run-instance.sh/
+      # release.sh — R6, inside the security model.
 
       - name: Deploy ref to standby and smoke-test it
         env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
           set -euo pipefail
           REF="${{ github.event_name == 'push' && github.ref_name || inputs.ref }}"
-          echo "Deploying $REF to the standby..."
+          echo "Deploying $REF to the standby ($BOX_HOST)..."
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           # The dist rides the EXEC channel on stdin, not scp: the deploy
-          # key's command= allows only `sudo /opt/houses/release.sh <ref>`
-          # (and switch.sh) — release.sh reads /dev/stdin when it is a pipe.
-          # The remote command must stay exactly that shape: no local
-          # wrapper inside the quotes, or authorized_keys refuses it.
-          # R4 envelope: local timeout wraps ssh (900 s) on top of the
-          # step's 90-minute cap; release.sh's snapshot has its own 120 s
+          # key's allowlist accepts ONLY `sudo /opt/houses/release.sh <ref>`
+          # (plus switch.sh forms) — release.sh reads /dev/stdin when it is
+          # a pipe. The remote command must stay exactly that shape: no
+          # local wrapper inside the quotes, or the allowlist refuses it.
+          # R4 envelope: local timeout wraps ssh (1500 s) on top of the
+          # step's 90-minute cap; release.sh's snapshot has its own 300 s
           # deadline, so no stage can hang unbounded.
           cat /tmp/houses-dist.tar.gz | timeout 1500 ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
@@ -142,7 +267,7 @@ jobs:
       - name: Surface the box-side release log (best-effort)
         if: failure()
         env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -150,8 +275,8 @@ jobs:
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
-            "$BOX_USER@$BOX_HOST" "sudo sh -c 'tail -80 \$(ls -t /opt/houses/logs/releases/*.log 2>/dev/null | head -1) 2>/dev/null || echo no release log yet'" \
-            || echo "box unreachable — the release log is on the box at /opt/houses/logs/releases/"
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose" \
+            || echo "box unreachable — check the OCI console"
         timeout-minutes: 3
 
   switch:
@@ -160,14 +285,14 @@ jobs:
     # HUMAN GATE — GitHub Environments → Required reviewers (configure the
     # 'production' environment in repo Settings → Environments; public-repo
     # free plan supports it). A switch is a prod traffic change: the job
-    # waits for an explicit approval before running, implementing the
-    # sign-off requirement from the 2026-09-23 governance breach. Rollback
-    # stays ungated: it is the emergency undo and must not need approval.
+    # waits for explicit approval before running — the sign-off requirement
+    # from the 2026-09-23 governance breach. Rollback stays ungated: it is
+    # the emergency undo and must not need approval.
     environment: production
     steps:
       - name: Switch traffic to the smoke-verified standby
         env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -183,24 +308,19 @@ jobs:
     if: inputs.action == 'diagnose'
     runs-on: ubuntu-latest
     steps:
-      # READ-ONLY box state dump — the only sanctioned box visibility
-      # (the box's ssh user has no shell writes beyond the sudoers
-      # allowlist; every command below reads). Used to verify shipped
-      # tooling, snapshot inventory, and unit/journal state during an
-      # incident without touching prod.
+      # READ-ONLY box state dump via the sanctioned switch.sh --diagnose
+      # (the allowlist accepts only release.sh/switch.sh forms; the dump
+      # prints tooling sha256, migrations.list, unit states, release marks,
+      # snapshots, DB/WAL, side layout, journal tails).
       - name: Dump box state
         env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
-          # The deploy key's authorized_keys allowlist is release.sh/switch.sh
-          # ONLY (provision.md) — arbitrary commands (bash -s) are refused and
-          # swallowed by the forced command. switch.sh --diagnose is the
-          # sanctioned read-only dump and its stdout relays to this log.
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose"
@@ -209,11 +329,10 @@ jobs:
   rollback:
     if: inputs.action == 'rollback'
     runs-on: ubuntu-latest
-
     steps:
       - name: Roll back to the previous side
         env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |

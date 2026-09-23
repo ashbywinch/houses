@@ -202,6 +202,38 @@ explicit approval on GitHub (the sign-off requirement from the
 2026-09-23 governance breach). `rollback` stays ungated: it is the
 emergency undo.
 
+## 5c. Provision-from-GitHub (replace-not-repair)
+
+The box is rebuilt entirely from a workflow dispatch — no ad-hoc installs:
+
+```sh
+gh workflow run Release --ref main -f action=provision -f ref=main
+```
+
+It renders `tools/deploy/box-bootstrap.sh` as cloud-init userdata (via
+`provision-box.sh`), launches a fresh OCI instance, waits for the
+bootstrap to complete, and registers the new public IP as the `BOX_HOST`
+repo variable (deploy/switch/rollback/diagnose all prefer the variable,
+falling back to the secret for the pre-provision box).
+
+Secrets required (in addition to Steps 5/5b):
+
+```
+OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_API_KEY, OCI_REGION
+OCI_COMPARTMENT_OCID, OCI_SUBNET_OCID, OCI_IMAGE_OCID
+DEPLOY_PUBKEY (the deploy key's PUBLIC half — allowlist install)
+OPERATOR_PUBKEY (your interactive admin key — break-glass via SSH)
+AGE_KEY (private — restore of the off-box backup)
+AGE_RECIPIENT (public — nightly backup encryption)
+CF_TUNNEL_TOKEN (Cloudflare Zero Trust tunnel token)
+RCLONE_CONFIG (the [houses] remote body: type/provider/creds)
+```
+
+The bootstrap refuses to finish without a restoreable `.db.age` and
+`.env.age` in the `houses:backups/` bucket — a box with no data is never
+built. Break-glass if the workflow itself is unusable: OCI console →
+serial console → reimage → re-run `action=provision`.
+
 ## 6. Your first release (the whole loop)
 
 1. Push a tag: `git tag v0.1.0 && git push origin v0.1.0` — the Release
