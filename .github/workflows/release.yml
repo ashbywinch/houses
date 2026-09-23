@@ -157,7 +157,7 @@ jobs:
           # smoke-tests the standby on the NEW box) and that run hands off
           # to the gated cutover (IP swap + flip + verify + retire old).
           sleep 5
-          gh workflow run Release --ref main -f action=deploy
+          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=deploy
           echo "chained: deploy dispatched (standby smoke on the new box)"
         env:
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
@@ -273,12 +273,12 @@ jobs:
 
       - name: Chain to the gated cutover
         run: |
-          gh workflow run Release --ref main -f action=cutover
+          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover
           echo "chained: cutover dispatched — it waits at the production environment approval"
 
       - name: Chain to the gated cutover
         run: |
-          gh workflow run Release --ref main -f action=cutover
+          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover
           echo "chained: cutover dispatched — it waits at the production environment approval"
 
 
