@@ -37,11 +37,11 @@ on:
         required: false
         default: 'main'
       action:
-        description: 'deploy to standby | switch over | rollback'
+        description: 'deploy to standby | switch over | rollback | diagnose (read-only box state)'
         required: false
         default: 'deploy'
         type: choice
-        options: ['deploy', 'switch', 'rollback']
+        options: ['deploy', 'switch', 'rollback', 'diagnose']
 
 jobs:
   deploy:
@@ -171,6 +171,54 @@ jobs:
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh"
         timeout-minutes: 20
+
+  diagnose:
+    if: inputs.action == 'diagnose'
+    runs-on: ubuntu-latest
+    steps:
+      # READ-ONLY box state dump — the only sanctioned box visibility
+      # (the box's ssh user has no shell writes beyond the sudoers
+      # allowlist; every command below reads). Used to verify shipped
+      # tooling, snapshot inventory, and unit/journal state during an
+      # incident without touching prod.
+      - name: Dump box state
+        env:
+          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$BOX_HOST" bash -s <<'DIAG'
+          set +e  # every probe reports; nothing aborts the dump
+          echo "===== tooling (sha256) ====="
+          sha256sum /opt/houses/release.sh /opt/houses/switch.sh /opt/houses/run-migration.sh 2>&1
+          echo "===== /opt/houses/migrations.list ====="
+          if [ -f /opt/houses/migrations.list ]; then cat /opt/houses/migrations.list; else echo "MISSING (fail-fast guard will refuse flips)"; fi
+          echo "===== unit states ====="
+          systemctl is-active houses-blue houses-green 2>&1
+          echo "===== release/migration/switch marks ====="
+          ls -lat /opt/houses/logs/releases/ 2>&1 | head -15
+          echo "----- newest switch log -----"
+          tail -n 40 "$(ls -t /opt/houses/logs/releases/switch-*.log 2>/dev/null | head -1)" 2>&1
+          echo "----- newest run-migration log -----"
+          tail -n 25 "$(ls -t /opt/houses/logs/releases/run-migration-*.log 2>/dev/null | head -1)" 2>&1
+          echo "===== snapshots ====="
+          ls -la /var/backups/ 2>&1
+          echo "===== live DB + wal ====="
+          wc -c /opt/houses/data/houses.db /opt/houses/data/houses.db-wal /opt/houses/data/houses.db-shm 2>&1
+          stat -c '%y %s %n' /opt/houses/data/houses.db 2>&1
+          echo "===== sides ====="
+          ls -la /opt/houses/ 2>&1 | head -20
+          echo "===== journal houses-blue (last 40) ====="
+          sudo journalctl -u houses-blue -n 40 --no-pager 2>&1
+          echo "===== journal houses-green (last 60) ====="
+          sudo journalctl -u houses-green -n 60 --no-pager 2>&1
+          DIAG
+        timeout-minutes: 10
 
   rollback:
     if: inputs.action == 'rollback'
