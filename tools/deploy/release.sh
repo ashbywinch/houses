@@ -188,7 +188,7 @@ try:
 except sqlite3.OperationalError:
     pass
 dst = sqlite3.connect(out)
-deadline = time.monotonic() + 120
+deadline = time.monotonic() + 300
 aborted = [False]
 def _progress(*_a, **_k):
     if time.monotonic() > deadline:
@@ -241,11 +241,35 @@ mark "snapshot ok ($(du -h "$ROOT/$SIDE-smoke.db" | cut -f1))"
 # nothing to do. Adding a future migration = shipping the script + one
 # line in migrations.list — the runner is generic
 # (tools/deploy/run-migration.sh).
+#
+# FAIL-FAST: a missing list or a loop that did not run is drift — the
+# v1.5.x incident showed a silently-skipped migration passing releases
+# and flips while the DB stayed unmigrated. The box's /opt list and the
+# runner's log for THIS run are asserted.
+if [ ! -f "$ROOT/$SIDE/tools/deploy/migrations.list" ]; then
+  mark "ref is missing migrations.list — refusing the release (silent-skip guard)"
+  exit 1
+fi
+MIG_MARK="$ROOT/.release-migration-start"
+touch "$MIG_MARK"
+MIG_COUNT=0
 while IFS= read -r MIG; do
   [ -z "$MIG" ] && continue
   [[ "$MIG" == \#* ]] && continue  # migrations.list carries a # header — never a migration path
+  MIG_COUNT=$((MIG_COUNT + 1))
   "$ROOT/$SIDE/tools/deploy/run-migration.sh" "$ROOT/$SIDE/$MIG" "$ROOT/$SIDE-smoke.db" "$ROOT/$SIDE/.venv/bin/python"
 done < "$ROOT/$SIDE/tools/deploy/migrations.list"
+if [ "$MIG_COUNT" -gt 0 ]; then
+  NEWEST=$(find /opt/houses/logs/releases -name 'run-migration-*.log' -newer "$MIG_MARK" 2>/dev/null | head -1 || true)
+  if [ -z "$NEWEST" ] || ! grep -q "migration applied + verified" "$NEWEST" 2>/dev/null; then
+    mark "migration rehearsal produced no verified runner log — refusing the release (silent-skip guard)"
+    exit 1
+  fi
+  mark "migration rehearsal verified: $(basename "$NEWEST")"
+else
+  mark "no migrations listed in this ref — skipping rehearsal"
+fi
+rm -f "$MIG_MARK"
 
 # R4 — pre-flight memory gate: never start the standby on a starved box
 # (the 2026-09-07 OOM was a second stack starting beside an already-busy

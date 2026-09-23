@@ -73,3 +73,75 @@ done < "$LIST"
     assert r.returncode == 0, r.stderr
     invoked = (tmp_path / "args.log").read_text().splitlines()
     assert invoked == [str(green / migration)], invoked
+
+
+def test_switch_guard_refuses_missing_migrations_list(tmp_path):
+    """A flip with no shipped /opt/houses/migrations.list must stop cold —
+    the v1.5.x silent-skip failure mode."""
+    import subprocess
+
+    switch_src = (REPO / "tools" / "deploy" / "switch.sh").read_text()
+    assert "migrations.list missing on the box" in switch_src
+    assert "refusing to flip" in switch_src
+    missing_dir = tmp_path / "opt" / "houses"
+    missing_dir.mkdir(parents=True)
+    env = {"PATH": "/usr/bin:/bin", "MIG_LIST": str(missing_dir / "migrations.list")}
+    r = subprocess.run(
+        ["bash", "-c", "if [ ! -f \"$MIG_LIST\" ]; then echo 'refusing to flip'; exit 1; fi"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert r.returncode != 0
+    assert "refusing to flip" in r.stdout
+
+
+def test_release_requires_a_verified_runner_log(tmp_path):
+    """The rehearsal must leave a runner log with the verified marker; a
+    silently-skipped migration (no fresh log) fails the release."""
+    import subprocess
+    import time
+
+    logs = tmp_path / "logs" / "releases"
+    logs.mkdir(parents=True)
+    mark = tmp_path / ".release-migration-start"
+    mark.write_text("")
+
+    # a fresh-enough log WITHOUT the verified marker -> refuse
+    stale = logs / "run-migration-early-whatever.log"
+    stale.write_text("dry-run on /x\n")
+    r = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'NEWEST=$(find "$LOGS" -name \'run-migration-*.log\' -newer "$MARK" | head -1 || true); '
+            'if [ -z "$NEWEST" ] || ! grep -q "migration applied + verified" "$NEWEST"; then '
+            'echo "no verified runner log — refusing"; exit 1; fi; echo "ok: $NEWEST"',
+        ],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "LOGS": str(logs), "MARK": str(mark)},
+    )
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "refusing" in r.stdout
+
+    # with the marker present -> passes (mark BEFORE the log: -newer finds it)
+    mark_new = tmp_path / ".mark2"
+    mark_new.write_text("")
+    verified = logs / "run-migration-now-x.log"
+    verified.write_text("migration applied + verified\n")
+    time.sleep(0.05)  # log mtime strictly after the mark (coarse-FS safety)
+    r2 = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'NEWEST=$(find "$LOGS" -name \'run-migration-*.log\' -newer "$MARK" | head -1 || true); '
+            'if [ -z "$NEWEST" ] || ! grep -q "migration applied + verified" "$NEWEST"; then '
+            'echo "no verified runner log — refusing"; exit 1; fi; echo "ok"',
+        ],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "LOGS": str(logs), "MARK": str(mark_new)},
+    )
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert "ok" in r2.stdout

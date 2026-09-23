@@ -71,7 +71,7 @@ try:
 except sqlite3.OperationalError:
     pass
 dst = sqlite3.connect(out)
-deadline = time.monotonic() + 120
+deadline = time.monotonic() + 300
 aborted = [False]
 def _progress(*_a, **_k):
     if time.monotonic() > deadline:
@@ -110,7 +110,14 @@ sudo systemctl stop "houses-$OLD"
 # ref's copy is the authority the flip uses). On failure the pre-flip
 # snapshot is restored UNCONDITIONALLY and the old side comes back —
 # never leave a half-migrated DB in front of either code.
-if [ "$ACTION" != "--rollback" ] && [ -f /opt/houses/migrations.list ]; then
+if [ "$ACTION" != "--rollback" ]; then
+  # FAIL-FAST: the release SHIPS /opt/houses/migrations.list; its absence
+  # means tooling drift — never flip with a silently-skipped migration
+  # (the v1.5.x incident).
+  if [ ! -f /opt/houses/migrations.list ]; then
+    mark "migrations.list missing on the box — the release did not ship it; refusing to flip"
+    exit 1
+  fi
   while IFS= read -r MIG; do
     [ -z "$MIG" ] && continue
     [[ "$MIG" == \#* ]] && continue  # migrations.list carries a # header — never a migration path
