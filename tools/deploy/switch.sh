@@ -113,6 +113,7 @@ sudo systemctl stop "houses-$OLD"
 if [ "$ACTION" != "--rollback" ] && [ -f /opt/houses/migrations.list ]; then
   while IFS= read -r MIG; do
     [ -z "$MIG" ] && continue
+    [[ "$MIG" == \#* ]] && continue  # migrations.list carries a # header — never a migration path
     mark "run data migration on the LIVE DB: $MIG"
     if ! sudo /opt/houses/run-migration.sh "$ROOT/$NEW/$MIG" "$ROOT/data/houses.db" "$ROOT/$NEW/.venv/bin/python"; then
       mark "migration FAILED on the live DB — restoring the pre-flip snapshot and the old side"
