@@ -75,7 +75,7 @@ def _apply(conn):
     data = json.loads(zlib.decompress(persons["result_json"]).decode())
     mapping = collect_mapping(data["value"])
     # the stream is lazy — count it BEFORE the apply mutates the table
-    remap_count = len(list(rows_to_remap(conn, mapping)))
+    remap_count = sum(1 for _ in rows_to_remap(conn, mapping))
     ok = apply_migration(
         conn, "unused.db", persons["id"], data, mapping, rows_to_remap(conn, mapping), use_backup=False, verify=False
     )

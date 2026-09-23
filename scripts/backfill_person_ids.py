@@ -25,6 +25,7 @@ Dry-run by default; anything that writes requires
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import re
@@ -307,8 +308,8 @@ def main() -> int:
     print(f"persons: {len(mapping)} | rows remapped: {count} (applied)" if args.apply
           else f"persons: {len(mapping)} | rows remapped: {count} (dry-run)")
     if count:
-        sample = [r[1] for r in rows_to_remap(conn, mapping)]
-        print("sample node ids:", sample[:3])
+        sample = [r[1] for r in itertools.islice(rows_to_remap(conn, mapping), 3)]
+        print("sample node ids:", sample)
     return 0
 
 
