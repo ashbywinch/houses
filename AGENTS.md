@@ -113,7 +113,7 @@ make stop                       # Stop dev server + frontend
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
 - **Deploy discipline / release process**: [docs/deploy-discipline.md](docs/deploy-discipline.md)
 - **LAN scrape worker install**: [tools/deploy/provision.md](tools/deploy/provision.md) → Step 2.4
-- **Deploy to Oracle Cloud Free Tier**: [docs/deployment-oracle-free-tier.md](docs/deployment-oracle-free-tier.md)
+- **Deploy / rebuild the box (GCP, terraform + provision workflow)**: [tools/deploy/provision.md](tools/deploy/provision.md)
 - **Lucidlint review log (accepted/deferred findings)**: [docs/lucidlint-review-log.md](docs/lucidlint-review-log.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Remaining work (uncertainty in the DAG library, usability backlog)**: [docs/remaining-work-plan.md](docs/remaining-work-plan.md)

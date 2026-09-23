@@ -25,6 +25,7 @@ Dry-run by default; anything that writes requires
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import itertools
 import json
 import os
@@ -40,6 +41,15 @@ from houses.model.domain import slugify
 DB_PATH = "data/houses.db"
 
 _NUMERIC_ID_RE = re.compile(r"^[0-9]+$")
+
+
+@dataclasses.dataclass(frozen=True)
+class MigrationResult:
+    """Outcome of one apply pass: whether it succeeded and how many rows
+    were actually rewritten (the real count, not a post-apply re-scan)."""
+
+    ok: bool
+    applied: int
 
 
 def _rekey_node_id(node_id: str, mapping) -> str:
@@ -234,14 +244,20 @@ def _mark_changed_sources(conn, persons_row_id: int) -> None:
 
 # lucidlint: ignore long-param-list one-shot migration step — the signature IS its IO boundary;
 # an Options object would be a facade over nothing
-def apply_migration(conn, db_path: str, persons_id: int, data, mapping, remaps, *, use_backup: bool, verify: bool) -> bool:  # noqa: E501  # noqa: E501 split-style: ruff line-length on a call signature the engine splits at call sites
+def apply_migration(conn, db_path: str, persons_id: int, data, mapping, remaps, *, use_backup: bool, verify: bool) -> MigrationResult:  # noqa: E501 the signature IS its IO boundary (see the long-param-list ignore above)
     """Write the transform, checkpoint first, and prove it exhausted the
-    work. True on success; False means the run must fail loudly."""
+    work. Returns a MigrationResult; ok=False means the run must fail loudly.
+
+    The applied count is the generator's OWN consumption — a post-apply
+    re-scan on the same connection sees migrated rows and would report
+    zero (the 2026-09-23 '0 remapped (applied)' lie)."""
     if use_backup:
         backup_path = db_path + ".pre-person-id-migration"
         conn.backup(sqlite3.connect(backup_path))
         print(f"backup written: {backup_path}")
+    applied = 0
     for idx, (row_id, node_id, dep_json, blob) in enumerate(remaps):
+        applied += 1
         conn.execute(
             "UPDATE node_results SET node_id=?, dep_timestamps=?, result_json=? WHERE id=?",
             (node_id, dep_json, blob, row_id),
@@ -258,13 +274,13 @@ def apply_migration(conn, db_path: str, persons_id: int, data, mapping, remaps, 
         second_persons = _read_persons(conn)
         if second_persons is None:
             print("VERIFY FAILED: persons row missing after apply", file=sys.stderr)
-            return False
+            return MigrationResult(ok=False, applied=0)
         leftover = sum(1 for _ in rows_to_remap(conn, collect_mapping(second_persons[1].get("value"))))
         if leftover:
             print(f"VERIFY FAILED: {leftover} rows still remappable", file=sys.stderr)
-            return False
+            return MigrationResult(ok=False, applied=0)
         print("verify: zero rows remappable after apply")
-    return True
+    return MigrationResult(ok=True, applied=applied)
 
 # lucidlint: ignore latent-class main is the thin CLI shell over the same one-shot IO steps (see rows_to_remap)
 def main() -> int:
@@ -292,7 +308,7 @@ def main() -> int:
         return 1
     remaps = rows_to_remap(conn, mapping)
     if args.apply:
-        ok = apply_migration(
+        result = apply_migration(
             conn,
             args.db,
             persons,
@@ -302,11 +318,12 @@ def main() -> int:
             use_backup=args.backup,
             verify=args.verify,
         )
-        if not ok:
+        if not result.ok:
             return 2
+        print(f"persons: {len(mapping)} | rows remapped: {result.applied} (applied)")
+        return 0
     count = sum(1 for _ in remaps)
-    print(f"persons: {len(mapping)} | rows remapped: {count} (applied)" if args.apply
-          else f"persons: {len(mapping)} | rows remapped: {count} (dry-run)")
+    print(f"persons: {len(mapping)} | rows remapped: {count} (dry-run)")
     if count:
         sample = [r[1] for r in itertools.islice(rows_to_remap(conn, mapping), 3)]
         print("sample node ids:", sample)
