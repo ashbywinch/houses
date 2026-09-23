@@ -243,6 +243,7 @@ mark "snapshot ok ($(du -h "$ROOT/$SIDE-smoke.db" | cut -f1))"
 # (tools/deploy/run-migration.sh).
 while IFS= read -r MIG; do
   [ -z "$MIG" ] && continue
+  [[ "$MIG" == \#* ]] && continue  # migrations.list carries a # header — never a migration path
   "$ROOT/$SIDE/tools/deploy/run-migration.sh" "$ROOT/$SIDE/$MIG" "$ROOT/$SIDE-smoke.db" "$ROOT/$SIDE/.venv/bin/python"
 done < "$ROOT/$SIDE/tools/deploy/migrations.list"
 

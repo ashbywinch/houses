@@ -134,7 +134,7 @@ jobs:
           # R4 envelope: local timeout wraps ssh (900 s) on top of the
           # step's 90-minute cap; release.sh's snapshot has its own 120 s
           # deadline, so no stage can hang unbounded.
-          cat /tmp/houses-dist.tar.gz | timeout 900 ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          cat /tmp/houses-dist.tar.gz | timeout 1500 ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
           -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh $REF"
         timeout-minutes: 90
