@@ -165,18 +165,42 @@ Repo → Settings → Secrets and variables → Actions:
 - `BOX_HOST` — the Oracle public IP (or hostname)
 - `BOX_USER` — `ubuntu`
 - `BOX_SSH_KEY` — the private half of a **restricted deploy key** (not your
-  personal key). Generate a dedicated key; in the box's
-  `~ubuntu/.ssh/authorized_keys` add a `command=`-restricted entry:
-  ```
-  command="sudo /opt/houses/release.sh $1 2>/dev/null || true",no-pty,no-agent-forwarding,no-port-forwarding ssh-ed25519 AAA… deploy@houses
-  ```
-  plus a second entry for switch.sh, OR (simpler) allow the key to run any
-  command but only as a dedicated user with a sudoers rule:
-  ```
-  housesdeploy ALL=(root) NOPASSWD: /opt/houses/release.sh, /opt/houses/switch.sh, /usr/bin/systemctl restart houses-*, /usr/bin/systemctl start houses-*, /usr/bin/systemctl stop houses-*
-  ```
-  (Pick the command-restricted key if you want least privilege; the sudoers
-  list is the pragmatic middle. The key is a GitHub secret either way.)
+  personal key). The box entrypoint dispatches it through a strict allowlist
+  (see below). Generate a dedicated keypair once per box:
+  `ssh-keygen -t ed25519 -f houses-deploy -N '' -C deploy@houses`.
+
+Then ON THE BOX (as root) install the allowlist entry — do NOT hand-edit
+authorized_keys with the old `$1` recipe; sshd does not populate positional
+params in forced commands, so that entry silently swallowed every
+arg-bearing invocation (the 2026-09-23 `--rollback`/`--diagnose` no-ops).
+The dispatcher matches on `$SSH_ORIGINAL_COMMAND` and forwards ONLY the
+sanctioned shapes:
+
+```sh
+sudo /opt/houses/install-deploy-allowlist.sh "$(cat houses-deploy.pub)"
+```
+
+Sanctioned remote commands (everything else = silent no-op):
+
+```
+sudo /opt/houses/release.sh <ref>       → deploy to standby
+sudo /opt/houses/switch.sh              → flip
+sudo /opt/houses/switch.sh --rollback   → undo last flip
+sudo /opt/houses/switch.sh --diagnose   → read-only box state dump
+sudo journalctl -u <unit> -n <N> --no-pager   → read-only logs
+```
+
+Set the private key text as the `BOX_SSH_KEY` secret.
+
+## 5b. Human prod gate (GitHub Environments)
+
+Repo → Settings → Environments → **production** → Protection rules:
+**Required reviewers** = you. Deletion? Leave "Allow administrators to
+bypass": false. The Release workflow's `switch` job declares
+`environment: production`, so every traffic flip now waits for your
+explicit approval on GitHub (the sign-off requirement from the
+2026-09-23 governance breach). `rollback` stays ungated: it is the
+emergency undo.
 
 ## 6. Your first release (the whole loop)
 

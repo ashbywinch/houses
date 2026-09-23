@@ -1,11 +1,23 @@
 #!/bin/sh
 # /opt/houses box layout + units. Run as root ON THE BOX (cloud-init calls
 # it after the two checkouts exist; provision.md's manual path calls it
-# too — single source of truth).
+# too — single source of truth). IDEMPOTENT: safe to re-run on a fresh
+# instance or over an existing install (a rebuild is a re-run, not surgery).
 #
-# What it does: ACTIVE marker, deploy-script installs, chrome/browser unit,
-# app units installed but DISABLED (they need /etc/houses.env first — the
-# secrets cutover installs that, then `systemctl enable --now houses-blue`).
+# DOCTRINE (2026-09-23, after the frozen-bootstrap incident):
+#   * Replace-not-repair. The box is disposable; recovery = reimage from
+#     this script + restore the off-box backup, never ad-hoc fixes.
+#   * No frozen bootstrap. /opt/houses/release.sh is refreshed from the
+#     ref on EVERY release (R6 self-ship) and calls uv by absolute path —
+#     a broken bootstrap can never deadlock the box again.
+#   * Restricted SSH with a WORKING allowlist. The deploy key matches on
+#     $SSH_ORIGINAL_COMMAND (sshd does NOT populate "$1" in forced
+#     commands); sanctioned shapes = release.sh <ref>, switch.sh
+#     [--rollback|--diagnose], journalctl (read-only). /opt/houses/
+#     install-deploy-allowlist.sh writes that entry from a given pubkey.
+#   * Human prod gate on GitHub (Environments → Required reviewers), not
+#     on the box.
+#   * Break-glass = OCI serial console (works with keys/units broken).
 set -eu
 
 ROOT=/opt/houses
@@ -14,17 +26,19 @@ for side in blue green; do
   [ -d "$ROOT/$side" ] || { echo "box-setup: clone the repo to $ROOT/$side first" >&2; exit 1; }
 done
 
-mkdir -p "$ROOT/data"
-echo blue > "$ROOT/ACTIVE"          # blue is live from day one
-cp "$ROOT/blue/tools/deploy/run-instance.sh" "$ROOT/blue/tools/deploy/release.sh" "$ROOT/blue/tools/deploy/switch.sh" "$ROOT/"
-chmod +x "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
+# Tooling: install the CURRENT copies (box-setup runs from the checkout,
+# so a rebuild gets the survivor release.sh; per-release self-ship keeps
+# it fresh afterwards).
+install -m 0755 "$ROOT/blue/tools/deploy/run-instance.sh" "$ROOT/blue/tools/deploy/release.sh" "$ROOT/blue/tools/deploy/switch.sh" "$ROOT/blue/tools/deploy/run-migration.sh" "$ROOT/blue/tools/deploy/deploy-allowlist.sh" "$ROOT/blue/tools/deploy/install-deploy-allowlist.sh" "$ROOT/"
 chown -R ubuntu:ubuntu "$ROOT"
 # The deploy scripts execute as root via the sudoers rule — they must NOT
 # be writable by the sudo-able user, or any ubuntu compromise could edit
 # a script and escalate to root, defeating the guard (PR #68 security
 # review).
-chown root:root "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
-chmod 755 "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
+chown root:root "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh" "$ROOT/run-migration.sh" "$ROOT/deploy-allowlist.sh" "$ROOT/install-deploy-allowlist.sh"
+chmod 755 "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh" "$ROOT/run-migration.sh" "$ROOT/deploy-allowlist.sh" "$ROOT/install-deploy-allowlist.sh"
+
+install -m 0644 "$ROOT/blue/tools/deploy/migrations.list" "$ROOT/migrations.list"
 cp "$ROOT/blue/tools/deploy/units/"*.service /etc/systemd/system/
 systemctl daemon-reload
 cp "$ROOT/blue/tools/deploy/units/"*.timer /etc/systemd/system/
@@ -59,8 +73,13 @@ cat > /etc/sudoers.d/houses-deploy <<'SUDOERS'
 ubuntu ALL=(root) NOPASSWD: /opt/houses/release.sh *
 ubuntu ALL=(root) NOPASSWD: /opt/houses/switch.sh *
 ubuntu ALL=(root) NOPASSWD: /usr/bin/journalctl *
+
 SUDOERS
 chmod 440 /etc/sudoers.d/houses-deploy
 visudo -c >/dev/null
 
 echo "box setup complete:"
+echo "  - run-instance/release/switch/run-migration installed (root-owned, current ref)"
+echo "  - units + sudoers installed (journalctl read-only allowed)"
+echo "  - next: ./install-deploy-allowlist.sh <pubkey>  (writes the SSH allowlist)"
+echo "  - break-glass: OCI serial console — reimage + box-setup + restore backup"

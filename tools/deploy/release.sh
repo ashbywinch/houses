@@ -81,10 +81,11 @@ git checkout --force "$REF"
 chown -R ubuntu:ubuntu "$ROOT/$SIDE"
 git rev-parse --short HEAD > "$ROOT/${SIDE}-revision"
 
-# A release must run the ref's OWN tooling: the /opt/houses copy of this
-# script is provision-time-frozen.  Re-exec the checked-out release.sh
-# (checkout --force guarantees it is the authentic ref content, so a
-# compromise of the ubuntu account cannot inject into it).
+# A release must run the ref's OWN tooling. The /opt/houses copy is a plain
+# entrypoint: the re-exec below guarantees the ref's checkout copy runs
+# (checkout --force makes it authentic ref content), and R6 later re-ships
+# /opt/houses/release.sh itself — the box entrypoint is NEVER frozen, so a
+# stale bootstrap cannot deadlock the box (2026-09-23 incident).
 if [ "$0" != "$ROOT/$SIDE/tools/deploy/release.sh" ] && [ -f "$ROOT/$SIDE/tools/deploy/release.sh" ]; then
   echo "== re-exec the ref's own release.sh"
   exec sh "$ROOT/$SIDE/tools/deploy/release.sh" "$REF"
@@ -136,17 +137,15 @@ install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-blue.service" /etc/system
 install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-green.service" /etc/systemd/system/
 install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-network-watchdog.service" /etc/systemd/system/
 install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-network-watchdog.timer" /etc/systemd/system/
-install -m 0755 "$ROOT/$SIDE/tools/deploy/network-watchdog.sh" /opt/houses/network-watchdog.sh
 install -m 0755 "$ROOT/$SIDE/tools/deploy/switch.sh" /opt/houses/switch.sh
 install -m 0755 "$ROOT/$SIDE/tools/deploy/run-instance.sh" /opt/houses/run-instance.sh
 install -m 0755 "$ROOT/$SIDE/tools/deploy/run-migration.sh" /opt/houses/run-migration.sh
 install -m 0644 "$ROOT/$SIDE/tools/deploy/migrations.list" /opt/houses/migrations.list
-systemctl daemon-reload
-if grep -qi google /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
-  systemctl enable --now houses-network-watchdog.timer
-else
-  mark "box-setup: not a GCP guest — network watchdog NOT enabled"
-fi
+# re-ship release.sh itself + the ssh allowlist dispatcher: the box
+# entrypoint is refreshed every release (never frozen — 2026-09-23).
+install -m 0755 "$ROOT/$SIDE/tools/deploy/release.sh" /opt/houses/release.sh
+install -m 0755 "$ROOT/$SIDE/tools/deploy/deploy-allowlist.sh" /opt/houses/deploy-allowlist.sh
+install -m 0755 "$ROOT/$SIDE/tools/deploy/install-deploy-allowlist.sh" /opt/houses/install-deploy-allowlist.sh
 mark "box tooling shipped (switch.sh sha: $(sha256sum /opt/houses/switch.sh | cut -c1-16))"
 
 # R1 — the workflow pipes the CI-built dist on STDIN (scp is impossible:
