@@ -194,11 +194,23 @@ Until the next release, a rollback runs the box's older `switch.sh`
 ## Data migrations ride the release (generic)
 
 A data migration is a ref-shipped script executed by the ONE generic
-step `tools/deploy/run-migration.sh` on the **standby's smoke copy**
-before the standby boots. The live DB is never touched; a failed
-migration aborts the release with prod untouched. Adding a future
-migration = shipping the script + one line in release.sh's `MIGRATIONS`
-ordered list — no new deployment machinery.
+step `tools/deploy/run-migration.sh`, in TWO phases driven by the ONE
+shared list `tools/deploy/migrations.list` (shipped to
+`/opt/houses/migrations.list`):
+
+1. **Release rehearsal** — release.sh runs each migration on the
+   standby's smoke copy before the standby boots; a failed rehearsal
+   aborts the release with prod untouched.
+2. **Flip-time real run** — switch.sh runs each migration on the LIVE
+   DB with prod stopped (no readers/writers to tear), between stopping
+   the old side and starting the new one. On failure the pre-flip
+   snapshot is restored unconditionally and the old side restarts —
+   a half-migrated DB never faces either code. Rollback skips the
+   migration (its snapshot restore already returns the pre-migration
+   DB).
+
+Adding a future migration = shipping the script + one line in
+migrations.list — no new deployment machinery.
 
 **Migration script contract** (reference: `scripts/backfill_person_ids.py`):
 

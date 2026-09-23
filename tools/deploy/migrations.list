@@ -1,0 +1,6 @@
+# Ref-shipped data migrations, one path per line (relative to the checkout
+# root). The SAME list drives release.sh (rehearsal on the standby's smoke
+# copy) and switch.sh (the real run on the live DB, with prod stopped).
+# A migration here MUST satisfy the run-migration.sh contract (idempotent,
+# dry-run by default, --apply/--backup/--verify).
+scripts/backfill_person_ids.py

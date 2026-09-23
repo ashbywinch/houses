@@ -140,6 +140,7 @@ install -m 0755 "$ROOT/$SIDE/tools/deploy/network-watchdog.sh" /opt/houses/netwo
 install -m 0755 "$ROOT/$SIDE/tools/deploy/switch.sh" /opt/houses/switch.sh
 install -m 0755 "$ROOT/$SIDE/tools/deploy/run-instance.sh" /opt/houses/run-instance.sh
 install -m 0755 "$ROOT/$SIDE/tools/deploy/run-migration.sh" /opt/houses/run-migration.sh
+install -m 0644 "$ROOT/$SIDE/tools/deploy/migrations.list" /opt/houses/migrations.list
 systemctl daemon-reload
 if grep -qi google /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
   systemctl enable --now houses-network-watchdog.timer
@@ -232,20 +233,18 @@ chmod 600 "$ROOT/$SIDE-smoke.db"
 chown ubuntu:ubuntu "$ROOT/$SIDE-smoke.db"
 mark "snapshot ok ($(du -h "$ROOT/$SIDE-smoke.db" | cut -f1))"
 
-# Data migrations (ordered): each ref-shipped script runs on the
-# STANDBY's smoke copy BEFORE the standby boots. The live DB is never
-# touched; a failed migration aborts the release with prod untouched; the
-# revert layers are this step's per-migration backup, the pre-flip
-# snapshot written by switch.sh, and switch.sh --rollback. Scripts must be
-# idempotent: a re-release after adoption finds nothing to do. Adding a
-# future migration = shipping the script + one line here — the runner is
-# generic (tools/deploy/run-migration.sh).
-MIGRATIONS=(
-  "scripts/backfill_person_ids.py"
-)
-for MIG in "${MIGRATIONS[@]}"; do
+# Data migrations (ordered, from the SHARED migrations.list): each
+# ref-shipped script rehearses on the STANDBY's smoke copy BEFORE the
+# standby boots; the REAL run happens at the flip (switch.sh, on the live
+# DB with prod stopped). A failed rehearsal aborts the release with prod
+# untouched. Scripts must be idempotent: a re-release after adoption finds
+# nothing to do. Adding a future migration = shipping the script + one
+# line in migrations.list — the runner is generic
+# (tools/deploy/run-migration.sh).
+while IFS= read -r MIG; do
+  [ -z "$MIG" ] && continue
   "$ROOT/$SIDE/tools/deploy/run-migration.sh" "$ROOT/$SIDE/$MIG" "$ROOT/$SIDE-smoke.db" "$ROOT/$SIDE/.venv/bin/python"
-done
+done < "$ROOT/$SIDE/tools/deploy/migrations.list"
 
 # R4 — pre-flight memory gate: never start the standby on a starved box
 # (the 2026-09-07 OOM was a second stack starting beside an already-busy

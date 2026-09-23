@@ -103,6 +103,29 @@ rm -f "$BACKUP_PY"
 mark "stopping $OLD"
 sudo systemctl stop "houses-$OLD"
 
+# Data migrations on the LIVE DB — with prod STOPPED (no readers or
+# writers to tear; a write during the batched re-key would re-create
+# pre-migration rows and fail the verify). The SAME ordered list as
+# release.sh; the box's migrations.list is shippped by the release (this
+# ref's copy is the authority the flip uses). On failure the pre-flip
+# snapshot is restored UNCONDITIONALLY and the old side comes back —
+# never leave a half-migrated DB in front of either code.
+if [ "$ACTION" != "--rollback" ] && [ -f /opt/houses/migrations.list ]; then
+  while IFS= read -r MIG; do
+    [ -z "$MIG" ] && continue
+    mark "run data migration on the LIVE DB: $MIG"
+    if ! sudo /opt/houses/run-migration.sh "$ROOT/$NEW/$MIG" "$ROOT/data/houses.db" "$ROOT/$NEW/.venv/bin/python"; then
+      mark "migration FAILED on the live DB — restoring the pre-flip snapshot and the old side"
+      rm -f "$ROOT/data/houses.db-wal" "$ROOT/data/houses.db-shm"
+      sudo cp "$SNAPSHOT" "$ROOT/data/houses.db"
+      sudo chmod 600 "$ROOT/data/houses.db"
+      sudo chown ubuntu:ubuntu "$ROOT/data/houses.db"
+      sudo systemctl restart "houses-$OLD"
+      exit 1
+    fi
+  done < /opt/houses/migrations.list
+fi
+
 # Rollback also restores the newest pre-flip snapshot BEFORE the old side
 # starts: the released side may have migrated the schema, and the contract
 # is "restored unconditionally". The snapshot taken above is the current
