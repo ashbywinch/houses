@@ -41,7 +41,7 @@ ROOT="${HOUSES_ROOT:-/opt/houses}"
 LOG_DIR="${HOUSES_LOG_DIR:-$ROOT/logs/releases}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/run-migration-$(date +%Y%m%d-%H%M%S)-$(basename "$SCRIPT").log"
-exec > >(tee -a "$LOG") 2>&1
+exec > >(tee -a "$LOG") 2>&1  # smoke: tees stdout into the release log
 mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "run-migration $*" 2>/dev/null || true; }
 
 # The ref must actually ship the script it lists — silence here is drift
