@@ -114,7 +114,7 @@ if [ "$ACTION" != "--rollback" ]; then
   # FAIL-FAST: the release SHIPS /opt/houses/migrations.list; its absence
   # means tooling drift — never flip with a silently-skipped migration
   # (the v1.5.x incident).
-  if [ ! -f /opt/houses/migrations.list ]; then
+  if [ ! -f "$ROOT/migrations.list" ]; then
     mark "migrations.list missing on the box — the release did not ship it; refusing to flip"
     exit 1
   fi
@@ -131,7 +131,7 @@ if [ "$ACTION" != "--rollback" ]; then
       sudo systemctl restart "houses-$OLD"
       exit 1
     fi
-  done < /opt/houses/migrations.list
+  done < "$ROOT/migrations.list"
 fi
 
 # Rollback also restores the newest pre-flip snapshot BEFORE the old side

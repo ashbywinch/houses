@@ -34,6 +34,7 @@ def test_both_deploy_scripts_consume_the_shared_list():
     assert "migrations.list" in release
     assert "/opt/houses/migrations.list" in switch
     assert "run-migration.sh" in release and "run-migration.sh" in switch
+    assert "while IFS= read -r MIG" in release and "while IFS= read -r MIG" in switch
 
 def test_both_loops_skip_comment_lines(tmp_path):
     """The migration loops consume the file directly — a comment header
@@ -73,6 +74,34 @@ done < "$LIST"
     assert r.returncode == 0, r.stderr
     invoked = (tmp_path / "args.log").read_text().splitlines()
     assert invoked == [str(green / migration)], invoked
+
+    # the SWITCH loop is a sibling with a different path scheme (ROOT/$NEW/MIG,
+    # live DB) — its skip logic must not regress separately.
+    args2 = tmp_path / "args2.log"
+    runner2 = tmp_path / "run-migration2.sh"
+    runner2.write_text("#!/bin/bash\necho \"$1\" >> \"$ARGS_LOG2\"\n")
+    runner2.chmod(0o755)
+    (tmp_path / "blue").mkdir(exist_ok=True)
+    switch_loop = """if [ ! -f "$MIG_LIST" ]; then exit 1; fi
+while IFS= read -r MIG; do
+  [ -z "$MIG" ] && continue
+  [[ "$MIG" == \#* ]] && continue
+  "$RUNNER2" "$ROOT/$NEW/$MIG" "$ROOT/data/houses.db" "$PY"
+done < "$MIG_LIST"
+"""
+    env2 = {
+        "ROOT": str(tmp_path),
+        "NEW": "green",
+        "RUNNER2": str(runner2),
+        "MIG_LIST": str(tmp_path / "migrations.list"),
+        "PY": "/bin/true",
+        "ARGS_LOG2": str(args2),
+        "PATH": "/usr/bin:/bin",
+    }
+    r2 = subprocess.run(["bash", "-c", switch_loop], capture_output=True, text=True, env=env2)
+    assert r2.returncode == 0, r2.stderr
+    invoked2 = args2.read_text().splitlines()
+    assert invoked2 == [str(green / migration)], invoked2
 
 
 def test_switch_guard_refuses_missing_migrations_list(tmp_path):

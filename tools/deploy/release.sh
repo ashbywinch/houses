@@ -260,7 +260,7 @@ while IFS= read -r MIG; do
   "$ROOT/$SIDE/tools/deploy/run-migration.sh" "$ROOT/$SIDE/$MIG" "$ROOT/$SIDE-smoke.db" "$ROOT/$SIDE/.venv/bin/python"
 done < "$ROOT/$SIDE/tools/deploy/migrations.list"
 if [ "$MIG_COUNT" -gt 0 ]; then
-  NEWEST=$(find /opt/houses/logs/releases -name 'run-migration-*.log' -newer "$MIG_MARK" 2>/dev/null | head -1 || true)
+  NEWEST=$(find "$ROOT/logs/releases" -name 'run-migration-*.log' -newer "$MIG_MARK" 2>/dev/null | head -1 || true)
   if [ -z "$NEWEST" ] || ! grep -q "migration applied + verified" "$NEWEST" 2>/dev/null; then
     mark "migration rehearsal produced no verified runner log — refusing the release (silent-skip guard)"
     exit 1
