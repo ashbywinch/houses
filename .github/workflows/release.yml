@@ -101,8 +101,10 @@ jobs:
       - name: Launch the fresh instance
         run: |
           set -euo pipefail
-          project=$(sed -n 's/^project *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
-          zone=$(sed -n 's/^zone *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          # terraform.tfvars is gitignored (never in this checkout) — the
+          # project/zone live as repo variables with the real defaults
+          project="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          zone="${{ vars.GCP_ZONE || 'us-west1-a' }}"
           gcloud compute instances create houses-rebuild \
             --project "$project" --zone "$zone" \
             --machine-type e2-micro --tags houses \
@@ -304,8 +306,8 @@ jobs:
       - name: Move the static origin IP to the new box
         run: |
           set -euo pipefail
-          PROJECT=$(sed -n 's/^project *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
-          ZONE=$(sed -n 's/^zone *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
           STATIC=$(gcloud compute addresses describe houses-static --region us-west1 \
             --project "$PROJECT" --format='value(address)')
           # detach from the OLD box, attach to the new — origin IP unchanged,
@@ -347,8 +349,8 @@ jobs:
       - name: Retire the old instance (only after verification)
         run: |
           set -euo pipefail
-          PROJECT=$(sed -n 's/^project *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
-          ZONE=$(sed -n 's/^zone *= *"\(.*\)"/\1/p' terraform/terraform.tfvars)
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
           gcloud compute instances delete houses --zone "$ZONE" --project "$PROJECT" --quiet
           echo "old instance 'houses' retired"
         env:
