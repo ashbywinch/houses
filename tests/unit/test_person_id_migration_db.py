@@ -74,16 +74,19 @@ def _apply(conn):
     ).fetchone()
     data = json.loads(zlib.decompress(persons["result_json"]).decode())
     mapping = collect_mapping(data["value"])
-    remaps = rows_to_remap(conn, mapping)
-    ok = apply_migration(conn, "unused.db", persons["id"], data, mapping, remaps, use_backup=False, verify=False)
+    # the stream is lazy — count it BEFORE the apply mutates the table
+    remap_count = len(list(rows_to_remap(conn, mapping)))
+    ok = apply_migration(
+        conn, "unused.db", persons["id"], data, mapping, rows_to_remap(conn, mapping), use_backup=False, verify=False
+    )
     assert ok
-    return mapping, remaps
+    return mapping, remap_count
 
 
 def test_apply_rekeys_ids_timestamps_and_money():
     conn = _connect()
     _seed(conn)
-    mapping, remaps = _apply(conn)
+    mapping, remap_count = _apply(conn)
 
     assert mapping == {"Simon": "1", "Lorena": "2", "Ashby": "3", "George": "4"}
     rows = {r["node_id"]: r for r in conn.execute(
@@ -101,7 +104,8 @@ def test_apply_rekeys_ids_timestamps_and_money():
     # a label that contains a person name: only the leading segment re-keys
     assert "111/2/Lorena Square/walk" in rows
     assert "9999/best_address" in rows
-    assert len(remaps) == 4  # walk, final_fuel, works (money), label-containment row — best_address is a true no-op
+    # walk, final_fuel, works (money), label-containment row — best_address is a true no-op
+    assert remap_count == 4
 
 
 def test_apply_is_idempotent_and_preserves_existing_ids():
@@ -126,7 +130,7 @@ def test_apply_is_idempotent_and_preserves_existing_ids():
     assert {p["name"]: p["person_id"] for p in data["value"]} == mapping
 
     second = rows_to_remap(conn, collect_mapping(data["value"]))
-    assert second == [], "a second pass must find zero remappable rows"
+    assert list(second) == [], "a second pass must find zero remappable rows"
 
 
 def test_apply_advances_source_freshness_only():

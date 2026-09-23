@@ -152,16 +152,25 @@ def collect_mapping(persons_value) -> dict:
 
 # lucidlint: ignore latent-class one-shot migration threads one connection through IO steps by design —
 # a class wrapper adds ceremony without a reuse axis; tests pin the transform
-def rows_to_remap(conn, mapping):
-    """Scan every row and produce the remapped (id, node_id, dep_timestamps, result_json) entries."""
-    out = []
-    for row in conn.execute("SELECT id, node_id, dep_timestamps, result_json FROM node_results").fetchall():
-        dep = json.loads(row["dep_timestamps"] or "{}")
-        remapped = remap_row(row["node_id"], dep, row["result_json"], mapping)
-        if remapped is None:
-            continue
-        out.append((row["id"], *remapped))
-    return out
+def rows_to_remap(conn, mapping, chunk_size: int = 10_000):
+    """Stream every row in batches, yielding the remapped entries.
+
+    Never materializes the table: the fetchall() + list build held every
+    row's re-serialized dep_timestamps — multi-GB on the 862k-row live
+    DB — and the box OOM-killed the migration's dry-run (v1.5.0 release,
+    2026-09-23). Callers count once and re-generate for the apply.
+    """
+    sel = conn.execute("SELECT id, node_id, dep_timestamps, result_json FROM node_results")
+    while True:
+        rows = sel.fetchmany(chunk_size)
+        if not rows:
+            return
+        for row in rows:
+            dep = json.loads(row["dep_timestamps"] or "{}")
+            remapped = remap_row(row["node_id"], dep, row["result_json"], mapping)
+            if remapped is None:
+                continue
+            yield (row["id"], *remapped)
 
 
 def _read_persons(conn):
@@ -249,9 +258,9 @@ def apply_migration(conn, db_path: str, persons_id: int, data, mapping, remaps, 
         if second_persons is None:
             print("VERIFY FAILED: persons row missing after apply", file=sys.stderr)
             return False
-        second = rows_to_remap(conn, collect_mapping(second_persons[1].get("value")))
-        if second:
-            print(f"VERIFY FAILED: {len(second)} rows still remappable", file=sys.stderr)
+        leftover = sum(1 for _ in rows_to_remap(conn, collect_mapping(second_persons[1].get("value"))))
+        if leftover:
+            print(f"VERIFY FAILED: {leftover} rows still remappable", file=sys.stderr)
             return False
         print("verify: zero rows remappable after apply")
     return True
@@ -288,16 +297,18 @@ def main() -> int:
             persons,
             data,
             mapping,
-            remaps,
+            rows_to_remap(conn, mapping),  # a fresh scan — the first is counted below
             use_backup=args.backup,
             verify=args.verify,
         )
         if not ok:
             return 2
-    print(f"persons: {len(mapping)} | rows remapped: {len(remaps)} (applied)" if args.apply
-          else f"persons: {len(mapping)} | rows remapped: {len(remaps)} (dry-run)")
-    if remaps:
-        print("sample node ids:", [r[1] for r in remaps[:3]])
+    count = sum(1 for _ in remaps)
+    print(f"persons: {len(mapping)} | rows remapped: {count} (applied)" if args.apply
+          else f"persons: {len(mapping)} | rows remapped: {count} (dry-run)")
+    if count:
+        sample = [r[1] for r in rows_to_remap(conn, mapping)]
+        print("sample node ids:", sample[:3])
     return 0
 
 
