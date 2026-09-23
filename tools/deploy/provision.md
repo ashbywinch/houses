@@ -204,6 +204,20 @@ emergency undo.
 
 ## 5c. Provision-from-GitHub (replace-not-repair)
 
+BEFORE the first provision: collect every value with a single read-only
+run on the CURRENT box (your personal key — this script only READS):
+
+```sh
+sudo bash tools/deploy/collect-provision-secrets.sh   # run on the old box
+```
+
+It prints `RCLONE_CONFIG`, `AGE_RECIPIENT`, `CF_TUNNEL_TOKEN`,
+`DEPLOY_PUBKEY` (the values already in use) and points you at the Oracle
+console for the `OCI_*` ids, your laptop for `OPERATOR_PUBKEY`, and your
+age keypair for `AGE_KEY` (which is never stored on the box — if it's
+lost the nightly backups are not decryptable; generate a new pair and
+re-encrypt the bucket BEFORE rebuilding).
+
 The box is rebuilt entirely from a workflow dispatch — no ad-hoc installs:
 
 ```sh
