@@ -168,9 +168,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
-          ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}"
-        env:
-          PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
           ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
 
   deploy:
