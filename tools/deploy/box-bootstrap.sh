@@ -85,17 +85,30 @@ else
   log "no seed SA — box starts empty"
 fi
 
-log "7. HTTPS — Caddy on :443 (the proven path: the box's own terraform
-startup calls install-caddy.sh; the Cloudflare A records proxy to origin
-443; NO tunnel exists or is needed)."
+log "7. app env restore (private GCS object — same SA as the seed)"
+if [ -n "${SEED_SA_KEY:-}" ] && [ ! -f /etc/houses.env ]; then
+  printf '%s' "$SEED_SA_KEY" | base64 -d > /tmp/seed-sa.json 2>/dev/null
+  gcloud auth activate-service-account --key-file=/tmp/seed-sa.json --project="${SEED_PROJECT:-houses-498215}" >/dev/null 2>&1 || true
+  rm -f /tmp/seed-sa.json
+  gsutil -q cp "${GCS_ENV:-gs://houses-seed/houses.env}" /tmp/houses.env 2>/dev/null || true
+  if [ -s /tmp/houses.env ]; then
+    install -m 600 -o root -g root /tmp/houses.env /etc/houses.env
+    log "env restored to /etc/houses.env"
+  else
+    log "no env object at gs://houses-seed/houses.env — app cannot run until it exists"
+  fi
+fi
+
+log "8. HTTPS — Caddy on :443 (the proven path: install-caddy.sh; the
+Cloudflare A records proxy to origin 443; NO tunnel exists or is needed)."
 if [ -f /etc/houses.env ]; then
   bash /opt/houses/blue/tools/deploy/install-caddy.sh
 else
-  log "no /etc/houses.env yet — caddy install deferred to the env/deploy step"
+  log "no /etc/houses.env yet — caddy install deferred to the env step"
 fi
 
-log "8. provision marker"
+log "9. provision marker"
 echo "provisioned $(date -u +%FT%TZ) ref=$PROVISION_REF" > /opt/houses/PROVISIONED
 chmod 644 /opt/houses/PROVISIONED
 
-log "PROVISION COMPLETE — ssh paths live, seed restored, box ready for deploy"
+log "PROVISION COMPLETE — ssh paths live, seed+env restored, box ready for deploy"

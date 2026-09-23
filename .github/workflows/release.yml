@@ -105,6 +105,8 @@ jobs:
           # project/zone live as repo variables with the real defaults
           project="${{ vars.GCP_PROJECT || 'houses-498215' }}"
           zone="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          # idempotent re-provision: a failed attempt must not block the next
+          gcloud compute instances delete houses-rebuild --zone "$zone" --project "$project" --quiet 2>/dev/null || true
           gcloud compute instances create houses-rebuild \
             --project "$project" --zone "$zone" \
             --machine-type e2-micro --tags houses \
