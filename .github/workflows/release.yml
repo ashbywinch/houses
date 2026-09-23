@@ -47,8 +47,12 @@ on:
         description: 'git ref to release/provision (SHA, branch, or tag)'
         required: false
         default: 'main'
+      ip:
+        description: 'box IP (chained from provision; fallback: vars/secret)'
+        required: false
+        default: ''
       action:
-        description: 'provision a fresh box (OCI) | deploy to standby | switch over | rollback | diagnose'
+        description: 'provision a fresh box (GCP) | deploy | cutover | switch | rollback | diagnose'
         required: false
         default: 'deploy'
         type: choice
@@ -144,22 +148,16 @@ jobs:
           BOX_USER: ${{ secrets.BOX_USER }}
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
           ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
-      - name: Register the fresh box as BOX_HOST
+      - name: Register the fresh box and chain to the deploy
         run: |
           set -euo pipefail
           IP=$(gcloud compute instances describe houses-rebuild --project "$PROJECT" --zone "$ZONE" \
             --format='value(networkInterfaces[0].accessConfigs[0].natIP)')
-          if gh api "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" >/dev/null 2>&1; then
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/actions/variables/BOX_HOST" -f value="$IP" >/dev/null
-          else
-            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/variables" -f name=BOX_HOST -f value="$IP" >/dev/null
-          fi
-          echo "BOX_HOST variable set to $IP"
-          # 100% automated chain: this run hands off to the deploy (which
-          # smoke-tests the standby on the NEW box) and that run hands off
-          # to the gated cutover (IP swap + flip + verify + retire old).
-          sleep 5
-          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=deploy
+          echo "new box ready: $IP"
+          # 100% automated chain: the new box's IP rides the dispatch input
+          # (the runner token cannot write repo variables); deploy targets
+          # it, then hands off to the gated cutover.
+          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=deploy -f ip="$IP"
           echo "chained: deploy dispatched (standby smoke on the new box)"
         env:
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
@@ -236,7 +234,7 @@ jobs:
 
       - name: Deploy ref to standby and smoke-test it
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ inputs.ip || vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -261,7 +259,7 @@ jobs:
       - name: Surface the box-side release log (best-effort)
         if: failure()
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ inputs.ip || vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -275,7 +273,7 @@ jobs:
 
       - name: Chain to the gated cutover
         run: |
-          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover
+          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover -f ip="$BOX_HOST"
           echo "chained: cutover dispatched — it waits at the production environment approval"
 
 
@@ -367,7 +365,7 @@ jobs:
     steps:
       - name: Switch traffic to the smoke-verified standby
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ inputs.ip || vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -389,7 +387,7 @@ jobs:
       # snapshots, DB/WAL, side layout, journal tails).
       - name: Dump box state
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ inputs.ip || vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
@@ -407,7 +405,7 @@ jobs:
     steps:
       - name: Roll back to the previous side
         env:
-          BOX_HOST: ${{ vars.BOX_HOST || secrets.BOX_HOST }}
+          BOX_HOST: ${{ inputs.ip || vars.BOX_HOST || secrets.BOX_HOST }}
           BOX_USER: ${{ secrets.BOX_USER }}
           BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
