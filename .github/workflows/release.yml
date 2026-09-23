@@ -122,6 +122,8 @@ jobs:
           set -euo pipefail
           # The box's allowlist silently no-ops until the bootstrap installs
           # it — the tooling banner can never be a false positive.
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
           IP=""
           for attempt in $(seq 1 180); do
             [ -n "$IP" ] && [ "$IP" != "null" ] || \
