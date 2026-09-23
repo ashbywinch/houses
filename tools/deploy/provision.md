@@ -202,51 +202,49 @@ explicit approval on GitHub (the sign-off requirement from the
 2026-09-23 governance breach). `rollback` stays ungated: it is the
 emergency undo.
 
-## 5c. Provision-from-GitHub (replace-not-repair)
+## 5c. Provision-from-GitHub (GCP, replace-not-repair)
 
-BEFORE the first provision: collect every value with a single read-only
-run on the CURRENT box (your personal key — this script only READS):
-
-```sh
-sudo bash tools/deploy/collect-provision-secrets.sh   # run on the old box
-```
-
-It prints `RCLONE_CONFIG`, `AGE_RECIPIENT`, `CF_TUNNEL_TOKEN`,
-`DEPLOY_PUBKEY` (the values already in use) and points you at the Oracle
-console for the `OCI_*` ids, your laptop for `OPERATOR_PUBKEY`, and your
-age keypair for `AGE_KEY` (which is never stored on the box — if it's
-lost the nightly backups are not decryptable; generate a new pair and
-re-encrypt the bucket BEFORE rebuilding).
-
-The box is rebuilt entirely from a workflow dispatch — no ad-hoc installs:
+One dispatch builds a fresh box from code and verifies it before anything
+else:
 
 ```sh
-gh workflow run Release --ref main -f action=provision -f ref=main
+tools/deploy/seed-box.sh        # run on the LAN machine: pull live DB ->
+                                # migrate the COPY (the rehearsal) ->
+                                # upload gs://houses-seed/latest.db
+gh workflow run Release --ref main -f action=provision
+# then: action=deploy (standby smoke on the new box), the production
+# environment approval, action=switch. Retire the old instance only after
+# the new box serves:
+#   gcloud compute instances delete houses   (project houses-498215, zone us-west1-a)
 ```
 
-It renders `tools/deploy/box-bootstrap.sh` as cloud-init userdata (via
-`provision-box.sh`), launches a fresh OCI instance, waits for the
-bootstrap to complete, and registers the new public IP as the `BOX_HOST`
-repo variable (deploy/switch/rollback/diagnose all prefer the variable,
-falling back to the secret for the pre-provision box).
+The provision action: renders `tools/deploy/box-bootstrap.sh` as the GCP
+startup-script, launches `houses-rebuild` (e2-micro, houses tags, in the
+repo's VPC), waits until the deploy key can reach the box (the tooling
+banner — the allowlist silent-no-ops before that, so no false positive),
+and registers the box's IP as the `BOX_HOST` repo variable. The bootstrap
+installs BOTH ssh paths FIRST (operator key + allowlisted deploy key), so
+a half-built box is still ssh-able and troubleshootable — the property
+the old box lacked.
 
 Secrets required (in addition to Steps 5/5b):
 
 ```
-OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_API_KEY, OCI_REGION
-OCI_COMPARTMENT_OCID, OCI_SUBNET_OCID, OCI_IMAGE_OCID
-DEPLOY_PUBKEY (the deploy key's PUBLIC half — allowlist install)
-OPERATOR_PUBKEY (your interactive admin key — break-glass via SSH)
-AGE_KEY (private — restore of the off-box backup)
-AGE_RECIPIENT (public — nightly backup encryption)
-CF_TUNNEL_TOKEN (Cloudflare Zero Trust tunnel token)
-RCLONE_CONFIG (the [houses] remote body: type/provider/creds)
+BOX_SSH_KEY        (deploy key PRIVATE half — workflow only)
+DEPLOY_PUBKEY      (deploy key PUBLIC half — allowlist install)
+OPERATOR_PUBKEY    (your interactive admin key — break-glass via SSH)
+GOOGLE_SA_KEY      (base64 service-account JSON: compute.instanceAdmin.v1,
+                    compute.networkUser, storage.objectViewer on houses-seed)
+CF_TUNNEL_TOKEN    (Cloudflare Zero Trust tunnel token — the one dashboard value)
 ```
 
-The bootstrap refuses to finish without a restoreable `.db.age` and
-`.env.age` in the `houses:backups/` bucket — a box with no data is never
-built. Break-glass if the workflow itself is unusable: OCI console →
-serial console → reimage → re-run `action=provision`.
+No age/rclone/OCI — the site is public, the seed is a private GCS object;
+there was never an off-box encrypted backup (Phase 6 was never installed).
+Seed failure = box with no data: box-bootstrap.sh logs "no seed" and the
+box still boots; re-run seed-box.sh and re-provision.
+
+Break-glass if the workflow itself is unusable: GCP console → serial
+output → reimage → re-run `action=provision`.
 
 ## 6. Your first release (the whole loop)
 
