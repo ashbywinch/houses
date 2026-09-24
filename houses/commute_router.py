@@ -21,6 +21,7 @@ from uk_postcodes_parsing.postcode_utils import to_outcode as _to_outcode
 
 from dag.attempt import Attempt
 from dag.http_error import HttpError
+from houses import apigw
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
@@ -270,6 +271,7 @@ class GoogleRoutesClient:
 
         client_factory = options.client_factory or cached_async_client
         async with client_factory(timeout=options.timeout) as client:
+            await apigw.GATE.pace(apigw.GOOGLE)
             resp = await client.post(self.GOOGLE_ROUTES_URL, json=payload, headers=headers)
             if resp.status_code == 429:
                 raise HttpError(429, "rate limited", headers=dict(resp.headers))

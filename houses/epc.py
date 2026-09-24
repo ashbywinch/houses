@@ -14,9 +14,10 @@ from dataclasses import dataclass
 import httpx
 
 from dag.attempt import Attempt
+from houses import apigw
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
-from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.api_cache import get_cached
 from houses.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -139,23 +140,18 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         return _match_cert(certs, building_id, address)
 
     try:
-        async with cached_async_client(timeout=10.0) as client:
-            resp = await client.get(
-                EPC_SEARCH_URL,
-                params=params.to_dict(),
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {settings.epc_bearer_token}",
-                },
-            )
-            if resp.status_code != HTTP_OK:
-                logger.warning("EPC API returned %d for %s", resp.status_code, postcode)
-                return Attempt.impossible(f"EPC API returned status {resp.status_code}")
-
-            data = resp.json()
-            set_cached("GET", EPC_SEARCH_URL, params, None, data)
-            certs = data.get("data", [])
-            return _match_cert(certs, building_id, address)
+        data = await apigw.api_fetch(
+            "GET",
+            EPC_SEARCH_URL,
+            api=apigw.GOV_EPC,
+            params=params,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {settings.epc_bearer_token}",
+            },
+        )
+        certs = data.get("data", [])
+        return _match_cert(certs, building_id, address)
 
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it

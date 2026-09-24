@@ -89,6 +89,9 @@ TFL = ApiProfile(pace_s=0.1)
 # UK government EPC register — free, light pace.
 GOV_EPC = ApiProfile(pace_s=0.5)
 
+# OpenStreetMap Overpass — free; a light pace for politeness.
+OVERPASS = ApiProfile(pace_s=0.5)
+
 
 def _as_dict(obj: Any):
     """WirePayload or plain dict — callers shouldn't have to care."""

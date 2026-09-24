@@ -9,7 +9,6 @@ from dataclasses import dataclass
 import httpx
 
 from houses import apigw
-from houses.api_cache import cached_async_client, get_cached, set_cached, with_cache
 from houses.geopoint import GeoPoint
 from houses.location import PropertyLocation, WalkabilityFns
 from houses.settings import settings
@@ -114,22 +113,14 @@ async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoi
     rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
     params = _ReverseGeocodeParamsJson(point_lat=lat, point_lon=lng, size=1, boundary_country="GBR")
 
-    cached = get_cached("GET", rev_url, params, None)
-    if cached is not None:
-        data = cached
-    else:
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(rev_url, params=params.to_dict())
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", rev_url, params, None, data)
-        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
-            raise  # transient — let DAG retry handle it
-        # lucidlint: ignore broad-except deliberate fallback — reverse-geocode failure returns None
-        except Exception:
-            logger.warning("ORS reverse geocode failed for (%.4f, %.4f)", lat, lng, exc_info=True)
-            return None
+    try:
+        data = await apigw.api_fetch("GET", rev_url, api=apigw.ORS, params=params)
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — let DAG retry handle it
+    # lucidlint: ignore broad-except deliberate fallback — reverse-geocode failure returns None
+    except Exception:
+        logger.warning("ORS reverse geocode failed for (%.4f, %.4f)", lat, lng, exc_info=True)
+        return None
 
     features = _GeocodeResponseJson.from_dict(data).features
     if not features:
@@ -200,22 +191,17 @@ async def _google_places_text(lat: float, lng: float) -> str:
         ),
     )
     try:
-        async with cached_async_client(timeout=15.0) as client:
-
-            async def _fetch_places():
-                resp = await client.post(
-                    GOOGLE_MAPS_PLACES_URL,
-                    headers={
-                        "X-Goog-Api-Key": settings.google_maps_api_key,
-                        "X-Goog-FieldMask": "places.displayName,places.types,places.location",
-                        "Content-Type": "application/json",
-                    },
-                    json=places_body.to_dict(),
-                )
-                resp.raise_for_status()
-                return resp.json()
-
-            data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=places_body, fetch=_fetch_places)
+        data = await apigw.api_fetch(
+            "POST",
+            GOOGLE_MAPS_PLACES_URL,
+            api=apigw.GOOGLE,
+            body=places_body,
+            headers={
+                "X-Goog-Api-Key": settings.google_maps_api_key,
+                "X-Goog-FieldMask": "places.displayName,places.types,places.location",
+                "Content-Type": "application/json",
+            },
+        )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status == HTTP_TOO_MANY_REQUESTS or (HTTP_5XX_START <= status < HTTP_5XX_END):
@@ -248,18 +234,13 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
     )
     overpass_params = _OverpassParamsJson(data=overpass_query)
     try:
-        async with cached_async_client(timeout=15.0) as client:
-
-            async def _fetch_overpass():
-                resp = await client.get(
-                    overpass_url,
-                    params=overpass_params.to_dict(),
-                    headers={"Accept": "application/json", "User-Agent": "HousesApp/1.0"},
-                )
-                resp.raise_for_status()
-                return resp.json()
-
-            data = await with_cache("GET", overpass_url, params=overpass_params, fetch=_fetch_overpass)
+        data = await apigw.api_fetch(
+            "GET",
+            overpass_url,
+            api=apigw.OVERPASS,
+            params=overpass_params,
+            headers={"Accept": "application/json", "User-Agent": "HousesApp/1.0"},
+        )
         places = _format_overpass(_OverpassResponseJson.from_dict(data), lat, lng)
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it

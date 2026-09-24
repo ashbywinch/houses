@@ -390,42 +390,25 @@ async def _geocode_postcode(postcode: str, *, services: Any | None = None) -> At
 
     is_outcode = bool(_OUTCODE_RE.match(key))
     url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
-    disk = get_cached("GET", url, None, None)
-    if disk is not None:
-        data = disk
-        result = data.get("result")
-        if not result:
-            return Attempt.impossible("postcode not found")
-        gp = GeoPoint(result["latitude"], result["longitude"])
-        attempt = Attempt.succeeded(gp)
-        _cache_result(key, attempt, services=services)
-        return attempt
-    else:
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", url, None, None, data)
-                # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
-                result = data.get("result")
-                if not result:
-                    return Attempt.impossible("postcode not found")
-                gp = GeoPoint(result["latitude"], result["longitude"])
-                attempt = Attempt.succeeded(gp)
-                _cache_result(key, attempt, services=services)
-                return attempt
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == HTTP_NOT_FOUND:
-                _cache_result(key, Attempt.impossible("postcode not found (404)"), services=services)
-                set_cached("GET", url, None, None, {})
-                return Attempt.impossible("postcode not found (404)")
-            logger.warning("Geocode HTTP error for %s: %s", key, e)
-            return Attempt.impossible(f"HTTP {e.response.status_code}")
-        # lucidlint: ignore broad-except unexpected geocode failure logs the key and returns Attempt.impossible
-        except Exception:
-            logger.exception("Failed to geocode postcode: %s", key)
-            return Attempt.impossible("unexpected error")
+    try:
+        data = await apigw.api_fetch("GET", url, api=apigw.POSTCODESIO)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == HTTP_NOT_FOUND:
+            _cache_result(key, Attempt.impossible("postcode not found (404)"), services=services)
+            return Attempt.impossible("postcode not found (404)")
+        logger.warning("Geocode HTTP error for %s: %s", key, e)
+        return Attempt.impossible(f"HTTP {e.response.status_code}")
+    # lucidlint: ignore broad-except unexpected geocode failure logs the key and returns Attempt.impossible
+    except Exception:
+        logger.exception("Failed to geocode postcode: %s", key)
+        return Attempt.impossible("unexpected error")
+    result = data.get("result")
+    if not result:
+        return Attempt.impossible("postcode not found")
+    gp = GeoPoint(result["latitude"], result["longitude"])
+    attempt = Attempt.succeeded(gp)
+    _cache_result(key, attempt, services=services)
+    return attempt
 
 
 async def find_nearest_town_name(
