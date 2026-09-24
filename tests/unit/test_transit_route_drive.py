@@ -10,6 +10,11 @@ import pytest
 from houses.geopoint import GeoPoint
 
 
+async def _passthrough_fetch(*args, **kwargs):
+    """with_cache stand-in for tests: call the fetch without disk I/O."""
+    return await kwargs["fetch"]()
+
+
 class _FakeDirectionsClient:
     """Context manager returning a canned ORS directions response."""
 
@@ -22,6 +27,8 @@ class _FakeDirectionsClient:
 
     async def __aexit__(self, *a):
         return False
+
+
 
     async def request(self, method, url, *, headers, params=None, json=None):
         self.posted_bodies.append(json)
@@ -40,11 +47,6 @@ class _FakeResponse:
         return {"routes": [{"summary": {"duration": self._duration_s}}]}
 
 
-async def _passthrough_fetch(*args, **kwargs):
-    """with_cache stand-in for tests: call the fetch without disk I/O."""
-    return await kwargs["fetch"]()
-
-
 @pytest.mark.asyncio
 async def test_drive_minutes_from_location_posts_origin_coords():
     """_get_drive_minutes_from_location estimates from known coordinates
@@ -55,18 +57,15 @@ async def test_drive_minutes_from_location_posts_origin_coords():
 
     fake = _FakeDirectionsClient(duration_s=720)  # 12 min
     with (
-        patch("houses.apigw.cached_async_client", return_value=fake),
-        patch(
-            "houses.apigw.with_cache",
-            side_effect=_passthrough_fetch,
-        ),
-        patch("houses.transit_route.settings.ors_api_key", "fake-key"),
+        patch("houses.apigw.with_cache", side_effect=_passthrough_fetch),
         patch("houses.transit_route.find_station") as find_station,
         patch("houses.transit_route.geocode_address") as geocode_address,
     ):
         find_station.return_value = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
         geocode_address.return_value = None  # station found in registry, no geocode needed
-        result = await _get_drive_minutes_from_location(GeoPoint(51.5, -0.1), "Maidenhead Rail Station")
+        result = await _get_drive_minutes_from_location(
+            GeoPoint(51.5, -0.1), "Maidenhead Rail Station", _client_factory=lambda *a, **k: fake
+        )
 
     assert result == 12
     assert fake.posted_bodies == [
@@ -85,12 +84,7 @@ async def test_drive_minutes_from_postcode_geocodes_then_estimates():
 
     fake = _FakeDirectionsClient(duration_s=900)  # 15 min
     with (
-        patch("houses.apigw.cached_async_client", return_value=fake),
-        patch(
-            "houses.apigw.with_cache",
-            side_effect=_passthrough_fetch,
-        ),
-        patch("houses.transit_route.settings.ors_api_key", "fake-key"),
+        patch("houses.apigw.with_cache", side_effect=_passthrough_fetch),
         patch("houses.transit_route.geocode") as geocode,
         patch("houses.transit_route.find_station") as find_station,
         patch("houses.transit_route.geocode_address") as geocode_address,
@@ -98,7 +92,9 @@ async def test_drive_minutes_from_postcode_geocodes_then_estimates():
         geocode.return_value = Attempt.succeeded(GeoPoint(51.5, -0.1))
         find_station.return_value = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
         geocode_address.return_value = None
-        result = await _get_drive_minutes("SL6 3YZ", "Maidenhead Rail Station")
+        result = await _get_drive_minutes(
+            "SL6 3YZ", "Maidenhead Rail Station", _client_factory=lambda *a, **k: fake
+        )
 
     assert result == 15
     assert fake.posted_bodies == [

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from houses import apigw
 from houses.geopoint import GeoPoint
@@ -86,24 +86,24 @@ class BaseApi:
 
 
 @dataclass(frozen=True)
-class OrsSearchParams:
+class OrsSearchParams(WirePayload):
     text: str
     size: int
 
 
 @dataclass(frozen=True)
-class OrsReverseParams:
+class OrsReverseParams(WirePayload):
     point_lat: float
     point_lon: float
     size: int
     boundary_country: str
 
     # the Pelias reverse endpoint wants dotted keys
-    wire_key_rewrites = {"point_lat": "point.lat", "point_lon": "point.lon"}
+    wire_key_rewrites: ClassVar[dict[str, str]] = {"point_lat": "point.lat", "point_lon": "point.lon"}
 
 
 @dataclass(frozen=True)
-class OrsDirectionsBody:
+class OrsDirectionsBody(WirePayload):
     coordinates: list[list[float]]
     units: str
 
@@ -192,7 +192,7 @@ ors = ORSApi()
 
 
 @dataclass(frozen=True)
-class NominatimParams:
+class NominatimParams(WirePayload):
     q: str
     format: str
     limit: int
@@ -226,7 +226,7 @@ nominatim = NominatimApi()
 
 
 @dataclass(frozen=True)
-class GoogleGeocodeParams:
+class GoogleGeocodeParams(WirePayload):
     address: str
 
 
@@ -255,24 +255,24 @@ google_geocode = GoogleGeocodeApi()
 
 
 @dataclass(frozen=True)
-class PlacesCenter:
+class PlacesCenter(WirePayload):
     latitude: float
     longitude: float
 
 
 @dataclass(frozen=True)
-class PlacesCircle:
+class PlacesCircle(WirePayload):
     center: PlacesCenter
     radius: float
 
 
 @dataclass(frozen=True)
-class PlacesRestriction:
+class PlacesRestriction(WirePayload):
     circle: PlacesCircle
 
 
 @dataclass(frozen=True)
-class PlacesSearchBody:
+class PlacesSearchBody(WirePayload):
     included_types: list[str]
     max_result_count: int
     location_restriction: PlacesRestriction
@@ -407,7 +407,7 @@ epc = EpcApi()
 
 
 @dataclass(frozen=True)
-class OverpassParams:
+class OverpassParams(WirePayload):
     data: str
 
 

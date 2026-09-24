@@ -32,7 +32,6 @@ follows.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import logging
 import time
 from dataclasses import dataclass
@@ -95,18 +94,10 @@ OVERPASS = ApiProfile(pace_s=0.5)
 
 
 def _as_dict(obj: Any):
-    """WirePayload dataclass or plain dict — serialize the dataclass
-    generically (nested shapes included); callers never hand-build wire
-    dicts in API classes. A class carries ``wire_key_rewrites`` when its
-    field name cannot be the wire key (e.g. ``point_lat`` → ``point.lat``)."""
-    if hasattr(obj, "to_dict"):
-        return obj.to_dict()
-    if dataclasses.is_dataclass(obj):
-        d = dataclasses.asdict(obj)
-        for src, dst in getattr(obj, "wire_key_rewrites", {}).items():
-            d[dst] = d.pop(src)
-        return d
-    return obj
+    """WirePayload dataclass or plain dict — the class's ``to_dict`` is the
+    single serializer (the default WirePayload one handles plain dataclasses);
+    callers never hand-build wire dicts in API classes."""
+    return obj.to_dict() if hasattr(obj, "to_dict") else obj
 
 
 class DailyQuotaError(Exception):
