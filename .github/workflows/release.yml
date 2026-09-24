@@ -45,25 +45,6 @@ permissions:
 # (see tools/deploy/provision.md §5c — no OCI, no tunnel, no age).
 
 on:
-  push:
-    tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: 'git ref to release/provision (SHA, branch, or tag)'
-        required: false
-        default: 'main'
-      ip:
-        description: 'box IP (chained from provision; fallback: vars/secret)'
-        required: false
-        default: ''
-      action:
-        description: 'provision a fresh box (GCP) | deploy | cutover | switch | rollback | diagnose'
-        required: false
-        default: 'deploy'
-        type: choice
-        options: ['provision', 'deploy', 'cutover', 'switch', 'rollback', 'diagnose']
-
 jobs:
   provision:
     if: inputs.action == 'provision'
@@ -154,22 +135,144 @@ jobs:
           BOX_USER: ${{ secrets.BOX_USER }}
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
           ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
-      - name: Register the fresh box and chain to the deploy
+      - id: register
+        name: Register the fresh box
         run: |
           set -euo pipefail
           IP=$(gcloud compute instances describe houses-rebuild --project "$PROJECT" --zone "$ZONE" \
             --format='value(networkInterfaces[0].accessConfigs[0].natIP)')
           echo "new box ready: $IP"
-          # 100% automated chain: the new box's IP rides the dispatch input
-          # (the runner token cannot write repo variables); deploy targets
-          # it, then hands off to the gated cutover.
-          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=deploy -f ip="$IP"
-          echo "chained: deploy dispatched (standby smoke on the new box)"
+          echo "new_ip=$IP" >> "$GITHUB_OUTPUT"
         env:
-          GH_TOKEN: ${{ github.token }}
           PROJECT: ${{ vars.GCP_PROJECT || 'houses-498215' }}
           ZONE: ${{ vars.GCP_ZONE || 'us-west1-a' }}
+    outputs:
+      new_ip: ${{ steps.register.outputs.new_ip }}
 
+  deploy-new:
+    if: inputs.action == 'provision' && needs.provision.result == 'success'
+    needs: [provision]
+    runs-on: ubuntu-latest
+    env:
+      BOX_HOST: ${{ needs.provision.outputs.new_ip }}
+    outputs:
+      box_ip: ${{ steps.chain_ok.outputs.ip }}
+    steps:
+      # The workspace starts EMPTY without a checkout — the Guard step only
+      # git-inits and fetches refs, so the frontend build below needs an
+      # explicit checkout of the ref being released (v1.4.0 deploy failed
+      # on `cd houses/frontend`).
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
+      - name: Guard — released ref must be on main (tags) or explicitly dispatched
+        env:
+          REF: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
+        run: |
+          set -euo pipefail
+          # The ref is interpolated into a remote shell command below —
+          # refuse anything outside the safe charset so a tag or dispatch
+          # input cannot break out of the quoting (PR #68 review,
+          # command injection).
+          case "$REF" in
+            *[!A-Za-z0-9._/-]*)
+              echo "ERROR: ref '$REF' contains characters outside [A-Za-z0-9._/-] — refusing to deploy." >&2
+              exit 1
+              ;;
+          esac
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Tag push: the tag must be reachable from main — the code
+            # went through a PR.  Tagging a feature branch directly is an
+            # unreviewed deploy; fail it (see docs/deploy-discipline.md).
+            echo "Tag push — verifying $REF is reachable from main..."
+            git init -q .
+            # actions/checkout already created origin (v1.4.1 deploy failed
+            # on `git remote add: remote origin already exists`) — be
+            # idempotent instead of assuming an empty workspace.
+            if git remote get-url origin >/dev/null 2>&1; then
+              git remote set-url origin "https://github.com/${{ github.repository }}.git"
+            else
+              git remote add origin "https://github.com/${{ github.repository }}.git"
+            fi
+            git fetch -q --filter=blob:none origin \
+              "+refs/heads/main:refs/remotes/origin/main" \
+              "+refs/tags/$REF:refs/tags/$REF"
+            if ! git merge-base --is-ancestor "$REF" origin/main; then
+              echo "ERROR: tag $REF is not reachable from main. Merge the PR first, then re-tag main." >&2
+              exit 1
+            fi
+          else
+            echo "workflow_dispatch with ref=$REF"
+            if [ "$REF" != "main" ]; then
+              echo "NOTE: releasing non-main ref $REF — the deliberate, reviewable bypass."
+            fi
+          fi
+
+      - name: Build the frontend for this release (R1 — never on the box)
+        run: |
+          set -euo pipefail
+          cd houses/frontend
+          npm ci
+          npm run build
+          tar -czf /tmp/houses-dist.tar.gz -C . dist
+          echo "dist: $(du -h /tmp/houses-dist.tar.gz | cut -f1)"
+
+      # NOTE: no "ship tooling" step here — deploy key is command-restricted
+      # to release.sh/switch.sh (deploy-allowlist.sh), so scp/install can
+      # never reach the box. The release script itself (running as root)
+      # installs the ref's own units/watchdog/switch.sh/run-instance.sh/
+      # release.sh — R6, inside the security model.
+
+      - name: Deploy ref to standby and smoke-test it
+        env:
+          BOX_HOST: ${{ needs.provision.outputs.new_ip }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          REF="${{ github.event_name == 'push' && github.ref_name || inputs.ref }}"
+          echo "Deploying $REF to the standby ($BOX_HOST)..."
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          # The dist rides the EXEC channel on stdin, not scp: the deploy
+          # key's allowlist accepts ONLY `sudo /opt/houses/release.sh <ref>`
+          # (plus switch.sh forms) — release.sh reads /dev/stdin when it is
+          # a pipe. The remote command must stay exactly that shape: no
+          # local wrapper inside the quotes, or the allowlist refuses it.
+          # R4 envelope: local timeout wraps ssh (1500 s) on top of the
+          # step's 90-minute cap; release.sh's snapshot has its own 300 s
+          # deadline, so no stage can hang unbounded.
+          cat /tmp/houses-dist.tar.gz | timeout 1500 ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh $REF"
+        timeout-minutes: 90
+
+      - name: Surface the box-side release log (best-effort)
+        if: failure()
+        env:
+          BOX_HOST: ${{ needs.provision.outputs.new_ip }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        run: |
+          set +e
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose" \
+            || echo "box unreachable — check the console"
+        timeout-minutes: 3
+
+      - name: Chain to the gated cutover
+        run: |
+          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover -f ip="$BOX_HOST"
+          echo "chained: cutover dispatched — it waits at the production environment approval"
+        env:
+          GH_TOKEN: ${{ github.token }}"
+
+
+      - id: chain_ok
+        name: Standby smoke passed on the new box
+        run: echo "ip=$BOX_HOST" >> "$GITHUB_OUTPUT"
   deploy:
     if: github.event_name == 'push' || inputs.action == 'deploy'
     runs-on: ubuntu-latest
@@ -287,7 +390,8 @@ jobs:
 
 
   cutover:
-    if: inputs.action == 'cutover'
+    if: inputs.action == 'provision' && needs.deploy-new.result == 'success'
+    needs: [deploy-new]
     runs-on: ubuntu-latest
     # The traffic move (the ONE human gate): the static origin IP moves to
     # the new box, the app flips, public health is verified, then the old
