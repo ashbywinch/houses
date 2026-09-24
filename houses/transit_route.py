@@ -7,8 +7,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.location import geocode, geocode_address
+from houses.location import geocode, geocode_address, get_geo_state, pace_ors_directions
 from houses.settings import settings
 from houses.stations import find as find_station
 from houses.web.json_utils import optional_parse
@@ -165,7 +167,9 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     return await _get_drive_minutes_from_location(origin_coords, station_name)
 
 
-async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> int | None:
+async def _get_drive_minutes_from_location(
+    origin_coords, station_name: str, *, _client_factory=None
+) -> int | None:
     """Drive time from known coordinates to a station — the fallback
     when a property has no postcode but does have a best location."""
     station = find_station(station_name)
@@ -184,8 +188,17 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
     )
     payload = body.to_dict()
     key = json.dumps(payload, sort_keys=True)
+    if get_geo_state().ors_exhausted:
+        logger.debug(
+            "park-and-ride ORS lookup skipped for %s -> %s: daily quota exhausted",
+            origin_coords,
+            station_name,
+        )
+        return None
     try:
-        async with cached_async_client(timeout=15.0) as client:
+        await pace_ors_directions()
+        client_factory = _client_factory or cached_async_client
+        async with client_factory(timeout=15.0) as client:
             cached = get_cached("POST", ORS_DIRECTIONS_URL, None, key)
             if cached is not None:
                 response = _DirectionsResponseJson.from_dict(cached)
@@ -195,6 +208,9 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
                 headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
                 json=payload,
             )
+            if resp.status_code == 403:
+                get_geo_state().ors_exhausted = True
+                return None  # daily quota, not "no route": keep the walk leg
             resp.raise_for_status()
             data = resp.json()
             set_cached("POST", ORS_DIRECTIONS_URL, None, key, data)
@@ -204,7 +220,11 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
         # Log and re-raise the ORIGINAL exception: _compute_attempt is the
         # single classifier (transient → retry + pending, permanent →
         # impossible). Wrapping in RuntimeError would hide the httpx type
-        # and lose the retry decision (2026-09-19).
+        # and lose the retry decision (2026-09-19). A 403 = the ORS daily
+        # quota (geocoder pattern): flag it so later calls short-circuit
+        # instead of stacking more impossibles.
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 403:
+            get_geo_state().ors_exhausted = True
         logger.warning(
             "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s): %s",
             origin_coords,

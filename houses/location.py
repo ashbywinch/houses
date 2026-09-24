@@ -29,9 +29,10 @@ HTTP_NOT_FOUND = 404
 
 class _GeoState:
     google_exhausted: bool = False
-    ors_geo_exhausted: bool = False
+    ors_exhausted: bool = False
     nominatim_exhausted: bool = False
     nominatim_last_call: float = 0.0
+    ors_directions_last_call: float = 0.0
 
 
 def get_geo_state(*, services: Any | None = None) -> _GeoState:
@@ -40,6 +41,23 @@ def get_geo_state(*, services: Any | None = None) -> _GeoState:
     if svc.geo_state is None:
         svc.geo_state = _GeoState()
     return svc.geo_state
+
+
+ORS_DIRECTIONS_PACE_SECONDS = 0.25
+
+
+async def pace_ors_directions(*, services: Any | None = None) -> None:
+    """Pace ORS directions/walk/drive POSTs — the geocoder's 1 req/s rule,
+    at a gentler interval for the heavier, well-cached directions calls.
+    Without this a cold-cache recompute hammered ORS and blew the daily
+    quota in minutes (2026-09-24)."""
+    state = get_geo_state(services=services)
+    loop = asyncio.get_event_loop()
+    now = loop.time()
+    since = now - state.ors_directions_last_call
+    if state.ors_directions_last_call and since < ORS_DIRECTIONS_PACE_SECONDS:
+        await asyncio.sleep(ORS_DIRECTIONS_PACE_SECONDS - since)
+    state.ors_directions_last_call = loop.time()
 
 
 # ── URL constants ────────────────────────────────────────────────
@@ -391,7 +409,7 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
 
 async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
     """Geocode *address* via ORS Pelias; ``None`` means "try the next provider"."""
-    if get_geo_state(services=services).ors_geo_exhausted:
+    if get_geo_state(services=services).ors_exhausted:
         return None
     params = _OrsSearchParams(text=f"{address}, UK", size=1)
     cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
@@ -428,7 +446,7 @@ async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = N
             logger.warning("ORS returned no features for '%s'", address)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (403, 429):
-            get_geo_state(services=services).ors_geo_exhausted = True
+            get_geo_state(services=services).ors_exhausted = True
         logger.warning("ORS geocoding failed for '%s': HTTP %s", address, exc.response.status_code)
         return None
     # lucidlint: ignore broad-except deliberate fallback — provider failure means try the next geocoder

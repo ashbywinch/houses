@@ -10,7 +10,7 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached, with_cache
 from houses.geopoint import GeoPoint
-from houses.location import PropertyLocation, WalkabilityFns
+from houses.location import PropertyLocation, WalkabilityFns, get_geo_state, pace_ors_directions
 from houses.settings import settings
 from houses.web.json_utils import optional_parse
 
@@ -145,12 +145,19 @@ async def _walk_duration(
     lat: float,
     lng: float,
     town_centre: GeoPoint,
+    *,
+    _client_factory=None,
 ) -> int | None:
     origin = [lng, lat]
     dest = [town_centre.lon, town_centre.lat]
     body = _ORSWalkBody(coordinates=[origin, dest])
+    if get_geo_state().ors_exhausted:
+        logger.warning("ORS walk directions skipped for (%.4f, %.4f): daily quota exhausted", lat, lng)
+        return None
     try:
-        async with cached_async_client(timeout=15.0) as client:
+        await pace_ors_directions()
+        client_factory = _client_factory or cached_async_client
+        async with client_factory(timeout=15.0) as client:
 
             async def _fetch():
                 resp = await client.post(
@@ -161,10 +168,15 @@ async def _walk_duration(
                     },
                     json=body.to_dict(),
                 )
+                if resp.status_code == 403:
+                    get_geo_state().ors_exhausted = True
+                    return None
                 resp.raise_for_status()
                 return resp.json()
 
             data = await with_cache("POST", ORS_WALKING_URL, body=body, fetch=_fetch)
+        if data is None:
+            return None
         response = _DirectionsResponseJson.from_dict(data)
         return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
     except (KeyError, IndexError) as e:
@@ -175,6 +187,9 @@ async def _walk_duration(
             HTTP_5XX_START <= e.response.status_code < HTTP_5XX_END
         ):
             raise  # transient — let DAG retry handle it
+        if e.response.status_code == 403:
+            location_state = get_geo_state()
+            location_state.ors_exhausted = True
         logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
         return None
 
@@ -197,7 +212,6 @@ async def _google_places_text(lat: float, lng: float) -> str:
     try:
         async with cached_async_client(timeout=15.0) as client:
 
-            # lucidlint: ignore duplicate twin POST wrapper of _fetch above — the shared cache logic already lives in
             async def _fetch_places():
                 resp = await client.post(
                     GOOGLE_MAPS_PLACES_URL,
