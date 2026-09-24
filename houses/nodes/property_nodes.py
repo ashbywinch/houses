@@ -603,8 +603,8 @@ class PropertyNodes:
         PRD contract: reads and writes are non-blocking — a read must
         never walk the graph, and every recompute is scheduled by
         whatever makes it necessary (a dependency write, or a deploy
-        invalidating persisted fingerprints).  The queue dedupes by node
-        id and drains in the background.
+        re-stamping a referenced class's fingerprint).  The queue dedupes
+        by node id and drains in the background.
 
         The walk is O(1) between code changes: the per-class fingerprint
         cache only grows when CODE changes, so the module epoch tells us
