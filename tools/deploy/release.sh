@@ -37,7 +37,10 @@ case "$ACTIVE" in
 esac
 PORT=8766  # the standby (this release target) always binds 8766 (role-based ports)
 
-LOG="$LOG_DIR/$(date +%Y%m%d-%H%M%S)-${REF}-${SIDE}.log"
+# a ref may carry '/' (branch names) — the log filename must not become
+# a nested path (wip/box-provision -> tee: No such file or directory)
+REF_LOG=$(printf '%s' "$REF" | tr '/', '_')
+LOG="$LOG_DIR/$(date +%Y%m%d-%H%M%S)-${REF_LOG}-${SIDE}.log"
 mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "$SIDE $*"; }
 
 # Keep the box-side transcript even if the CI ssh dies mid-release.
@@ -46,6 +49,7 @@ mark() { echo "== $(date +%H:%M:%S) $*"; logger -t houses-release "$SIDE $*"; }
 # `>(tee …)` is a PARSE ERROR under sh (v1.4.3: `Syntax error: redirection
 # unexpected`). A named pipe + background tee is the sh-compatible form.
 FIFO="$LOG_DIR/.tee-$$"
+rm -f "$FIFO"   # a crashed run may leave its fifo behind — never die on it
 mkfifo "$FIFO"
 tee -a "$LOG" < "$FIFO" &
 TEE_PID=$!
