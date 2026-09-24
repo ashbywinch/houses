@@ -3,6 +3,8 @@ location-based paths."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from houses.geopoint import GeoPoint
@@ -13,7 +15,7 @@ class _FakeDirectionsClient:
 
     def __init__(self, duration_s: int = 720):
         self._duration_s = duration_s
-        self.posted_bodies: list[dict] = []
+        self.posted_bodies: list[Any] = []
 
     async def __aenter__(self):
         return self
@@ -21,20 +23,26 @@ class _FakeDirectionsClient:
     async def __aexit__(self, *a):
         return False
 
-    async def post(self, url, *, headers, json):
+    async def request(self, method, url, *, headers, params=None, json=None):
         self.posted_bodies.append(json)
         return _FakeResponse(self._duration_s)
 
 
 class _FakeResponse:
-    def __init__(self, duration_s: int):
+    def __init__(self, duration_s: int, *, status_code: int = 200):
         self._duration_s = duration_s
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None
 
     def json(self):
         return {"routes": [{"summary": {"duration": self._duration_s}}]}
+
+
+async def _passthrough_fetch(*args, **kwargs):
+    """with_cache stand-in for tests: call the fetch without disk I/O."""
+    return await kwargs["fetch"]()
 
 
 @pytest.mark.asyncio
@@ -47,9 +55,11 @@ async def test_drive_minutes_from_location_posts_origin_coords():
 
     fake = _FakeDirectionsClient(duration_s=720)  # 12 min
     with (
-        patch("houses.transit_route.cached_async_client", return_value=fake),
-        patch("houses.transit_route.get_cached", return_value=None),
-        patch("houses.transit_route.set_cached"),
+        patch("houses.apigw.cached_async_client", return_value=fake),
+        patch(
+            "houses.apigw.with_cache",
+            side_effect=_passthrough_fetch,
+        ),
         patch("houses.transit_route.settings.ors_api_key", "fake-key"),
         patch("houses.transit_route.find_station") as find_station,
         patch("houses.transit_route.geocode_address") as geocode_address,
@@ -75,9 +85,11 @@ async def test_drive_minutes_from_postcode_geocodes_then_estimates():
 
     fake = _FakeDirectionsClient(duration_s=900)  # 15 min
     with (
-        patch("houses.transit_route.cached_async_client", return_value=fake),
-        patch("houses.transit_route.get_cached", return_value=None),
-        patch("houses.transit_route.set_cached"),
+        patch("houses.apigw.cached_async_client", return_value=fake),
+        patch(
+            "houses.apigw.with_cache",
+            side_effect=_passthrough_fetch,
+        ),
         patch("houses.transit_route.settings.ors_api_key", "fake-key"),
         patch("houses.transit_route.geocode") as geocode,
         patch("houses.transit_route.find_station") as find_station,

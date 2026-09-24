@@ -1,19 +1,17 @@
-"""ORS daily-quota guard — the directions/walk/drive path uses the shared
-geocoder state (houses.location._GeoState) that already existed.
+"""The external-API gateway quota guard — ORS's DAILY quota (403) sets the
+process-wide flag; later calls short-circuit without a network hit.
 
-2026-09-24: ORS answers its DAILY quota with 403 (per-minute with 429).
-The geocoding path already paced and short-circuited on the flag; the
-directions/walk/drive path had neither, so a cache-cold double recompute
-(live + smoke on a fresh box) burned the quota in minutes and every later
-property was a wasted 403 round-trip. These tests pin: a 403 sets the
-shared flag, subsequent calls short-circuit without a network hit, and
-the callsite paces through the shared timestamp.
+2026-09-24: a cache-cold double recompute burned ORS's daily quota in
+minutes; every later property was a wasted 403 round-trip and the
+park-and-ride leg raised permanent impossibles. The gateway gives the
+directions/walk/drive calls the same guard the geocoders already had —
+without per-callsite wiring.
 """
 
 import httpx
 import pytest
 
-from houses import location, walkability
+from houses import apigw, walkability
 from houses.geopoint import GeoPoint
 
 pytestmark = pytest.mark.asyncio
@@ -24,14 +22,12 @@ _DEST = GeoPoint(lat=51.5074, lon=-0.1276)
 
 
 @pytest.fixture(autouse=True)
-def _clean_state():
-    state = location.get_geo_state()
-    state.ors_exhausted = False
-    state.ors_directions_last_call = 0.0
+def _clean_gate():
+    apigw.GATE.clear_quota()
+    apigw.GATE.reset_pacing()
     yield
-    state = location.get_geo_state()
-    state.ors_exhausted = False
-    state.ors_directions_last_call = 0.0
+    apigw.GATE.clear_quota()
+    apigw.GATE.reset_pacing()
 
 
 class _FourZeroThreeClient:
@@ -46,9 +42,11 @@ class _FourZeroThreeClient:
     async def __aexit__(self, *exc: object) -> bool:
         return False
 
-    async def post(self, url: str, *args: object, **kwargs: object) -> httpx.Response:
+    async def request(
+        self, method: str, url: str, *args: object, **kwargs: object
+    ) -> httpx.Response:
         self.posts.append(url)
-        request = httpx.Request("POST", url)
+        request = httpx.Request(method, url)
         raise httpx.HTTPStatusError(
             f"Client error '403 Forbidden' for url '{url}'",
             request=request,
@@ -56,16 +54,16 @@ class _FourZeroThreeClient:
         )
 
 
-async def test_walk_403_sets_shared_flag_and_short_circuits():
+async def test_walk_403_sets_the_shared_flag_and_short_circuits():
     client = _FourZeroThreeClient()
     result = await walkability._walk_duration(
         _LAT, _LNG, _DEST, _client_factory=lambda **k: client
     )
     assert result is None
-    assert location.get_geo_state().ors_exhausted, "a 403 must flip the shared flag"
+    assert apigw.GATE.quota_exhausted(apigw.ORS), "a 403 must flip the shared flag"
     assert len(client.posts) == 1
 
-    # second call: the shared flag short-circuits — NO network hit
+    # second call: the flag short-circuits — NO network hit
     result2 = await walkability._walk_duration(
         _LAT, _LNG, _DEST, _client_factory=lambda **k: client
     )
@@ -79,4 +77,11 @@ async def test_failed_call_updates_the_pacing_timestamp():
         _LAT, _LNG, _DEST, _client_factory=lambda **k: client
     )
     assert result is None
-    assert location.get_geo_state().ors_directions_last_call > 0.0
+    assert apigw.GATE._last_call[apigw.ORS] > 0.0
+
+
+def test_quota_flag_resets():
+    apigw.GATE.mark_quota_exhausted(apigw.ORS)
+    assert apigw.GATE.quota_exhausted(apigw.ORS)
+    apigw.GATE.clear_quota(apigw.ORS)
+    assert not apigw.GATE.quota_exhausted(apigw.ORS)

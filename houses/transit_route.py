@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
-from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.location import geocode, geocode_address, get_geo_state, pace_ors_directions
+from houses import apigw
+from houses.location import geocode, geocode_address
 from houses.settings import settings
 from houses.stations import find as find_station
 from houses.web.json_utils import optional_parse
@@ -187,53 +184,33 @@ async def _get_drive_minutes_from_location(
         units="km",
     )
     payload = body.to_dict()
-    key = json.dumps(payload, sort_keys=True)
-    if get_geo_state().ors_exhausted:
-        logger.debug(
-            "park-and-ride ORS lookup skipped for %s -> %s: daily quota exhausted",
-            origin_coords,
-            station_name,
-        )
-        return None
     try:
-        await pace_ors_directions()
-        client_factory = _client_factory or cached_async_client
-        async with client_factory(timeout=15.0) as client:
-            cached = get_cached("POST", ORS_DIRECTIONS_URL, None, key)
-            if cached is not None:
-                response = _DirectionsResponseJson.from_dict(cached)
-                return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
-            resp = await client.post(
-                ORS_DIRECTIONS_URL,
-                headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
-                json=payload,
-            )
-            if resp.status_code == 403:
-                get_geo_state().ors_exhausted = True
-                return None  # daily quota, not "no route": keep the walk leg
-            resp.raise_for_status()
-            data = resp.json()
-            set_cached("POST", ORS_DIRECTIONS_URL, None, key, data)
-            response = _DirectionsResponseJson.from_dict(data)
-            return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
+        data = await apigw.api_fetch(
+            "POST",
+            ORS_DIRECTIONS_URL,
+            api=apigw.ORS,
+            body=payload,
+            headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
+        )
+        response = _DirectionsResponseJson.from_dict(data)
+        return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
+    except apigw.DailyQuotaError:
+        # the key's daily quota is gone: keep the walk leg (the caller's
+        # contract for None), never an impossible pill
+        return None
     except Exception as exc:
         # Log and re-raise the ORIGINAL exception: _compute_attempt is the
-        # single classifier (transient → retry + pending, permanent →
+        # single classifier (transient -> retry + pending, permanent ->
         # impossible). Wrapping in RuntimeError would hide the httpx type
-        # and lose the retry decision (2026-09-19). A 403 = the ORS daily
-        # quota (geocoder pattern): flag it so later calls short-circuit
-        # instead of stacking more impossibles.
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 403:
-            get_geo_state().ors_exhausted = True
+        # and lose the retry decision (2026-09-19).
         logger.warning(
-            "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s): %s",
+            "Park-and-ride ORS lookup failed for %s -> %s (url=%s): %s",
             origin_coords,
             station_name,
             ORS_DIRECTIONS_URL,
             exc,
         )
         raise
-
 
 # lucidlint: ignore record-shape consumes the TfL journeys provider payload — provider wire shape (coding-standards.md)
 # lucidlint: ignore record-shape returns the mutated TfL journeys payload — provider wire shape (coding-standards.md)

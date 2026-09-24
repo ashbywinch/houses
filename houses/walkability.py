@@ -8,9 +8,10 @@ from dataclasses import dataclass
 
 import httpx
 
+from houses import apigw
 from houses.api_cache import cached_async_client, get_cached, set_cached, with_cache
 from houses.geopoint import GeoPoint
-from houses.location import PropertyLocation, WalkabilityFns, get_geo_state, pace_ors_directions
+from houses.location import PropertyLocation, WalkabilityFns
 from houses.settings import settings
 from houses.web.json_utils import optional_parse
 
@@ -151,34 +152,25 @@ async def _walk_duration(
     origin = [lng, lat]
     dest = [town_centre.lon, town_centre.lat]
     body = _ORSWalkBody(coordinates=[origin, dest])
-    if get_geo_state().ors_exhausted:
-        logger.warning("ORS walk directions skipped for (%.4f, %.4f): daily quota exhausted", lat, lng)
-        return None
     try:
-        await pace_ors_directions()
-        client_factory = _client_factory or cached_async_client
-        async with client_factory(timeout=15.0) as client:
-
-            async def _fetch():
-                resp = await client.post(
-                    ORS_WALKING_URL,
-                    headers={
-                        "Authorization": settings.ors_api_key,
-                        "Content-Type": "application/json",
-                    },
-                    json=body.to_dict(),
-                )
-                if resp.status_code == 403:
-                    get_geo_state().ors_exhausted = True
-                    return None
-                resp.raise_for_status()
-                return resp.json()
-
-            data = await with_cache("POST", ORS_WALKING_URL, body=body, fetch=_fetch)
-        if data is None:
-            return None
+        data = await apigw.api_fetch(
+            "POST",
+            ORS_WALKING_URL,
+            api=apigw.ORS,
+            body=body,
+            headers={
+                "Authorization": settings.ors_api_key,
+                "Content-Type": "application/json",
+            },
+            _client_factory=_client_factory,
+        )
         response = _DirectionsResponseJson.from_dict(data)
         return round(response.routes[0].summary.duration / SECONDS_PER_MINUTE)
+    except apigw.DailyQuotaError:
+        logger.warning(
+            "ORS walk directions skipped for (%.4f, %.4f): daily quota exhausted", lat, lng
+        )
+        return None
     except (KeyError, IndexError) as e:
         logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
         return None
@@ -187,11 +179,9 @@ async def _walk_duration(
             HTTP_5XX_START <= e.response.status_code < HTTP_5XX_END
         ):
             raise  # transient — let DAG retry handle it
-        if e.response.status_code == 403:
-            location_state = get_geo_state()
-            location_state.ors_exhausted = True
         logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
         return None
+
 
 
 async def _google_places_text(lat: float, lng: float) -> str:
