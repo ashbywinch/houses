@@ -27,11 +27,10 @@ cat > /etc/caddy/Caddyfile <<EOF
 # houses blue/green — ports are role-based (active=8765, standby=8766),
 # so this file never changes on a flip.
 {
-    # 2026-09-24: a fresh install used acme-staging-v02 (untrusted) and the
-    # default tls-alpn-01 challenge can never pass through the Cloudflare
-    # proxy — force the production CA and the http-01 challenge (:80)
+    # 2026-09-24: a fresh install used acme-staging-v02 (untrusted) — force
+    # the PRODUCTION CA. (tls-alpn-01 can't cross the Cloudflare proxy, but
+    # caddy falls back to http-01, which the open :80 answers.)
     acme_ca https://acme-v02.api.letsencrypt.org/directory
-    challenges http-01
 }
 
 $MAIN {
