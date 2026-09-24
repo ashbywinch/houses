@@ -45,7 +45,7 @@ Rightmove scraper lives on your LAN — see the worker in Step 4).
    ```
 3. **The SSH key** for the box (this machine):
    ```bash
-   ssh-keygen -t ed25519 -f ~/.ssh/oracle -N "" -C "oracle-houses"
+   ssh-keygen -t ed25519 -f ~/.ssh/houses_operator -N "" -C "houses-operator"
    ```
 4. **Fill the variables** and apply (terraform already installed on this
    machine):
@@ -55,7 +55,7 @@ Rightmove scraper lives on your LAN — see the worker in Step 4).
    terraform init
    terraform plan     # read it — firewall is SSH-only, machine is e2-micro
    terraform apply
-   terraform output ssh_command   # -> ssh -i ~/.ssh/oracle ubuntu@<ip>
+   terraform output ssh_command   # -> ssh -i ~/.ssh/houses_operator ubuntu@<ip>
    ```
    `apply` runs the startup script: apt deps, Caddy, uv, the two
    checkouts (/opt/houses/blue + green), units, ACTIVE=blue. ~5–10 min

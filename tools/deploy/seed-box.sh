@@ -2,7 +2,7 @@
 # tools/deploy/seed-box.sh — produce the data seed for a fresh box.
 #
 # Run on the LAN dev machine (the box is reached with the operator key
-# from ~/.ssh/oracle; the seed bucket via the local gcloud login). This
+# from ~/.ssh/houses_operator; the seed bucket via the local gcloud login). This
 # is the migration REHEARSAL the rollout always wanted: the live DB is
 # copied, the person-id migration is applied to the COPY (never live),
 # integrity is verified, and the result becomes gs://houses-seed/latest.db
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 BOX_IP="${1:-136.66.196.67}"
-OPERATOR_KEY="${OPERATOR_KEY:-$HOME/.ssh/oracle}"
+OPERATOR_KEY="${OPERATOR_KEY:-$HOME/.ssh/houses_operator}"
 WORK="$(mktemp -d /var/tmp/houses-seed.XXXXXX)"  # NOT /tmp: a 3.6G tmpfs
 # overflows while the migration journals (638MB DB + backup + update WAL)
 SEED_GS="${SEED_GS:-gs://houses-seed/latest.db}"
