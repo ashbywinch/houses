@@ -243,6 +243,11 @@ class GoogleGeocodeApi(BaseApi):
         )
         data = await self._fetch(req)
         if not data or data.get("status") != "OK":
+            logger.warning(
+                "Google Maps geocode failed: status=%s msg=%s",
+                data.get("status") if data else "no response",
+                (data or {}).get("error_message", ""),
+            )
             return None
         results = data.get("results") or []
         if not results:

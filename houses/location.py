@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from dag.attempt import Attempt
-from houses import apigw
+from houses import apis
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.geopoint import GeoPoint
 from houses.services_provider import get_services
@@ -29,50 +29,9 @@ HTTP_NOT_FOUND = 404
 POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 
 # ── Geocoder query params (external API wire shapes) ───────────────
-
-
-@dataclass(frozen=True)
-class _NominatimParams:
-    """Query params for the Nominatim search API."""
-
-    q: str
-    format: str
-    limit: int
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {"q": self.q, "format": self.format, "limit": self.limit}
-
-
-@dataclass(frozen=True)
-class _GoogleParams:
-    """Query params for the Google Maps geocode API. The API key is AUTH,
-    not request identity: it travels in the wire query at the httpx edge and
-    never in the record, so cache keys stay key-driven-free (605accb)."""
-
-    address: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return {"address": self.address}
-
-
-@dataclass(frozen=True)
-class _OrsSearchParams:
-    """Query params for the ORS Pelias search API."""
-
-    text: str
-    size: int
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {"text": self.text, "size": self.size}
 
 
 @dataclass(frozen=True)
@@ -259,23 +218,13 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
     if cached is not None:
         return cached
     clean = _END_PC_RE.sub("", query).strip()
-    params = _NominatimParams(q=f"{clean}, UK", format="json", limit=1)
     try:
-        data = await apigw.api_fetch(
-            "GET",
-            NOMINATIM_URL,
-            api=apigw.NOMINATIM,
-            params=params,
-            headers={"User-Agent": "HousesApp/1.0"},
-        )
+        gp = await apis.nominatim.geocode(clean)
     except httpx.HTTPStatusError as exc:
         logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
         return Attempt.impossible(f"HTTP {exc.response.status_code}")
-    if not data:
+    if gp is None:
         return Attempt.impossible("no results")
-    lat = float(data[0]["lat"])
-    lng = float(data[0]["lon"])
-    gp = GeoPoint(lat, lng)
     result = Attempt.succeeded(gp)
     _cache_result(cache_key, result, services=services)
     return result
@@ -283,69 +232,41 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
 
 async def _geocode_google(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
     """Geocode *address* via Google Maps; ``None`` means "try the next provider"."""
-    params = _GoogleParams(address=f"{address}, UK")
-    googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
     try:
-        data = await apigw.api_fetch(
-            "GET",
-            googlegeocode_url,
-            api=apigw.GOOGLE,
-            params=params,
-            # the key is auth, not identity: wire-only, never part of the
-            # request record or the cache key
-            wire_params={"key": settings.google_maps_api_key},
-        )
+        gp = await apis.google_geocode.geocode(address)
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let the caller's next-geocoder fallback run
     # lucidlint: ignore broad-except deliberate fallback — provider failure means try the next geocoder
     except Exception as exc:
         logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)
         return None
-    if data.get("status") == "OK" and data.get("results"):
-        loc = data["results"][0]["geometry"]["location"]
-        gp = GeoPoint(loc["lat"], loc["lng"])
-        result = Attempt.succeeded(gp)
-        _cache_result(cache_key, result, services=services)
-        logger.info("Geocoded '%s' via google-maps", address)
-        return result
-    logger.warning(
-        "Google Maps API response for '%s': status=%s msg=%s",
-        address,
-        data.get("status"),
-        data.get("error_message", ""),
-    )
-    return None
+    if gp is None:
+        return None
+    result = Attempt.succeeded(gp)
+    _cache_result(cache_key, result, services=services)
+    logger.info("Geocoded '%s' via google-maps", address)
+    return result
 
 
 async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
     """Geocode *address* via ORS Pelias; ``None`` means "try the next provider"."""
-    params = _OrsSearchParams(text=f"{address}, UK", size=1)
     try:
-        data = await apigw.api_fetch(
-            "GET",
-            ORS_GEOCODE_URL,
-            api=apigw.ORS,
-            params=params,
-            headers={"Authorization": settings.ors_api_key},
-        )
-    except apigw.DailyQuotaError:
-        logger.warning("ORS geocoding for '%s' skipped: daily quota exhausted", address)
-        return None
-    except httpx.HTTPStatusError as exc:
-        logger.warning("ORS geocoding failed for '%s': HTTP %s", address, exc.response.status_code)
+        # quota-exhausted and no-result both surface as None (stop and
+        # fall through to the next geocoder); transient HTTP still raises
+        gp = await apis.ors.geocode(address)
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as exc:
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else exc
+        logger.warning("ORS geocoding failed for '%s': %s", address, status)
         return None
     except Exception as exc:
         logger.warning("ORS geocoding failed for '%s': %s", address, exc)
         return None
-    features = data.get("features", [])
-    if features:
-        lng, lat = features[0]["geometry"]["coordinates"]
-        gp = GeoPoint(lat, lng)
-        result = Attempt.succeeded(gp)
-        _cache_result(cache_key, result, services=services)
-        logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
-        return result
-    return None
+    if gp is None:
+        return None
+    result = Attempt.succeeded(gp)
+    _cache_result(cache_key, result, services=services)
+    logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{gp.lat:.4f}", f"{gp.lon:.4f}")
+    return result
 
 
 
@@ -388,10 +309,8 @@ async def _geocode_postcode(postcode: str, *, services: Any | None = None) -> At
     if cached is not None:
         return cached
 
-    is_outcode = bool(_OUTCODE_RE.match(key))
-    url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
     try:
-        data = await apigw.api_fetch("GET", url, api=apigw.POSTCODESIO)
+        gp = await apis.postcodes.geocode(key)
     except httpx.HTTPStatusError as e:
         if e.response.status_code == HTTP_NOT_FOUND:
             _cache_result(key, Attempt.impossible("postcode not found (404)"), services=services)
@@ -402,10 +321,8 @@ async def _geocode_postcode(postcode: str, *, services: Any | None = None) -> At
     except Exception:
         logger.exception("Failed to geocode postcode: %s", key)
         return Attempt.impossible("unexpected error")
-    result = data.get("result")
-    if not result:
+    if gp is None:
         return Attempt.impossible("postcode not found")
-    gp = GeoPoint(result["latitude"], result["longitude"])
     attempt = Attempt.succeeded(gp)
     _cache_result(key, attempt, services=services)
     return attempt

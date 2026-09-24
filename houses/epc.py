@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import httpx
 
 from dag.attempt import Attempt
-from houses import apigw
+from houses import apis
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
 from houses.api_cache import get_cached
@@ -140,18 +140,8 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         return _match_cert(certs, building_id, address)
 
     try:
-        data = await apigw.api_fetch(
-            "GET",
-            EPC_SEARCH_URL,
-            api=apigw.GOV_EPC,
-            params=params,
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {settings.epc_bearer_token}",
-            },
-        )
-        certs = data.get("data", [])
-        return _match_cert(certs, building_id, address)
+        result = await apis.epc.search(EPC_SEARCH_URL, params)
+        return _match_cert(result.certificates, building_id, address)
 
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
