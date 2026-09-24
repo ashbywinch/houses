@@ -536,7 +536,6 @@ class Services:
         default_factory=lambda: _make_settings_source("whatif_started_at", str, lambda: "")
     )
     # Per-request mutable state (lazily initialized by accessors)
-    geo_state: Any | None = None
     geo_cache: dict | None = None
     bus_fare_registry: Any | None = None
     rail_fare_registry: Any | None = None

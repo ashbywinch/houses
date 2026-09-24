@@ -28,8 +28,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from houses import apigw
 from houses.geopoint import GeoPoint
-from houses.location import geocode_address, get_geo_state
+from houses.location import geocode_address
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ async def main() -> None:
             failed += 1
             logger.debug("Row %d (%s): geocode failed", i, address[:60])
 
-        if get_geo_state().nominatim_exhausted:
+        if apigw.GATE.quota_exhausted(apigw.NOMINATIM):
             logger.info("Nominatim exhausted — stopping (done=%d failed=%d)", done, failed)
             break
 

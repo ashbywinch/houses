@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from collections.abc import Callable
@@ -14,6 +13,7 @@ from typing import Any
 import httpx
 
 from dag.attempt import Attempt
+from houses import apigw
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.geopoint import GeoPoint
 from houses.services_provider import get_services
@@ -23,42 +23,6 @@ from houses.web.json_utils import WirePayload
 logger = logging.getLogger(__name__)
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_NOT_FOUND = 404
-
-# ── Geocoding API state (per-request via Services) ─────────────
-
-
-class _GeoState:
-    google_exhausted: bool = False
-    ors_exhausted: bool = False
-    nominatim_exhausted: bool = False
-    nominatim_last_call: float = 0.0
-    ors_directions_last_call: float = 0.0
-
-
-def get_geo_state(*, services: Any | None = None) -> _GeoState:
-    """Return the per-request geocoder state, lazily created on the services container."""
-    svc = services or get_services()
-    if svc.geo_state is None:
-        svc.geo_state = _GeoState()
-    return svc.geo_state
-
-
-ORS_DIRECTIONS_PACE_SECONDS = 0.25
-
-
-async def pace_ors_directions(*, services: Any | None = None) -> None:
-    """Pace ORS directions/walk/drive POSTs — the geocoder's 1 req/s rule,
-    at a gentler interval for the heavier, well-cached directions calls.
-    Without this a cold-cache recompute hammered ORS and blew the daily
-    quota in minutes (2026-09-24)."""
-    state = get_geo_state(services=services)
-    loop = asyncio.get_event_loop()
-    now = loop.time()
-    since = now - state.ors_directions_last_call
-    if state.ors_directions_last_call and since < ORS_DIRECTIONS_PACE_SECONDS:
-        await asyncio.sleep(ORS_DIRECTIONS_PACE_SECONDS - since)
-    state.ors_directions_last_call = loop.time()
-
 
 # ── URL constants ────────────────────────────────────────────────
 
@@ -142,7 +106,6 @@ _TOWN_SUFFIXES = re.compile(
 # ── In-memory geocode cache (per-request via Services) ─────────
 
 
-# lucidlint: ignore duplicate deliberate twin of get_geo_state above — the same lazy-per-request-slot idiom over a
 # lucidlint: ignore record-shape keyed geocode cache map (variable keys), not a fixed record shape
 def _geo_cache(*, services: Any | None = None) -> dict:
     """Return the per-request geocode cache, lazily created on the services container."""
@@ -290,169 +253,98 @@ async def geocode(postcode: str, *, services: Any | None = None) -> Attempt[GeoP
 
 async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Attempt[GeoPoint]:
     """Geocode a place name via Nominatim (free, 1 req/sec max)."""
-    if get_geo_state(services=services).nominatim_exhausted:
-        return Attempt.impossible("rate limit exhausted")
     cache_key = f"nom::{query.strip().upper()}"
     cache = _geo_cache(services=services)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
     clean = _END_PC_RE.sub("", query).strip()
-    now = asyncio.get_event_loop().time()
-    since_last = now - get_geo_state(services=services).nominatim_last_call
-    if since_last < 1.0:
-        await asyncio.sleep(1.0 - since_last)
     params = _NominatimParams(q=f"{clean}, UK", format="json", limit=1)
-    cached = get_cached("GET", NOMINATIM_URL, params, None)
-    if cached is not None:
-        # Nominatim returns a JSON array of results — not a dict — so treat
-        # the cached payload as Any, mirroring the fresh `resp.json()` path.
-        data: Any = cached
-        if data:
-            lat = float(data[0]["lat"])
-            lng = float(data[0]["lon"])
-            gp = GeoPoint(lat, lng)
-            result = Attempt.succeeded(gp)
-            _cache_result(cache_key, result, services=services)
-            return result
+    try:
+        data = await apigw.api_fetch(
+            "GET",
+            NOMINATIM_URL,
+            api=apigw.NOMINATIM,
+            params=params,
+            headers={"User-Agent": "HousesApp/1.0"},
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
+        return Attempt.impossible(f"HTTP {exc.response.status_code}")
+    if not data:
         return Attempt.impossible("no results")
-    else:
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(
-                    NOMINATIM_URL,
-                    params=params.to_dict(),
-                    headers={"User-Agent": "HousesApp/1.0"},
-                )
-                get_geo_state(services=services).nominatim_last_call = asyncio.get_event_loop().time()
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", NOMINATIM_URL, params, None, data)
-                    # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
-                if data:
-                    lat = float(data[0]["lat"])
-                    lng = float(data[0]["lon"])
-                    gp = GeoPoint(lat, lng)
-                    result = Attempt.succeeded(gp)
-                    _cache_result(cache_key, result, services=services)
-                    return result
-                return Attempt.impossible("no results")
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == HTTP_TOO_MANY_REQUESTS:
-                get_geo_state(services=services).nominatim_exhausted = True
-            logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
-            return Attempt.impossible(f"HTTP {exc.response.status_code}")
-        # lucidlint: ignore broad-except boundary — unexpected geocode failures convert to an impossible attempt
-        except Exception:
-            logger.warning("Nominatim geocoding failed for: %s", query)
-            return Attempt.impossible("unexpected error")
+    lat = float(data[0]["lat"])
+    lng = float(data[0]["lon"])
+    gp = GeoPoint(lat, lng)
+    result = Attempt.succeeded(gp)
+    _cache_result(cache_key, result, services=services)
+    return result
 
 
 async def _geocode_google(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
     """Geocode *address* via Google Maps; ``None`` means "try the next provider"."""
-    if get_geo_state(services=services).google_exhausted:
-        logger.debug("Skipping Google Maps — API quota exhausted")
-        return None
-    googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = _GoogleParams(address=f"{address}, UK")
-    cached = get_cached("GET", googlegeocode_url, params, None)
-    if cached is not None:
-        data = cached
-        if data.get("status") == "OK" and data.get("results"):
-            loc = data["results"][0]["geometry"]["location"]
-            gp = GeoPoint(loc["lat"], loc["lng"])
-            result = Attempt.succeeded(gp)
-            _cache_result(cache_key, result, services=services)
-            logger.info("Geocoded '%s' via google-maps (cached)", address)
-            return result
-        if data.get("status") == "OVER_QUERY_LIMIT":
-            get_geo_state(services=services).google_exhausted = True
-        logger.warning(
-            "Google Maps cached result for '%s' rejected: status=%s msg=%s",
-            address,
-            data.get("status"),
-            data.get("error_message", ""),
-        )
-        return None
+    googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
     try:
-        async with cached_async_client(timeout=10.0) as client:
-            # The key is auth, not identity: attached to the wire query here
-            # (the httpx edge), never part of the request record or cache key.
-            resp = await client.get(
-                googlegeocode_url, params={**params.to_dict(), "key": settings.google_maps_api_key}
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("status") == "OK" and data.get("results"):
-                set_cached("GET", googlegeocode_url, params, None, data)
-                # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared
-                loc = data["results"][0]["geometry"]["location"]
-                gp = GeoPoint(loc["lat"], loc["lng"])
-                result = Attempt.succeeded(gp)
-                _cache_result(cache_key, result, services=services)
-                logger.info("Geocoded '%s' via google-maps", address)
-                return result
-            if data.get("status") == "OVER_QUERY_LIMIT":
-                get_geo_state(services=services).google_exhausted = True
-            logger.warning(
-                "Google Maps API response for '%s': status=%s msg=%s",
-                address,
-                data.get("status"),
-                data.get("error_message", ""),
-            )
+        data = await apigw.api_fetch(
+            "GET",
+            googlegeocode_url,
+            api=apigw.GOOGLE,
+            params=params,
+            # the key is auth, not identity: wire-only, never part of the
+            # request record or the cache key
+            wire_params={"key": settings.google_maps_api_key},
+        )
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — let the caller's next-geocoder fallback run
     # lucidlint: ignore broad-except deliberate fallback — provider failure means try the next geocoder
     except Exception as exc:
         logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)
         return None
+    if data.get("status") == "OK" and data.get("results"):
+        loc = data["results"][0]["geometry"]["location"]
+        gp = GeoPoint(loc["lat"], loc["lng"])
+        result = Attempt.succeeded(gp)
+        _cache_result(cache_key, result, services=services)
+        logger.info("Geocoded '%s' via google-maps", address)
+        return result
+    logger.warning(
+        "Google Maps API response for '%s': status=%s msg=%s",
+        address,
+        data.get("status"),
+        data.get("error_message", ""),
+    )
     return None
 
 
 async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
     """Geocode *address* via ORS Pelias; ``None`` means "try the next provider"."""
-    if get_geo_state(services=services).ors_exhausted:
-        return None
     params = _OrsSearchParams(text=f"{address}, UK", size=1)
-    cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
-    if cached is not None:
-        data = cached
-        features = data.get("features", [])
-        if features:
-            lng, lat = features[0]["geometry"]["coordinates"]
-            gp = GeoPoint(lat, lng)
-            result = Attempt.succeeded(gp)
-            _cache_result(cache_key, result, services=services)
-            logger.info("Geocoded '%s' via ors-pelias (cached) → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
-            return result
-        return None
     try:
-        async with cached_async_client(timeout=10.0) as client:
-            resp = await client.get(
-                ORS_GEOCODE_URL,
-                params=params.to_dict(),
-                headers={"Authorization": settings.ors_api_key},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            set_cached("GET", ORS_GEOCODE_URL, params, None, data)
-            # lucidlint: ignore duplicate-block this provider's success tail intentionally follows the shared geocoder
-            features = data.get("features", [])
-            if features:
-                lng, lat = features[0]["geometry"]["coordinates"]
-                gp = GeoPoint(lat, lng)
-                result = Attempt.succeeded(gp)
-                _cache_result(cache_key, result, services=services)
-                logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
-                return result
-            logger.warning("ORS returned no features for '%s'", address)
+        data = await apigw.api_fetch(
+            "GET",
+            ORS_GEOCODE_URL,
+            api=apigw.ORS,
+            params=params,
+            headers={"Authorization": settings.ors_api_key},
+        )
+    except apigw.DailyQuotaError:
+        logger.warning("ORS geocoding for '%s' skipped: daily quota exhausted", address)
+        return None
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in (403, 429):
-            get_geo_state(services=services).ors_exhausted = True
         logger.warning("ORS geocoding failed for '%s': HTTP %s", address, exc.response.status_code)
         return None
-    # lucidlint: ignore broad-except deliberate fallback — provider failure means try the next geocoder
     except Exception as exc:
         logger.warning("ORS geocoding failed for '%s': %s", address, exc)
         return None
+    features = data.get("features", [])
+    if features:
+        lng, lat = features[0]["geometry"]["coordinates"]
+        gp = GeoPoint(lat, lng)
+        result = Attempt.succeeded(gp)
+        _cache_result(cache_key, result, services=services)
+        logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
+        return result
     return None
 
 

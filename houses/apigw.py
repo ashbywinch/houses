@@ -166,6 +166,7 @@ async def api_fetch(
     params: Any = None,
     body: Any = None,
     headers: dict[str, str] | None = None,
+    wire_params: dict[str, str] | None = None,
     _client_factory=None,
 ) -> Any:
     """Fetch a guarded external API call: cache, pace, quota, classify.
@@ -187,7 +188,7 @@ async def api_fetch(
                 resp = await client.request(
                     method,
                     url,
-                    params=_as_dict(params),
+                    params={**(_as_dict(params) or {}), **(wire_params or {})},
                     json=_as_dict(body),
                     headers=headers,
                 )
