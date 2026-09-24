@@ -39,13 +39,6 @@ _DEST = GeoPoint(lat=51.5074, lon=-0.1276)
 _URL = "https://api.openrouteservice.org/v2/directions/foot-walking/whatever"
 
 
-def _retry_after_of(exc: object) -> float | None:
-    """Read the transport-attached Retry-After (httpx exceptions carry no
-    declared attribute; the gateway sets it at the raise boundary)."""
-    name = "retry_after"
-    return getattr(exc, name, None)
-
-
 def _status_response(status: int, url: str = _URL, headers: dict[str, str] | None = None) -> httpx.Response:
     request = httpx.Request("POST", url)
     return httpx.Response(status, request=request, headers=headers or {})
@@ -127,12 +120,13 @@ async def test_transient_429_carries_provider_retry_after():
     """A 429 with Retry-After: 120 must surface with retry_after=120 so
     the DAG's scheduler waits the provider's window, not the 10s backoff."""
     client = _RaisingClient(429, {"Retry-After": "120"})
-    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+    with pytest.raises(apigw.GatewayHttpError) as excinfo:
         await apis.ors.directions(
             GeoPoint(_LAT, _LNG), _DEST, mode="foot-walking",
             _client_factory=lambda **k: client,
         )
-    assert _retry_after_of(excinfo.value) == 120.0
+    assert isinstance(excinfo.value, httpx.HTTPStatusError), "callers catch the base class"
+    assert excinfo.value.retry_after == 120.0
     assert classify_exception(excinfo.value).retryable, "429 must be retryable"
 
 
@@ -140,12 +134,12 @@ async def test_transient_503_from_raise_for_status_carries_retry_after():
     """A 503 returned (not raised) by the client still gets Retry-After
     attached at the raise_for_status boundary."""
     client = _RaisingClient(503, {"Retry-After": "45"}, raise_in_request=False)
-    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+    with pytest.raises(apigw.GatewayHttpError) as excinfo:
         await apis.ors.directions(
             GeoPoint(_LAT, _LNG), _DEST, mode="foot-walking",
             _client_factory=lambda **k: client,
         )
-    assert _retry_after_of(excinfo.value) == 45.0
+    assert excinfo.value.retry_after == 45.0
     assert classify_exception(excinfo.value).retryable
 
 
@@ -156,17 +150,19 @@ def test_retry_delay_honors_provider_window_beyond_backoff_cap():
     node = _DelayProbeNode()
     node._retry_count = 1
 
-    exc = httpx.HTTPStatusError(
-        "too many", request=httpx.Request("GET", _URL),
+    exc = apigw.GatewayHttpError(
+        "too many",
+        request=httpx.Request("GET", _URL),
         response=httpx.Response(429, request=httpx.Request("GET", _URL)),
+        retry_after=3600,
     )
-    _attr = "retry_after"
-    setattr(exc, _attr, 3600)
     assert node._retry_delay_from(exc) == timedelta(seconds=3600)
 
-    exc2 = httpx.HTTPStatusError(
-        "boom", request=httpx.Request("GET", _URL),
+    exc2 = apigw.GatewayHttpError(
+        "boom",
+        request=httpx.Request("GET", _URL),
         response=httpx.Response(503, request=httpx.Request("GET", _URL)),
+        retry_after=None,
     )
     assert node._retry_delay_from(exc2) == timedelta(seconds=20), (
         "no Retry-After -> exponential backoff 10s * 2^1"

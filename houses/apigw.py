@@ -113,19 +113,36 @@ class DailyQuotaError(Exception):
     is_daily_quota = True
 
 
-def _attach_retry_after(exc: httpx.HTTPStatusError) -> None:
-    """Carry the provider's Retry-After onto a transient error.
+class GatewayHttpError(httpx.HTTPStatusError):
+    """An httpx status error as raised by the gateway, annotated with the
+    provider's Retry-After when the response carried one.
 
-    httpx exceptions carry no retry metadata; the DAG's retry scheduler
-    reads ``exc.retry_after`` (seconds) when present and otherwise falls
-    back to its exponential backoff. The gateway is the one place every
-    response passes, so the header is parsed once, here.
+    Subclasses ``httpx.HTTPStatusError`` so every caller's ``except
+    httpx.HTTPStatusError`` keeps matching; ``retry_after`` (seconds) is
+    what the DAG's retry scheduler reads to wait the provider's window —
+    declared here, never set dynamically.
     """
-    raw = exc.response.headers.get("Retry-After") or exc.response.headers.get("retry-after")
-    if raw is not None:
-        with suppress(TypeError, ValueError):
-            attr = "retry_after"  # dynamic: httpx does not declare it
-            setattr(exc, attr, float(raw))
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        request: httpx.Request,
+        response: httpx.Response,
+        retry_after: float | None,
+    ) -> None:
+        super().__init__(message, request=request, response=response)
+        self.retry_after = retry_after
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """Parse the response's Retry-After header (seconds) or None."""
+    raw = response.headers.get("Retry-After") or response.headers.get("retry-after")
+    if raw is None:
+        return None
+    with suppress(TypeError, ValueError):
+        return float(raw)
+    return None
 
 
 # ── per-process state (the quota belongs to the KEY, so it is
@@ -225,16 +242,20 @@ async def api_fetch(
                     raise DailyQuotaError(
                         f"{api}: HTTP {e.response.status_code} (daily quota) for {url}"
                     ) from e
-                _attach_retry_after(e)
-                raise
+                raise GatewayHttpError(
+                    str(e), request=e.request, response=e.response,
+                    retry_after=_retry_after_seconds(e.response),
+                ) from e
             if api.is_quota(resp.status_code):
                 GATE.mark_quota_exhausted(api)
                 raise DailyQuotaError(f"{api}: HTTP {resp.status_code} (daily quota) for {url}")
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
-                _attach_retry_after(e)
-                raise
+                raise GatewayHttpError(
+                    str(e), request=e.request, response=e.response,
+                    retry_after=_retry_after_seconds(e.response),
+                ) from e
             return resp.json()
 
     return await with_cache(method, url, params=params, body=body, fetch=_fetch)
