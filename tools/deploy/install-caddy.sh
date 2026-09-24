@@ -26,6 +26,12 @@ fi
 cat > /etc/caddy/Caddyfile <<EOF
 # houses blue/green — ports are role-based (active=8765, standby=8766),
 # so this file never changes on a flip.
+{
+    # caddy's default CA must be forced: a fresh install used
+    # acme-staging-v02 (untrusted) and prod served nothing (2026-09-24)
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
 $MAIN {
     reverse_proxy 127.0.0.1:8765
 }
@@ -36,4 +42,8 @@ $SMOKE {
 EOF
 
 systemctl enable --now caddy
+systemctl restart caddy || true
+# fresh ACME storage: a first-boot staging issuance must never leak into
+# the production path (the certificates dir is cache, not state)
+rm -rf /var/lib/caddy/.local/share/caddy/certificates
 echo "caddy installed: https://$MAIN -> :8765 (active), https://$SMOKE -> :8766 (standby)"

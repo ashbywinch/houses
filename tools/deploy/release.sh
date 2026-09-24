@@ -140,7 +140,8 @@ fi
 # install can ever reach /opt/houses or /etc/systemd — the release itself is
 # the only elevated path, by design. Install the ref's copies of the units,
 # watchdog, switch.sh and run-instance.sh, then reload + (re)enable.
-mark "shipping box tooling (units, watchdog, switch, run-instance)"
+mark "shipping box tooling (units, watchdog, switch, run-instance, caddy config)"
+bash "$ROOT/$SIDE/tools/deploy/install-caddy.sh"
 install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-blue.service" /etc/systemd/system/
 install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-green.service" /etc/systemd/system/
 install -m 0644 "$ROOT/$SIDE/tools/deploy/units/houses-network-watchdog.service" /etc/systemd/system/
