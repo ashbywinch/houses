@@ -48,6 +48,8 @@ if [ "$ACTION" = "--diagnose" ]; then
   cat "$ROOT/ACTIVE" 2>&1; cat "$ROOT/PREVIOUS" 2>&1
   echo "===== unit states ====="
   systemctl is-active houses-blue houses-green 2>&1
+  echo "===== provisioned marker ====="
+  if [ -f "$ROOT/PROVISIONED" ]; then cat "$ROOT/PROVISIONED"; else echo "not-yet (tooling is up but seed/env/caddy may still be running)"; fi
   echo "===== release marks (newest 12) ====="
   ls -lat "$LOG_DIR"/ 2>&1 | head -13
   echo "----- newest switch log -----"

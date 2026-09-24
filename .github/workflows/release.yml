@@ -142,7 +142,7 @@ jobs:
               -o ServerAliveInterval=15 -o ServerAliveCountMax=40 \
               "$BOX_USER@$IP" "sudo /opt/houses/switch.sh --diagnose" 2>/dev/null || true)
             case "$OUT" in
-              *"===== tooling"*) echo "bootstrap confirmed after ~$((attempt * 10))s"; exit 0 ;;
+              *"provisioned"*"ref="*) echo "box fully provisioned after ~$((attempt * 10))s"; exit 0 ;;
             esac
             sleep 10
           done
