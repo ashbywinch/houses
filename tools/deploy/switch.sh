@@ -45,7 +45,7 @@ if [ "$ACTION" = "--diagnose" ]; then
   echo "===== /opt/houses/migrations.list ====="
   if [ -f "$ROOT/migrations.list" ]; then cat "$ROOT/migrations.list"; else echo "MISSING (fail-fast guard will refuse flips)"; fi
   echo "===== ACTIVE/PREVIOUS markers ====="
-  cat "$ROOT/ACTIVE" 2>&1; cat "$ROOT/PREVIOUS" 2>&1
+  cat "$ROOT/ACTIVE" 2>&1 || true; cat "$ROOT/PREVIOUS" 2>&1 || true   # PREVIOUS absent on a fresh box — set -e must not abort the dump
   echo "===== unit states ====="
   systemctl is-active houses-blue houses-green 2>&1
   echo "===== provisioned marker ====="
