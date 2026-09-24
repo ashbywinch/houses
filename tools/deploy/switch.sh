@@ -35,6 +35,8 @@ prune_logs() {
 }
 
 if [ "$ACTION" = "--diagnose" ]; then
+  set +e   # every probe is best-effort — a fresh box (no PREVIOUS, no
+  # active units) must never abort the dump mid-way
   # READ-ONLY box state dump (incident diagnostics). Prints to stdout —
   # the deploy key's forced command relays release.sh/switch.sh stdout, so
   # the workflow log receives this. Never mutates anything; exits before
