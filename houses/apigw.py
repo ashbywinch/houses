@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -105,7 +106,26 @@ class DailyQuotaError(Exception):
 
     Permanent: retrying before UTC midnight is futile and only burns more
     quota — the DAG classifier maps this to a clear "daily quota" attempt.
+    ``is_daily_quota`` is the marker dag.attempt.classify_exception checks
+    (dag must not import houses, so the class name is never matched).
     """
+
+    is_daily_quota = True
+
+
+def _attach_retry_after(exc: httpx.HTTPStatusError) -> None:
+    """Carry the provider's Retry-After onto a transient error.
+
+    httpx exceptions carry no retry metadata; the DAG's retry scheduler
+    reads ``exc.retry_after`` (seconds) when present and otherwise falls
+    back to its exponential backoff. The gateway is the one place every
+    response passes, so the header is parsed once, here.
+    """
+    raw = exc.response.headers.get("Retry-After") or exc.response.headers.get("retry-after")
+    if raw is not None:
+        with suppress(TypeError, ValueError):
+            attr = "retry_after"  # dynamic: httpx does not declare it
+            setattr(exc, attr, float(raw))
 
 
 # ── per-process state (the quota belongs to the KEY, so it is
@@ -205,11 +225,16 @@ async def api_fetch(
                     raise DailyQuotaError(
                         f"{api}: HTTP {e.response.status_code} (daily quota) for {url}"
                     ) from e
+                _attach_retry_after(e)
                 raise
             if api.is_quota(resp.status_code):
                 GATE.mark_quota_exhausted(api)
                 raise DailyQuotaError(f"{api}: HTTP {resp.status_code} (daily quota) for {url}")
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                _attach_retry_after(e)
+                raise
             return resp.json()
 
     return await with_cache(method, url, params=params, body=body, fetch=_fetch)

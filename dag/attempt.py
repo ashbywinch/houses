@@ -183,7 +183,7 @@ def classify_exception(exc: BaseException | None) -> ExceptionClassification:
 
     Handles ``houses.http_error.HttpError`` (``.status``), httpx errors
     (``.response.status_code``), ``TimeoutError``, the gateway's
-    ``DailyQuotaExhausted``, and anything else. This is the single source
+    ``DailyQuotaError`` (its ``is_daily_quota`` marker), and anything else. This is the single source
     of truth for retryability — the DAG retry logic and AttemptError both
     use it.
     """
@@ -191,9 +191,10 @@ def classify_exception(exc: BaseException | None) -> ExceptionClassification:
         return ExceptionClassification("error", retryable=False)
     if isinstance(exc, TimeoutError):
         return ExceptionClassification("timeout", retryable=True)
-    if exc.__class__.__name__ == "DailyQuotaExhausted":
-        # the API key's DAILY quota is gone — retrying before UTC midnight
-        # is futile and burns quota; permanent, with a clear reason
+    if getattr(exc, "is_daily_quota", False):
+        # the API key's DAILY quota is gone (houses.apigw.DailyQuotaError
+        # carries the marker) — retrying before UTC midnight is futile and
+        # burns quota; permanent, with a clear reason
         return ExceptionClassification("daily_quota", retryable=False)
     status = getattr(exc, "status", None)
     if status is None and hasattr(exc, "response"):

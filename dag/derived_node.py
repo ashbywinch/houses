@@ -611,7 +611,11 @@ class DerivedNode(Node[T], Generic[T]):
         """Extract retry delay from an exception, or use exponential backoff."""
         retry_after = getattr(exc, "retry_after", None)
         if retry_after is not None:
-            return timedelta(seconds=min(retry_after, 300))
+            # the provider's declared window (Retry-After) is authoritative
+            # within a day — a 429 that says "wait an hour" must not be
+            # hammered at the 5-minute backoff cap; only the exponential
+            # backoff path keeps the 300s bound
+            return timedelta(seconds=min(retry_after, 86400))
         delay_sec = base_delay.total_seconds() * (2**self._retry_count)
         if self._retry_count < self._max_retries:
             self._retry_count += 1

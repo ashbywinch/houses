@@ -23,6 +23,8 @@ from houses.web.json_utils import WirePayload
 logger = logging.getLogger(__name__)
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_NOT_FOUND = 404
+HTTP_5XX_START = 500
+HTTP_5XX_END = 600
 
 # ── URL constants ────────────────────────────────────────────────
 
@@ -210,7 +212,7 @@ async def geocode(postcode: str, *, services: Any | None = None) -> Attempt[GeoP
     return await _geocode_postcode(postcode, services=services)
 
 
-async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Attempt[GeoPoint]:
+async def _geocode_nominatim(query: str, *, services: Any | None = None, _client_factory=None) -> Attempt[GeoPoint]:
     """Geocode a place name via Nominatim (free, 1 req/sec max)."""
     cache_key = f"nom::{query.strip().upper()}"
     cache = _geo_cache(services=services)
@@ -219,8 +221,12 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None) -> Atte
         return cached
     clean = _END_PC_RE.sub("", query).strip()
     try:
-        gp = await apis.nominatim.geocode(clean)
+        gp = await apis.nominatim.geocode(clean, _client_factory=_client_factory)
     except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == HTTP_TOO_MANY_REQUESTS or (
+            HTTP_5XX_START <= exc.response.status_code < HTTP_5XX_END
+        ):
+            raise  # transient — the DAG retries at the provider's interval
         logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
         return Attempt.impossible(f"HTTP {exc.response.status_code}")
     if gp is None:
@@ -299,7 +305,7 @@ async def geocode_address(address: str, *, services: Any | None = None) -> Attem
     return await _geocode_nominatim(address, services=services)
 
 
-async def _geocode_postcode(postcode: str, *, services: Any | None = None) -> Attempt[GeoPoint]:
+async def _geocode_postcode(postcode: str, *, services: Any | None = None, _client_factory=None) -> Attempt[GeoPoint]:
     """Geocode a UK postcode via postcodes.io with in-memory caching."""
     key = postcode.strip().upper()
     if not key:
@@ -310,13 +316,19 @@ async def _geocode_postcode(postcode: str, *, services: Any | None = None) -> At
         return cached
 
     try:
-        gp = await apis.postcodes.geocode(key)
+        gp = await apis.postcodes.geocode(key, _client_factory=_client_factory)
     except httpx.HTTPStatusError as e:
         if e.response.status_code == HTTP_NOT_FOUND:
             _cache_result(key, Attempt.impossible("postcode not found (404)"), services=services)
             return Attempt.impossible("postcode not found (404)")
+        if e.response.status_code == HTTP_TOO_MANY_REQUESTS or (
+            HTTP_5XX_START <= e.response.status_code < HTTP_5XX_END
+        ):
+            raise  # transient — the DAG retries at the provider's interval
         logger.warning("Geocode HTTP error for %s: %s", key, e)
         return Attempt.impossible(f"HTTP {e.response.status_code}")
+    except (httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — the DAG retries
     # lucidlint: ignore broad-except unexpected geocode failure logs the key and returns Attempt.impossible
     except Exception:
         logger.exception("Failed to geocode postcode: %s", key)
