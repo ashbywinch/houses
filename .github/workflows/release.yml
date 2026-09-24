@@ -107,6 +107,23 @@ jobs:
           printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
         env:
           OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
+      - name: Publish the current live DB to the seed bucket (the migration's output step)
+        run: |
+          set -euo pipefail
+          # The fresh box restores gs://houses-seed/latest.db — so that
+          # artifact MUST be the CURRENT settled state, never the one-time
+          # migration capture (2026-09-24: a rollout re-served the stale
+          # seed because nothing had ever published the migrated output).
+          # Fail-fast: no snapshot, no upload -> the launch below never
+          # runs and the live box is untouched.
+          IP="${{ vars.BOX_HOST || secrets.BOX_HOST }}"
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@$IP" "sudo /opt/houses/switch.sh --publish"
+        env:
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
       - name: Launch the fresh instance
         run: |
           set -euo pipefail
@@ -470,6 +487,10 @@ jobs:
               AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
               if [ "$AGE" -lt 300 ]; then
                 echo "CUTOVER VERIFIED: https://houses.blueumbrella.net last_write=$LW"
+                # The new box now carries the settled state — publish it so
+                # the next provision restores THIS, not an older capture.
+                ssh -i /tmp/deploy.key -o BatchMode=yes "$BOX_USER@$IP" \
+                  "sudo /opt/houses/switch.sh --publish" || echo "WARNING: post-flip publish failed (bucket stays at the pre-flip capture)"
                 exit 0
               fi
             fi

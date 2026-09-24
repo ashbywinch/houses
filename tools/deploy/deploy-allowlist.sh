@@ -28,9 +28,9 @@ case "$CMD" in
     ;;
 esac
 
-# --- switch.sh [bare | --rollback | --diagnose] ------------------------
+# --- switch.sh [bare | --rollback | --diagnose | --publish] -------------
 case "$CMD" in
-  "sudo /opt/houses/switch.sh"|"sudo /opt/houses/switch.sh --rollback"|"sudo /opt/houses/switch.sh --diagnose")
+  "sudo /opt/houses/switch.sh"|"sudo /opt/houses/switch.sh --rollback"|"sudo /opt/houses/switch.sh --diagnose"|"sudo /opt/houses/switch.sh --publish")
     exec sudo /opt/houses/switch.sh ${CMD#sudo /opt/houses/switch.sh}
     ;;
 esac

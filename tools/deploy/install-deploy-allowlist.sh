@@ -22,6 +22,7 @@
 #   sudo /opt/houses/switch.sh                — flip
 #   sudo /opt/houses/switch.sh --rollback     — undo last flip (arg forwarded)
 #   sudo /opt/houses/switch.sh --diagnose     — read-only box state dump
+#   sudo /opt/houses/switch.sh --publish      — capture live DB to the seed bucket
 #   sudo journalctl <options>                 — read-only logs
 #
 # Usage: install-deploy-allowlist.sh "$(cat deploy.pub)"

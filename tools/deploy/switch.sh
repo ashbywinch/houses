@@ -34,6 +34,58 @@ prune_logs() {
     | xargs -r rm -f
 }
 
+# Bounded snapshot of the LIVE DB via the stdlib .backup API (never the
+# CLI): WAL-consistent with a deadline so the flip/publish never blocks on
+# the live DB. Prints "snapshot ok: N rows". Any installed side's venv
+# works — the script is stdlib-only (2026-09-24 flip aborted on a missing
+# active-side venv; the fallback is intentional).
+_snapshot_live() {
+  out="$1"
+  current=$(cat "$ROOT/ACTIVE" 2>/dev/null || echo blue)
+  script=$(mktemp "$ROOT/.snapshot-XXXXXX.py")
+  sudo chown ubuntu:ubuntu "$script"
+  sudo sh -c "cat > '$script'" <<'PY'
+import sqlite3, sys, time
+live, out = sys.argv[1], sys.argv[2]
+src = sqlite3.connect(live, timeout=5)  # write-capable: a PASSIVE checkpoint must apply the WAL for the copy to include it
+try:
+    src.execute("PRAGMA wal_checkpoint(PASSIVE)")
+except sqlite3.OperationalError:
+    pass
+dst = sqlite3.connect(out)
+deadline = time.monotonic() + 300
+aborted = [False]
+def _progress(*_a, **_k):
+    if time.monotonic() > deadline:
+        aborted[0] = True
+        return 1  # abort
+    return 0
+try:
+    src.backup(dst, pages=1000, progress=_progress)
+    if aborted[0]:
+        sys.exit("backup exceeded the deadline")
+    rows = dst.execute("SELECT count(*) FROM node_results").fetchone()[0]
+    if rows == 0:
+        sys.exit("snapshot copy has no node_results rows — refusing a stale/empty standby")
+    print(f"snapshot ok: {rows} rows in node_results")
+except sqlite3.OperationalError as e:
+    sys.exit(f"backup failed within the deadline: {e}")
+finally:
+    dst.close()
+    src.close()
+PY
+  py="$ROOT/$current/.venv/bin/python"
+  if [ ! -x "$py" ]; then
+    for side in green blue; do
+      [ -x "$ROOT/$side/.venv/bin/python" ] && { py="$ROOT/$side/.venv/bin/python"; break; }
+    done
+  fi
+  sudo "$py" "$script" "$ROOT/data/houses.db" "$out"
+  rc=$?
+  sudo rm -f "$script"
+  return $rc
+}
+
 if [ "$ACTION" = "--diagnose" ]; then
   set +e   # every probe is best-effort — a fresh box (no PREVIOUS, no
   # active units) must never abort the dump mid-way
@@ -72,6 +124,24 @@ if [ "$ACTION" = "--diagnose" ]; then
   exit 0
 fi
 
+if [ "$ACTION" = "--publish" ]; then
+  # Capture the CURRENT live DB to the seed bucket — the current-state
+  # artifact every future provision restores. The migration's output step
+  # made explicit: the provision workflow runs this BEFORE any destructive
+  # action and aborts on failure, so a stale one-time capture can never be
+  # silently restored as the fresh box's data (2026-09-24: a rollout
+  # re-served the migration's input because nothing had ever published the
+  # settled state). Fail-fast: no snapshot, no upload -> exit 1.
+  set -euo pipefail
+  SNAPSHOT="/tmp/houses-publish.db"
+  sudo rm -f "$SNAPSHOT"
+  _snapshot_live "$SNAPSHOT" || { echo "publish: live-DB snapshot FAILED — current state NOT captured; refusing to proceed" >&2; exit 1; }
+  gsutil -q cp "$SNAPSHOT" "gs://houses-seed/latest.db" || { echo "publish: bucket upload FAILED — current state NOT captured; refusing to proceed" >&2; exit 1; }
+  echo "published $(wc -c < "$SNAPSHOT") bytes to gs://houses-seed/latest.db"
+  sudo rm -f "$SNAPSHOT"
+  exit 0
+fi
+
 CURRENT=$(cat "$ROOT/ACTIVE")
 
 if [ "$ACTION" = "--rollback" ]; then
@@ -96,55 +166,10 @@ fi
 SNAPSHOT="/var/backups/houses-pre-flip-$TS.db"
 mark "pre-flip snapshot"
 sudo mkdir -p /var/backups
-# Bounded backup API (never the CLI's .backup): the flip must never wait
-# unbounded on the live DB for its snapshot.
-BACKUP_PY=$(mktemp "$ROOT/.backup-XXXXXX.py")
-sudo chown ubuntu:ubuntu "$BACKUP_PY"
-sudo sh -c "cat > '$BACKUP_PY'" <<'PY'
-import sqlite3, sys, time
-live, out = sys.argv[1], sys.argv[2]
-src = sqlite3.connect(live, timeout=5)  # write-capable: a PASSIVE checkpoint must apply the WAL for the copy to include it
-try:
-    src.execute("PRAGMA wal_checkpoint(PASSIVE)")
-except sqlite3.OperationalError:
-    pass
-dst = sqlite3.connect(out)
-deadline = time.monotonic() + 300
-aborted = [False]
-def _progress(*_a, **_k):
-    if time.monotonic() > deadline:
-        aborted[0] = True
-        return 1  # abort
-    return 0
-try:
-    src.backup(dst, pages=1000, progress=_progress)
-    if aborted[0]:
-        sys.exit("backup exceeded the deadline")
-    rows = dst.execute("SELECT count(*) FROM node_results").fetchone()[0]
-    if rows == 0:
-        sys.exit("snapshot copy has no node_results rows — refusing a stale/empty standby")
-    print(f"snapshot ok: {rows} rows in node_results")
-except sqlite3.OperationalError as e:
-    sys.exit(f"backup failed within the deadline: {e}")
-finally:
-    dst.close()
-    src.close()
-
-
-PY
-PY="$ROOT/$CURRENT/.venv/bin/python"
-if [ ! -x "$PY" ]; then
-  # Fresh box: the release installs only the standby side's venv; the
-  # snapshot script is stdlib-only, so the standby's python is identical
-  # for this purpose (2026-09-24 flip aborted on a missing active venv).
-  PY="$ROOT/$NEW/.venv/bin/python"
-fi
-if ! sudo "$PY" "$BACKUP_PY" "$ROOT/data/houses.db" "$SNAPSHOT"; then
-  rm -f "$BACKUP_PY"
+if ! _snapshot_live "$SNAPSHOT"; then
   mark "pre-flip snapshot failed within the deadline — aborting flip (live DB untouched)"
   exit 1
 fi
-rm -f "$BACKUP_PY"
 mark "stopping $OLD"
 sudo systemctl stop "houses-$OLD"
 
