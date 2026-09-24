@@ -280,10 +280,6 @@ jobs:
             || echo "box unreachable — check the console"
         timeout-minutes: 3
 
-      - name: Chain to the gated cutover
-        run: |
-          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover -f ip="$BOX_HOST"
-          echo "chained: cutover dispatched — it waits at the production environment approval"
         env:
           GH_TOKEN: ${{ github.token }}"
 
@@ -399,10 +395,6 @@ jobs:
             || echo "box unreachable — check the console"
         timeout-minutes: 3
 
-      - name: Chain to the gated cutover
-        run: |
-          gh workflow run Release --ref "$GITHUB_REF_NAME" -f action=cutover -f ip="$BOX_HOST"
-          echo "chained: cutover dispatched — it waits at the production environment approval"
         env:
           GH_TOKEN: ${{ github.token }}"
 
