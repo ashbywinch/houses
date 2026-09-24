@@ -45,6 +45,24 @@ permissions:
 # (see tools/deploy/provision.md §5c — no OCI, no tunnel, no age).
 
 on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'git ref to release/provision (SHA, branch, or tag)'
+        required: false
+        default: 'main'
+      ip:
+        description: 'box IP (chained from provision; fallback: vars/secret)'
+        required: false
+        default: ''
+      action:
+        description: 'provision | deploy | switch | rollback | diagnose'
+        required: false
+        default: 'deploy'
+        type: choice
+        options: ['provision', 'deploy', 'switch', 'rollback', 'diagnose']
 jobs:
   provision:
     if: inputs.action == 'provision'
