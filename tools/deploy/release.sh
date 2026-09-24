@@ -79,6 +79,10 @@ mark "release '$REF' -> $SIDE (standby; active=$ACTIVE)"
 cd "$ROOT/$SIDE"
 git fetch --tags --force origin
 git checkout --force "$REF"
+# an already-checked-out BRANCH stays behind unless we move it: the
+# re-exec must run the REF's LATEST content (wip/box-provision was 2
+# commits behind and the re-exec silently re-ran the old copy)
+git reset -q --hard "origin/$REF" 2>/dev/null || true
 # The checkout runs as root — changed files become root-owned, and the
 # app unit (ubuntu) would crash-loop on npm install EACCES.  Give the
 # checkout back to ubuntu before anything runs against it.
