@@ -27,9 +27,11 @@ cat > /etc/caddy/Caddyfile <<EOF
 # houses blue/green — ports are role-based (active=8765, standby=8766),
 # so this file never changes on a flip.
 {
-    # caddy's default CA must be forced: a fresh install used
-    # acme-staging-v02 (untrusted) and prod served nothing (2026-09-24)
+    # 2026-09-24: a fresh install used acme-staging-v02 (untrusted) and the
+    # default tls-alpn-01 challenge can never pass through the Cloudflare
+    # proxy — force the production CA and the http-01 challenge (:80)
     acme_ca https://acme-v02.api.letsencrypt.org/directory
+    challenges http-01
 }
 
 $MAIN {
@@ -45,5 +47,5 @@ systemctl enable --now caddy
 systemctl restart caddy || true
 # fresh ACME storage: a first-boot staging issuance must never leak into
 # the production path (the certificates dir is cache, not state)
-rm -rf /var/lib/caddy/.local/share/caddy/certificates
+rm -rf /var/lib/caddy/.local/share/caddy   # full ACME storage: staging account/certs must not resurface
 echo "caddy installed: https://$MAIN -> :8765 (active), https://$SMOKE -> :8766 (standby)"
