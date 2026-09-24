@@ -28,6 +28,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+import httpx
+
 from houses import apigw
 from houses.geopoint import GeoPoint
 from houses.settings import settings
@@ -175,7 +177,18 @@ class ORSApi(BaseApi):
             headers={**self._auth_headers(), "Content-Type": "application/json"},
             _client_factory=_client_factory,
         )
-        data = await self._fetch(req)
+        try:
+            data = await self._fetch(req)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                # no route exists between these points (e.g. no road
+                # connection): keep the walk leg, never an impossible pill
+                logger.warning(
+                    "ORS found no %s route between %s and %s",
+                    mode, origin, destination,
+                )
+                return None
+            raise
         if not data:
             return None
         try:

@@ -54,6 +54,38 @@ class _FourZeroThreeClient:
         )
 
 
+class _FourZeroFourClient:
+    """httpx-shaped fake: every ORS POST answers 404 (no route exists)."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def request(
+        self, method: str, url: str, *args: object, **kwargs: object
+    ) -> httpx.Response:
+        request = httpx.Request(method, url)
+        raise httpx.HTTPStatusError(
+            f"Client error '404 Not Found' for url '{url}'",
+            request=request,
+            response=httpx.Response(404, request=request),
+        )
+
+
+async def test_walk_404_no_route_keeps_the_walk_leg():
+    """A 404 = ORS found no route between the points (e.g. no road
+    connection): keep the walk leg — never an impossible pill, while the
+    daily-quota flag stays untouched."""
+    client = _FourZeroFourClient()
+    result = await walkability._walk_duration(
+        _LAT, _LNG, _DEST, _client_factory=lambda **k: client
+    )
+    assert result is None
+    assert not apigw.GATE.quota_exhausted(apigw.ORS), "a 404 is not quota"
+
+
 async def test_walk_403_sets_the_shared_flag_and_short_circuits():
     client = _FourZeroThreeClient()
     result = await walkability._walk_duration(
