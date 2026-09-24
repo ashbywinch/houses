@@ -26,6 +26,9 @@ for side in blue green; do
   [ -d "$ROOT/$side" ] || { echo "box-setup: clone the repo to $ROOT/$side first" >&2; exit 1; }
 done
 
+# blue is live from day one; never clobber an existing marker (idempotent)
+[ -f "$ROOT/ACTIVE" ] || echo blue > "$ROOT/ACTIVE"
+
 # Tooling: install the CURRENT copies (box-setup runs from the checkout,
 # so a rebuild gets the survivor release.sh; per-release self-ship keeps
 # it fresh afterwards).
