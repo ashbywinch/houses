@@ -47,4 +47,8 @@ systemctl restart caddy || true
 # fresh ACME storage: a first-boot staging issuance must never leak into
 # the production path (the certificates dir is cache, not state)
 rm -rf /var/lib/caddy/.local/share/caddy   # full ACME storage: staging account/certs must not resurface
+# Fresh-box ACME storage: the package creates /var/lib/caddy as root and
+# the TLS job dies on the storage check (2026-09-24) — the cert never
+# issues until caddy owns its storage.
+sudo chown -R caddy:caddy /var/lib/caddy
 echo "caddy installed: https://$MAIN -> :8765 (active), https://$SMOKE -> :8766 (standby)"

@@ -132,7 +132,14 @@ finally:
 
 
 PY
-if ! sudo "$ROOT/$CURRENT/.venv/bin/python" "$BACKUP_PY" "$ROOT/data/houses.db" "$SNAPSHOT"; then
+PY="$ROOT/$CURRENT/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  # Fresh box: the release installs only the standby side's venv; the
+  # snapshot script is stdlib-only, so the standby's python is identical
+  # for this purpose (2026-09-24 flip aborted on a missing active venv).
+  PY="$ROOT/$NEW/.venv/bin/python"
+fi
+if ! sudo "$PY" "$BACKUP_PY" "$ROOT/data/houses.db" "$SNAPSHOT"; then
   rm -f "$BACKUP_PY"
   mark "pre-flip snapshot failed within the deadline — aborting flip (live DB untouched)"
   exit 1

@@ -114,7 +114,18 @@ jobs:
           # project/zone live as repo variables with the real defaults
           project="${{ vars.GCP_PROJECT || 'houses-498215' }}"
           zone="${{ vars.GCP_ZONE || 'us-west1-a' }}"
-          # idempotent re-provision: a failed attempt must not block the next
+          # idempotent re-provision: a failed attempt must not block the next.
+          # NEVER delete a running box that owns the static origin IP — the
+          # cutover depends on it serving until the new box is ready; a
+          # re-provision of a LIVE box must run the switch/rollback path
+          # instead (2026-09-24: the idempotent delete destroyed the live
+          # box before the new one booted — downtime + manual cutover).
+          OWNED=$(gcloud compute addresses describe houses-static --region us-west1 \
+            --project "$project" --format='value(users[0])' 2>/dev/null || true)
+          if [ -n "$OWNED" ] && echo "$OWNED" | grep -q "instances/houses-rebuild"; then
+            echo "ERROR: houses-rebuild owns the static origin IP and is serving — refusing to delete it. Re-provision must not touch the live box." >&2
+            exit 1
+          fi
           gcloud compute instances delete houses-rebuild --zone "$zone" --project "$project" --quiet 2>/dev/null || true
           gcloud compute instances create houses-rebuild \
             --project "$project" --zone "$zone" \
@@ -427,6 +438,12 @@ jobs:
           # detach from the OLD box, attach to the new — origin IP unchanged,
           # so DNS/Cloudflare proxy need no edits
           gcloud compute instances delete-access-config houses --access-config-name=external-nat \
+            --zone "$ZONE" --project "$PROJECT" || true
+          # The fresh instance carries an auto-assigned ephemeral access
+          # config — GCP allows ONE; delete it first, then attach the static
+          # (2026-09-24: without this the cutover died mid-move with
+          # 'At most one access config currently supported').
+          gcloud compute instances delete-access-config houses-rebuild --access-config-name=external-nat \
             --zone "$ZONE" --project "$PROJECT" || true
           gcloud compute instances add-access-config houses-rebuild --access-config-name=external-nat \
             --address "$STATIC" --zone "$ZONE" --project "$PROJECT"
