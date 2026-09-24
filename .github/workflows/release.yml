@@ -280,9 +280,6 @@ jobs:
             || echo "box unreachable — check the console"
         timeout-minutes: 3
 
-        env:
-          GH_TOKEN: ${{ github.token }}"
-
 
       - id: chain_ok
         name: Standby smoke passed on the new box
@@ -394,9 +391,6 @@ jobs:
             "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose" \
             || echo "box unreachable — check the console"
         timeout-minutes: 3
-
-        env:
-          GH_TOKEN: ${{ github.token }}"
 
 
   cutover:
