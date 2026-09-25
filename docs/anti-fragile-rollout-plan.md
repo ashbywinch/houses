@@ -59,7 +59,10 @@ Landed + pushed:
 
 ### Phase 1 — The migration pipeline runs what it ships, verified by the paired check (remaining work)
 
-The migration runner's orchestration — manifest parsing, run order, verdict gating, evidence — is **tested code, not shell**. This is the direct consequence of the research finding: the missing-newline bug was shell orchestration (a `while read` over a text file) with no tests. Shell remains only where it is a *security surface*: the deploy-key allowlist matches exact command shapes, so the box entry points stay restricted one-liners (`release.sh`/`switch.sh` exec the runner); all logic moves out of them.
+The migration runner's orchestration — manifest parsing, run order, verdict gating, evidence — is **tested code, not shell**. This is the direct consequence of the research finding: the missing-newline bug was shell orchestration (a `while read` over a text file) with no tests. Shell remains in exactly two places, and nothing else:
+
+- **the deploy-key allowlist** — a security surface by design: OpenSSH's forced command runs it and it matches exact command strings; there is nothing to convert, it is a lock;
+- **the fixed service-lifecycle sequence in release.sh/switch.sh** — snapshot, stop, call the runner, restart, verify, markers. These shrink to thin callers of the runner; the sequence itself is the next thing brought under test, not "gone".
 
 - **A migration runner as a real program** (`tools/deploy/run_migrations.py`), implementing the existing `run-migration.sh` contract (dry-run / apply / backup / verify):
   - reads the manifest with a real parser — the file-shape fragility class (trailing-newline, comment filtering) is impossible;
