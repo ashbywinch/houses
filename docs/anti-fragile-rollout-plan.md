@@ -16,7 +16,7 @@ The 2026-09-24/25 rollout from the branch failed in four distinct ways, each a f
 
 | Incident | Root cause | Resolution |
 |---|---|---|
-| Provision's idempotent `delete` destroyed the **live** box before the new one was ready | the launch step deletes `houses-rebuild` unconditionally; the live box had that name | the traffic owner is `houses`, `prevent_destroy`, never rebuilt by a rollout |
+| Provision's idempotent `delete` destroyed the **live** box before the new one was ready | the launch step deletes `houses-rebuild` unconditionally; the live box had that name | the traffic owner is whoever the forwarding rule targets; the workflow refuses to rebuild the targeted instance |
 | Cutover's static-IP move failed (`At most one access config currently supported`) | the fresh instance keeps an auto-assigned ephemeral config; GCP allows one | the static IP never touches an instance; it is an L4 forwarding rule's address, and the flip changes the rule's target |
 | Fresh box's flip aborted (no `blue/.venv`) | the release only installs the standby side's venv | boxes install one artifact (venv included) fetched from GCS by the instance's own identity |
 | **The migration silently never ran** | `migrations.list` shipped with no trailing newline; `while IFS= read -r MIG` skips a newline-less final line — the list was comments-only to the loop, so the flip reported success with nothing executed | a real parser in a tested runner + mandatory apply-then-check verdicts |
@@ -28,24 +28,26 @@ The 2026-09-24/25 rollout from the branch failed in four distinct ways, each a f
                                 │  address of
                                 ▼
                   L4 forwarding rule (houses-l4, ports 80/443)   ← data plane
-                                │  target =
+                                │  target = the active instance
                                 ▼
       ┌────────────────────┐    ┌──────────────────────┐
-      │ houses             │    │ houses-standby       │
-      │ traffic owner      │    │ rolling / disposable │   control plane:
-      │ prevent_destroy    │    │ ephemeral ext IP =   │
-      │ Caddy terminates   │    │ SSH only             │
-      │ TLS on 80/443      │    │                      │
-      └────────────────────┘    └──────────────────────┘
-             ssH / verifies             ssH / runs migrations
+      │ houses             │    │ houses               │
+      │ (currently active) │    │ (currently standby)  │   control plane:
+      │ serves via Caddy   │    │ built each rollout   │
+      │ on 80/443          │    │ ephemeral ext IP =   │
+      └────────────────────┘    │ SSH only            │
+                                └──────────────────────┘
+          ssH / verifies                ssH / runs migrations
 ```
 
 Four invariants, each stated so it is obvious why the design cannot go wrong:
 
-1. **The static IP belongs to the forwarding rule and nothing else.** Instance access configs are ephemeral and for SSH only (control plane); the data plane is `houses-l4` whose `target` is a zonal `google_compute_target_instance` for the active box. A rollout changes the rule's target — an IP is never attached to or detached from an instance, so the access-config failure class cannot occur. Caddy stays on the box (L4 passthrough, TLS unchanged).
+1. **The static IP belongs to the forwarding rule and nothing else.** Instance access configs are ephemeral and for SSH only (control plane); the data plane is `houses-l4`, whose `target` is a zonal `google_compute_target_instance`. A rollout changes the rule's target — an IP is never attached to or detached from an instance, so the access-config failure class cannot occur. Caddy stays on the box (L4 passthrough, TLS unchanged).
 2. **Boxes hold no secrets.** Each instance runs with its GCP service account (`houses-box-deploy`); every gsutil/gcloud call uses the metadata-server identity. Metadata carries only public keys (`ssh-keys` pubkeys) and public vars (`PROVISION_REF`, `PROVISION_ARTIFACT`). No key file exists on a box and none can appear in Terraform state.
-3. **Migrations run only on the standby's DB copy.** Rehearsal at install; a fresh snapshot of the owner's DB is pulled and re-checked immediately before the flip. The owner's data is never migrated on, so a failed migration can never touch production data.
+3. **Migrations run only on the standby's DB copy, while that DB is quiescent.** Rehearsal at install; a fresh snapshot of the owner's DB is pulled, restored, and re-checked immediately before the flip — all with the standby app stopped. The owner's data is never migrated on, and no step writes the standby's DB while the runner operates on it.
 4. **Exactly one human decision: the cutover approval.** Everything else in the rollout is automated; the gate is the smoke evidence.
+
+**Ownership and the rebuild guard.** The rule target is the only "who is live" fact. Instances are fixed resources (`houses` + `houses-standby`) whose roles rotate with the target. The workflow reads the target before **any** destructive step and refuses to rebuild the targeted instance — the launch-guard pattern, with the rule as the source of truth. The address keeps `prevent_destroy` (it never changes); instances cannot, because after a flip the protected resource has moved.
 
 ## The runner
 
@@ -55,24 +57,53 @@ Four invariants, each stated so it is obvious why the design cannot go wrong:
 run_migrations.py --manifest <path> --db <path> --scripts-dir <abs side checkout> --python <abs venv python> [--apply | --dry-run]
 ```
 
-- **Paths and interpreter are explicit caller inputs.** The manifest holds relative `<apply-script> <check-script>` pairs resolved against `--scripts-dir`, so the same shipped manifest serves both checkouts (`houses` at flip, `houses-standby` at release) with no hidden convention about where scripts live; `--python` names the side's `.venv/bin/python`, which the migration scripts require (they import `houses.*`). The runner validates both resolve and exist. The runner itself is stdlib because it only orchestrates subprocesses.
-- **Manifest format:** one line per migration, whitespace-separated paths; the parser rejects malformed lines, unknown or duplicate paths, and a final line without a newline — the file-shape failure class cannot parse.
-- **`--apply`:** space gate (DB + 1 GiB, `HOUSES_MIGRATION_MIN_FREE_BYTES`) → per migration: dry-run report → apply + `<db>.pre-<migration>` backup → **independent check subprocess** (the migration's own `.check` script; exit 0 iff the effect is complete) → one verdict line → non-zero exit on any failure. The check is a separate process so it cannot vouch for the code that just wrote. `--dry-run` = read-only report with the same space-gate semantics.
-- **Callers make exactly one runner call.** `release.sh` (rehearsal against the standby DB copy) and `switch.sh` (the flip, live DB, prod stopped) each invoke the runner once; non-zero = abort (release stops; flip restores the pre-flip snapshot and the old side). All of the deleted `run-migration.sh`'s guarantees — space gate, backup, dry-run-first, post-apply chown/chmod — live inside the runner.
-- **Evidence:** one `run-migrations-<timestamp>.log` per run, root-owned, pruned newest-32; `switch.sh --diagnose` tails it. Verdict lines are the checkpoint values the human gate reviews.
-- **Tests:** the real backfill plus its `scripts/backfill_person_ids.check.py` against a seeded temp DB — apply ran, check ran, a deliberately skipped or incomplete migration fails the run; parser failure cases; verdict lines present.
+- **Paths and interpreter are explicit caller inputs.** The manifest holds relative `<apply-script> <check-script>` pairs resolved against `--scripts-dir`, so the same shipped manifest serves both checkouts with no hidden convention; `--python` names the side's `.venv/bin/python` (migrations import `houses.*`). The runner validates both resolve and exist, and is stdlib because it only orchestrates subprocesses.
+- **Manifest format:** one line per migration, whitespace-separated paths; the parser rejects malformed lines, unknown or duplicate paths, duplicate apply-script basenames, and a final line without a newline — the file-shape failure class cannot parse.
+- **`--apply`:** space gate (DB + 1 GiB, `HOUSES_MIGRATION_MIN_FREE_BYTES`) → per migration: dry-run report → apply + backup → **independent check** → one verdict line → summary → exit non-zero on any failure. `--dry-run` = read-only report with the same space-gate semantics.
+
+**Check contract (the migration's paired check).** A check is a program invoked by the runner as `<python> <check-script> --db <db>`, opens the DB **read-only**, and exits 0 iff the migration's effect is complete. It must not modify the DB. The backfill's check = `scripts/backfill_person_ids.check.py`, the same "rows remapped == 0" scan the migration's `--verify` performs today, as a standalone read-only script. The check is a separate process so it cannot vouch for the code that just wrote.
+
+**Backup naming.** The pre-migration backup is `<db>.pre-<apply-script-basename>` (e.g. `houses.db.pre-backfill_person_ids.py`). Unique per run by the parser's duplicate-basename rejection.
+
+**Verdict format (load-bearing: the release guard, `--diagnose`, the tests, and the human gate read exactly this):**
+
+```
+== run_migrations <iso-ts> manifest=<path> db=<path> mode=apply
+migration <apply-basename>: apply ok; backup ok; check ok     # or: apply FAILED: <err> / check FAILED: <err>
+migrations: <N> applied+checked, <M> failed
+```
+
+The runner prints exactly one `migration …` line per manifest entry and one summary line, then exits 0 iff the summary ends `0 failed`. Callers and `--diagnose` match the summary line's exact text; tests assert both shapes.
+
+**Callers make exactly one runner call.** `release.sh` (rehearsal against the standby DB copy) and `switch.sh` (the flip, live DB, prod stopped — until Phase 2 removes the per-box flip) each invoke the runner once; non-zero = abort (release stops; flip restores the pre-flip snapshot and the old side). All of the deleted `run-migration.sh`'s guarantees live inside the runner (space gate, backup, dry-run-first, post-apply chown/chmod).
+
+**Evidence:** one `run-migrations-<timestamp>.log` per run, root-owned, pruned newest-32; `switch.sh --diagnose` tails it.
+
+**Tests:** the real backfill + `backfill_person_ids.check.py` against a seeded temp DB — apply ran, check ran, a deliberately skipped or incomplete migration fails the run; the verdict forms above appear; parser failure cases.
 
 ## Artifacts and bootstrap
 
-- **The artifact is a content-addressed object in GCS** — `gs://houses-artifacts/<sha256>.tar.gz` — built by a `build-artifact` CI job: pinned `uv sync` + frontend `npm ci && npm run build` into one tarball (code, `frontend/dist`, `.venv`, units, tools, `migrations.list`, checks); the sha256 of the bundle is the object key, so identity and content are one value and re-building the same ref reproduces the same object. The choice of GCS over the GitHub artifact store is driven by who consumes it: the **box**, at first boot and at install, using its instance SA via the metadata server — no token, no secret, no ssh re-pipe (the size-capped stdin transport Phase 3 removes). GitHub run-scoped artifacts are for humans and CI, not for a box fetching by machine identity.
-- **Install:** one new sanctioned shape, `sudo /opt/houses/install-artifact.sh <object>` (charset-validated). It fetches with the instance SA, verifies the sha256 equals the key, unpacks over the standby side, runs the runner (rehearsal) and the smoke, and streams verdicts. The stdin-dist pipe and the per-side git checkout disappear; tooling ships inside the artifact.
-- **Fresh box:** `PROVISION_ARTIFACT` in metadata (public) names the object; bootstrap step 2 fetches and unpacks it with the instance SA — available from first boot via the metadata server, so there is no ordering dance and no `SEED_SA_KEY` anywhere. The artifact hash answers "what is this box": `/opt/houses/ARTIFACT` records `<sha256>` + `<git ref>` (ref = provenance, sha = identity); `--diagnose` prints both.
+- **The artifact is a content-addressed object in GCS** — `gs://houses-artifacts/<sha256>.tar.gz` — built by a `build-artifact` CI job: pinned `uv sync` + frontend `npm ci && npm run build` into one tarball (code, `frontend/dist`, `.venv`, units, tools, `migrations.list`, checks); the sha256 of the bundle is the object key. GCS over the GitHub artifact store is a consequence of who consumes it: the **box**, at first boot and install, by its instance SA via the metadata server — no token, no secret, no size-capped ssh re-pipe.
+- **Install:** one new sanctioned shape, `sudo /opt/houses/install-artifact.sh <object>` (charset-validated). It fetches with the instance SA, verifies the sha256 equals the key, unpacks over the standby's checkout, runs the runner (rehearsal) and the smoke locally (127.0.0.1), stops the standby app, and streams verdicts. The stdin-dist pipe and per-side git checkouts disappear; tooling ships inside the artifact.
+- **Fresh box:** `PROVISION_ARTIFACT` in metadata (public) names the object; bootstrap step 2 fetches and unpacks it with the instance SA. The artifact hash answers "what is this box": `/opt/houses/ARTIFACT` records `<sha256>` + `<git ref>`; `--diagnose` prints both.
+- **Seed provenance:** the bootstrap writes `/opt/houses/SEED` — `object=<seed object> etag=<etag> restored_at=<iso> rows=<n>` (values it already has during restore) — so "what did this box start from" is a file, printed by `--diagnose`.
 
 ## Cutover and rollback
 
-The cutover job — the only job that moves traffic — runs under `environment: production` with Required reviewers. Inside the gated job, in order: **snapshot the owner's live DB** (`switch.sh --snapshot` streams a consistent `.backup` to the CI runner), **restore it onto the standby** (`switch.sh --restore` consumes it), **re-run the migrations + checks on the standby**, then **flip the forwarding-rule target** (`gcloud compute forwarding-rules set-target houses-l4 …` with the existing `GOOGLE_SA_KEY` — the box never flips routes, so it needs no GCP credentials and has none), then **verify public health**. The snapshot transfer is CI-mediated transient cutover data — never the seed, which remains a human-validated artifact written only by `seed-box.sh`.
+The cutover job — the only job that moves traffic — runs under `environment: production` with Required reviewers. Inside the gated job, in order:
 
-**Rollback is the same command in reverse**: `set-target` back to the original instance. There is no DB restore — the owner's database was never written by the rollout; the standby is discarded and rebuilt by the next rollout. The pre-flip snapshot machinery that exists today becomes vestigial and is removed.
+1. **snapshot** the owner's live DB (`switch.sh --snapshot`, a consistent `.backup`, streamed to the CI runner) — the owner keeps serving;
+2. **restore** it onto the standby (`switch.sh --restore`, from stdin), with the standby app **stopped**;
+3. **re-run the migrations + checks** on the standby (the runner, still stopped — the DB is quiescent);
+4. **start** the standby app;
+5. **flip** the forwarding-rule target (`gcloud compute forwarding-rules set-target houses-l4 …` with the existing `GOOGLE_SA_KEY` — the box never flips routes, so it needs no GCP credentials and has none);
+6. **verify** public health on the new owner, continuously for the **settle window (5 minutes)** with `last_write` advancing; only then is the flip complete.
+
+**Standby app lifecycle (explicit):** install-smoke: stopped → start → health/smoke → stop. Waiting: stopped. Cutover: stopped → [restore, recheck] → start → set-target → verify/settle (running). No step writes the standby DB while the runner operates on it; on any smoke failure the standby is already stopped and stays stopped.
+
+**Role cycle (post-flip):** after settle, the previous owner idles as the next rollout's standby. The next rollout rebuilds it from the artifact at its own start (never at a cutover); the workflow's rebuild guard refuses to touch whichever resource the rule currently targets. Nothing is "discarded" at flip time.
+
+**Rollback** is the same command in reverse: `set-target` back to the previous owner. No DB restore — the owner's database was never written by the rollout. The per-box flip, ACTIVE/PREVIOUS markers, and the pre-flip snapshot machinery are removed in Phase 2.
 
 ## The human approval gate for the smoke test (required, unchanged)
 
@@ -83,32 +114,36 @@ The cutover job — the only job that moves traffic — runs under `environment:
 
 ## Phases
 
-1. **Migration pipeline:** the runner + manifest/check contract + tests; one-runner-call callers; delete `run-migration.sh` and the `--publish` mechanism (allowlist/workflow sites); bootstrap records the seed object it restored.
-2. **Terraform + the two-instance data plane:** `terraform/` over both instances (imported first, `prevent_destroy` on the owner and the address), target instances + `houses-l4`, public-key-only metadata, instance SAs (drop `SEED_SA_KEY`), ephemeral SSH IPs (`access_config {}`); `switch.sh --snapshot`/`--restore`; the gated cutover sequence above; rollback = `set-target` back.
+1. **Migration pipeline:** the runner + manifest/check contract (incl. check CLI, backup naming, verdict format above) + tests; one-runner-call callers; delete `run-migration.sh` and the `--publish` mechanism (allowlist/workflow sites); bootstrap writes the `/opt/houses/SEED` provenance file; `--diagnose` prints it.
+2. **Terraform + the two-instance data plane:**
+   - `terraform/` over both instances, target instances, `houses-l4`, the address (with `prevent_destroy`), firewall, `houses-tfstate`, public-key-only metadata, instance SAs (drop `SEED_SA_KEY`), ephemeral SSH IPs.
+   - **Adoption run** (one-off, gated like a cutover; accepted downtime = the seconds the address is unattached): detach `houses-static` from the owner's access config → `terraform apply` (the rule claims the address, targets the current owner) → verify. The owner's SSH (ephemeral IP) is unaffected throughout.
+   - **The per-box layout collapses:** each box = one checkout (`/opt/houses/app`), one unit (`houses.service`, port 8765), Caddy on the standby serves nothing external (its smoke is local). The `houses-blue`/`houses-green` units, role ports 8765/8766, `ACTIVE`/`PREVIOUS`, the smoke hostname, and `run-instance.sh` port derivation are deleted; the rule target is the role marker. `switch.sh` keeps `--snapshot`/`--restore`/`--diagnose`; the per-box flip is gone (CI's `set-target` is the flip).
+   - **Rebuild guard:** the workflow reads the rule target before any instance replacement and refuses to rebuild the targeted instance.
 3. **Artifacts:** `build-artifact` job → `gs://houses-artifacts/<sha>.tar.gz`; `install-artifact.sh <object>`; bootstrap fetch by `PROVISION_ARTIFACT`; the `ARTIFACT` marker.
 
 ## Operations & troubleshooting
 
 - **Humans: the operator key is full admin, unchanged** (locally `~/.ssh/houses_operator`): shell + passwordless sudo on either instance. The troubleshooting path; the allowlist constrains automation, not humans.
 - **CI: least privilege.** The deploy key runs exactly the allowlist shapes — `install-artifact.sh <object>`, `switch.sh --snapshot`/`--restore`, `--diagnose`, journalctl. New shapes = explicit, reviewed allowlist + sudoers changes.
-- **Evidence over state:** runner verdicts, transcripts, and release logs are the same artifacts humans and automation read.
-- **Reproducibility:** the installed artifact sha answers "what is this box"; `--diagnose` prints it with the ref.
+- **Evidence over state:** runner verdicts (the exact format above), transcripts, `/opt/houses/ARTIFACT`, `/opt/houses/SEED`, and release logs are the same artifacts humans and automation read.
+- **Reproducibility:** the installed artifact sha answers "what is this box"; the SEED file answers "what did it start from".
 - **Declared infra:** `terraform show`/`plan` = what should exist; drift is a finding, not a mystery.
 - **Escape hatches:** serial console + startup-script logs when SSH is unreachable; gcloud for rule target and instance status.
-- **Recovery, by layer:** rehearsal fails → release aborts, standby stays stopped. Flip fails → `set-target` back (the owner never changed). Standby broken → re-provision it from the artifact. Owner broken → rebuild it as a standby and flip back, or re-provision from the trusted seed.
+- **Recovery, by layer:** rehearsal fails → release aborts, standby stays stopped. Flip fails → `set-target` back (the owner never changed). Standby broken → rebuild it from the artifact at the next rollout. Owner broken → rebuild it as a standby and `set-target` back, or re-provision from the trusted seed.
 
 ## Acceptance criteria
 
-1. A rollout: build artifact → install on standby → migrations-with-checks → smoke → **human approval** → snapshot/restore/recheck → `set-target` → settle. Exactly one human decision.
+1. A rollout: build artifact → install on standby → migrations-with-checks → smoke → **human approval** → snapshot/restore/recheck → start → `set-target` → settle. Exactly one human decision.
 2. A failed rehearsal = release aborts, production untouched. A failed flip = `set-target` back in one command, no DB restore.
-3. The migration pipeline cannot report success without every check having run and passed — enforced by the parser and verdict gate, proven by fixture tests.
-4. No destructive step precedes the trusted state: `prevent_destroy` on the owner and address; the seed is human-validated; the owner's data is never migrated on.
+3. The migration pipeline cannot report success without every check having run and passed — enforced by the parser and verdict gate (exact formats above), proven by fixture tests.
+4. No destructive step precedes the trusted state: the address is `prevent_destroy`; the workflow refuses to rebuild the rule's target; the seed is human-validated; the owner's data is never migrated on.
 5. Every rollout exercises the recovery path (the standby = the DR drill).
 
 ## Risks / tradeoffs
 
 - Terraform state: an operator-created `houses-tfstate` bucket, CI SA scoped to it.
-- The cutover window (snapshot → restore → runner → set-target) is minutes of downtime by design.
+- The cutover window (snapshot → restore → recheck → set-target) and the one-time adoption detach are minutes of downtime by design.
 - Paired-check quality is the load-bearing risk: a weak check is the new silent-skip. Mitigated by the verdict gate, fixture tests, and the human reviewer seeing verdicts.
 - SA permission changes affect both boxes; they go through the release process, not ad-hoc.
 
