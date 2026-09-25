@@ -59,11 +59,17 @@ Landed + pushed:
 
 ### Phase 1 — The migration pipeline runs what it ships, verified by the paired check (remaining work)
 
-- **Mandatory paired check.** Every migration in `migrations.list` must ship a check of its effect (the existing `--verify` contract). A manifest without a check = manifest invalid; the pipeline refuses.
-- **Invocation + verdict are hard gates, on the non-live side first.** `release.sh` rehearsal: for each manifest migration — run against the standby's DB copy, then run the paired check; any failure aborts the release, standby stays stopped, live untouched. `switch.sh` flip: the same pair against the live DB with prod stopped; failure restores the pre-flip snapshot and brings the old side back. Both steps log a per-migration verdict line; the run's evidence includes each verdict.
-- **Test the pipeline, not just the file read.** Regression tests that run the *actual* rehearsal step against a fixture DB and assert: the migration ran, the check ran, and a deliberately skipped/incomplete migration **fails the release** (this is the test that would have caught the missing-newline bug — it exercises invocation and verdict, not loop mechanics).
+The migration runner's orchestration — manifest parsing, run order, verdict gating, evidence — is **tested code, not shell**. This is the direct consequence of the research finding: the missing-newline bug was shell orchestration (a `while read` over a text file) with no tests. Shell remains only where it is a *security surface*: the deploy-key allowlist matches exact command shapes, so the box entry points stay restricted one-liners (`release.sh`/`switch.sh` exec the runner); all logic moves out of them.
+
+- **A migration runner as a real program** (`tools/deploy/run_migrations.py`), implementing the existing `run-migration.sh` contract (dry-run / apply / backup / verify):
+  - reads the manifest with a real parser — the file-shape fragility class (trailing-newline, comment filtering) is impossible;
+  - for each manifest migration: run the migration's script (idempotent), then run **its paired check** (the `--verify` contract: exit non-zero when the migration's effect is incomplete);
+  - one verdict line per migration; exit non-zero on any failure; the transcript is the evidence.
+- **Mandatory paired check.** Every migration in the manifest must ship a check of its effect. A manifest entry without a check = invalid; the runner refuses.
+- **Invocation + verdict are hard gates, on the non-live side first.** Rehearsal: the runner against the standby's DB copy — any failure aborts the release, standby stays stopped, live untouched. Flip: the same run against the live DB with prod stopped — failure restores the pre-flip snapshot and brings the old side back.
+- **Test the pipeline, not just the file read.** Unit tests on the runner against a fixture DB assert: the migration ran, the paired check ran, and a deliberately skipped/incomplete migration **fails the run** (the test that would have caught the missing-newline bug — it exercises invocation and verdict, not parsing trivia).
 - **Remove the superseded publish mechanism** (`switch.sh --publish`, the provision + cutover publish steps, the allowlist entry) — replaced by the trusted-seed + migration pipeline direction.
-- **Acceptance:** a release whose standby migration check fails cannot reach the cutover gate; evidence per migration is in the run transcript.
+- **Acceptance:** the runner is unit-tested; a release whose standby migration check fails cannot reach the cutover gate; per-migration verdicts are in the run transcript.
 
 ### Phase 2 — Terraform the GCP layer
 
@@ -82,7 +88,7 @@ Landed + pushed:
 
 1. A rollout from a scratch box = automated through: artifact build → standby install → migration run-and-check on the standby → smoke → **human approval** → cutover → settle. Exactly one human decision.
 2. A failed migration on the standby = release aborts, standby discarded, production never touched. A failed live flip = pre-flip snapshot restored, old side back.
-3. The migration pipeline cannot report success without the migration's check having run and passed: the verdict is part of the gate, and a test exercises the whole step.
+3. The migration pipeline cannot report success without the migration's check having run and passed: the runner is a tested program (not shell), the verdict is part of the gate, and a test exercises the whole step.
 4. No destructive step precedes the trusted state (the launch guard remains; the publish direction is removed).
 5. Every rollout exercises the recovery path (blue/green = hot standby = the DR drill, per Fowler).
 
