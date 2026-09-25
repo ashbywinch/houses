@@ -52,7 +52,7 @@ Landed + pushed:
 1. `deploy-new` installs the release artifact on the standby, boots it against a **snapshot copy of the trusted DB**, and runs the smoke suite: the migrations (script + paired check) against that copy, health, `last_write` freshness, and a canary property evaluated end-to-end on real data.
 2. The smoke transcript + evidence (run artifacts, the checkpoint values — including each migration's check verdict) are published with the run.
 3. The `cutover` job — the only job that moves traffic — runs under `environment: production` with Required reviewers. **The reviewer's approval is the smoke gate: the cutover must not start until a human has seen the smoke evidence and approved.** This is the existing production-environment approval, made explicit about what it gates.
-4. On smoke failure — including any migration check failing — no approval is possible: the chain aborts, the standby stays stopped, the live box is untouched, and the run surfaces the failing checks. Re-run or fix; the standby is disposable, so "roll it back" means discard it and rebuild.
+4. On smoke failure — including any migration check failing — no approval is possible: the chain aborts, the standby stays stopped, the live box is untouched, and the run surfaces the failing checks. Re-run or fix. (In the Phase-2 two-instance layout the standby is a disposable instance; in the current single-box layout the failed side is simply left stopped — never promoted, never half-removed.)
 5. Nothing in Phases 1–3 removes or automates this human checkpoint. Automation replaces everything *around* it (planning, building, installing, evaluating, rolling back); the decision to move traffic remains with a human looking at evidence.
 
 ## Phases
@@ -103,7 +103,7 @@ The migration runner's orchestration — manifest parsing, run order, verdict ga
 - **Reproducibility (Phase 3).** The installed artifact hash answers "what is this box" — diagnosis compares hashes instead of re-deriving from setup scripts.
 - **Declared infra (Phase 2).** `terraform show`/`plan` = what should exist; drift vs actual is a finding, not a mystery.
 - **Escape hatches.** Serial console (`gcloud compute instances get-serial-port-output`) + startup-script logs when SSH is unreachable; gcloud for static-IP owner and instance status.
-- **Recovery.** Pre-flip snapshot + `switch.sh --rollback`; beyond that the standby is disposable — rebuild it.
+- **Recovery, by layer.** Rehearsal fails → release aborts, standby side stays stopped (today's single-box blue/green: the other app side on the same instance — rebuilding it means re-running the release in place, which shares disk/lifecycle with the live side, so it is NOT the disposable path). Live flip fails → pre-flip snapshot + `switch.sh --rollback`. Box-level breakage → re-provision a fresh box from the trusted seed (replace-not-repair — the *box* is disposable via provision). Phase 2's two-instance blue/green makes the standby a genuinely separate instance, and then — and only then — the standby itself is disposable: delete it, launch a fresh one from the artifact, re-run smoke.
 
 ## Risks / tradeoffs
 
