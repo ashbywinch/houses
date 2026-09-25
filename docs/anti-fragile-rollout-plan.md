@@ -95,6 +95,16 @@ The migration runner's orchestration — manifest parsing, run order, verdict ga
 4. No destructive step precedes the trusted state (the launch guard remains; the publish direction is removed).
 5. Every rollout exercises the recovery path (blue/green = hot standby = the DR drill, per Fowler).
 
+## Operations & troubleshooting
+
+- **Humans: the operator key is full admin, unchanged.** The unrestricted key in the instance `ssh-keys` metadata (locally `~/.ssh/houses_operator`): normal shell + passwordless sudo. This is the troubleshooting path — the one that resolved the 2026-09 incidents (flip transcripts, journalctl, sqlite3 on the live DB, dry-runs). The deploy-key allowlist does NOT constrain it; it constrains automation only.
+- **CI: least privilege.** The deploy key runs exactly the allowlist shapes. Read-only diagnostics are already sanctioned: `switch.sh --diagnose` (box-state dump: tooling shas, migrations.list, ACTIVE/PREVIOUS, units, snapshots, live DB + WAL, side layouts, journal tails) and `journalctl`. A new sanctioned command = an explicit, reviewed change to `deploy-allowlist.sh` + the sudoers (mechanism: `install-deploy-allowlist.sh`).
+- **Evidence over state.** The runner's per-migration verdicts + transcripts and the release logs are the same artifacts humans and automation read — "what did the migration do" is a log line, never a reconstruction.
+- **Reproducibility (Phase 3).** The installed artifact hash answers "what is this box" — diagnosis compares hashes instead of re-deriving from setup scripts.
+- **Declared infra (Phase 2).** `terraform show`/`plan` = what should exist; drift vs actual is a finding, not a mystery.
+- **Escape hatches.** Serial console (`gcloud compute instances get-serial-port-output`) + startup-script logs when SSH is unreachable; gcloud for static-IP owner and instance status.
+- **Recovery.** Pre-flip snapshot + `switch.sh --rollback`; beyond that the standby is disposable — rebuild it.
+
 ## Risks / tradeoffs
 
 - **Terraform state**: needs an off-box backend + a decision on who applies (CI SA with scoped perms).
