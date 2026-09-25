@@ -1,5 +1,12 @@
 # Deploy discipline
 
+> **Superseded in part — see [docs/anti-fragile-rollout-plan.md](anti-fragile-rollout-plan.md).**
+> This page describes the *current* mechanism (`run-migration.sh`, the per-box
+> flip with `ACTIVE`/`PREVIOUS`, flip-time migration of the live DB, the
+> `--publish` seed refresh). The plan replaces those; until each phase lands,
+> this page is accurate for the code in the tree. Where they disagree, the
+> plan is the destination and this page is the present.
+
 How production changes happen — and the rules that keep them safe. The
 generic principle lives in `skill://prod-deploy-via-release-only` (loaded
 when a task touches a production system); this page is the houses-specific
