@@ -261,7 +261,7 @@ fi
 MIG_MARK="$ROOT/.release-migration-start"
 touch "$MIG_MARK"
 MIG_COUNT=0
-while IFS= read -r MIG; do
+while IFS= read -r MIG || [ -n "$MIG" ]; do
   [ -z "$MIG" ] && continue
   [[ "$MIG" == \#* ]] && continue  # migrations.list carries a # header — never a migration path
   MIG_COUNT=$((MIG_COUNT + 1))

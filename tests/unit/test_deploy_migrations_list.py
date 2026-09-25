@@ -23,6 +23,61 @@ def _migrations() -> list[str]:
     return [ln for ln in lines if ln and not ln.startswith("#")]
 
 
+def test_shared_list_is_newline_terminated():
+    """The last-line bash trap: `while IFS= read -r MIG` does NOT execute
+    its body for a final line without a newline (bash read returns
+    non-zero) — the migration path silently never runs while every
+    comment 'happens' to be consumed. 2026-09-25: the ref's list shipped
+    with no trailing newline; the flip reported success with the migration
+    never executed (no mark, no transcript, zero seconds)."""
+    assert LIST.read_text().endswith("\n"), (
+        "migrations.list must end with a newline — a trailing partial line "
+        "is silently skipped by the while-read loops"
+    )
+
+
+def test_last_line_without_newline_is_still_migrated(tmp_path):
+    """The deploy loops must not depend on the file's trailing newline —
+    the hardening (|| [ -n "$MIG" ]) processes a partial final line."""
+    import subprocess
+
+    migration = "scripts/backfill_person_ids.py"
+    runner = tmp_path / "run-migration.sh"
+    runner.write_text("#!/bin/bash\necho \"$1\" >> \"$ARGS_LOG\"\n")
+    runner.chmod(0o755)
+    green = tmp_path / "green"
+    (green / "scripts").mkdir(parents=True)
+    (green / migration).write_text("")
+    green_smoke = tmp_path / "green-smoke.db"
+    green_smoke.write_text("")
+    # THE trap: the final migration line has NO trailing newline
+    (tmp_path / "migrations.list").write_text(
+        "# Ref-shipped data migrations, one path per line\n" + migration
+    )
+
+    release_loop = """while IFS= read -r MIG || [ -n "$MIG" ]; do
+  [ -z "$MIG" ] && continue
+  [[ "$MIG" == \\#* ]] && continue
+  "$RUNNER" "$ROOT/$SIDE/$MIG" "$ROOT/$SIDE-smoke.db" "$PY"
+done < "$LIST"
+"""
+    env = {
+        "ROOT": str(tmp_path),
+        "SIDE": "green",
+        "RUNNER": str(runner),
+        "LIST": str(tmp_path / "migrations.list"),
+        "PY": "/bin/true",
+        "ARGS_LOG": str(tmp_path / "args.log"),
+        "PATH": "/usr/bin:/bin",
+    }
+    r = subprocess.run(["bash", "-c", release_loop], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    invoked = (tmp_path / "args.log").read_text().splitlines()
+    assert invoked == [str(green / migration)], (
+        f"the newline-less last line was skipped by the loop: {invoked}"
+    )
+
+
 def test_every_listed_migration_exists_in_the_ref():
     for mig in _migrations():
         assert (REPO / mig).is_file(), f"migrations.list references a missing script: {mig}"

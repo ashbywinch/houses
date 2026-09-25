@@ -188,7 +188,7 @@ if [ "$ACTION" != "--rollback" ]; then
     mark "migrations.list missing on the box — the release did not ship it; refusing to flip"
     exit 1
   fi
-  while IFS= read -r MIG; do
+  while IFS= read -r MIG || [ -n "$MIG" ]; do
     [ -z "$MIG" ] && continue
     [[ "$MIG" == \#* ]] && continue  # migrations.list carries a # header — never a migration path
     mark "run data migration on the LIVE DB: $MIG"
