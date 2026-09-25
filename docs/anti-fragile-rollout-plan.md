@@ -16,24 +16,24 @@ The 2026-09-24/25 rollout from the branch failed in four distinct ways, each a f
 
 The migration skip is the emblematic failure: a safety-critical, fail-fast-designed mechanism was disabled by **one missing byte** and nothing verified the run — no mark, no transcript, zero seconds between stop and restart, flip completes. The fail-fast guarded only the missing-*file* case, never the missing-*entry* case. The data was unaffected only by luck (the persons backfill is a no-op on both the seed and the current DB).
 
-The research (see [Sources](#sources)) says the tooling class itself — bash orchestration of irreversible cloud actions with no plan, no state, no verification — is the recurring root cause, not this bug. This plan replaces the class.
+The response is **a pipeline that gets it right in the first place** — not additional defensive machinery layered on after the fact (checksums, state ledgers, phased schema evolution). The unit of correctness: **migration script + its paired check + a verdict**, run on the non-live side; a wrong result rolls back by simply not promoting.
 
 ## Principles
 
 1. **Deployments are performed by computers, not humans, in small self-contained artifacts** (Google SRE Workbook ch. 16). Google's postmortem data: a majority of incidents are triggered by binary or config pushes. Small artifacts ⇒ cheap rollback ⇒ frequent boring releases.
-2. **Blue/green: two environments, routing flip, trivial rollback; schema changes ship separately and first** (Fowler, Blue Green Deployment; SRE Workbook: blue/green = simplest canary, rollback = "a trivial reversal of the router change").
-3. **Expand/contract for backward-incompatible changes** (Fowler, Parallel Change): expand (support both), migrate (all consumers), contract (remove the old). Database refactoring is the canonical application.
+2. **Blue/green: two environments, routing flip, trivial rollback** (Fowler, Blue Green Deployment; SRE Workbook: blue/green = simplest canary, rollback = "a trivial reversal of the router change"). The standby is where release defects are supposed to surface — it runs the real install and the real migration against a copy, and if that goes wrong the standby is discarded, production untouched.
+3. **A migration is a script plus its check.** Each migration ships a verification that asserts the migration's effect (exit non-zero when the work isn't complete). The pipeline runs the script it shipped, then runs the check; the verdict is the gate. The migration runner contract (`run-migration.sh`: dry-run / apply / backup / **verify**) already embodies this — the work is to make invocation + verdict hard requirements, tested.
 4. **Infrastructure is declared, planned, and reviewed** (Terraform): plan shows every create/update/**destroy** before it happens; state = source of truth; operations dependency-ordered; immutable infrastructure.
-5. **Migrations are a versioned ledger with checksums and preconditions** (Liquibase): applied-state tracked in the database, unique identifiers per changeset, preconditions before unrecoverable operations — not a text file parsed by a shell loop.
+5. **Deliberately not adopted** — the database-versioning machinery (migration checksums + applied-state ledgers, expand/contract schema evolution) that larger shared databases use. Houses has ~40 properties, a disposable standby, and minutes-scale downtime tolerance; the paired-check-on-the-standby design covers the failure modes with a fraction of the machinery. (Sources for the considered-and-rejected approaches: Liquibase changelog/checksum model; Fowler's Parallel Change.)
 
 ## Data-direction decision (settled 2026-09-25)
 
-The restore source for any fresh box is the **trusted pre-migration backup + the expand/contract migrations**, not the *current* live output: the last migrated state was produced by a rollout the user judged untrustworthy, and the migration ledger exists to bring the trusted data forward deterministically.
+The restore source for any fresh box is the **trusted pre-migration backup + the migrations**, not the *current* live output: the last migrated state was produced by a rollout the user judged untrustworthy, and the migration pipeline brings the trusted data forward deterministically.
 
 Consequences, already or to be applied:
 
 - The seed bucket (`gs://houses-seed/latest.db`) holds the trusted seed. (`--publish`-style mechanisms that upload the *current live* DB as the next restore source — `switch.sh --publish` + the workflow publish steps from `fa0b48d` — are **superseded** and will be removed in Phase 1: they would carry an untrusted state forward.)
-- The live box keeps serving its current DB (functionally identical for the applied migration); migration consistency is enforced by the ledger, not by which DB file is newest.
+- The live box keeps serving its current DB (functionally identical for the applied migration); migration consistency is enforced by the pipeline's run-and-check, not by which DB file is newest.
 
 ## Current state of the branch (as of 2026-09-25)
 
@@ -49,20 +49,21 @@ Landed + pushed:
 
 **The cutover — any traffic change — stays a human-gated step. The gate is the smoke evidence.**
 
-1. `deploy-new` installs the release artifact on the standby, boots it against a **snapshot copy of the trusted DB**, and runs the smoke suite: health, `last_write` freshness, migration-applied-state vs the ledger, and a canary property evaluated end-to-end on real data.
-2. The smoke transcript + evidence (run artifacts, the checkpoint values) are published with the run.
+1. `deploy-new` installs the release artifact on the standby, boots it against a **snapshot copy of the trusted DB**, and runs the smoke suite: the migrations (script + paired check) against that copy, health, `last_write` freshness, and a canary property evaluated end-to-end on real data.
+2. The smoke transcript + evidence (run artifacts, the checkpoint values — including each migration's check verdict) are published with the run.
 3. The `cutover` job — the only job that moves traffic — runs under `environment: production` with Required reviewers. **The reviewer's approval is the smoke gate: the cutover must not start until a human has seen the smoke evidence and approved.** This is the existing production-environment approval, made explicit about what it gates.
-4. On smoke failure, no approval is possible: the chain aborts, the standby stays stopped, the live box is untouched, and the run surfaces the failing checks. Re-run or fix — never proceed on a failed smoke.
-5. Nothing in Phases 1–4 removes or automates this human checkpoint. Automation replaces everything *around* it (planning, building, installing, evaluating, rolling back); the decision to move traffic remains with a human looking at evidence.
+4. On smoke failure — including any migration check failing — no approval is possible: the chain aborts, the standby stays stopped, the live box is untouched, and the run surfaces the failing checks. Re-run or fix; the standby is disposable, so "roll it back" means discard it and rebuild.
+5. Nothing in Phases 1–3 removes or automates this human checkpoint. Automation replaces everything *around* it (planning, building, installing, evaluating, rolling back); the decision to move traffic remains with a human looking at evidence.
 
 ## Phases
 
-### Phase 1 — Migration integrity (remaining work)
+### Phase 1 — The migration pipeline runs what it ships, verified by the paired check (remaining work)
 
-- **Applied-state ledger + checksums.** Add a `migrations_applied` table (migration id, content checksum, applied_at); `run-migration.sh` records it after a verified apply; the flip's precondition AND its post-verify compare the ledger against the shipped manifest — any mismatch (missing entry, changed checksum, skipped run) aborts the flip. The missing-newline class dies for good: the loop result is *checked against the database*, not trusted from a file read.
-- **Remove the superseded publish mechanism** (`switch.sh --publish`, the provision + cutover publish steps, the allowlist entry) — replaced by the ledger + trusted-seed direction.
-- **Restore the bucket to the trusted seed** if needed before any next provision.
-- **Acceptance:** a flip with any unapplied/changed migration fails loudly before traffic moves, with the snapshot restored; a unit test covers a tampered manifest.
+- **Mandatory paired check.** Every migration in `migrations.list` must ship a check of its effect (the existing `--verify` contract). A manifest without a check = manifest invalid; the pipeline refuses.
+- **Invocation + verdict are hard gates, on the non-live side first.** `release.sh` rehearsal: for each manifest migration — run against the standby's DB copy, then run the paired check; any failure aborts the release, standby stays stopped, live untouched. `switch.sh` flip: the same pair against the live DB with prod stopped; failure restores the pre-flip snapshot and brings the old side back. Both steps log a per-migration verdict line; the run's evidence includes each verdict.
+- **Test the pipeline, not just the file read.** Regression tests that run the *actual* rehearsal step against a fixture DB and assert: the migration ran, the check ran, and a deliberately skipped/incomplete migration **fails the release** (this is the test that would have caught the missing-newline bug — it exercises invocation and verdict, not loop mechanics).
+- **Remove the superseded publish mechanism** (`switch.sh --publish`, the provision + cutover publish steps, the allowlist entry) — replaced by the trusted-seed + migration pipeline direction.
+- **Acceptance:** a release whose standby migration check fails cannot reach the cutover gate; evidence per migration is in the run transcript.
 
 ### Phase 2 — Terraform the GCP layer
 
@@ -73,35 +74,28 @@ Landed + pushed:
 
 ### Phase 3 — Single release artifact
 
-- CI builds ONE deploy bundle (code + frontend dist + pinned venv + units + tools + the migrations manifest) with a content checksum; the box installs the bundle verbatim; no checkout-at-release-time (the `release.sh`/`switch.sh` per-side install and the missing-venv class disappear).
+- CI builds ONE deploy bundle (code + frontend dist + pinned venv + units + tools + the migrations manifest + paired checks) with a content hash; the box installs the bundle verbatim; no checkout-at-release-time (the `release.sh`/`switch.sh` per-side install and the missing-venv class disappear).
 - Reproducible: same ref ⇒ same artifact (SRE principle #1).
 - **Acceptance:** a fresh box reaches serving with zero per-box setup variance; artifact hash recorded in the run.
 
-### Phase 4 — Expand/contract migrations + canary-style evaluation gate
-
-- Migrations ship as expand/contract: schema/data changes that support old and new run in their own release step **before** the app release, verified, with the ledger as the rollback point (Fowler). The DAG recompute remains a background settle after cutover, bounded by the gateway (quota short-circuit, Retry-After, keep-walk fallbacks).
-- The smoke suite becomes a canary-style evaluation with attributable metrics: standby vs live comparison on health, `last_write`, error rate, and the canary property's end-to-end values over a settle window; thresholds from real data; failure ⇒ auto-rollback by routing (still initiated by the human gate in Phase ≤3, then by the evaluation once the thresholds earn trust).
-- **Acceptance:** a bad release is caught on the standby or in the canary window before full traffic, and rollback = one routing flip.
-
 ## Acceptance criteria (whole plan)
 
-1. A rollout from a scratch box = automated through: artifact build → standby install → smoke → **human approval** → cutover → settle. Exactly one human decision.
-2. Rollback = routing flip, ≤ a few minutes, via the pre-flip snapshot + ledger.
-3. A migration can never be silently skipped: the ledger + checksum blocks the flip, with evidence.
-4. No destructive step precedes a verified, trusted state (the launch guard remains; the publish direction is removed).
+1. A rollout from a scratch box = automated through: artifact build → standby install → migration run-and-check on the standby → smoke → **human approval** → cutover → settle. Exactly one human decision.
+2. A failed migration on the standby = release aborts, standby discarded, production never touched. A failed live flip = pre-flip snapshot restored, old side back.
+3. The migration pipeline cannot report success without the migration's check having run and passed: the verdict is part of the gate, and a test exercises the whole step.
+4. No destructive step precedes the trusted state (the launch guard remains; the publish direction is removed).
 5. Every rollout exercises the recovery path (blue/green = hot standby = the DR drill, per Fowler).
 
 ## Risks / tradeoffs
 
 - **Terraform state**: needs an off-box backend + a decision on who applies (CI SA with scoped perms).
 - **Blue/green cost**: one extra instance (e2-micro). Acceptable; the old chain already peaked at two during cutover.
-- **Canary metrics on a small property set**: 40ish properties ⇒ the evaluation window/thresholds need real settle data before they replace the human gate. The human gate stays until the evaluation proves itself.
-- **Ledger on an existing DB**: the `migrations_applied` bootstrap must treat the current state as "already applied, checksum verified in dry-run" — the backfill's `rows remapped: 0` proves it.
+- **Paired-check quality**: a weak check (e.g. always passes) is the new silent-skip risk — that's exactly what the release-abort paths and the fixture tests are for, and the human reviewer sees the verdicts.
+- **A migration already applied on the live DB**: the paired check treats "nothing left to do" as pass — the backfill's `rows remapped: 0` is exactly that, so an already-migrated DB passes cleanly.
 
 ## Sources
 
 - Google SRE Workbook, ch. 16 *Canarying Releases* — https://sre.google/workbook/canarying-releases/
 - Martin Fowler, *Blue Green Deployment* — https://martinfowler.com/bliki/BlueGreenDeployment.html
-- Martin Fowler / Danilo Sato, *Parallel Change* — https://martinfowler.com/bliki/ParallelChange.html
 - HashiCorp, *What is Terraform* — https://developer.hashicorp.com/terraform/intro
-- Liquibase, *What is a Changelog* — https://docs.liquibase.com/concepts/changeset.html
+- Considered and deliberately not adopted: Liquibase changelog/checksum model — https://docs.liquibase.com/concepts/changeset.html ; Fowler / Danilo Sato, *Parallel Change* (expand/contract) — https://martinfowler.com/bliki/ParallelChange.html
