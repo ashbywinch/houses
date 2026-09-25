@@ -3,12 +3,12 @@
 **Status:** Plan — Phase 1 partially landed on `wip/box-provision`.
 **Scope:** the external provisioning/release chain (`.github/workflows/release.yml` + `tools/deploy/*` + the GCP slice). Not frontend, not the DAG library.
 
-## Requirements (in priority order)
+## Requirements
 
-1. **Simple.** Fewest moving parts that satisfy the others. When two designs both work, the one with fewer files, fewer commands, fewer states wins.
-2. **Obviously correct.** A reader with only this document and the code can *see* why each step can't go wrong. No trust-us invariants: the gate is an explicit check, the transcript is the evidence, a state that violates the design is refused loudly at the first place it could.
-3. **Anti-fragile.** Every failure mode we have actually hit is structurally impossible or reduces to a trivial recovery — don't promote, flip back, re-provision. Never defense layered on top of a mechanism that should have been built right; build the mechanism right.
-4. **Discoverable by new agents with no context.** An agent can find this plan, read the design, and operate a rollout from the artifacts — the manifest, the runner verdicts, the run log — without reconstructing history. Stable names, machine-readable evidence, exactly one human decision, stated.
+1. **Simple.**
+2. **Obviously correct** in its implementation — it should be obvious why it can't go wrong.
+3. **Anti-fragile.**
+4. **Easy to find, read, understand and use for new agents with no context.**
 
 ## Why this exists
 
