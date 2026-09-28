@@ -23,8 +23,6 @@ class _FakeDirectionsClient:
     async def __aexit__(self, *a):
         return False
 
-
-
     async def request(self, method, url, *, headers, params=None, json=None):
         self.posted_bodies.append(json)
         return _FakeResponse(self._duration_s)
@@ -46,20 +44,22 @@ class _FakeResponse:
 async def test_drive_minutes_from_location_posts_origin_coords():
     """_get_drive_minutes_from_location estimates from known coordinates
     directly — the no-postcode fallback path."""
-    from houses.transit_route import _get_drive_minutes_from_location
+    from houses.transit_route import _get_drive_minutes_from_location, _LookupSeam
 
     fake = _FakeDirectionsClient(duration_s=720)  # 12 min
     station = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
     result = await _get_drive_minutes_from_location(
-        GeoPoint(51.5, -0.1), "Maidenhead Rail Station",
-        _client_factory=lambda *a, **k: fake, _no_cache=True,
-        _find_station=lambda name: station, _geocode_address=lambda addr: None,
+        GeoPoint(51.5, -0.1),
+        "Maidenhead Rail Station",
+        _client_factory=lambda *a, **k: fake,
+        _no_cache=True,
+        _lookups=_LookupSeam(find_station=lambda name: station, geocode_address=lambda addr: None),
     )
 
     assert result == 12
-    assert fake.posted_bodies == [
-        {"coordinates": [[-0.1, 51.5], [-0.97, 51.4]], "units": "km"}
-    ], "origin must be the known coordinates, not geocoded"
+    assert fake.posted_bodies == [{"coordinates": [[-0.1, 51.5], [-0.97, 51.4]], "units": "km"}], (
+        "origin must be the known coordinates, not geocoded"
+    )
 
 
 @pytest.mark.asyncio
@@ -72,19 +72,20 @@ async def test_drive_minutes_from_postcode_geocodes_then_estimates():
     async def geocode_ok(addr):
         return Attempt.succeeded(GeoPoint(51.5, -0.1))
 
+    from houses.transit_route import _LookupSeam
+
     fake = _FakeDirectionsClient(duration_s=900)  # 15 min
     station = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
     result = await _get_drive_minutes(
-        "SL6 3YZ", "Maidenhead Rail Station",
-        _client_factory=lambda *a, **k: fake, _no_cache=True,
-        _geocode=geocode_ok,
-        _find_station=lambda name: station, _geocode_address=lambda addr: None,
+        "SL6 3YZ",
+        "Maidenhead Rail Station",
+        _client_factory=lambda *a, **k: fake,
+        _no_cache=True,
+        _lookups=_LookupSeam(geocode=geocode_ok, find_station=lambda name: station, geocode_address=lambda addr: None),
     )
 
     assert result == 15
-    assert fake.posted_bodies == [
-        {"coordinates": [[-0.1, 51.5], [-0.97, 51.4]], "units": "km"}
-    ]
+    assert fake.posted_bodies == [{"coordinates": [[-0.1, 51.5], [-0.97, 51.4]], "units": "km"}]
 
 
 @pytest.mark.asyncio
@@ -97,9 +98,12 @@ async def test_drive_minutes_from_postcode_returns_none_when_ungeocodable():
     async def ungeocodable(addr):
         return Attempt.impossible("no geo")
 
+    from houses.transit_route import _LookupSeam
+
     result = await _get_drive_minutes(
-        "NOT A POSTCODE", "Maidenhead Rail Station",
-        _geocode=ungeocodable, _geocode_address=ungeocodable,
+        "NOT A POSTCODE",
+        "Maidenhead Rail Station",
+        _lookups=_LookupSeam(geocode=ungeocodable, geocode_address=ungeocodable),
     )
 
     assert result is None

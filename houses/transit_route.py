@@ -14,7 +14,6 @@ from houses.web.json_utils import optional_parse
 logger = logging.getLogger(__name__)
 
 
-
 @dataclass(frozen=True)
 class _LegModeJson:
     """A TfL journey leg mode — the {name} wire shape."""
@@ -99,36 +98,61 @@ class _DrivingLegJson:
         )
 
 
+@dataclass(frozen=True)
+class _LookupSeam:
+    """The test-injection seam for drive estimates — the three lookups a
+    drive minute needs, each defaulting to the production implementation.
+
+    The parameter-object sibling of ``FetchArgs``: keeps the drive helpers'
+    signatures bounded instead of one kwarg per lookup.
+    """
+
+    geocode: Any | None = None  # postcode -> Attempt[GeoPoint]
+    find_station: Any | None = None  # station name -> Station | None
+    geocode_address: Any | None = None  # address -> Attempt[GeoPoint]
+
+
 async def _get_drive_minutes(
-    origin_postcode: str, station_name: str, *,
-    _client_factory=None, _no_cache: bool = False,
-    _geocode=None, _find_station=None, _geocode_address=None,
+    origin_postcode: str,
+    station_name: str,
+    *,
+    _client_factory=None,
+    _no_cache: bool = False,
+    _lookups: _LookupSeam | None = None,
 ) -> int | None:
     """Drive time from a postcode to a station.  The postcode is
     geocoded first — callers that already hold coordinates should use
     ``_get_drive_minutes_from_location`` and skip the lookup."""
-    geocode_fn = _geocode or geocode
-    geocode_address_fn = _geocode_address or geocode_address
+    seam = _lookups or _LookupSeam()
+    geocode_fn = seam.geocode or geocode
+    geocode_address_fn = seam.geocode_address or geocode_address
     origin_coords = (await geocode_fn(origin_postcode)).value_or_none()
     if origin_coords is None:
         origin_coords = (await geocode_address_fn(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
     return await _get_drive_minutes_from_location(
-        origin_coords, station_name, _client_factory=_client_factory, _no_cache=_no_cache,
-        _find_station=_find_station, _geocode_address=_geocode_address,
+        origin_coords,
+        station_name,
+        _client_factory=_client_factory,
+        _no_cache=_no_cache,
+        _lookups=_lookups,
     )
 
 
 async def _get_drive_minutes_from_location(
-    origin_coords, station_name: str, *,
-    _client_factory=None, _no_cache: bool = False,
-    _find_station=None, _geocode_address=None,
+    origin_coords,
+    station_name: str,
+    *,
+    _client_factory=None,
+    _no_cache: bool = False,
+    _lookups: _LookupSeam | None = None,
 ) -> int | None:
     """Drive time from known coordinates to a station — the fallback
     when a property has no postcode but does have a best location."""
-    find_station_fn = _find_station or find_station
-    geocode_address_fn = _geocode_address or geocode_address
+    seam = _lookups or _LookupSeam()
+    find_station_fn = seam.find_station or find_station
+    geocode_address_fn = seam.geocode_address or geocode_address
     station = find_station_fn(station_name)
     dest_coords = station.location if station else None
     if dest_coords is None:
@@ -139,8 +163,11 @@ async def _get_drive_minutes_from_location(
     try:
         # None = quota exhausted or no route — the caller keeps the walk leg
         return await apis.ors.directions(
-            origin_coords, dest_coords, mode="driving-car",
-            _client_factory=_client_factory, _no_cache=_no_cache,
+            origin_coords,
+            dest_coords,
+            mode="driving-car",
+            _client_factory=_client_factory,
+            _no_cache=_no_cache,
         )
     except Exception as exc:
         # Log and re-raise the ORIGINAL exception: _compute_attempt is the
@@ -154,6 +181,7 @@ async def _get_drive_minutes_from_location(
             exc,
         )
         raise
+
 
 # lucidlint: ignore record-shape consumes the TfL journeys provider payload — provider wire shape (coding-standards.md)
 # lucidlint: ignore record-shape returns the mutated TfL journeys payload — provider wire shape (coding-standards.md)

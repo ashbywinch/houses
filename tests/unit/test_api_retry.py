@@ -122,7 +122,9 @@ async def test_transient_429_carries_provider_retry_after():
     client = _RaisingClient(429, {"Retry-After": "120"})
     with pytest.raises(apigw.GatewayHttpError) as excinfo:
         await apis.ors.directions(
-            GeoPoint(_LAT, _LNG), _DEST, mode="foot-walking",
+            GeoPoint(_LAT, _LNG),
+            _DEST,
+            mode="foot-walking",
             _client_factory=lambda **k: client,
         )
     assert isinstance(excinfo.value, httpx.HTTPStatusError), "callers catch the base class"
@@ -136,7 +138,9 @@ async def test_transient_503_from_raise_for_status_carries_retry_after():
     client = _RaisingClient(503, {"Retry-After": "45"}, raise_in_request=False)
     with pytest.raises(apigw.GatewayHttpError) as excinfo:
         await apis.ors.directions(
-            GeoPoint(_LAT, _LNG), _DEST, mode="foot-walking",
+            GeoPoint(_LAT, _LNG),
+            _DEST,
+            mode="foot-walking",
             _client_factory=lambda **k: client,
         )
     assert excinfo.value.retry_after == 45.0
@@ -164,9 +168,7 @@ def test_retry_delay_honors_provider_window_beyond_backoff_cap():
         response=httpx.Response(503, request=httpx.Request("GET", _URL)),
         retry_after=None,
     )
-    assert node._retry_delay_from(exc2) == timedelta(seconds=20), (
-        "no Retry-After -> exponential backoff 10s * 2^1"
-    )
+    assert node._retry_delay_from(exc2) == timedelta(seconds=20), "no Retry-After -> exponential backoff 10s * 2^1"
 
 
 # ── 3. last-resort geocoders surface transients for DAG retry ───────
@@ -176,24 +178,18 @@ async def test_nominatim_transient_503_raises_for_dag_retry():
     """A 503 from the final geocoder must pend+retry, not permanently
     fail the property."""
     with pytest.raises(httpx.HTTPStatusError):
-        await _geocode_nominatim(
-            "Maidenhead", _client_factory=lambda **k: _RaisingClient(503)
-        )
+        await _geocode_nominatim("Maidenhead", _client_factory=lambda **k: _RaisingClient(503))
 
 
 async def test_nominatim_permanent_404_stays_impossible():
-    attempt = await _geocode_nominatim(
-        "Not A Place", _client_factory=lambda **k: _RaisingClient(404)
-    )
+    attempt = await _geocode_nominatim("Not A Place", _client_factory=lambda **k: _RaisingClient(404))
     assert attempt.impossible
     assert "404" in (attempt.error or "")
 
 
 async def test_postcode_transient_503_raises_for_dag_retry():
     with pytest.raises(httpx.HTTPStatusError):
-        await _geocode_postcode(
-            "SW1A 1AA", _client_factory=lambda **k: _RaisingClient(503)
-        )
+        await _geocode_postcode("SW1A 1AA", _client_factory=lambda **k: _RaisingClient(503))
 
 
 async def test_ors_transient_503_raises_for_dag_retry():
@@ -202,7 +198,8 @@ async def test_ors_transient_503_raises_for_dag_retry():
     impossible a property on a temporary ORS outage (2026-09-28)."""
     with pytest.raises(httpx.HTTPStatusError):
         await _geocode_ors(
-            "Maidenhead", "unit-test-ors-transient",
+            "Maidenhead",
+            "unit-test-ors-transient",
             _client_factory=lambda **k: _RaisingClient(503),
         )
 
@@ -211,21 +208,19 @@ async def test_postcode_network_error_raises_for_dag_retry():
     """A connection error must pend+retry — not 'unexpected error'
     impossible (the old broad-except swallowed it)."""
     with pytest.raises(httpx.RequestError):
-        await _geocode_postcode(
-            "SW1A 1AA", _client_factory=lambda **k: _NetworkErrorClient()
-        )
+        await _geocode_postcode("SW1A 1AA", _client_factory=lambda **k: _NetworkErrorClient())
 
 
 async def test_postcode_404_stays_cached_impossible():
-    attempt = await _geocode_postcode(
-        "XX9 9XX", _client_factory=lambda **k: _RaisingClient(404)
-    )
+    attempt = await _geocode_postcode("XX9 9XX", _client_factory=lambda **k: _RaisingClient(404))
     assert attempt.impossible
     assert "404" in (attempt.error or "")
+
 
 class _JsonClient:
     """httpx-shaped fake that RETURNS a fixed body + status, and counts
     requests — the two Google quota paths both go through the client."""
+
     def __init__(self, status: int, json_body: dict, *, hits: list):
         self._status = status
         self._json_body = json_body
@@ -272,14 +267,16 @@ async def test_google_403_marks_quota_exhausted_and_skips_future_calls():
     the request run. A 403 must flip the gate ONCE and never request again."""
     hits: list[str] = []
     first = apis.google_geocode.geocode(
-        "1 High Street", _client_factory=lambda *a, **k: _JsonClient(403, {}, hits=hits),
+        "1 High Street",
+        _client_factory=lambda *a, **k: _JsonClient(403, {}, hits=hits),
         _no_cache=True,
     )
     assert await first is None  # DailyQuotaError -> keep-fallback signal
     assert apigw.GATE.quota_exhausted(apigw.GOOGLE)
     # a subsequent call is skipped entirely — zero requests, not a repeat
     second = apis.google_geocode.geocode(
-        "2 High Street", _client_factory=lambda *a, **k: _JsonClient(200, {"status": "OK", "results": []}, hits=hits),
+        "2 High Street",
+        _client_factory=lambda *a, **k: _JsonClient(200, {"status": "OK", "results": []}, hits=hits),
         _no_cache=True,
     )
     assert await second is None
@@ -306,8 +303,10 @@ async def test_postcodes_uses_the_outcode_url_only_for_an_outcode():
     the full-postcode URL — and a real postcode (SW1A 1AA, digits AND a
     trailing letter) must use the postcodes search URL."""
     hits: list[str] = []
-    for key, want in (("SW1A", "https://api.postcodes.io/outcodes/SW1A"),
-                      ("SW1A 1AA", "https://api.postcodes.io/postcodes/SW1A 1AA")):
+    for key, want in (
+        ("SW1A", "https://api.postcodes.io/outcodes/SW1A"),
+        ("SW1A 1AA", "https://api.postcodes.io/postcodes/SW1A 1AA"),
+    ):
         hits.clear()
         assert await _geocode_via(apis.postcodes, key, hits) is not None
         assert hits == [want], (key, hits)

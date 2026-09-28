@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 import httpx
+from pint import Quantity
 
 from houses import apis
 from houses.geopoint import GeoPoint
@@ -76,8 +77,8 @@ KNOWN_COUNTIES = frozenset(
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_5XX_START = 500
 HTTP_5XX_END = 600
-WALKING_SPEED_KMH = 5
-MINUTES_PER_HOUR = 60
+# walking pace as a Quantity — the km→minutes math goes through pint
+WALKING_SPEED = Quantity(5, "km/hour")
 MAX_PLAUSIBLE_WALK_MINUTES = 180
 
 
@@ -114,7 +115,9 @@ async def _walk_duration(
 ) -> int | None:
     try:
         return await apis.ors.directions(
-            GeoPoint(lat, lng), town_centre, mode="foot-walking",
+            GeoPoint(lat, lng),
+            town_centre,
+            mode="foot-walking",
             _client_factory=_client_factory,
         )
     except httpx.HTTPStatusError as e:
@@ -124,7 +127,6 @@ async def _walk_duration(
             raise  # transient — let DAG retry handle it
         logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
         return None
-
 
 
 async def _google_places_text(lat: float, lng: float) -> str:
@@ -195,7 +197,10 @@ def _format_places(places: list[apis.PlacesResult], lat: float, lng: float) -> s
         place_lng = place.longitude
         if place_lat is not None and place_lng is not None:
             dist_km = origin.distance_km_to(GeoPoint(place_lat, place_lng))
-            walk_min = max(1, round(dist_km / WALKING_SPEED_KMH * MINUTES_PER_HOUR))
+            # GeoPoint.distance_km_to is a bare-km wire value; the pace math
+            # is pint, and the minutes int is the serialization boundary
+            walk_minutes_q = (Quantity(dist_km, "km") / WALKING_SPEED).to("minute")
+            walk_min = max(1, round(walk_minutes_q.magnitude))
             hits.append((walk_min, f"{name} ({walk_min}m)"))
         else:
             hits.append((999, name))
@@ -216,7 +221,8 @@ def _format_overpass(data: apis.OverpassResponse, lat: float, lng: float) -> str
         e_lng = element.longitude or (element.center[1] if element.center else None)
         if e_lat is not None and e_lng is not None:
             dist_km = origin.distance_km_to(GeoPoint(e_lat, e_lng))
-            walk_min = max(1, round(dist_km / WALKING_SPEED_KMH * MINUTES_PER_HOUR))
+            walk_minutes_q = (Quantity(dist_km, "km") / WALKING_SPEED).to("minute")
+            walk_min = max(1, round(walk_minutes_q.magnitude))
             hits.append((walk_min, f"{name} ({walk_min}m)"))
         else:
             hits.append((999, name))
@@ -260,7 +266,6 @@ async def _walk_to_town_minutes(
             # If reverse geocode also failed to produce a valid time, leave
             # the original walk_to_town_minutes as-is (may be None or invalid).
     return walk_to_town_minutes if _plausible_walk(walk_to_town_minutes) else None
-
 
 
 @dataclass(frozen=True)
