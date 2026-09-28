@@ -250,11 +250,15 @@ class Run:
         backup = self.db.with_name(self.db.name + f".pre-{migration.name}")
         if reason := _stage_verdict("apply FAILED: dry-run failed", self._dry_run_report(migration)):
             return reason
-        if reason := _stage_verdict("apply FAILED", self._apply_and_backup(migration, backup)):
+        proc = self._apply_and_backup(migration, backup)
+        # WHOEVER wrote, the app must be able to open the DB — ownership is
+        # handed back on failure too, not only on success (review finding: a
+        # failed apply must not leave a root-owned database behind).
+        self._hand_back()
+        if reason := _stage_verdict("apply FAILED", proc):
             return reason
         if not backup.is_file() or backup.stat().st_size == 0:
             return f"apply FAILED: no backup written at {backup}"
-        self._hand_back()
         return _stage_verdict("check FAILED", self._independent_check(migration))
 
     def dry_run(self, entries: list[Migration]) -> int:

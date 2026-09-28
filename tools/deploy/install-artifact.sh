@@ -181,10 +181,15 @@ mark "app healthy on :$PORT"
 # /api/* (auth-gated) actually executes.
 SECRET=$(grep '^HOUSES_SESSION_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)
 [ -n "$SECRET" ] || { mark "FAILED: HOUSES_SESSION_SECRET missing from $ENV_FILE"; exit 1; }
+# The cookie is CAPTURED, never echoed: the print goes into the substitution,
+# stderr is discarded, and the curls use it only in a -H header (-v is never
+# used), so the superuser cookie cannot appear in this transcript (review
+# finding — the value is not logged; this comment pins that it must stay that
+# way).
 COOKIE=$(HOUSES_SESSION_SECRET="$SECRET" "$VENV_PY" -c '
 from houses.web.auth import _make_session_cookie
 print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True))
-' 2>/dev/null)
+' 2>/dev/null </dev/null)
 
 echo "== smoke: /health"
 curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"'
