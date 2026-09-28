@@ -16,6 +16,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.http_error import HttpError
+from houses import apigw
 from houses.api_cache import CacheEnvelope, cached_async_client, evict_cached, get_cached, set_cached
 from houses.car_park import ApcoaCarParkLookup, CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
@@ -822,6 +823,7 @@ class TflClient:
             else:
                 return cached
         async with (_client_factory or cached_async_client)(timeout=20.0) as client:
+            await apigw.GATE.pace(apigw.TFL)
             resp = await client.get(url, params={**params, **TflClient._tfl_auth_params()})
             data = resp.json()
             # Cache deterministic responses — 2xx/3xx/4xx (including 404
