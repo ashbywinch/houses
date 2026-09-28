@@ -229,16 +229,24 @@ async def test_no_certificates_returns_impossible(_mock_http_requests):
 
 
 @pytest.mark.asyncio
-async def test_non_200_response_returns_impossible(_mock_http_requests):
-    """API returning non-200 should carry the status in the error."""
+async def test_non_200_response_raises_for_dag_classification(_mock_http_requests):
+    """API 5xx raises so the DAG classifies it transient — never swallowed
+    into a permanent impossible attempt (the pre-gateway behaviour froze the
+    property on a temporarily-500 EPC API)."""
+    from dag.attempt import classify_exception
+    from houses.apigw import GatewayHttpError
+
     _mock_http_requests.add_rule(
         lambda url: "get-energy-performance-data" in str(url),
         lambda request: Response(500),
     )
-    band = await lookup_epc("RG14 1AA")
+    with pytest.raises(GatewayHttpError) as excinfo:
+        await lookup_epc("RG14 1AA")
 
-    assert band.impossible
-    assert "500" in band.error
+    assert excinfo.value.response.status_code == 500
+    # the DAG retry contract: 5xx is retryable → the node goes pending,
+    # not impossible. A permanent 4xx would classify retryable=False.
+    assert classify_exception(excinfo.value).retryable
 
 
 @pytest.mark.asyncio
