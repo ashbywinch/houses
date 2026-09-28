@@ -1,52 +1,33 @@
 #!/bin/sh
-# /opt/houses/run-instance.sh — launcher for one houses instance (blue|green).
+# /opt/houses/run-instance.sh — launcher for THIS box's app (port 8765).
 #
-# Blue/green model: the ACTIVE side (per /opt/houses/ACTIVE) serves the LIVE
-# database. The other side, when started, serves its own snapshot copy
-# (/opt/houses/<side>-smoke.db, taken by release.sh) — a fully working prod
-# replica whose writes land in the copy, never the live DB. That is the
-# pre-switch smoke target.
+# One box = one app = one port. The box's role is decided by the L4 forwarding
+# rule's target, not by this script: whichever instance is the target receives
+# 80/443 and serves houses.blueumbrella.net; the other serves nothing external
+# and its smoke runs on 127.0.0.1. There is no ACTIVE marker, no per-side port
+# and no smoke copy any more (docs/anti-fragile-rollout-plan.md, Phase 2).
 #
-# Ports are ROLE-based: the ACTIVE side binds 8765, the standby 8766. Caddy
-# (install-caddy.sh) reverse-proxies the public hostnames to those ports,
-# so a flip never touches TLS config. Env for both sides comes from
-# /etc/houses.env; this script overrides the per-instance bits.
+# The database at $ROOT/data/houses.db is this box's own copy — the owner's live
+# DB, or the standby's copy of it from the last cutover's restore.
 set -eu
 
-SIDE="${1:?usage: run-instance.sh <blue|green>}"
 ROOT="${HOUSES_ROOT:-/opt/houses}"
-LIVE_DB="$ROOT/data/houses.db"
-SMOKE_DB="$ROOT/${SIDE}-smoke.db"
-ACTIVE_FILE="$ROOT/ACTIVE"
+APP="$ROOT/app"
 
-# Ports are ROLE-based (active=8765, standby=8766), not side-based — the
-# Caddyfile is therefore static forever and a flip never touches TLS config.
-case "$SIDE" in
-  blue|green) : ;;
-  *) echo "usage: run-instance.sh <blue|green>" >&2; exit 1 ;;
-esac
+# The artifact's venv is the source of truth: the prod boot path runs NO uv sync
+# and needs NO network (2026-09-24: a box whose venv was never installed served
+# nothing).
+[ -x "$APP/.venv/bin/python" ] || { echo "run-instance: no venv at $APP/.venv — install the artifact first" >&2; exit 1; }
 
-# A missing ACTIVE file means the box is not yet provisioned — treat as smoke
-# so a stray start can never touch a live DB it shouldn't.
-if [ -f "$ACTIVE_FILE" ] && [ "$(cat "$ACTIVE_FILE")" = "$SIDE" ]; then
-  DB="$LIVE_DB"
-  PORT=8765
-else
-  DB="$SMOKE_DB"
-  PORT=8766
-fi
-
-cd "$ROOT/$SIDE"
-# systemd's default PATH lacks ~/.local/bin (uv) — make's UV fallback
-# handles it, but be explicit so make/npm resolve identically to a shell.
-export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+cd "$APP"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOUSES_HOST=0.0.0.0
-export HOUSES_PORT="$PORT"
-export HOUSES_SQLITE_PATH="$DB"
+export HOUSES_PORT=8765
+export HOUSES_SQLITE_PATH="$ROOT/data/houses.db"
 
-# Wait for the scraper browser's CDP endpoint before serving — but only
-# when a browser is installed on this box. The GCP host has no Chrome
-# (the scraper lives on the LAN); the wait must not block startup there.
+# Wait for the scraper browser's CDP endpoint before serving — but only when a
+# browser is installed on this box. The GCP host has no Chrome (the scraper
+# lives on the LAN); the wait must not block startup there.
 if command -v google-chrome >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
   for i in $(seq 1 30); do
     curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break
@@ -58,4 +39,6 @@ if command -v google-chrome >/dev/null 2>&1 || command -v chromium-browser >/dev
   }
 fi
 
-exec make run-prod
+# serve_prod.py mounts the shipped frontend build and runs uvicorn — no make,
+# no uv, no on-box build.
+exec "$APP/.venv/bin/python" "$APP/serve_prod.py"

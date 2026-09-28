@@ -1,80 +1,105 @@
 #!/bin/sh
-# /opt/houses/deploy-allowlist.sh — the command= dispatcher for the
-# restricted deploy key (installed root-owned by box-setup.sh; the
-# authorized_keys entry is written by install-deploy-allowlist.sh).
+# /opt/houses/deploy-allowlist.sh — the command= dispatcher for the restricted
+# deploy key (installed root-owned by box-setup.sh; the authorized_keys entry is
+# written by install-deploy-allowlist.sh).
 #
-# Runs as the ubuntu user with $SSH_ORIGINAL_COMMAND = the deploy
-# workflow's exact requested command line (man sshd → authorized_keys).
-# Accepts ONLY the sanctioned shapes below; anything else is a silent
-# no-op exit 0 (the workflow's forced-command fallback must never look
-# like success with a side effect). Sanctioned commands then run through
-# sudo (the sudoers allowlist: release.sh/switch.sh/journalctl).
+# Runs as the ubuntu user with $SSH_ORIGINAL_COMMAND = the deploy workflow's
+# exact requested command line (man sshd → authorized_keys). Accepts ONLY the
+# sanctioned shapes below; anything else is a silent no-op exit 0 (the
+# workflow's forced-command fallback must never look like success with a side
+# effect). Sanctioned commands then run through sudo (the sudoers allowlist:
+# install-artifact.sh, switch.sh, journalctl).
 #
-# Injection discipline: no eval of $SSH_ORIGINAL_COMMAND. Every token is
-# rebuilt from validated fields; refs and unit names pass explicit
-# charset checks; numbers are digits-only. An unexpected token aborts.
+# Injection discipline: no eval of $SSH_ORIGINAL_COMMAND. Every token is rebuilt
+# from validated fields; the artifact object and the restore source are
+# charset-checked, the row count is digits-only. An unexpected token aborts.
+#
+# The sanctioned set is exactly what release.yml calls and no more (R7): including
+# a shape CI does not use would be a capability nothing asked for.
 set -eu
 
 CMD="${SSH_ORIGINAL_COMMAND:-}"
+SHA256_HEX_CHARS=64   # the artifact's key IS its sha256, in hex
 
-# --- release.sh <ref> -------------------------------------------------
+# --- the rollout install: install-artifact.sh <gs://bucket/<sha256>.tar.gz> ---
+# The OBJECT is the only argument, and it must be a content-addressed artifact
+# name — the script re-verifies the sha256 against the key it fetches.
 case "$CMD" in
-  "sudo /opt/houses/release.sh "?*)
-    REF=${CMD#"sudo /opt/houses/release.sh "}
-    case "$REF" in
-      *[!A-Za-z0-9._/-]*|"") echo "deploy-allowlist: bad ref" >&2; exit 1 ;;
-      *) exec sudo /opt/houses/release.sh "$REF" ;;
+  "sudo /opt/houses/install-artifact.sh "*)
+    OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh "}
+    case "$OBJECT" in
+      gs://*/*.tar.gz)
+        rest=${OBJECT#gs://}
+        bucket=${rest%%/*}
+        key=${rest#*/}
+        case "$bucket" in
+          *[!A-Za-z0-9._-]*|"") echo "deploy-allowlist: bad bucket" >&2; exit 1 ;;
+        esac
+        case "$key" in
+          *.tar.gz) HASH=${key%.tar.gz} ;;
+          *) echo "deploy-allowlist: the artifact must be <sha256>.tar.gz" >&2; exit 1 ;;
+        esac
+        case "$HASH" in
+          *[!0-9a-f]*|"") echo "deploy-allowlist: the artifact key must be a 64-character lowercase sha256 hex string" >&2; exit 1 ;;
+        esac
+        [ "${#HASH}" = "${SHA256_HEX_CHARS}" ] || { echo "deploy-allowlist: the artifact key must be a 64-character lowercase sha256 hex string" >&2; exit 1; }
+        exec sudo /opt/houses/install-artifact.sh "$OBJECT"
+        ;;
+      *) echo "deploy-allowlist: bad artifact object" >&2; exit 1 ;;
     esac
     ;;
 esac
 
-# --- switch.sh [bare | --rollback | --diagnose] ------------------------
+# --- switch.sh --snapshot (FREEZE production, then the DB on stdout) ------
+if [ "$CMD" = "sudo /opt/houses/switch.sh --snapshot" ]; then
+  exec sudo /opt/houses/switch.sh --snapshot
+fi
+
+# --- switch.sh --unfreeze (the cutover's abort path: serve from here again) --
+if [ "$CMD" = "sudo /opt/houses/switch.sh --unfreeze" ]; then
+  exec sudo /opt/houses/switch.sh --unfreeze
+fi
+
+# --- switch.sh --rebase <rows> (snapshot on stdin, migrate, verify) --------
+# The row count is REQUIRED: it is what proves the transfer did not lose rows, and
+# a bare form would silently skip that comparison. `--restore` (below) is the
+# path for a snapshot whose count nobody recorded.
 case "$CMD" in
-  "sudo /opt/houses/switch.sh"|"sudo /opt/houses/switch.sh --rollback"|"sudo /opt/houses/switch.sh --diagnose")
-    exec sudo /opt/houses/switch.sh ${CMD#sudo /opt/houses/switch.sh}
+  "sudo /opt/houses/switch.sh --rebase "*)
+    ROWS=${CMD#"sudo /opt/houses/switch.sh --rebase "}
+    case "$ROWS" in
+      *[!0-9]*|"") echo "deploy-allowlist: bad row count" >&2; exit 1 ;;
+    esac
+    exec sudo /opt/houses/switch.sh --rebase "$ROWS"
     ;;
 esac
 
-# --- journalctl (read-only: fixed flag set, validated tokens) ---------
+# --- switch.sh --restore <gs://…> (the exception path: data from an object) --
 case "$CMD" in
-  "sudo journalctl "?*)
-    CMD=${CMD#sudo }
-    # tokens in any order, each at most once: -u UNIT, -n N, --no-pager
-    unit=""; count=""; pager=""
-    state=args
-    for tok in $CMD; do
-      case "$state:$tok" in
-        args:journalctl) ;;
-        args:-u) state=unit ;;
-        unit:*)
-          case "$tok" in
-            houses-blue|houses-green|houses-chrome|houses-network-watchdog|houses-network-watchdog.timer|houses-scrape-worker|houses-scrape-worker-dev)
-              unit="$tok"; state=args ;;
-            *) echo "deploy-allowlist: bad unit '$tok'" >&2; exit 1 ;;
-          esac
-          ;;
-        args:-n) state=count ;;
-        count:*)
-          case "$tok" in
-            *[!0-9]*) echo "deploy-allowlist: bad count '$tok'" >&2; exit 1 ;;
-            *) count="$tok"; state=args ;;
-          esac
-          ;;
-        args:--no-pager)
-          [ -n "$pager" ] && { echo "deploy-allowlist: duplicate --no-pager" >&2; exit 1; }
-          pager=1
-          ;;
-        *) echo "deploy-allowlist: unexpected journalctl token '$tok'" >&2; exit 1 ;;
-      esac
-    done
-    # rebuild the argv from validated pieces (POSIX sh, no arrays)
-    set -- journalctl
-    [ -n "$unit" ] && set -- "$@" -u "$unit"
-    [ -n "$count" ] && set -- "$@" -n "$count"
-    [ -n "$pager" ] && set -- "$@" --no-pager
-    exec sudo "$@"
+  "sudo /opt/houses/switch.sh --restore "*)
+    SOURCE=${CMD#"sudo /opt/houses/switch.sh --restore "}
+    case "$SOURCE" in
+      gs://*/*.db)
+        rest=${SOURCE#gs://}
+        bucket=${rest%%/*}
+        key=${rest#*/}
+        case "$bucket" in
+          *[!A-Za-z0-9._-]*|"") echo "deploy-allowlist: bad bucket" >&2; exit 1 ;;
+        esac
+        case "$key" in
+          *[!A-Za-z0-9._/-]*|"") echo "deploy-allowlist: bad restore object" >&2; exit 1 ;;
+        esac
+        exec sudo /opt/houses/switch.sh --restore "$SOURCE"
+        ;;
+      *) echo "deploy-allowlist: the restore source must be gs://<bucket>/<object>.db" >&2; exit 1 ;;
+    esac
     ;;
 esac
+
+# --- switch.sh --diagnose (read-only state dump) --------------------------
+if [ "$CMD" = "sudo /opt/houses/switch.sh --diagnose" ]; then
+  exec sudo /opt/houses/switch.sh --diagnose
+fi
 
 # --- everything else: silent no-op (exit 0, no side effects) -----------
 exit 0
