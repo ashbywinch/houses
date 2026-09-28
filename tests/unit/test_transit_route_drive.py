@@ -46,21 +46,15 @@ class _FakeResponse:
 async def test_drive_minutes_from_location_posts_origin_coords():
     """_get_drive_minutes_from_location estimates from known coordinates
     directly — the no-postcode fallback path."""
-    from unittest.mock import patch
-
     from houses.transit_route import _get_drive_minutes_from_location
 
     fake = _FakeDirectionsClient(duration_s=720)  # 12 min
-    with (
-        patch("houses.transit_route.find_station") as find_station,
-        patch("houses.transit_route.geocode_address") as geocode_address,
-    ):
-        find_station.return_value = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
-        geocode_address.return_value = None  # station found in registry, no geocode needed
-        result = await _get_drive_minutes_from_location(
-            GeoPoint(51.5, -0.1), "Maidenhead Rail Station",
-            _client_factory=lambda *a, **k: fake, _no_cache=True,
-        )
+    station = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
+    result = await _get_drive_minutes_from_location(
+        GeoPoint(51.5, -0.1), "Maidenhead Rail Station",
+        _client_factory=lambda *a, **k: fake, _no_cache=True,
+        _find_station=lambda name: station, _geocode_address=lambda addr: None,
+    )
 
     assert result == 12
     assert fake.posted_bodies == [
@@ -72,24 +66,20 @@ async def test_drive_minutes_from_location_posts_origin_coords():
 async def test_drive_minutes_from_postcode_geocodes_then_estimates():
     """_get_drive_minutes geocodes the postcode, then delegates to the
     same coords-based estimate — the two paths share the ORS call."""
-    from unittest.mock import patch
-
     from dag.attempt import Attempt
     from houses.transit_route import _get_drive_minutes
 
+    async def geocode_ok(addr):
+        return Attempt.succeeded(GeoPoint(51.5, -0.1))
+
     fake = _FakeDirectionsClient(duration_s=900)  # 15 min
-    with (
-        patch("houses.transit_route.geocode") as geocode,
-        patch("houses.transit_route.find_station") as find_station,
-        patch("houses.transit_route.geocode_address") as geocode_address,
-    ):
-        geocode.return_value = Attempt.succeeded(GeoPoint(51.5, -0.1))
-        find_station.return_value = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
-        geocode_address.return_value = None
-        result = await _get_drive_minutes(
-            "SL6 3YZ", "Maidenhead Rail Station",
-            _client_factory=lambda *a, **k: fake, _no_cache=True,
-        )
+    station = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
+    result = await _get_drive_minutes(
+        "SL6 3YZ", "Maidenhead Rail Station",
+        _client_factory=lambda *a, **k: fake, _no_cache=True,
+        _geocode=geocode_ok,
+        _find_station=lambda name: station, _geocode_address=lambda addr: None,
+    )
 
     assert result == 15
     assert fake.posted_bodies == [
@@ -101,17 +91,15 @@ async def test_drive_minutes_from_postcode_geocodes_then_estimates():
 async def test_drive_minutes_from_postcode_returns_none_when_ungeocodable():
     """An ungeocodable postcode yields None (the walk stays) — never an
     exception that could fail the commute."""
-    from unittest.mock import patch
-
     from dag.attempt import Attempt
     from houses.transit_route import _get_drive_minutes
 
-    with (
-        patch("houses.transit_route.geocode") as geocode,
-        patch("houses.transit_route.geocode_address") as geocode_address,
-    ):
-        geocode.return_value = Attempt.impossible("no geo")
-        geocode_address.return_value = Attempt.impossible("no geo")
-        result = await _get_drive_minutes("NOT A POSTCODE", "Maidenhead Rail Station")
+    async def ungeocodable(addr):
+        return Attempt.impossible("no geo")
+
+    result = await _get_drive_minutes(
+        "NOT A POSTCODE", "Maidenhead Rail Station",
+        _geocode=ungeocodable, _geocode_address=ungeocodable,
+    )
 
     assert result is None

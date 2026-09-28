@@ -254,16 +254,18 @@ async def _geocode_google(address: str, cache_key: str, *, services: Any | None 
     return result
 
 
-async def _geocode_ors(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
+async def _geocode_ors(
+    address: str, cache_key: str, *, services: Any | None = None, _client_factory=None
+) -> Attempt[GeoPoint] | None:
     """Geocode *address* via ORS Pelias; ``None`` means "try the next provider"."""
     try:
         # quota-exhausted and no-result both surface as None (stop and
-        # fall through to the next geocoder); transient HTTP still raises
-        gp = await apis.ors.geocode(address)
-    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as exc:
-        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else exc
-        logger.warning("ORS geocoding failed for '%s': %s", address, status)
-        return None
+        # fall through to the next geocoder); transient HTTP RE-RAISES so
+        # the DAG retries at the provider's interval — swallowing a 5xx
+        # into a permanent impossible is the bug this gateway exists to fix
+        gp = await apis.ors.geocode(address, _client_factory=_client_factory)
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — the DAG retries at the provider's interval
     except Exception as exc:
         logger.warning("ORS geocoding failed for '%s': %s", address, exc)
         return None

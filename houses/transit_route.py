@@ -100,30 +100,39 @@ class _DrivingLegJson:
 
 
 async def _get_drive_minutes(
-    origin_postcode: str, station_name: str, *, _client_factory=None, _no_cache: bool = False
+    origin_postcode: str, station_name: str, *,
+    _client_factory=None, _no_cache: bool = False,
+    _geocode=None, _find_station=None, _geocode_address=None,
 ) -> int | None:
     """Drive time from a postcode to a station.  The postcode is
     geocoded first — callers that already hold coordinates should use
     ``_get_drive_minutes_from_location`` and skip the lookup."""
-    origin_coords = (await geocode(origin_postcode)).value_or_none()
+    geocode_fn = _geocode or geocode
+    geocode_address_fn = _geocode_address or geocode_address
+    origin_coords = (await geocode_fn(origin_postcode)).value_or_none()
     if origin_coords is None:
-        origin_coords = (await geocode_address(origin_postcode)).value_or_none()
+        origin_coords = (await geocode_address_fn(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
     return await _get_drive_minutes_from_location(
-        origin_coords, station_name, _client_factory=_client_factory, _no_cache=_no_cache
+        origin_coords, station_name, _client_factory=_client_factory, _no_cache=_no_cache,
+        _find_station=_find_station, _geocode_address=_geocode_address,
     )
 
 
 async def _get_drive_minutes_from_location(
-    origin_coords, station_name: str, *, _client_factory=None, _no_cache: bool = False
+    origin_coords, station_name: str, *,
+    _client_factory=None, _no_cache: bool = False,
+    _find_station=None, _geocode_address=None,
 ) -> int | None:
     """Drive time from known coordinates to a station — the fallback
     when a property has no postcode but does have a best location."""
-    station = find_station(station_name)
+    find_station_fn = _find_station or find_station
+    geocode_address_fn = _geocode_address or geocode_address
+    station = find_station_fn(station_name)
     dest_coords = station.location if station else None
     if dest_coords is None:
-        dest_coords = (await geocode_address(station_name)).value_or_none()
+        dest_coords = (await geocode_address_fn(station_name)).value_or_none()
     if dest_coords is None:
         return None
 

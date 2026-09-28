@@ -29,7 +29,7 @@ from dag.derived_node import DerivedNode
 from dag.scheduler import AsyncQueueScheduler, set_scheduler
 from houses import apigw, apis
 from houses.geopoint import GeoPoint
-from houses.location import _geocode_nominatim, _geocode_postcode
+from houses.location import _geocode_nominatim, _geocode_ors, _geocode_postcode
 
 pytestmark = pytest.mark.asyncio
 
@@ -193,6 +193,17 @@ async def test_postcode_transient_503_raises_for_dag_retry():
     with pytest.raises(httpx.HTTPStatusError):
         await _geocode_postcode(
             "SW1A 1AA", _client_factory=lambda **k: _RaisingClient(503)
+        )
+
+
+async def test_ors_transient_503_raises_for_dag_retry():
+    """ORS (the first fallback) must pend+retry on a transient 5xx — a
+    swallow silently fell through to Nominatim and could permanently
+    impossible a property on a temporary ORS outage (2026-09-28)."""
+    with pytest.raises(httpx.HTTPStatusError):
+        await _geocode_ors(
+            "Maidenhead", "unit-test-ors-transient",
+            _client_factory=lambda **k: _RaisingClient(503),
         )
 
 
