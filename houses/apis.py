@@ -25,6 +25,7 @@ Provider payloads are parsed INSIDE the class into named response types.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -55,6 +56,7 @@ class FetchArgs:
     headers: dict[str, str] | None = None
     wire_params: dict[str, str] | None = None
     _client_factory: Any = None
+    no_cache: bool = False
 
 
 class BaseApi:
@@ -79,6 +81,7 @@ class BaseApi:
                 headers=req.headers,
                 wire_params=req.wire_params,
                 _client_factory=req._client_factory,
+                _no_cache=req.no_cache,
             )
         except apigw.DailyQuotaError:
             return None
@@ -164,6 +167,7 @@ class ORSApi(BaseApi):
         *,
         mode: str = "driving-car",
         _client_factory=None,
+        _no_cache: bool = False,
     ) -> int | None:
         """Minutes between two points for the given profile; None when the
         key is quota-exhausted (the caller keeps its fallback)."""
@@ -176,6 +180,7 @@ class ORSApi(BaseApi):
             "POST", url, body=body,
             headers={**self._auth_headers(), "Content-Type": "application/json"},
             _client_factory=_client_factory,
+            no_cache=_no_cache,
         )
         try:
             data = await self._fetch(req)
@@ -247,14 +252,24 @@ class GoogleGeocodeApi(BaseApi):
     profile = apigw.GOOGLE
     url = "https://maps.googleapis.com/maps/api/geocode/json"
 
-    async def geocode(self, address: str, *, _client_factory=None) -> GeoPoint | None:
+    async def geocode(self, address: str, *, _client_factory=None, _no_cache: bool = False) -> GeoPoint | None:
         params = GoogleGeocodeParams(address=f"{address}, UK")
         req = FetchArgs(
             "GET", self.url, params=params,
             wire_params={"key": settings.google_maps_api_key},
             _client_factory=_client_factory,
+            no_cache=_no_cache,
         )
         data = await self._fetch(req)
+        if data and data.get("status") == "OVER_QUERY_LIMIT":
+            # Google reports the daily limit in the BODY (HTTP 200); a 403 is
+            # handled by the profile's quota_statuses. Either way the key is
+            # unusable for this request run — mark it and keep the fallback.
+            apigw.GATE.mark_quota_exhausted(self.profile)
+            logger.warning(
+                "Google Maps OVER_QUERY_LIMIT — marked exhausted for this request run"
+            )
+            return None
         if not data or data.get("status") != "OK":
             logger.warning(
                 "Google Maps geocode failed: status=%s msg=%s",
@@ -359,21 +374,28 @@ places = GooglePlacesApi()
 # ═══ postcodes.io ═══════════════════════════════════════════════
 
 
+# An outcode is the postcode's first 1-2 letters, one digit and an optional
+# trailing letter (SW1, SW1A). "Not all digits" is wrong — every real
+# postcode has digits — so the discriminator is this regex, exactly the
+# postcodes.io contract the previous implementation used.
+OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
+
+
 class PostcodesApi(BaseApi):
     profile = apigw.POSTCODESIO
     url = "https://api.postcodes.io/postcodes"
     outcode_url = "https://api.postcodes.io/outcodes"
 
-    async def geocode(self, postcode: str, *, _client_factory=None) -> GeoPoint | None:
+    async def geocode(self, postcode: str, *, _client_factory=None, _no_cache: bool = False) -> GeoPoint | None:
         key = postcode.strip().upper()
         if not key:
             return None
         url = (
             f"{self.outcode_url}/{key}"
-            if not any(c.isdigit() for c in key)
+            if OUTCODE_RE.match(key)
             else f"{self.url}/{key}"
         )
-        req = FetchArgs("GET", url, _client_factory=_client_factory)
+        req = FetchArgs("GET", url, _client_factory=_client_factory, no_cache=_no_cache)
         data = await self._fetch(req)
         if not data:
             return None

@@ -204,6 +204,7 @@ async def with_cache(  # lucidlint: ignore record-shape return is the cached API
     body: WirePayload | None = None,
     *,
     fetch,
+    no_store: bool = False,
 ) -> dict[str, Any]:
     """Check disk cache first; on miss call ``fetch``, cache result, return.
 
@@ -216,6 +217,10 @@ async def with_cache(  # lucidlint: ignore record-shape return is the cached API
     at the cache-key edge; legacy plain dicts pass through unchanged.
     """
     body_str = json.dumps(_wire_params(body), sort_keys=True) if body else None
+    if no_store:
+        # test-injection seam (``_no_cache``), the DI sibling of a client
+        # factory: call the fetch without reading or writing the disk cache
+        return await fetch()
     cached = get_cached(method, url, params, body_str)
     if cached is not None:
         return cached

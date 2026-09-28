@@ -76,10 +76,13 @@ ORS = ApiProfile(pace_s=0.25, quota_statuses=(403,))
 # Nominatim — 1 req/s hard policy limit.
 NOMINATIM = ApiProfile(pace_s=1.0)
 
-# Google Maps/Places/Routes — GCP key quotas; both 403 and 429 can be
-# either quota or auth, and GCP quotas recover within the day, so the
-# exhausted flag is not useful — pace only, transient stays transient.
-GOOGLE = ApiProfile(pace_s=0.25)
+# Google Maps/Places/Routes — GCP 403 IS a quota or auth failure for THIS
+# request run: the key cannot be used again (the daily tier is exhausted or
+# the key is invalid), so a 403 marks the profile exhausted and future calls
+# in the run raise DailyQuotaError instead of repeating the request. GCP
+# quotas recover between runs — the exhausted flag is per-process — so the
+# flag does not hurt a later run. 429 stays transient.
+GOOGLE = ApiProfile(pace_s=0.25, quota_statuses=(403,))
 
 # postcodes.io — free, 1 req/s policy.
 POSTCODESIO = ApiProfile(pace_s=1.0)
@@ -210,6 +213,7 @@ async def api_fetch(
     headers: dict[str, str] | None = None,
     wire_params: dict[str, str] | None = None,
     _client_factory=None,
+    _no_cache: bool = False,
 ) -> Any:
     """Fetch a guarded external API call: cache, pace, quota, classify.
 
@@ -258,4 +262,6 @@ async def api_fetch(
                 ) from e
             return resp.json()
 
-    return await with_cache(method, url, params=params, body=body, fetch=_fetch)
+    return await with_cache(
+        method, url, params=params, body=body, fetch=_fetch, no_store=_no_cache
+    )

@@ -100,7 +100,7 @@ class _DrivingLegJson:
 
 
 async def _get_drive_minutes(
-    origin_postcode: str, station_name: str, *, _client_factory=None
+    origin_postcode: str, station_name: str, *, _client_factory=None, _no_cache: bool = False
 ) -> int | None:
     """Drive time from a postcode to a station.  The postcode is
     geocoded first — callers that already hold coordinates should use
@@ -111,12 +111,12 @@ async def _get_drive_minutes(
     if origin_coords is None:
         return None
     return await _get_drive_minutes_from_location(
-        origin_coords, station_name, _client_factory=_client_factory
+        origin_coords, station_name, _client_factory=_client_factory, _no_cache=_no_cache
     )
 
 
 async def _get_drive_minutes_from_location(
-    origin_coords, station_name: str, *, _client_factory=None
+    origin_coords, station_name: str, *, _client_factory=None, _no_cache: bool = False
 ) -> int | None:
     """Drive time from known coordinates to a station — the fallback
     when a property has no postcode but does have a best location."""
@@ -131,7 +131,7 @@ async def _get_drive_minutes_from_location(
         # None = quota exhausted or no route — the caller keeps the walk leg
         return await apis.ors.directions(
             origin_coords, dest_coords, mode="driving-car",
-            _client_factory=_client_factory,
+            _client_factory=_client_factory, _no_cache=_no_cache,
         )
     except Exception as exc:
         # Log and re-raise the ORIGINAL exception: _compute_attempt is the

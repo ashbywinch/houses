@@ -211,3 +211,92 @@ async def test_postcode_404_stays_cached_impossible():
     )
     assert attempt.impossible
     assert "404" in (attempt.error or "")
+
+class _JsonClient:
+    """httpx-shaped fake that RETURNS a fixed body + status, and counts
+    requests — the two Google quota paths both go through the client."""
+    def __init__(self, status: int, json_body: dict, *, hits: list):
+        self._status = status
+        self._json_body = json_body
+        self.hits = hits
+
+    async def request(self, method, url, *, headers, params=None, json=None):
+        self.hits.append(url)
+        return _JsonResponse(self._status, self._json_body)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+class _JsonResponse:
+    def __init__(self, status: int, json_body: dict):
+        self.status_code = status
+        self._json_body = json_body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"HTTP {self.status_code}",
+                request=httpx.Request("GET", "https://maps.googleapis.com/"),
+                response=httpx.Response(self.status_code, request=httpx.Request("GET", "https://maps.googleapis.com/")),
+            )
+        return None
+
+    def json(self):
+        return self._json_body
+
+
+async def _geocode_via(api, key: str, hits: list[str]):
+    """One postcodes geocode through a stateless fake bound to ``hits``."""
+    client = _JsonClient(200, {"result": {"latitude": 51.5, "longitude": -0.13}}, hits=hits)
+    return await api.geocode(key, _client_factory=lambda *a, **k: client, _no_cache=True)
+
+
+async def test_google_403_marks_quota_exhausted_and_skips_future_calls():
+    """The 2026-09-24 regression: Google's profile had no quota status, so a
+    403 repeated on every fallback instead of marking the key exhausted for
+    the request run. A 403 must flip the gate ONCE and never request again."""
+    hits: list[str] = []
+    first = apis.google_geocode.geocode(
+        "1 High Street", _client_factory=lambda *a, **k: _JsonClient(403, {}, hits=hits),
+        _no_cache=True,
+    )
+    assert await first is None  # DailyQuotaError -> keep-fallback signal
+    assert apigw.GATE.quota_exhausted(apigw.GOOGLE)
+    # a subsequent call is skipped entirely — zero requests, not a repeat
+    second = apis.google_geocode.geocode(
+        "2 High Street", _client_factory=lambda *a, **k: _JsonClient(200, {"status": "OK", "results": []}, hits=hits),
+        _no_cache=True,
+    )
+    assert await second is None
+    assert len(hits) == 1, f"the exhausted key must not be asked again: {hits}"
+
+
+async def test_google_over_query_limit_body_marks_exhausted():
+    """Google reports the daily limit in the BODY (HTTP 200): the old
+    OVER_QUERY_LIMIT check was lost in the migration — restore it, so one
+    such response means no more Google calls for this run."""
+    hits: list[str] = []
+
+    def api(*a, **k):  # noqa: ANN002,ANN003 - the seam takes *a/**k, test fake
+        return _JsonClient(200, {"status": "OVER_QUERY_LIMIT", "error_message": "quota"}, hits=hits)
+
+    assert await apis.google_geocode.geocode("1 High Street", _client_factory=api, _no_cache=True) is None
+    assert apigw.GATE.quota_exhausted(apigw.GOOGLE)
+    assert await apis.google_geocode.geocode("2 High Street", _client_factory=api, _no_cache=True) is None
+    assert len(hits) == 1, f"the exhausted key must not be asked again: {hits}"
+
+
+async def test_postcodes_uses_the_outcode_url_only_for_an_outcode():
+    """The discriminator is the postcodes.io contract — /outcodes/SW1A, not
+    the full-postcode URL — and a real postcode (SW1A 1AA, digits AND a
+    trailing letter) must use the postcodes search URL."""
+    hits: list[str] = []
+    for key, want in (("SW1A", "https://api.postcodes.io/outcodes/SW1A"),
+                      ("SW1A 1AA", "https://api.postcodes.io/postcodes/SW1A 1AA")):
+        hits.clear()
+        assert await _geocode_via(apis.postcodes, key, hits) is not None
+        assert hits == [want], (key, hits)
