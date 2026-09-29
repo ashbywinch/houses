@@ -179,16 +179,6 @@ resource "google_compute_forwarding_rule" "https" {
 # adoption apply from planning "destroy the old instance, create a new one" —
 # which would take the production database with it. Terraform state operations
 # (`moved`) are the ONLY safe way to rename a resource that exists in the world.
-moved {
-  from = google_compute_instance.houses
-  to   = google_compute_instance.box["house"]
-}
-
-moved {
-  from = google_compute_firewall.web
-  to   = google_compute_firewall.https
-}
-
 
 # The instance identity every box-side gsutil/gcloud call uses — no key file
 # anywhere, and nothing secret in metadata. The scopes are the API surface, the
