@@ -1,0 +1,25 @@
+#!/bin/bash
+# Rendered by terraform into the instance's `startup-script` metadata (see
+# terraform/main.tf). The bootstrap itself is read VERBATIM from
+# tools/deploy/box-bootstrap.sh and written through a quoted heredoc, so the
+# shell's own dollar-brace references inside it are never interpolated here.
+#
+# Everything exported here is PUBLIC: a git ref, an artifact object name, two
+# SSH public keys, hostnames, bucket names. No secret, no key file — the box
+# fetches what it needs with its own service-account identity.
+set -euo pipefail
+
+export PROVISION_REF='${provision_ref}'
+export PROVISION_ARTIFACT='${provision_artifact}'
+export OPERATOR_PUBKEY='${operator_pubkey}'
+export DEPLOY_PUBKEY='${deploy_pubkey}'
+export SEED_PROJECT='${project}'
+export GCS_SEED='${seed_object}'
+export GCS_ENV='${env_object}'
+export HOUSES_MAIN_HOST='${main_host}'
+
+cat > /tmp/box-bootstrap.sh <<'BOOTSTRAP_EOF'
+${bootstrap}
+BOOTSTRAP_EOF
+chmod 700 /tmp/box-bootstrap.sh
+bash /tmp/box-bootstrap.sh

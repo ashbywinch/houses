@@ -1,6 +1,21 @@
-# Ref-shipped data migrations, one path per line (relative to the checkout
-# root). The SAME list drives release.sh (rehearsal on the standby's smoke
-# copy) and switch.sh (the real run on the live DB, with prod stopped).
-# A migration here MUST satisfy the run-migration.sh contract (idempotent,
-# dry-run by default, --apply/--backup/--verify).
-scripts/backfill_person_ids.py
+# Ref-shipped data migrations, one line per migration:
+#
+#   <apply-script> <check-script>        (both relative to the checkout root)
+#
+# The SAME list drives BOTH runner calls of a rollout: install-artifact.sh
+# (rehearsal, on the standby's own database) and switch.sh --rebase (the
+# restored snapshot, at cutover). ONE parser reads it —
+# tools/deploy/run_migrations.py — never a shell loop: the 2026-09-24 silent
+# skip was a `while read` that dropped a final line carrying no trailing
+# newline, and a shell loop cannot refuse an empty list.
+#
+# apply-script contract: `<python> <apply> --db <db>` is a READ-ONLY dry-run
+#   report; `--apply --backup --backup-path <p> --verify` writes.
+# check-script contract: `<python> <check> --db <db>` opens the DB read-only and
+#   exits 0 iff the migration's effect is complete. A separate program from the
+#   apply, so it cannot vouch for the code that just wrote.
+#
+# Adding a migration = shipping both scripts + one line here. A blank or
+# comments-only list is REFUSED by the runner (zero migrations cannot be
+# reported as "0 applied+checked, 0 failed").
+scripts/backfill_person_ids.py scripts/backfill_person_ids.check.py

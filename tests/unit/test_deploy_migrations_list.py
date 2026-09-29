@@ -1,176 +1,152 @@
-"""The shared migration list contract (tools/deploy/migrations.list).
+"""The shared migration manifest contract (tools/deploy/migrations.list) and the
+shape of the rollout chain that consumes it.
 
-One list drives BOTH the release-time rehearsal (switch copy) and the
-flip-time real run (live DB): every listed migration must exist in the
-ref, and both deploy scripts must consume the SAME file — a divergence
-here silently stops migrations from ever running at the flip.
+One manifest drives BOTH runner calls of a rollout: the install's rehearsal (the
+standby's own database) and the cutover's rebase (the restored snapshot). Its
+contract:
+
+  * every line is a `<apply-script> <check-script>` PAIR, both relative to the
+    checkout root — the apply writes, the check is a separate program that opens
+    the DB read-only and exits 0 iff the effect is complete;
+  * both callers read it through the ONE runner (tools/deploy/run_migrations.py)
+    and gate on its summary line — a shell loop here is what silently skipped the
+    migration on 2026-09-24 (a final line with no trailing newline,
+    comments-only to `while read`, reported as success);
+  * the runner refuses the empty manifest, so "0 applied+checked, 0 failed" can
+    never be the verdict of a run that did nothing.
+
+Parser behaviour is pinned in test_deploy_run_migrations.py; this file pins the
+SHIPPED manifest, the two callers' wiring, and the absence of the mechanisms the
+plan deletes (the per-box flip, the git-ref release, the auto seed refresh).
 """
 
-# lucidlint: ignore-file fakefs the code under test IS the repo's deploy
-# scripts and list (read from the real checkout — the same carve-out as
-# test_deploy_run_migration: real-file interop).
+# lucidlint: ignore-file fakefs the code under test IS the repo's deploy scripts
+# and manifest (read from the real checkout — the same carve-out as
+# test_deploy_run_migrations: real-file interop).
 from __future__ import annotations
 
-import os
+import importlib.util
+import re
+import sys
 from pathlib import Path
 
-REPO = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-LIST = REPO / "tools" / "deploy" / "migrations.list"
+REPO = Path(__file__).resolve().parents[2]
+DEPLOY = REPO / "tools" / "deploy"
+WORKFLOW = REPO / ".github" / "workflows" / "release.yml"
+MANIFEST = DEPLOY / "migrations.list"
+RUNNER_CALLERS = ("install-artifact.sh", "switch.sh")
+# The retired INVOCATION shapes (not bare words): the box scripts explain in
+# prose which mechanisms are gone and why, and that explanation is worth keeping.
+RETIRED_INVOCATIONS = (
+    "switch.sh --publish",
+    "switch.sh --rollback",
+    "run-migration.sh",
+    "/opt/houses/release.sh",
+)
+RETIRED_FILES = (
+    "release.sh",
+    "run-migration.sh",
+    "provision-box.sh",
+    "units/houses-blue.service",
+    "units/houses-green.service",
+)
 
 
-def _migrations() -> list[str]:
-    lines = [ln.strip() for ln in LIST.read_text().splitlines()]
-    return [ln for ln in lines if ln and not ln.startswith("#")]
+def _runner_module():
+    spec = importlib.util.spec_from_file_location("deploy_run_migrations", DEPLOY / "run_migrations.py")
+    assert spec and spec.loader, "run_migrations.py must be importable"
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def test_every_listed_migration_exists_in_the_ref():
-    for mig in _migrations():
-        assert (REPO / mig).is_file(), f"migrations.list references a missing script: {mig}"
+def test_the_shipped_manifest_pairs_every_apply_script_with_a_check():
+    entries = _runner_module().parse_manifest(MANIFEST.read_text(), REPO)
+    assert entries, "the shipped manifest must list at least one migration"
+    for entry in entries:
+        assert entry.apply.is_file(), f"manifest lists a missing apply script: {entry.apply}"
+        assert entry.check.is_file(), f"manifest lists a missing check script: {entry.check}"
+        assert entry.check != entry.apply, "the check must be a separate program from the apply"
 
 
-def test_both_deploy_scripts_consume_the_shared_list():
-    release = (REPO / "tools" / "deploy" / "release.sh").read_text()
-    switch = (REPO / "tools" / "deploy" / "switch.sh").read_text()
-    assert "migrations.list" in release
-    assert "/opt/houses/migrations.list" in switch
-    assert "run-migration.sh" in release and "run-migration.sh" in switch
-    assert "while IFS= read -r MIG" in release and "while IFS= read -r MIG" in switch
+def test_the_shipped_manifest_survives_a_missing_trailing_newline():
+    """The 2026-09-24 skip in one assertion: the final line must be read whether
+    or not the file ends with a newline."""
+    text = MANIFEST.read_text().rstrip("\n")
+    assert _runner_module().parse_manifest(text, REPO)
 
-def test_both_loops_skip_comment_lines(tmp_path):
-    """The migration loops consume the file directly — a comment header
-    must never become a migration path. This is the regression behind the
-    v1.5.2 flips failing with 'ref is missing its migration script: /# '."""
-    import subprocess
 
-    migration = "scripts/backfill_person_ids.py"
-    runner = tmp_path / "run-migration.sh"
-    runner.write_text("#!/bin/bash\necho \"$1\" >> \"$ARGS_LOG\"\n")
-    runner.chmod(0o755)
-    green = tmp_path / "green"
-    (green / "scripts").mkdir(parents=True)
-    (green / migration).write_text("")
-    green_smoke = tmp_path / "green-smoke.db"
-    green_smoke.write_text("")
-    (tmp_path / "migrations.list").write_text(
-        "# Ref-shipped data migrations, one path per line\n" + migration + "\n"
-    )
+def test_both_callers_make_exactly_one_runner_call_and_gate_on_its_verdict():
+    for name in RUNNER_CALLERS:
+        src = (DEPLOY / name).read_text()
+        assert src.count("--manifest") == 1, f"{name} must make exactly one runner call"
+        assert src.count("--apply") == 1, f"{name} must call the runner in apply mode"
+        # A zero exit is not enough: the summary line is asserted, so a run that
+        # did not apply AND check every migration can never be followed by a
+        # boot, a flip, or a "ready" verdict.
+        assert "applied\\+checked, 0 failed$" in src, f"{name} does not gate on the verdict"
+        # Verdicts are READ by the callers, never authored: a caller that writes
+        # its own "ok" line can report success the runner never claimed.
+        assert "apply ok; backup ok; check ok" not in src, f"{name} fabricates a verdict line"
 
-    release_loop = """while IFS= read -r MIG; do
-  [ -z "$MIG" ] && continue
-  [[ "$MIG" == \\#* ]] && continue
-  "$RUNNER" "$ROOT/$SIDE/$MIG" "$ROOT/$SIDE-smoke.db" "$PY"
-done < "$LIST"
-"""
-    env = {
-        "ROOT": str(tmp_path),
-        "SIDE": "green",
-        "RUNNER": str(runner),
-        "LIST": str(tmp_path / "migrations.list"),
-        "PY": "/bin/true",
-        "ARGS_LOG": str(tmp_path / "args.log"),
-        "PATH": "/usr/bin:/bin",
+
+def _source_of(name: str) -> str:
+    """The text of one box script."""
+    return (DEPLOY / name).read_text()
+
+
+def _assert_no_retired_invocations(name: str, source: str) -> None:
+    missing = [retired for retired in RETIRED_INVOCATIONS if retired in source]
+    assert not missing, f"{name} still references the retired {missing}"
+
+
+def test_the_deleted_mechanisms_are_gone():
+    still_present = [gone for gone in RETIRED_FILES if (DEPLOY / gone).exists()]
+    assert not still_present, f"these should have been deleted by the plan: {still_present}"
+    assert not (REPO / "terraform" / "user_data.sh").exists(), "terraform's own startup script is retired"
+    checked = {name: _source_of(name) for name in (*RUNNER_CALLERS, "box-bootstrap.sh")} | {
+        "release.yml": WORKFLOW.read_text()
     }
-    r = subprocess.run(["bash", "-c", release_loop], capture_output=True, text=True, env=env)
-    assert r.returncode == 0, r.stderr
-    invoked = (tmp_path / "args.log").read_text().splitlines()
-    assert invoked == [str(green / migration)], invoked
-
-    # the SWITCH loop is a sibling with a different path scheme (ROOT/$NEW/MIG,
-    # live DB) — its skip logic must not regress separately.
-    args2 = tmp_path / "args2.log"
-    runner2 = tmp_path / "run-migration2.sh"
-    runner2.write_text("#!/bin/bash\necho \"$1\" >> \"$ARGS_LOG2\"\n")
-    runner2.chmod(0o755)
-    (tmp_path / "blue").mkdir(exist_ok=True)
-    switch_loop = """if [ ! -f "$MIG_LIST" ]; then exit 1; fi
-while IFS= read -r MIG; do
-  [ -z "$MIG" ] && continue
-  [[ "$MIG" == \#* ]] && continue
-  "$RUNNER2" "$ROOT/$NEW/$MIG" "$ROOT/data/houses.db" "$PY"
-done < "$MIG_LIST"
-"""
-    env2 = {
-        "ROOT": str(tmp_path),
-        "NEW": "green",
-        "RUNNER2": str(runner2),
-        "MIG_LIST": str(tmp_path / "migrations.list"),
-        "PY": "/bin/true",
-        "ARGS_LOG2": str(args2),
-        "PATH": "/usr/bin:/bin",
-    }
-    r2 = subprocess.run(["bash", "-c", switch_loop], capture_output=True, text=True, env=env2)
-    assert r2.returncode == 0, r2.stderr
-    invoked2 = args2.read_text().splitlines()
-    assert invoked2 == [str(green / migration)], invoked2
+    for name, source in checked.items():
+        _assert_no_retired_invocations(name, source)
 
 
-def test_switch_guard_refuses_missing_migrations_list(tmp_path):
-    """A flip with no shipped /opt/houses/migrations.list must stop cold —
-    the v1.5.x silent-skip failure mode."""
-    import subprocess
-
-    switch_src = (REPO / "tools" / "deploy" / "switch.sh").read_text()
-    assert "migrations.list missing on the box" in switch_src
-    assert "refusing to flip" in switch_src
-    missing_dir = tmp_path / "opt" / "houses"
-    missing_dir.mkdir(parents=True)
-    env = {"PATH": "/usr/bin:/bin", "MIG_LIST": str(missing_dir / "migrations.list")}
-    r = subprocess.run(
-        ["bash", "-c", "if [ ! -f \"$MIG_LIST\" ]; then echo 'refusing to flip'; exit 1; fi"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert r.returncode != 0
-    assert "refusing to flip" in r.stdout
+def test_the_box_has_one_unit_and_one_port():
+    assert (DEPLOY / "units" / "houses.service").is_file(), "the box's ONE app unit"
+    per_side = [gone for gone in ("houses-blue.service", "houses-green.service") if (DEPLOY / "units" / gone).exists()]
+    assert not per_side, f"the retired per-side units are back: {per_side}"
+    assert "HOUSES_PORT=8765" in _source_of("run-instance.sh")
+    # No second port anywhere in the chain — the L4 rule's target is the role.
+    chain = [*sorted(DEPLOY.glob("*.sh")), DEPLOY / "units" / "houses.service", WORKFLOW]
+    carries = [path.name for path in chain if "8766" in path.read_text()]
+    assert not carries, f"these still carry the retired standby port: {carries}"
 
 
-def test_release_requires_a_verified_runner_log(tmp_path):
-    """The rehearsal must leave a runner log with the verified marker; a
-    silently-skipped migration (no fresh log) fails the release."""
-    import subprocess
-    import time
+def test_the_allowlist_sanctions_only_the_rollout_shapes():
+    dispatcher = (DEPLOY / "deploy-allowlist.sh").read_text()
+    for shape in ("install-artifact.sh", "--snapshot", "--rebase", "--diagnose"):
+        assert shape in dispatcher, f"the allowlist must sanction {shape}"
 
-    logs = tmp_path / "logs" / "releases"
-    logs.mkdir(parents=True)
-    mark = tmp_path / ".release-migration-start"
-    mark.write_text("")
 
-    # a fresh-enough log WITHOUT the verified marker -> refuse
-    stale = logs / "run-migration-early-whatever.log"
-    stale.write_text("dry-run on /x\n")
-    r = subprocess.run(
-        [
-            "bash",
-            "-c",
-            'NEWEST=$(find "$LOGS" -name \'run-migration-*.log\' -newer "$MARK" | head -1 || true); '
-            'if [ -z "$NEWEST" ] || ! grep -q "migration applied + verified" "$NEWEST"; then '
-            'echo "no verified runner log — refusing"; exit 1; fi; echo "ok: $NEWEST"',
-        ],
-        capture_output=True,
-        text=True,
-        env={"PATH": "/usr/bin:/bin", "LOGS": str(logs), "MARK": str(mark)},
-    )
-    assert r.returncode != 0, r.stdout + r.stderr
-    assert "refusing" in r.stdout
+def _job_block(workflow: str, job: str) -> str:
+    """One job's body, so an assertion about its wiring stays local to it."""
+    match = re.search(rf"^  {job}:\n(.*?)(?=^  [A-Za-z#]|\Z)", workflow, re.MULTILINE | re.DOTALL)
+    assert match, f"no {job!r} job in the workflow"
+    return match.group(1)
 
-    # with the marker present -> passes (mark BEFORE the log: -newer finds it)
-    mark_new = tmp_path / ".mark2"
-    mark_new.write_text("")
-    verified = logs / "run-migration-now-x.log"
-    verified.write_text("migration applied + verified\n")
-    time.sleep(0.05)  # log mtime strictly after the mark (coarse-FS safety)
-    r2 = subprocess.run(
-        [
-            "bash",
-            "-c",
-            'NEWEST=$(find "$LOGS" -name \'run-migration-*.log\' -newer "$MARK" | head -1 || true); '
-            'if [ -z "$NEWEST" ] || ! grep -q "migration applied + verified" "$NEWEST"; then '
-            'echo "no verified runner log — refusing"; exit 1; fi; echo "ok"',
-        ],
-        capture_output=True,
-        text=True,
-        env={"PATH": "/usr/bin:/bin", "LOGS": str(logs), "MARK": str(mark_new)},
-    )
-    assert r2.returncode == 0, r2.stdout + r2.stderr
-    assert "ok" in r2.stdout
+
+def test_every_rollout_rebuilds_the_standby_and_moves_the_certificate():
+    """Replace-not-repair: a rollout REBUILDS the standby instance from the
+    artifact (so no box drifts and the bootstrap path is exercised every time),
+    and install then runs against that fresh box."""
+    workflow = WORKFLOW.read_text()
+    rebuild = _job_block(workflow, "provision")
+    assert "inputs.action == 'release'" in rebuild, "a release must rebuild the box"
+    assert "inputs.action == 'provision'" in rebuild, "a bare rebuild must stay possible"
+    assert "-replace " in rebuild, "the box is replaced, not patched"
+    assert "needs: [resolve, build, provision]" in workflow, "install must follow the rebuild"
+    # The instance lifecycle belongs to Terraform; traffic is moved ONLY by the
+    # rules' target. A hand-run create/delete here would be the 2026-09-24 outage.
+    assert "instances create" not in workflow
+    assert "instances delete" not in workflow

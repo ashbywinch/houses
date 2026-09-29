@@ -244,15 +244,14 @@ def _mark_changed_sources(conn, persons_row_id: int) -> None:
 
 # lucidlint: ignore long-param-list one-shot migration step — the signature IS its IO boundary;
 # an Options object would be a facade over nothing
-def apply_migration(conn, db_path: str, persons_id: int, data, mapping, remaps, *, use_backup: bool, verify: bool) -> MigrationResult:  # noqa: E501 the signature IS its IO boundary (see the long-param-list ignore above)
+def apply_migration(conn, persons_id: int, data, mapping, remaps, *, backup_path: str | None, verify: bool) -> MigrationResult:  # noqa: E501 the signature IS its IO boundary (see the long-param-list ignore above)
     """Write the transform, checkpoint first, and prove it exhausted the
     work. Returns a MigrationResult; ok=False means the run must fail loudly.
 
     The applied count is the generator's OWN consumption — a post-apply
     re-scan on the same connection sees migrated rows and would report
     zero (the 2026-09-23 '0 remapped (applied)' lie)."""
-    if use_backup:
-        backup_path = db_path + ".pre-person-id-migration"
+    if backup_path:
         conn.backup(sqlite3.connect(backup_path))
         print(f"backup written: {backup_path}")
     applied = 0
@@ -287,6 +286,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="write the changes (dry-run default)")
     parser.add_argument("--backup", action="store_true", help="sqlite backup of the DB before writing (recommended)")
+    parser.add_argument("--backup-path", default=None, help="where --backup writes (default: <db>.pre-<this script's basename>)")
     parser.add_argument("--verify", action="store_true", help="re-scan after apply: must find zero remaps")
     parser.add_argument("--db", default=DB_PATH, help="sqlite path (default: data/houses.db)")
     args = parser.parse_args()
@@ -310,12 +310,11 @@ def main() -> int:
     if args.apply:
         result = apply_migration(
             conn,
-            args.db,
             persons,
             data,
             mapping,
             rows_to_remap(conn, mapping),  # a fresh scan — the first is counted below
-            use_backup=args.backup,
+            backup_path=(args.backup_path or f"{args.db}.pre-{os.path.basename(__file__)}") if args.backup else None,
             verify=args.verify,
         )
         if not result.ok:

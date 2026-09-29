@@ -1,31 +1,43 @@
 name: Release
 
-# Blue/green release, driven from GitHub.
+permissions:
+  contents: read
+
+# The rollout chain (docs/anti-fragile-rollout-plan.md). ONE human decision per
+# rollout: the cutover job's production-environment approval.
 #
-#   deploy  — ship box tooling (units/switch/run-instance/watchdog) + the
-#             CI-built frontend dist, then run the release: checkout the ref
-#             on the STANDBY box side, snapshot the live DB into the standby's
-#             smoke copy, start it, run authenticated smoke checks, then STOP
-#             the standby (ephemeral: the switch starts it cold; the 2026-09-07
-#             OOM was a warm standby left running on a 953 MiB box). The live
-#             side and live DB are untouched.
-#   switch  — flip: stop the live side, start the (smoke-verified) standby on
-#             the live DB (Caddy's config is static — nothing else changes).
-#             Run this AFTER the standby has been smoke-tested.
-#   rollback — undo the last switch (previous code + pre-flip DB snapshot).
+#   resolve   — read the L4 forwarding rule's target. That is the ONLY "who is
+#               live" fact; a box's role (owner/standby) is exactly that target.
+#   build     — build the content-addressed artifact (code + frontend/dist +
+#               relocatable .venv + units + tooling + manifest) and upload it to
+#               gs://houses-artifacts/<sha256>.tar.gz. The sha256 IS the key.
+#   provision — rebuild the STANDBY instance from the artifact (replace-not-repair,
+#               guarded against the box the rules target). Part of every rollout.
+#   install   — on the fresh standby: verify the artifact + its venv, rehearse the
+#               migrations (apply + check each), smoke on 127.0.0.1, then leave the
+#               app STOPPED for the human gate.
+#   cutover   — GATED (environment: production). FREEZE the owner (stop its app)
+#               and snapshot it → rebase the standby from that snapshot (restore +
+#               verify rows/integrity + migrate + check + start) → flip the rules
+#               → settle. Any failure restarts the owner's app; traffic never moved.
+#   rollback  — flip the rules back to the other box. Ungated: the emergency undo.
+#   recover   — GATED. The EXCEPTION path: restore the standby's database from a
+#               NAMED object (never from the owner) and flip. For when the owner's
+#               data must not be carried forward at all.
+#   diagnose  — read-only state dump of BOTH boxes.
 #
-# Triggers: push a tag v* (deploys automatically) or workflow_dispatch with
-# the action of your choice.
+# The box never flips routes and holds no GCP credentials; CI does the flip with
+# its own service account. The box's only identity is its instance service
+# account, used for GCS reads (no key file on a box, none in Terraform state).
 #
-# Ref guard: a tag push is accepted only when the tag is reachable from
-# main — the released code must have gone through a PR (see
-# docs/deploy-discipline.md).  A non-main ref is released only via an
-# explicit workflow_dispatch with the ref input named: the deliberate,
-# reviewable bypass, never a tag.
-#
-# Requires GitHub secrets: BOX_HOST (public IP or hostname), BOX_USER,
-# BOX_SSH_KEY (private key of the restricted deploy key; see
-# tools/deploy/provision.md).
+# Required repo secrets:
+#   BOX_USER, BOX_SSH_KEY   restricted deploy key (forced-command allowlist)
+#   DEPLOY_PUBKEY           that key's PUBLIC half (allowlist install)
+#   OPERATOR_PUBKEY         the human admin key (break-glass: shell + sudo)
+#   GOOGLE_SA_KEY           base64 SA JSON: compute.instanceAdmin.v1,
+#                           compute.networkUser, storage.objectAdmin on
+#                           houses-artifacts, and the houses-tfstate backend
+# Repo variables (optional): GCP_PROJECT, GCP_ZONE.
 
 on:
   push:
@@ -33,25 +45,96 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'git ref to release (SHA, branch, or tag)'
+        description: 'git ref to build/release (SHA, branch, or tag)'
         required: false
         default: 'main'
       action:
-        description: 'deploy to standby | switch over | rollback | diagnose (read-only box state)'
+        description: 'release | build | install | cutover | rollback | recover | diagnose | provision | bake'
         required: false
-        default: 'deploy'
+        default: 'release'
         type: choice
-        options: ['deploy', 'switch', 'rollback', 'diagnose']
+        options: ['release', 'build', 'install', 'cutover', 'rollback', 'recover', 'diagnose', 'provision', 'bake']
+      artifact:
+        description: 'install only: an existing gs://<bucket>/<sha256>.tar.gz (blank = build one now)'
+        required: false
+        default: ''
+      snapshot:
+        description: 'recover only: the database object to restore (gs://bucket/object.db)'
+        required: false
+        default: 'gs://houses-seed/latest.db'
 
 jobs:
-  deploy:
-    if: github.event_name == 'push' || inputs.action == 'deploy'
+  # ── who is live ───────────────────────────────────────────────────────
+  resolve:
+    if: ${{ inputs.action != 'build' }}
     runs-on: ubuntu-latest
+    outputs:
+      owner: ${{ steps.roles.outputs.owner }}
+      standby: ${{ steps.roles.outputs.standby }}
+      owner_ip: ${{ steps.roles.outputs.owner_ip }}
+      standby_ip: ${{ steps.roles.outputs.standby_ip }}
+      target: ${{ steps.roles.outputs.target }}
+      consistent: ${{ steps.roles.outputs.consistent }}
     steps:
-      # The workspace starts EMPTY without a checkout — the Guard step only
-      # git-inits and fetches refs, so the frontend build below needs an
-      # explicit checkout of the ref being released (v1.4.0 deploy failed
-      # on `cd houses/frontend`).
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - id: roles
+        name: Read the rules' targets (the only "who is live" fact)
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          describe() { gcloud compute instances describe "$1" --zone "$ZONE" --project "$PROJECT" --format="value($2)"; }
+          rule_target() { basename "$(gcloud compute forwarding-rules describe "$1" --region "$REGION" --project "$PROJECT" --format='value(target)')"; }
+
+          # The two rules are always flipped together. A split means a half-flip:
+          # report it and carry on resolving, because REFUSING HERE would make
+          # rollback and diagnose — the two actions you need in that state —
+          # impossible to dispatch. Jobs that must not act on a split check
+          # `consistent` themselves.
+          TARGET=$(rule_target houses-l4-https)
+          TARGET_HTTP=$(rule_target houses-l4-http)
+          if [ "$TARGET" = "$TARGET_HTTP" ]; then
+            CONSISTENT=true
+          else
+            CONSISTENT=false
+            echo "::warning::the L4 rules DISAGREE (https -> $TARGET, http -> $TARGET_HTTP) — a half-finished flip. action=rollback repairs this; cutover/install/recover refuse it."
+          fi
+          OWNER=$(basename "$(gcloud compute target-instances describe "$TARGET" --zone "$ZONE" --project "$PROJECT" --format='value(instance)')")
+          case "$OWNER" in
+            houses) STANDBY=houses-standby ;;
+            houses-standby) STANDBY=houses ;;
+            *) echo "::error::the rule targets an unknown instance '$OWNER'"; exit 1 ;;
+          esac
+          OWNER_IP=$(describe "$OWNER" networkInterfaces[0].accessConfigs[0].natIP)
+          STANDBY_IP=$(describe "$STANDBY" networkInterfaces[0].accessConfigs[0].natIP)
+          {
+            echo "owner=$OWNER"
+            echo "standby=$STANDBY"
+            echo "owner_ip=$OWNER_IP"
+            echo "standby_ip=$STANDBY_IP"
+            echo "target=$TARGET"
+            echo "consistent=$CONSISTENT"
+          } >> "$GITHUB_OUTPUT"
+          echo "LIVE (rule target): $OWNER ($OWNER_IP) via $TARGET"
+          echo "STANDBY:            $STANDBY ($STANDBY_IP)"
+
+  # ── the artifact ──────────────────────────────────────────────────────
+  build:
+    if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact: ${{ steps.pack.outputs.artifact }}
+      sha: ${{ steps.pack.outputs.sha }}
+    steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
@@ -60,10 +143,8 @@ jobs:
           REF: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
         run: |
           set -euo pipefail
-          # The ref is interpolated into a remote shell command below —
-          # refuse anything outside the safe charset so a tag or dispatch
-          # input cannot break out of the quoting (PR #68 review,
-          # command injection).
+          # The ref is interpolated into a remote shell command below — refuse
+          # anything outside the safe charset (PR #68 review, command injection).
           case "$REF" in
             *[!A-Za-z0-9._/-]*)
               echo "ERROR: ref '$REF' contains characters outside [A-Za-z0-9._/-] — refusing to deploy." >&2
@@ -71,14 +152,8 @@ jobs:
               ;;
           esac
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Tag push: the tag must be reachable from main — the code
-            # went through a PR.  Tagging a feature branch directly is an
-            # unreviewed deploy; fail it (see docs/deploy-discipline.md).
             echo "Tag push — verifying $REF is reachable from main..."
             git init -q .
-            # actions/checkout already created origin (v1.4.1 deploy failed
-            # on `git remote add: remote origin already exists`) — be
-            # idempotent instead of assuming an empty workspace.
             if git remote get-url origin >/dev/null 2>&1; then
               git remote set-url origin "https://github.com/${{ github.repository }}.git"
             else
@@ -97,130 +172,593 @@ jobs:
               echo "NOTE: releasing non-main ref $REF — the deliberate, reviewable bypass."
             fi
           fi
-
-      - name: Build the frontend for this release (R1 — never on the box)
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Build the frontend (never on the box — a Vite build is the 2026-09-07 OOM victim)
         run: |
           set -euo pipefail
           cd houses/frontend
           npm ci
           npm run build
-          tar -czf /tmp/houses-dist.tar.gz -C . dist
-          echo "dist: $(du -h /tmp/houses-dist.tar.gz | cut -f1)"
-
-      # NOTE: no "ship tooling" step here — the deploy key is
-      # command-restricted to `sudo /opt/houses/release.sh …` and
-      # `sudo /opt/houses/switch.sh` (authorized_keys), so scp/install can
-      # never reach the box. The release script itself (running as root)
-      # installs the ref's own units/watchdog/switch.sh/run-instance.sh —
-      # R6, inside the security model.
-
-
-      - name: Deploy ref to standby and smoke-test it
-        env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+          test -f dist/index.html
+      - id: pack
+        name: Pack the artifact (relocatable venv + code + dist + tooling)
         run: |
           set -euo pipefail
           REF="${{ github.event_name == 'push' && github.ref_name || inputs.ref }}"
-          echo "Deploying $REF to the standby..."
+          STAGE=/tmp/houses-artifact
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          # EXACTLY the tracked tree: it carries the app AND the committed
+          # reference data the app reads from relative paths at runtime
+          # (data/commute/*.json for the map layers, schools/council-tax/bus-fare
+          # tables). A hand-written exclude list shipped none of those once and
+          # the only symptom was silently-empty derived data, so exclude nothing
+          # by hand: `.gitignore` and git's own index are the single source of
+          # what belongs in the artifact.
+          git archive HEAD | tar -x -C "$STAGE"
+          # The frontend build is CI's output, not tracked content — overlay it.
+          rm -rf "$STAGE/houses/frontend/dist"
+          cp -r houses/frontend/dist "$STAGE/houses/frontend/dist"
+          test -f "$STAGE/houses/frontend/dist/index.html"
+          echo "$REF" > "$STAGE/ARTIFACT_REF"
+          # A RELOCATABLE venv with the project installed NON-EDITABLE: an
+          # editable venv embeds absolute build paths (shebangs + __editable__
+          # .pth), so it cannot import houses/dag after unpacking elsewhere —
+          # which is exactly how the 2026-09-24 flip aborted.
+          export UV_PROJECT_ENVIRONMENT="$STAGE/.venv"
+          uv venv --relocatable "$STAGE/.venv"
+          uv sync --no-editable --frozen
+          # Prove it moved: unpack elsewhere and import the app + the DAG library.
+          PROOF=/tmp/houses-artifact-proof
+          rm -rf "$PROOF"; mkdir -p "$PROOF"
+          tar -cf - -C "$STAGE" . | tar -xf - -C "$PROOF"
+          ( cd / && "$PROOF/.venv/bin/python" -c 'import houses, dag' )
+          echo "venv receipt ok: the packed .venv imports houses + dag from $PROOF"
+          rm -rf "$PROOF"
+          # Pack, then hash the FILE: the object key must be the sha256 of the
+          # exact bytes served, or the box's verification would be meaningless.
+          tar -czf /tmp/houses-artifact.tar.gz -C "$STAGE" .
+          SHA=$(sha256sum /tmp/houses-artifact.tar.gz | cut -d' ' -f1)
+          mv /tmp/houses-artifact.tar.gz "/tmp/$SHA.tar.gz"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "artifact=gs://houses-artifacts/$SHA.tar.gz" >> "$GITHUB_OUTPUT"
+          du -h "/tmp/$SHA.tar.gz"
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Upload the artifact (the object KEY is its sha256)
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.pack.outputs.sha }}"
+          gsutil -q cp "/tmp/$SHA.tar.gz" "gs://houses-artifacts/$SHA.tar.gz"
+          gsutil ls -l "gs://houses-artifacts/$SHA.tar.gz"
+
+  # ── install on the standby (the rehearsal) ────────────────────────────
+  install:
+    needs: [resolve, build, provision]
+    # A rollout rebuilds the standby first (provision) and then installs this
+    # artifact onto it; `action=install` re-installs onto the existing box
+    # without a rebuild (a retry after a failed install, or a hotfix probe).
+    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.consistent == 'true' && (inputs.action == 'install' || needs.provision.result == 'success') }}
+    runs-on: ubuntu-latest
+    env:
+      BOX_USER: ${{ secrets.BOX_USER }}
+      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+      ARTIFACT: ${{ inputs.artifact != '' && inputs.artifact || needs.build.outputs.artifact }}
+      STANDBY_IP: ${{ needs.provision.outputs.standby_ip || needs.resolve.outputs.standby_ip }}
+    steps:
+      - name: Guard — never install onto the box that owns the traffic
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.resolve.outputs.standby }}" = "${{ needs.resolve.outputs.owner }}" ]; then
+            echo "::error::resolve returned the same box for owner and standby — refusing"
+            exit 1
+          fi
+          case "$ARTIFACT" in
+            gs://*/[0-9a-f]*.tar.gz) : ;;
+            *) echo "::error::no artifact to install (build one, or pass artifact=gs://<bucket>/<sha256>.tar.gz)"; exit 1 ;;
+          esac
+          echo "installing $ARTIFACT on the standby ${{ needs.resolve.outputs.standby }} ($STANDBY_IP)"
+      - name: Install the artifact on the standby
+        run: |
+          set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
-          # The dist rides the EXEC channel on stdin, not scp: the deploy
-          # key's command= allows only `sudo /opt/houses/release.sh <ref>`
-          # (and switch.sh) — release.sh reads /dev/stdin when it is a pipe.
-          # The remote command must stay exactly that shape: no local
-          # wrapper inside the quotes, or authorized_keys refuses it.
-          # R4 envelope: local timeout wraps ssh (900 s) on top of the
-          # step's 90-minute cap; release.sh's snapshot has its own 120 s
-          # deadline, so no stage can hang unbounded.
-          cat /tmp/houses-dist.tar.gz | timeout 1500 ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh $REF"
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/install-artifact.sh $ARTIFACT"
         timeout-minutes: 90
-
-      - name: Surface the box-side release log (best-effort)
+      - name: Surface the standby's state (best-effort)
         if: failure()
-        env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
         run: |
           set +e
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
-            "$BOX_USER@$BOX_HOST" "sudo sh -c 'tail -80 \$(ls -t /opt/houses/logs/releases/*.log 2>/dev/null | head -1) 2>/dev/null || echo no release log yet'" \
-            || echo "box unreachable — the release log is on the box at /opt/houses/logs/releases/"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --diagnose" \
+            || echo "standby unreachable — check the console"
         timeout-minutes: 3
 
-  switch:
-    if: inputs.action == 'switch'
+  # ── cutover (THE human gate) ──────────────────────────────────────────
+  cutover:
+    needs: [resolve]
+    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' }}
     runs-on: ubuntu-latest
-    # HUMAN GATE — GitHub Environments → Required reviewers (configure the
-    # 'production' environment in repo Settings → Environments; public-repo
-    # free plan supports it). A switch is a prod traffic change: the job
-    # waits for an explicit approval before running, implementing the
-    # sign-off requirement from the 2026-09-23 governance breach. Rollback
-    # stays ungated: it is the emergency undo and must not need approval.
     environment: production
+    env:
+      BOX_USER: ${{ secrets.BOX_USER }}
+      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+      OWNER_IP: ${{ needs.resolve.outputs.owner_ip }}
+      STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
     steps:
-      - name: Switch traffic to the smoke-verified standby
-        env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+      - name: Prepare the deploy key
         run: |
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh"
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - id: snapshot
+        name: FREEZE the owner and snapshot its database
+        run: |
+          set -euo pipefail
+          # --snapshot STOPS the owner's app first (the freeze), so no write can
+          # land between the freeze and the copy: what CI gets is exactly the last
+          # state production served, and the row count it reports is what the
+          # restore is verified against. Production is down from here until the
+          # flip completes (or until the unfreeze step restarts this box).
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --snapshot" \
+            > /tmp/snapshot.db 2> /tmp/snapshot.err
+          cat /tmp/snapshot.err
+          echo "frozen_at=$(date -u +%FT%TZ)" >> "$GITHUB_OUTPUT"
+          ROWS=$(sed -n 's/.*snapshot ok: \([0-9]*\) rows.*/\1/p' /tmp/snapshot.err | tail -1)
+          [ -n "$ROWS" ] || { echo "::error::the snapshot reported no row count — production is FROZEN; check the box"; exit 1; }
+          [ -s /tmp/snapshot.db ] || { echo "::error::the snapshot stream is empty — production is FROZEN; check the box"; exit 1; }
+          echo "snapshot: $(du -h /tmp/snapshot.db | cut -f1), $ROWS rows"
+          echo "rows=$ROWS" >> "$GITHUB_OUTPUT"
+          # ARCHIVE the clean pre-migration copy before any migration runs on the
+          # restores: this object is the "backup taken before the migration" that
+          # must survive the flip. NEVER delete it once the runner has migrated
+          # the standby — the naming and the bytes are the point (the 09-23 seed
+          # that had no surviving clean copy was the 2026-09-24 lesson).
+          SNAPSHOT_OBJECT="gs://houses-artifacts/snapshots/$(date -u +%Y%m%dT%H%M%SZ).db"
+          gsutil -q cp /tmp/snapshot.db "$SNAPSHOT_OBJECT" || {
+            echo "::error::could not archive the clean snapshot to $SNAPSHOT_OBJECT — the cutover rule is: no archive, no migration. Production is FROZEN; the unfreeze step restarts the owner."
+            exit 1
+          }
+          echo "archived clean snapshot: $SNAPSHOT_OBJECT ($(du -h /tmp/snapshot.db | cut -f1), $ROWS rows, pre-migration)"
+          echo "snapshot_object=$SNAPSHOT_OBJECT" >> "$GITHUB_OUTPUT"
         timeout-minutes: 20
+      - name: Rebase the standby (restore, verify, migrate, check, start)
+        run: |
+          set -euo pipefail
+          # --rebase reads the snapshot on stdin and passes the snapshot's row
+          # count, which the box verifies the restore against before installing it.
+          # Any failure here leaves the standby's app stopped; the unfreeze step
+          # below restarts the owner, so traffic never moves onto a bad copy.
+          cat /tmp/snapshot.db | ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}"
+          # The GCS copy is now the archive; the runner's own <db>.pre-<basename>
+          # backups live on the standby/owner box. Nothing further is deleted.
+        timeout-minutes: 45
+      - name: Flip the L4 rules to the new owner
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          TARGET="${{ needs.resolve.outputs.standby }}-target"
+          for rule in houses-l4-http houses-l4-https; do
+            gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
+              --target-instance "$TARGET"
+          done
+          echo "flipped houses-l4-http + houses-l4-https -> $TARGET"
+      - name: Unfreeze — put production back on the owner if anything above failed
+        # failure() is FALSE for a cancelled run, and a lost runner runs no
+        # further steps: either way the owner's app has been stopped since the
+        # snapshot and production is down. Both cases must unfreeze.
+        if: ${{ failure() || cancelled() }}
+        run: |
+          set +e
+          # The owner's app has been stopped since the snapshot. Traffic never
+          # moved (the flip is the last step), so restarting it restores service
+          # exactly as it was — with the writes it had already accepted.
+          echo "cutover failed after the freeze — restarting the owner's app"
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --unfreeze"
+        timeout-minutes: 10
+      - name: Verify public health through the settle window (5 minutes)
+        if: success()
+        run: |
+          set -euo pipefail
+          # The settle window: five minutes of continuous public verification on
+          # the NEW owner. /health is the evidence that the box is SERVING
+          # (`status` and `db` are hard gates). It is NOT evidence that the data
+          # is migrated — that verdict comes from the runner inside --rebase
+          # (`migrations: N applied+checked, 0 failed`), which the box refuses to
+          # finish without, long before any traffic moves.
+          #
+          # last_write staleness is reported, not gated: it is MAX(created_at) in
+          # node_results, so an idle-but-converged DAG legitimately writes nothing
+          # for minutes at a time. A genuinely stalled database shows `db:"error"`.
+          deadline=$(( $(date +%s) + 300 ))
+          polls=0
+          first=""
+          last=""
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
+            read -r S DB LW < <(printf '%s' "$H" | python3 -c 'import sys,json; d=json.loads(sys.stdin.read()); print(d.get("status",""), d.get("db",""), d.get("last_write",""))' 2>/dev/null || echo "  ")
+            if [ "$S" != "ok" ] || [ "$DB" != "ok" ] || [ -z "$LW" ]; then
+              echo "::error::public health is not ok (status='$S' db='$DB' last_write='$LW') — the flip is NOT complete"
+              exit 1
+            fi
+            AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
+            [ -n "$first" ] || first="$LW"
+            last="$LW"
+            polls=$((polls + 1))
+            echo "settle poll $polls: last_write=$LW age=${AGE}s"
+            sleep 15
+          done
+          if [ "$first" = "$last" ]; then
+            echo "NOTE: last_write did not advance during the window ($last) — the app had nothing to recompute"
+          fi
+          echo "SETTLE VERIFIED: $polls healthy reads over 5 minutes (last_write $first -> $last)"
+      - name: Record the outcome
+        if: always()
+        run: |
+          echo "owner before:  ${{ needs.resolve.outputs.owner }}"
+          echo "owner after:   ${{ needs.resolve.outputs.standby }}"
+          echo "Rollback (if needed): gh workflow run Release -f action=rollback -f ref=main"
+          echo "Clean pre-migration backups retained: ${{ steps.snapshot.outputs.snapshot_object }} (GCS) + each box's <db>.pre-<migration> files"
 
-  diagnose:
-    if: inputs.action == 'diagnose'
+  # ── recover: put production on a database from a NAMED OBJECT, then flip ──
+  #
+  # The exception path, for when the owner's data must NOT be carried forward
+  # (a silent migration skip, a stalled cascade, a botched restore). The owner is
+  # never read and never snapshotted: this box's database comes from the object a
+  # human names — deliberately, in an incident, not automatically from a pile of
+  # old copies. Recovery means the writes since that object are gone; that is the
+  # trade, and the approval below is where it is accepted.
+  recover:
+    needs: [resolve]
+    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      BOX_USER: ${{ secrets.BOX_USER }}
+      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+      STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
+      SOURCE: ${{ inputs.snapshot || 'gs://houses-seed/latest.db' }}
+    steps:
+      - name: Guard — never recover onto the box that owns the traffic
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.resolve.outputs.standby }}" = "${{ needs.resolve.outputs.owner }}" ]; then
+            echo "::error::resolve returned the same box for owner and standby — refusing"
+            exit 1
+          fi
+          case "$SOURCE" in
+            gs://*/*.db) : ;;
+            *) echo "::error::snapshot must name an object: gs://<bucket>/<object>.db"; exit 1 ;;
+          esac
+          echo "recovering ${{ needs.resolve.outputs.standby }} from $SOURCE"
+          echo "::warning::the owner (${{ needs.resolve.outputs.owner }}) is NOT read — its data is being abandoned, and every write since $SOURCE is lost"
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Restore the named database and start the app
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --restore $SOURCE"
+        timeout-minutes: 45
+      - name: Flip the L4 rules to the recovered box
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          TARGET="${{ needs.resolve.outputs.standby }}-target"
+          for rule in houses-l4-http houses-l4-https; do
+            gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
+              --target-instance "$TARGET"
+          done
+          echo "flipped houses-l4-http + houses-l4-https -> $TARGET ($SOURCE)"
+      - name: Unfreeze — nothing to do on the owner
+        if: failure()
+        run: |
+          echo "::warning::recovery did not complete. The owner was never touched, so whatever served before still serves — but if it is broken, recovery is still outstanding."
+      - name: Verify public health through the settle window (5 minutes)
+        if: success()
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 300 ))
+          polls=0
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
+            read -r S DB LW < <(printf '%s' "$H" | python3 -c 'import sys,json; d=json.loads(sys.stdin.read()); print(d.get("status",""), d.get("db",""), d.get("last_write",""))' 2>/dev/null || echo "  ")
+            if [ "$S" != "ok" ] || [ "$DB" != "ok" ] || [ -z "$LW" ]; then
+              echo "::error::public health is not ok (status='$S' db='$DB' last_write='$LW') — the recovery flip is NOT complete"
+              exit 1
+            fi
+            polls=$((polls + 1))
+            echo "settle poll $polls: last_write=$LW"
+            sleep 15
+          done
+          echo "RECOVERY VERIFIED: $polls healthy reads over 5 minutes"
+      - name: Record the outcome
+        if: always()
+        run: |
+          echo "owner before: ${{ needs.resolve.outputs.owner }} (its data was NOT carried forward)"
+          echo "owner after:  ${{ needs.resolve.outputs.standby }}, restored from $SOURCE"
+          echo "NOTE: rollback is NOT the undo here — it would move traffic back onto the data you just abandoned."
+
+  # ── rollback (the emergency undo — ungated) ───────────────────────────
+  rollback:
+    needs: [resolve]
+    if: ${{ inputs.action == 'rollback' }}
     runs-on: ubuntu-latest
     steps:
-      # READ-ONLY box state dump — the only sanctioned box visibility
-      # (the box's ssh user has no shell writes beyond the sudoers
-      # allowlist; every command below reads). Used to verify shipped
-      # tooling, snapshot inventory, and unit/journal state during an
-      # incident without touching prod.
-      - name: Dump box state
-        env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+      - name: Authenticate gcloud
         run: |
           set -euo pipefail
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          # The deploy key's authorized_keys allowlist is release.sh/switch.sh
-          # ONLY (provision.md) — arbitrary commands (bash -s) are refused and
-          # swallowed by the forced command. switch.sh --diagnose is the
-          # sanctioned read-only dump and its stdout relays to this log.
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --diagnose"
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Flip the rules back to the previous owner (or repair a half-flip)
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          if [ "${{ needs.resolve.outputs.consistent }}" = "true" ]; then
+            TARGET="${{ needs.resolve.outputs.owner }}-target"
+            MESSAGE="rolled back: houses-l4-* -> $TARGET"
+          else
+            # Half-flip: the rules point at different boxes. Point both at the one
+            # serving HTTPS — that is the leg carrying real traffic, so this is a
+            # no-op for users and makes the state consistent again. Moving traffic
+            # on a guess is not the undo.
+            TARGET="${{ needs.resolve.outputs.target }}"
+            MESSAGE="REPAIRED a half-flip: houses-l4-* now agree on $TARGET (the box serving HTTPS). Dispatch rollback again if you also meant to move traffic."
+          fi
+          for rule in houses-l4-http houses-l4-https; do
+            gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
+              --target-instance "$TARGET"
+          done
+          echo "$MESSAGE"
+          # No DATABASE restore: the rollout never wrote the owner's database, so
+          # the previous owner is still serving its own untouched data.
+      - name: Verify public health recovered
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
+            S=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("status",""))' 2>/dev/null || true)
+            LW=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("last_write",""))' 2>/dev/null || true)
+            # status/db are the gates. last_write freshness is NOT one: an idle
+            # but healthy DAG writes nothing for minutes, and the settle gate
+            # reaches the same conclusion — the emergency undo must not report a
+            # failure for a rollback that worked.
+            if [ "$S" = "ok" ] && [ -n "$LW" ]; then
+              echo "rollback verified: status=ok last_write=$LW"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::rollback ran but public health did not recover — check action=diagnose"
+          exit 1
         timeout-minutes: 10
 
-  rollback:
-    if: inputs.action == 'rollback'
+  # ── rebuild a box from the artifact (replace-not-repair) ──────────────
+  provision:
+    needs: [resolve, build]
+    # Part of every rollout (a fresh box per rollout — replace-not-repair), and
+    # standalone for a box that needs rebuilding between rollouts.
+    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') }}
     runs-on: ubuntu-latest
-
+    outputs:
+      # The rebuilt instance's address is NEW (ephemeral) — everything downstream
+      # must use this, not resolve's pre-rebuild reading.
+      standby_ip: ${{ steps.wait.outputs.ip }}
+    env:
+      ARTIFACT: ${{ needs.build.outputs.artifact }}
+      REBUILD: ${{ needs.resolve.outputs.standby }}
     steps:
-      - name: Roll back to the previous side
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Guard — never rebuild the box that owns the traffic
+        run: |
+          set -euo pipefail
+          if [ "$REBUILD" = "${{ needs.resolve.outputs.owner }}" ]; then
+            echo "::error::$REBUILD is the rule's target (it is serving) — refusing to rebuild it"
+            exit 1
+          fi
+          echo "rebuilding the standby $REBUILD from $ARTIFACT"
+      - name: Prepare credentials + the operator public key
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+          printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
         env:
-          BOX_HOST: ${{ secrets.BOX_HOST }}
-          BOX_USER: ${{ secrets.BOX_USER }}
-          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+          OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
+      - name: terraform apply -replace the standby
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          KEY=$( [ "$REBUILD" = "houses" ] && echo house || echo standby )
+          cd terraform
+          terraform init -input=false
+          terraform apply -auto-approve -input=false \
+            -var "project=$PROJECT" \
+            -var "region=$REGION" \
+            -var "zone=$ZONE" \
+            -var "operator_ssh_public_key_path=/tmp/operator.pub" \
+            -var "deploy_pubkey=$DEPLOY_PUBKEY" \
+            -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
+            -var "provision_artifact=$ARTIFACT" \
+            -var "live_instance=${{ needs.resolve.outputs.owner }}" \
+            -replace "google_compute_instance.box[\"$KEY\"]"
+        env:
+          DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
+        timeout-minutes: 30
+      - id: wait
+        name: Wait for the bootstrap (the PROVISIONED marker, via the deploy key)
         run: |
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
-          -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --rollback"
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          IP=""
+          for attempt in $(seq 1 180); do
+            [ -n "$IP" ] || IP=$(gcloud compute instances describe "$REBUILD" --zone "$ZONE" --project "$PROJECT" \
+              --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || true)
+            OUT=$(ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+              -o ServerAliveInterval=15 -o ServerAliveCountMax=40 \
+              "$BOX_USER@$IP" "sudo /opt/houses/switch.sh --diagnose" 2>/dev/null || true)
+            case "$OUT" in
+              *provisioned*) echo "ip=$IP" >> "$GITHUB_OUTPUT"; echo "box provisioned after ~$((attempt * 10))s"; exit 0 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::the bootstrap did not complete in 30m — check the GCP console (serial output)"
+          exit 1
+        env:
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+
+  # ── re-bake the base machine image ────────────────────────────────────
+  # Monthly-ish, and after any OS or Caddy package change worth landing: the
+  # image is the OS half of a fresh box, so a stale one is a stale box. The boxes
+  # do not change here — they pick the new image up when they are next rebuilt.
+  bake:
+    if: ${{ inputs.action == 'bake' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+          printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+          OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
+      - name: terraform apply -replace the builder (the bake runs on first boot)
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          cd terraform
+          terraform init -input=false
+          terraform apply -auto-approve -input=false \
+            -var "project=$PROJECT" \
+            -var "region=$REGION" \
+            -var "zone=$ZONE" \
+            -var "operator_ssh_public_key_path=/tmp/operator.pub" \
+            -var "deploy_pubkey=$DEPLOY_PUBKEY" \
+            -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
+            -replace=google_compute_instance.base_builder
+        env:
+          DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
+        timeout-minutes: 30
+      - name: Wait for the bake to FINISH (the bake script powers the box off when done)
+        run: |
+          set -euo pipefail
+          # The completion signal IS the powered-off state: terraform cannot see a
+          # startup script's progress, and stopping the box on creation would cut
+          # the bake short mid-apt. An image taken from a box that is still
+          # baking would be a silently truncated OS layer.
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          for attempt in $(seq 1 90); do
+            STATUS=$(gcloud compute instances describe houses-base-builder --zone "$ZONE" --project "$PROJECT" --format='value(status)' 2>/dev/null || true)
+            case "$STATUS" in
+              TERMINATED|STOPPED) echo "bake finished: status=$STATUS after ~$((attempt * 20))s"; exit 0 ;;
+            esac
+            echo "bake still running (status=$STATUS, attempt $attempt/90)"
+            sleep 20
+          done
+          echo "::error::the bake did not finish in 30m — check the builder's serial output; NO image was created"
+          exit 1
+        timeout-minutes: 35
+      - name: Create the base image from the baked disk
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          # The boxes reference the image BY NAME, so recreating it is how a
+          # re-bake reaches them (at their NEXT rebuild — never in place).
+          echo "NOTE: do not bake while a rollout is creating a box — for a few seconds the name has no image behind it."
+          gcloud compute images delete "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" --quiet 2>/dev/null || true
+          gcloud compute images create "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" \
+            --project "$PROJECT" \
+            --source-disk=houses-base-builder --source-disk-zone="$ZONE" \
+            --description="Baked OS layer for the houses boxes (packages + Caddy + layout)."
+          gcloud compute images describe "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" \
+            --format='value(name,status,diskSizeGb)'
+          echo "base image ready: boxes built from now on use it"
         timeout-minutes: 20
+
+  # ── read-only state dump ──────────────────────────────────────────────
+  diagnose:
+    needs: [resolve]
+    if: ${{ always() && inputs.action == 'diagnose' && needs.resolve.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump both boxes
+        run: |
+          set +e
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          for box in "owner:${{ needs.resolve.outputs.owner_ip }}" "standby:${{ needs.resolve.outputs.standby_ip }}"; do
+            NAME=${box%%:*}; IP=${box#*:}
+            echo "############ $NAME ($IP) ############"
+            ssh -i /tmp/deploy.key -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new \
+              -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+              "$BOX_USER@$IP" "sudo /opt/houses/switch.sh --diagnose"
+            echo "############ end $NAME ############"
+          done
+        env:
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        timeout-minutes: 15

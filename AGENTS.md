@@ -112,11 +112,13 @@ make stop                       # Stop dev server + frontend
 - **Rightmove commute monitor**: [docs/rightmove-commute-monitor.md](docs/rightmove-commute-monitor.md)
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
 - **Deploy discipline / release process**: [docs/deploy-discipline.md](docs/deploy-discipline.md)
-- **LAN scrape worker install**: [tools/deploy/provision.md](tools/deploy/provision.md) → Step 2.4
+- **LAN scrape worker install**: [tools/deploy/provision.md](tools/deploy/provision.md) → §3b
 - **Deploy / rebuild the box (GCP, terraform + provision workflow)**: [tools/deploy/provision.md](tools/deploy/provision.md)
+- **Backups — where they live and how to judge one**: [tools/deploy/provision.md](tools/deploy/provision.md) → §8; `tools/deploy/verify-backup.sh` (copies, then runs the rollout's own gates; `MIGRATION-COMPATIBLE` ≠ data-trusted — trust is a human call from `.meta`'s captured_from/at)
 - **Lucidlint review log (accepted/deferred findings)**: [docs/lucidlint-review-log.md](docs/lucidlint-review-log.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Remaining work (uncertainty in the DAG library, usability backlog)**: [docs/remaining-work-plan.md](docs/remaining-work-plan.md)
+- **Anti-fragile rollout plan (deploy reliability redesign)**: [docs/anti-fragile-rollout-plan.md](docs/anti-fragile-rollout-plan.md)
 - **Provenance rebuild plan (frozen rows, deps as nodes, audit list)**: [docs/provenance-frozen-row-rebuild.md](docs/provenance-frozen-row-rebuild.md)
 - **Troubleshoot batch endpoints**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
 - **Users & UX requirements (provenance, filters, states)**: [docs/personas.md](docs/personas.md)

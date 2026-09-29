@@ -18,7 +18,7 @@ from houses.server import app
 from houses.services_provider import get_services
 from houses.web.auth import (
     # lucidlint: ignore private-import shared-secret cookie mint — the only
-    # minting entry point; same pattern as tools/deploy/release.sh
+    # minting entry point; same pattern as tools/deploy/install-artifact.sh
     _make_session_cookie,
 )
 from tests.unit.conftest import flush_all

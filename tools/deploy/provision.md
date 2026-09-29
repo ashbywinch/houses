@@ -1,289 +1,467 @@
-# Provisioning the houses blue/green box — your manual walkthrough
+# Provisioning the houses boxes — the operator walkthrough
 
-Everything that can be scripted lives in `tools/deploy/` (release.sh, switch.sh,
-run-instance.sh, units/). This file is the part only you can do, in order.
-Time: ~1–2 hours spread over a couple of sittings (A1 capacity can take a day
-of retries). Do NOT do step 1 in the same sitting as a release you care about.
+Everything that can be scripted lives in `tools/deploy/` and `terraform/`; the
+Release workflow drives it. This file is the part only you can do, in order.
+Read [docs/anti-fragile-rollout-plan.md](../../docs/anti-fragile-rollout-plan.md) first —
+it explains *why* the design is shaped this way, and
+[docs/deploy-discipline.md](../../docs/deploy-discipline.md) has the operating rules.
 
-The box layout this all targets:
+The layout this all targets:
 
 ```
-/opt/houses/
-├── ACTIVE            # "blue" | "green" — who serves the live DB
-├── PREVIOUS          # the side before the last flip (rollback target)
-├── data/             # LIVE data: houses.db, caches, CSVs (shared)
-├── blue/             # checkout A — port 8765
-├── green/            # checkout B — port 8766
-├── blue-smoke.db     # standby A's snapshot copy (created by release.sh)
-├── green-smoke.db    # standby B's snapshot copy
-├── run-instance.sh   # (from tools/deploy/)
-├── release.sh        # (from tools/deploy/)
-└── switch.sh         # (from tools/deploy/)
+                     static IP (houses-static, regional)
+                                │  address of
+                                ▼
+                 L4 forwarding rules (houses-l4-http :80, houses-l4-https :443)
+                                │  target = the ACTIVE target instance
+                                ▼
+     ┌────────────────────┐    ┌──────────────────────┐
+     │ instance: houses   │    │ instance: houses-standby
+     │ (one role may be   │    │ (the other role)      │
+     │  the rule's target)│    │                       │
+     │ Caddy :443         │    │ Caddy (nothing        │
+     │ app :8765          │    │  external: smoke is   │
+     │ /opt/houses/       │    │  127.0.0.1)           │
+     │   app  data  logs  │    │                       │
+     └────────────────────┘    └──────────────────────┘
+        ephemeral IP (SSH)          ephemeral IP (SSH)
 ```
 
-Public traffic flows Cloudflare Tunnel -> localhost ports; the VCN never
-exposes 8765/8766. **Only SSH (22) is open to the internet.**
+- **The static IP belongs to the forwarding rules**, never to an instance.
+  Instance addresses are ephemeral and exist for SSH/control only.
+- **Roles rotate with the rules' target.** "Who is live" is that target, and
+  nothing else. Both instances are fixed resources.
+- **Only 22, 80 and 443 are open.** The app port (8765) is loopback-only.
 
 ---
 
-## 1. Google Cloud box — Terraform (account + gcloud login are the only manual bits)
+## 1. One-off prerequisites (console + local CLI)
 
-The whole GCP side (VPC, SSH-only firewall, e2-micro instance, static IP,
-startup-script box setup) is `terraform/` in the repo. Google's free tier
-here is **permanent** — one e2-micro (1 vCPU / 1 GB RAM) + 30 GB disk in
-us-west1/us-central1/us-east1, always-on, no sleep, no idle-reclaim
-policy. The app alone runs in ~100 MB; Chrome is NOT on this box (the
-Rightmove scraper lives on your LAN — see the worker in Step 4).
-
-1. **Create the account** at cloud.google.com (**Start free**; a billing
-   account is required for the free tier but e2-micro + 30 GB stay free).
-2. **gcloud CLI + login** (this machine):
+1. **Project + billing**: the `houses` GCP project (free tier: one e2-micro +
+   30 GB in us-west1/us-central1/us-east1).
+2. **gcloud on your machine**:
    ```bash
-   # install: https://cloud.google.com/sdk/docs/install — or snap/apt
-   gcloud auth application-default login   # browser OAuth, no key files
-   gcloud config set project <project-id>  # from the console project picker
+   gcloud auth login
+   gcloud config set project <project-id>
    ```
-3. **The SSH key** for the box (this machine):
+3. **The operator key** (your break-glass shell; the same key installs as
+   `ubuntu`'s authorized key on both boxes):
    ```bash
-   ssh-keygen -t ed25519 -f ~/.ssh/oracle -N "" -C "oracle-houses"
+   ssh-keygen -t ed25519 -f ~/.ssh/houses_operator -N "" -C "houses-operator"
    ```
-4. **Fill the variables** and apply (terraform already installed on this
-   machine):
+4. **The CI deploy key** (never a login — it is forced through the allowlist):
    ```bash
-   cd terraform
-   cp terraform.tfvars.example terraform.tfvars   # fill project (+ region/zone)
-   terraform init
-   terraform plan     # read it — firewall is SSH-only, machine is e2-micro
-   terraform apply
-   terraform output ssh_command   # -> ssh -i ~/.ssh/oracle ubuntu@<ip>
+   ssh-keygen -t ed25519 -f houses-deploy -N '' -C deploy@houses
    ```
-   `apply` runs the startup script: apt deps, Caddy, uv, the two
-   checkouts (/opt/houses/blue + green), units, ACTIVE=blue. ~5–10 min
-   after boot (watch: `ssh ubuntu@<ip> "sudo tail -f /var/log/syslog"`).
-
-## 2. Secrets + data cutover (the manual part that stays manual)
-
-1. **Install the secrets**: the LAN `.env` as root-only `/etc/houses.env`,
-   using the cutover pipeline from `docs/deployment-oracle-free-tier.md`
-   Phase 3 (grep out the sheet-era keys — they crash pydantic at boot).
-   Critical keys must be present and non-empty:
+5. **The Terraform state bucket** (Terraform cannot create its own):
    ```bash
-   sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env   # STRICT KEY=VALUE
-   # required: HOUSES_SESSION_SECRET, HOUSES_GOOGLE_WEB_CLIENT_ID/SECRET,
-   #           HOUSES_GOOGLE_DEVICE_CLIENT_ID/SECRET, TFL_API_KEY,
-   #           HEIGIT_API_KEY, PLACES_API_KEY, EPC_BEARER_TOKEN
-   # plus:    HOUSES_RIGHTMOVE_SCRAPER_OFFLINE=true   (no Chrome on the box)
+   gsutil mb -l us-west1 -b on gs://houses-tfstate
    ```
-   **Do not put HOUSES_PORT in /etc/houses.env** — run-instance.sh sets it
-   per side (8765/8766). Add the host vars too (Step 3's env block).
-2. **Copy the live data + DB** (from the LAN machine, `make stop` the LAN
-   app first — same machinery as the plan doc Phase 3; the DB is ~520 MB
-   now that it is compressed):
+6. **The artifact + seed buckets** (Terraform manages `houses-artifacts`; the
+   seed bucket is yours):
    ```bash
-   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
-   cat /tmp/houses-backup.db | ssh ubuntu@<ip> "umask 077; cat > /opt/houses/data/houses.db && chmod 600 /opt/houses/data/houses.db && sqlite3 /opt/houses/data/houses.db 'PRAGMA integrity_check;' | grep -q '^ok$'"
-   rsync -a --exclude 'houses.db*' data/ ubuntu@<ip>:/opt/houses/data/
-   rm -f /tmp/houses-backup.db
+   gsutil mb -l us-west1 -b on gs://houses-seed
    ```
-3. **Start the live side**:
+7. **The box service account's permissions** are Terraform's job
+   (`houses-box-deploy`); the **CI** service account needs, once:
+   - `roles/compute.instanceAdmin.v1`, `roles/compute.networkUser` (flip the rules)
+   - `roles/storage.objectAdmin` on `gs://houses-artifacts` (upload artifacts)
+   - access to the `houses-tfstate` backend
    ```bash
-   ssh ubuntu@<ip> "sudo systemctl enable --now houses-blue && curl -s --max-time 10 -o /dev/null -w 'blue: %{http_code}\n' http://localhost:8765/health"
+   SA=<ci-sa-email>
+   gsutil iam ch serviceAccount:$SA:objectAdmin gs://houses-artifacts
+   gsutil iam ch serviceAccount:$SA:objectAdmin gs://houses-tfstate
    ```
-4. **Install the scrape worker on the LAN** (where Chrome lives — the box
-   enqueues scrape jobs, the worker completes them with exponential
-   backoff via the queue). Proper service install, not a manual loop:
-   ```bash
-   sudo HOUSES_SCRAPE_APP_URL=https://houses.blueumbrella.net \
-     bash tools/deploy/install-lan-worker.sh
-   ```
-   This installs two boot-enabled systemd units:
-   - `houses-chrome.service` — shared headless Chrome on :9222 (the dev
-     app and the worker reuse the same instance)
-   - `houses-scrape-worker.service` — polls the box's queue, scrapes,
-     reports (Restart=always; logs: `journalctl -u houses-scrape-worker -f`)
-   The worker mints its auth cookie from the LAN `.env`'s
-   HOUSES_SESSION_SECRET — the same secret the box has. If the LAN machine
-   is ever off, the queue simply holds jobs with backoff and the worker
-   drains them on return — no data loss, only scrape latency.
 
-## 3. DNS + HTTPS (PointHQ A records + Caddy — no Cloudflare needed)
-
-The domain is blueumbrella.net and its DNS lives at **PointHQ**
-(`dns4.pointhq.com` / `dns10.pointhq.com`). Log into your PointHQ account
-(or the registrar console — `whois blueumbrella.net` shows the registrar if
-you don't know your PointHQ login). The box has a static IP, so two plain
-**A records** are all DNS needs:
-
-- `houses.blueumbrella.net` → `<box public IP>` (from `terraform output`)
-- `houses-smoke.blueumbrella.net` → `<box public IP>` (same IP)
-
-Caddy is ALREADY on the box (the terraform startup script installs it; on
-an existing box run `/opt/houses/install-caddy.sh` once). It terminates
-HTTPS with automatic Let's Encrypt certs and reverse-proxies:
-
-- `houses.blueumbrella.net` → `127.0.0.1:8765` (the ACTIVE side)
-- `houses-smoke.blueumbrella.net` → `127.0.0.1:8766` (the standby)
-
-Ports are role-based, so the Caddyfile is static forever — a blue/green
-flip never touches TLS or DNS. Hostnames come from `/etc/houses.env`
-(HOUSES_MAIN_HOST / HOUSES_SMOKE_HOST) or defaults; add them if you want
-non-default subdomains:
+## 2. First apply (the two instances + the rules)
 
 ```bash
-sudo sh -c 'echo "HOUSES_MAIN_HOST=houses.blueumbrella.net" >> /etc/houses.env'
-sudo sh -c 'echo "HOUSES_SMOKE_HOST=houses-smoke.blueumbrella.net" >> /etc/houses.env'
+cd terraform
+cp terraform.tfvars.example terraform.tfvars   # fill project/region/zone
+# edit: operator_ssh_public_key_path, deploy_pubkey, provision_ref
+terraform init -migrate-state                  # moves any local state into GCS
+terraform plan                                 # read it: 2 e2-micro, L4 rules, SA
+terraform apply
+terraform output                               # ssh_house / ssh_standby / address
 ```
 
-First-time cert issuance happens automatically once the A records resolve
-(Caddy retries in the background — `journalctl -u caddy`). Verify from
-outside your network (phone on cellular):
+`terraform apply` renders `tools/deploy/box-bootstrap.sh` into each instance's
+`startup-script` metadata, so a fresh box builds itself: packages → operator key
+→ artifact (fetch with the instance SA, sha256 verified) → layout/units/sudoers
+→ deploy-key allowlist → seed restore → migrations → app env → Caddy → markers.
+~5–10 minutes per box; watch with
+`ssh -i ~/.ssh/houses_operator ubuntu@<ephemeral-ip> "sudo tail -f /var/log/syslog"`.
+
+`provision_artifact` must name a real `gs://houses-artifacts/<sha256>.tar.gz`.
+The first one comes from a `Release` dispatch with `action=build` (or `release`),
+which builds it in CI and uploads it.
+
+## 2b. Adoption — from today's single box to the two-instance data plane
+
+One-off. There are two variants, and which one you take depends on whether the
+existing box's database is trustworthy. **Read the warning first.**
+
+> **Ordering.** The rollout's tooling ships inside the artifact, and the new
+> scripts have no per-box flip. So the adoption comes BEFORE the next `release`:
+> terraform first, then the box work, then the gated `cutover`. A box still on the
+> old layout cannot be flipped by this tree at all.
+>
+> **The old box is NOT adopted in place.** Its disk keeps the old OS, its sudoers
+> and its SSH allowlist know only the old command shapes, and it has no
+> `install-artifact.sh`. The new config therefore builds FRESH instances and the
+> old box is either left alone (variant A, where it serves until the flip) or
+> abandoned where it stands (variant B). Terraform is told this with `moved`
+> blocks and `ignore_changes = [boot_disk]`, so an apply can never replace or
+> re-image an existing box — only `-replace` (the rollout) creates a new one.
+
+**Variant A — the live database is trustworthy (the normal adoption).**
+
+1. `terraform init -migrate-state` and apply. The two new instances
+   (`houses`, `houses-standby`) are created from the base image; the existing
+   box is left exactly as it is. `houses-static` stays attached to IT for now
+   (two pieces of infrastructure cannot own one address), so traffic keeps
+   flowing to the old box.
+2. `gh workflow run Release -f action=release` — builds the artifact, rebuilds
+   `houses-standby`, installs and smokes it.
+3. Publish the live database to the new plane — this is the step that needs the
+   old box, so run it from the LAN machine:
+   `tools/deploy/seed-box.sh <old-box-ip>` (pulls the live DB, migrates the copy
+   with the rollout's runner, uploads the seed).
+4. **`action=recover`** with that seed: `houses-standby` is restored from it,
+   migrated, started and flipped to. From here the L4 rules own the address...
+   which the old box still holds. So before the flip, detach it:
+   ```bash
+   gcloud compute instances delete-access-config <old-box> \
+     --access-config-name=external-nat --zone us-west1-a
+   ```
+   and run `terraform apply` once more so the rules claim `houses-static`
+   (accepted downtime: the seconds the address is unattached).
+5. Verify: `https://houses.blueumbrella.net/health`, `terraform output live_target`.
+6. Retire the old box when you are satisfied: `gcloud compute instances delete <old-box>`
+   — never before, because it is the copy of record until the flip is verified.
+
+**Variant B — the live database is NOT trustworthy (today's case).** Skip the
+snapshot of the old box entirely; its data is abandoned:
+
+1. `terraform init -migrate-state`, then apply (as above), then detach the
+   address from the old box and apply again so the rules hold it — the old box
+   may keep serving on an ephemeral address, or not serve at all; that is the
+   point.
+2. `action=release` → build + rebuild the standby + install + smoke.
+3. `action=recover -f snapshot=gs://houses-seed/latest.db` → the standby is
+   restored from the human-validated seed (or from any object you name), migrated,
+   started, and flipped to. **Every write since that seed is gone** — the
+   approval gate is where you accept that.
+4. Verify and retire the old box as above. Its data is never read, and the next
+   rollout replaces it anyway.
+
+## 3. DNS + TLS (Cloudflare terminates; the box serves an origin certificate)
+
+`blueumbrella.net`'s DNS lives at **PointHQ** (`dns4.pointhq.com` /
+`dns10.pointhq.com`). One **A record**, proxied through Cloudflare, is all DNS
+needs:
+
+- `houses.blueumbrella.net` → the **static** address (`terraform output address`)
+
+There is no smoke hostname: only the rule's target receives 80/443, and the
+standby's smoke is local (127.0.0.1).
+
+**TLS is Cloudflare's job, not the box's.** Browsers see Cloudflare's edge
+certificate; the Cloudflare → origin leg uses a **Cloudflare Origin
+Certificate** — a 15-year certificate issued by Cloudflare's own CA that never
+rotates. Deliberately NOT Let's Encrypt: a rollout builds a fresh box, and a
+fresh box has no certificate, so ACME would re-issue on every rollout and hit
+Let's Encrypt's "5 duplicate certificates per week" limit within days.
+
+Setup, once (Cloudflare dashboard):
+
+1. **SSL/TLS → Overview → mode: Full (strict).** With Flexible the origin leg
+   would be plaintext, and nothing on the box listens on :80 any more.
+2. **SSL/TLS → Origin Server → Create Certificate** for
+   `houses.blueumbrella.net`, then upload the pair to the bucket the box already
+   reads with its instance identity:
+   ```bash
+   gsutil cp origin.pem gs://houses-seed/cloudflare/origin.pem
+   gsutil cp origin.key gs://houses-seed/cloudflare/origin.key
+   ```
+   (No new IAM: the box's service account already reads that bucket.)
+
+`install-caddy.sh` fetches the pair on every box, writes it to
+`/etc/caddy/certs/`, and serves it for the hostname — reverse-proxying
+`127.0.0.1:8765`. Verify from outside your network (phone on cellular):
 `https://houses.blueumbrella.net/health` → `{"status":"ok"}`.
 
-**Gotcha:** if Caddy started before the A records propagated, its initial
-cert attempt failed and it serves HTTP-only until it retries (background
-backoff — can take a while). Fix instantly: `sudo systemctl restart caddy`.
+**Gotcha:** if the origin certificate is missing from the bucket, the bootstrap
+FAILS loudly rather than serving a box that cannot be reached over HTTPS.
 
-## 4. Google OAuth — allow the prod hostnames
+## 3b. The LAN scrape worker (Chrome lives at home, not on the box)
 
-In the Google Cloud console, open the OAuth consent screen → **Authorized
-redirect URIs** for the web client you already use (the LAN `.env`'s
-HOUSES_GOOGLE_WEB_CLIENT_ID/SECRET — same project, add URIs; no new creds):
+The box enqueues scrape jobs; the LAN machine's worker completes them with
+exponential backoff via the queue. Proper service install, not a manual loop:
+
+```bash
+sudo HOUSES_SCRAPE_APP_URL=https://houses.blueumbrella.net \
+  bash tools/deploy/install-lan-worker.sh
+```
+
+This installs two boot-enabled systemd units:
+
+- `houses-chrome.service` — shared headless Chrome on :9222 (the LAN dev app and
+  the worker reuse the same instance)
+- `houses-scrape-worker.service` — polls the box's queue, scrapes, reports
+  (`Restart=always`; logs: `journalctl -u houses-scrape-worker -f`)
+
+The worker mints its auth cookie from the LAN `.env`'s
+`HOUSES_SESSION_SECRET` — the same secret the box has. If the LAN machine is off,
+the queue simply holds jobs with backoff and the worker drains them on return: no
+data loss, only scrape latency.
+
+## 4. Google OAuth — allow the prod hostname
+
+In the Google Cloud console, OAuth consent screen → **Authorized redirect URIs**
+for the web client in `/etc/houses.env` (same project, no new credentials):
 - `https://houses.blueumbrella.net/api/auth/callback`
-- `https://houses-smoke.blueumbrella.net/api/auth/callback`
 
 ## 4b. Production guard (applied automatically by box-setup.sh)
 
-The box's sudoers grants ONLY `/opt/houses/release.sh`, `/opt/houses/
-switch.sh`, and read-only `journalctl` — no interactive login can restart
-app units or mutate the deployment. Production changes go only through the
-Release workflow (tag → deploy to standby → smoke → switch). If that feels
-slow, improve the process; never ssh in and "just fix it" directly.
+The box's sudoers grants ONLY `/opt/houses/install-artifact.sh`,
+`/opt/houses/switch.sh`, and read-only `journalctl` — no interactive login can
+restart app units or mutate the deployment. Production changes go only through
+the Release workflow (build → install → cutover). If that feels slow, improve
+the process; never ssh in and "just fix it" directly.
 
-## 5. GitHub secrets for the release workflow
+## 5. GitHub secrets
 
 Repo → Settings → Secrets and variables → Actions:
-- `BOX_HOST` — the Oracle public IP (or hostname)
-- `BOX_USER` — `ubuntu`
-- `BOX_SSH_KEY` — the private half of a **restricted deploy key** (not your
-  personal key). The box entrypoint dispatches it through a strict allowlist
-  (see below). Generate a dedicated keypair once per box:
-  `ssh-keygen -t ed25519 -f houses-deploy -N '' -C deploy@houses`.
 
-Then ON THE BOX (as root) install the allowlist entry — do NOT hand-edit
-authorized_keys with the old `$1` recipe; sshd does not populate positional
-params in forced commands, so that entry silently swallowed every
-arg-bearing invocation (the 2026-09-23 `--rollback`/`--diagnose` no-ops).
-The dispatcher matches on `$SSH_ORIGINAL_COMMAND` and forwards ONLY the
-sanctioned shapes:
-
-```sh
-sudo /opt/houses/install-deploy-allowlist.sh "$(cat houses-deploy.pub)"
 ```
+BOX_USER          ubuntu
+BOX_SSH_KEY       the PRIVATE half of the restricted deploy key (houses-deploy)
+DEPLOY_PUBKEY     its PUBLIC half (installed with the forced-command allowlist)
+OPERATOR_PUBKEY   your admin key's PUBLIC half (break-glass: shell + sudo)
+GOOGLE_SA_KEY     base64 of the CI service-account JSON (see §1.7)
+```
+
+There is no `BOX_HOST`: the workflow reads both instances' ephemeral addresses
+from GCP (the rule's target tells it which is which).
+
+Then install the allowlist entry automatically on each box: the bootstrap does it
+from `DEPLOY_PUBKEY` (or, by hand, as root:
+`/opt/houses/install-deploy-allowlist.sh "$(cat houses-deploy.pub)"`).
 
 Sanctioned remote commands (everything else = silent no-op):
 
 ```
-sudo /opt/houses/release.sh <ref>       → deploy to standby
-sudo /opt/houses/switch.sh              → flip
-sudo /opt/houses/switch.sh --rollback   → undo last flip
-sudo /opt/houses/switch.sh --diagnose   → read-only box state dump
-sudo journalctl -u <unit> -n <N> --no-pager   → read-only logs
+sudo /opt/houses/install-artifact.sh gs://<bucket>/<sha256>.tar.gz   — install the artifact on this box
+sudo /opt/houses/switch.sh --snapshot                               — FREEZE production, then stream its DB to stdout
+sudo /opt/houses/switch.sh --unfreeze                               — the abort path: serve from here again
+sudo /opt/houses/switch.sh --rebase <rows>                          — restore the snapshot on stdin, verify, migrate, start
+sudo /opt/houses/switch.sh --restore gs://<bucket>/<object>.db      — restore THIS database instead (the recovery exception)
+sudo /opt/houses/switch.sh --diagnose                               — read-only state dump
 ```
-
-Set the private key text as the `BOX_SSH_KEY` secret.
+`journalctl` is NOT in the allowlist: CI does not use it, and a human logs in with the
+operator key and reads logs directly. Nothing else is forwarded — an unknown command
+is a silent no-op, so a shape that is not listed here does nothing at all.
 
 ## 5b. Human prod gate (GitHub Environments)
 
-Repo → Settings → Environments → **production** → Protection rules:
-**Required reviewers** = you. Deletion? Leave "Allow administrators to
-bypass": false. The Release workflow's `switch` job declares
-`environment: production`, so every traffic flip now waits for your
-explicit approval on GitHub (the sign-off requirement from the
-2026-09-23 governance breach). `rollback` stays ungated: it is the
-emergency undo.
+Repo → Settings → Environments → **production** → Protection rules: **Required
+reviewers** = you, "Allow administrators to bypass" = false. The workflow's
+`cutover` job declares `environment: production`, so every traffic move waits for
+your explicit approval. `rollback` stays ungated: it is the emergency undo.
 
-## 5c. Provision-from-GitHub (GCP, replace-not-repair)
+## 6. A rollout (the whole loop)
 
-One dispatch builds a fresh box from code and verifies it before anything
-else:
+Every rollout **builds a fresh box** (replace-not-repair): the standby instance is
+replaced from the artifact, so no box drifts, and the bootstrap path is exercised
+on every rollout — the standby is the DR drill.
 
-```sh
-tools/deploy/seed-box.sh        # run on the LAN machine: pull live DB ->
-                                # migrate the COPY (the rehearsal) ->
-                                # upload gs://houses-seed/latest.db
-gh workflow run Release --ref main -f action=provision
-# then: action=deploy (standby smoke on the new box), the production
-# environment approval, action=switch. Retire the old instance only after
-# the new box serves:
-#   gcloud compute instances delete houses   (project houses-498215, zone us-west1-a)
+```bash
+# 1. build the artifact, rebuild the STANDBY instance from it, install + smoke
+gh workflow run Release -f action=release -f ref=main
+
+# 2. read the run log — every verdict line:
+#    the new box: seed restored → migrations applied+checked → artifact receipt
+#    the install:  sha256 verified (or "already runs this artifact"), venv receipt
+#                  ok, `migrations: N applied+checked, 0 failed`, app healthy,
+#                  smoke ok, then INSTALL READY with the app STOPPED.
+
+# 3. the flip — approve the `production` environment when the job waits
+gh workflow run Release -f action=cutover -f ref=main
+
+# 4. something wrong? undo in one command (no DB restore: the rollout never
+#    writes the owner's database)
+gh workflow run Release -f action=rollback -f ref=main
+
+# 5. re-install onto the existing standby (no rebuild — a retry after a failed
+#    install, or a probe)
+gh workflow run Release -f action=install -f artifact=gs://houses-artifacts/<sha256>.tar.gz
+
+# 6. the owner's data is not trustworthy? recover onto a named object instead
+#    of carrying it forward — §7b
+gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
 ```
 
-The provision action: renders `tools/deploy/box-bootstrap.sh` as the GCP
-startup-script, launches `houses-rebuild` (e2-micro, houses tags, in the
-repo's VPC), waits until the deploy key can reach the box (the tooling
-banner — the allowlist silent-no-ops before that, so no false positive),
-and registers the box's IP as the `BOX_HOST` repo variable. The bootstrap
-installs BOTH ssh paths FIRST (operator key + allowlisted deploy key), so
-a half-built box is still ssh-able and troubleshootable — the property
-the old box lacked.
+What each phase owns:
 
-Secrets required (in addition to Steps 5/5b):
+| Phase | Data | Proves |
+|---|---|---|
+| `provision` (bootstrap) | **seed + migrations** | the box builds from an artifact and a human-validated seed |
+| `install` (rehearsal + smoke) | the same seed-derived DB | the artifact boots, serves and migrates |
+| `cutover` → freeze + `--snapshot` | **the owner's live DB**, app stopped | the exact last state production served (no write can land after the freeze) |
+| `cutover` → `--rebase` | that snapshot, restored | integrity + row count match, migrations + checks pass |
+| `cutover` → `set-target` + settle | — | the public site on the new owner |
 
+**Every cutover first ARCHIVES the clean pre-migration snapshot** (`gs://houses-artifacts/snapshots/<timestamp>.db`, written by CI, pruned after 90 days) and only then lets the runner migrate the restored copy — with the runner's own pre-backup (`<db>.pre-<migration>`) kept beside the database on the box. The process never runs a migration without a clean copy that still exists afterwards; the 2026-09-24 lesson was precisely that there was none.
+
+**The cutover is the only downtime, and it is the freeze window.** `--snapshot`
+stops the owner's app *before* copying, so nothing is lost between the copy and
+the flip — the price is that production is down from the freeze until the flip
+(snapshot → transfer → restore → verify → migrate → start → flip; minutes on a
+2.3 GB database). Everything that can happen earlier does: the box is built,
+installed and smoked before the gate is even opened. If any step after the
+freeze fails, CI restarts the owner's app (`--unfreeze`) and traffic never moved.
+
+**The "settle gate"** is the last step of the cutover: five minutes of continuous
+public polling of `https://houses.blueumbrella.net/health` on the new owner. It
+hard-fails if the site does not answer, or if `status`/`db` are not `ok`, or if
+`last_write` is missing — i.e. if the box is not serving. It reports `last_write`
+staleness but does not gate on it: `last_write` is `MAX(created_at)` in
+`node_results`, so a converged DAG that has nothing to recompute legitimately
+writes nothing for minutes at a time.
+
+The seed is *not* the correct database and is not meant to be: it only gives a
+fresh box something to boot and smoke with. The correct database can only land at
+the flip, because the owner keeps writing up to it — see §7.
+
+## 7. The seed, and when the box gets the real data
+
+**What a seed is.** `gs://houses-seed/latest.db` — one full copy of the production
+SQLite database (the DAG's computed state, ~2.3 GB), produced by a human running
+`tools/deploy/seed-box.sh`: it pulls the owner's DB, applies the migrations to the
+copy, verifies, and uploads. `box-bootstrap.sh` restores it to
+`/opt/houses/data/houses.db` on a fresh box and writes `/opt/houses/SEED`
+(object, etag, when, row count) so the box's origin is a file, not a memory.
+
+**Why it is not "the correct database".** The live database is being written
+continuously, so any copy is stale the moment it is taken. Baking a copy in at box
+build time would mean serving data that is 10–15 minutes old at the flip and
+silently dropping every write in between. That is why the plan puts the data step
+immediately before the traffic step: the cutover takes a **fresh snapshot of the
+owner**, streams it to CI, restores it onto the standby with the app stopped,
+verifies it (`integrity_check` + row count against the snapshot's own count),
+runs the migrations + checks on that quiescent copy, and only then starts the app
+and moves the rule. The seed's data is superseded before a single request reaches
+the box.
+
+**Refresh the seed deliberately**, when you judge the settled state trustworthy —
+it is never auto-refreshed (the old `--publish` step that did that made the newest
+live output the next restore source automatically, which is how a stale capture
+became production's data on 2026-09-24):
+
+```bash
+tools/deploy/seed-box.sh <owner-ip>       # copy → migrate the copy → verify → upload
 ```
-BOX_SSH_KEY        (deploy key PRIVATE half — workflow only)
-DEPLOY_PUBKEY      (deploy key PUBLIC half — allowlist install)
-OPERATOR_PUBKEY    (your interactive admin key — break-glass via SSH)
-GOOGLE_SA_KEY      (base64 service-account JSON: compute.instanceAdmin.v1,
-                    compute.networkUser, storage.objectViewer on houses-seed)
-CF_TUNNEL_TOKEN    (Cloudflare Zero Trust tunnel token — the one dashboard value)
+
+## 7b. Recovery: when the owner's data must NOT be carried forward
+
+The normal path carries the live database forward (freeze → snapshot → restore →
+flip). This is the exception, for when that database cannot be trusted — a
+migration that never ran, a stalled cascade, a botched restore, a box that is
+simply broken. Do not snapshot it and do not "carry it forward and fix it
+later".
+
+```bash
+gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
 ```
 
-No age/rclone/OCI — the site is public, the seed is a private GCS object;
-there was never an off-box encrypted backup (Phase 6 was never installed).
-Seed failure = box with no data: box-bootstrap.sh logs "no seed" and the
-box still boots; re-run seed-box.sh and re-provision.
+What it does: restores that object onto the **standby**, runs the migrations +
+checks on the quiescent copy, starts the app, and flips the rules — with the
+`production` environment approval in front of it, because the cost is real:
+**every write since that object was made is gone**. The owner is never read.
 
-Break-glass if the workflow itself is unusable: GCP console → serial
-output → reimage → re-run `action=provision`.
+Choosing the source is a human decision made once, in the incident:
 
-## 6. Your first release (the whole loop)
+- `gs://houses-seed/latest.db` — the human-validated seed (see §7). This is the
+  default and the usual answer.
+- A copy someone took deliberately, e.g. a database exported off a box before
+  the problem appeared. Name it explicitly; the workflow takes exactly the
+  object you name.
 
-1. Push a tag: `git tag v0.1.0 && git push origin v0.1.0` — the Release
-   workflow deploys to the standby (green), snapshots the DB, starts green,
-   runs the authenticated smoke checks, and reports.
-2. **Eyeball the standby** at https://houses-smoke.blueumbrella.net —
-   sign in, open a property, look at a commute. It is a full replica of prod
-   (data from the snapshot); everything you do there writes only to the
-   standby's copy.
-3. When it looks right: GitHub → Actions → Release → Run workflow →
-   action `switch`. Traffic moves to green; blue
-   becomes the standby for next time.
-4. Something wrong? Run workflow → action `rollback`. Blue (previous code)
-   comes back with the pre-flip DB snapshot restored.
+Then: the recovered box is the owner. The abandoned box becomes the standby and
+the **next rollout replaces it** (`provision`), so its data cannot come back.
+Note that `rollback` is NOT the undo here — it would move traffic back onto the
+data you just abandoned; the undo is another `recover` with a different object.
 
-## 7. Nightly backups (do not skip — plan doc Phase 6)
+**Recovery is verified by the rollout's own mechanism**: the restore's
+`integrity_check` + row count, the runner's `migrations: <N> applied+checked,
+0 failed` verdict (the box refuses to start the app without it), the smoke, and
+the settle window.
 
-The backup units in `docs/deployment-oracle-free-tier.md` Phase 6 are
-unchanged: on-box snapshot + age-encrypted off-box push, 03:00 daily,
-30 copies kept. The pre-flip snapshots from switch.sh are extra safety, not
-a substitute.
+## 8. Backups — where they live, and how to tell which are good
 
----
+**Where the backups are:**
+
+| What | Where | When it exists |
+|---|---|---|
+| the **seed** (the recovery artifact) | `gs://houses-seed/latest.db` (+ `.meta`); the bucket is VERSIONED, so publishing a new seed never destroys the previous generation (last 10 kept) | made by `seed-box.sh`, replaced deliberately |
+| a box's **live database** | that box's `/opt/houses/data/houses.db`, with each migration's clean pre-backup kept beside it as `<db>.pre-<migration>` | while the box exists (see `/opt/houses/RESTORED` for what it was last restored from) |
+| the LAN dev copy | `data/houses.db` on this machine | the development data — never a recovery source |
+| **the cutover's clean snapshots** | `gs://houses-artifacts/snapshots/<timestamp>.db` — every cutover's PRE-MIGRATION live DB, archived before the runner migrates the restored copy | one per cutover, pruned after 90 days |
+| a deliberately chosen recovery source | `gs://houses-seed/recovery-<timestamp>.db` — copies the operator has verified and NAMED for a specific recovery | made by hand, like this session's |
+
+Versioning and pruning are CONFIGURED on the buckets (GCS lifecycle), not a script: the normal process therefore always keeps the clean copy it took, and the archive cannot grow without bound.
+
+There is deliberately no pile of floating copies beyond those intentional archives: the plan's rule is that a fresh
+box's data is **seed + migrations**, and that the seed is the human-validated
+artifact. Nothing else is kept, so "which backup?" has exactly one normal answer.
+
+**How to know a backup is good — without trusting anyone's memory:**
+
+```bash
+tools/deploy/verify-backup.sh gs://houses-seed/latest.db
+```
+
+It copies the object, then applies the SAME gates the rollout insists on:
+`PRAGMA integrity_check`, a non-zero `node_results` row count, and the migration
+runner's verdict `migrations: <N> applied+checked, 0 failed`.
+
+**`MIGRATION-COMPATIBLE` is the only claim the script ever makes: the tooling
+can carry this object forward.** It is NOT a statement that the data is what you
+want — the migration machinery repairing a copy proves nothing about the copy's
+source (see 2026-09-24). **Trust is a human judgement**, made from the meta's
+`captured_from`/`captured_at`/`made_by` plus your knowledge of that moment, and
+it is taken at the `recover` approval gate — never stamped by a script.
+
+`latest.db.meta` (next to the seed) records the inputs to that human judgement
+without needing the 621 MB copy: `object`, `captured_from` (which box),
+`captured_at`, `rows`, `manifest_sha256`, `migrations_applied`,
+`gates=passed-on-copy`, `made_by`, and `trust=unset` until a human takes the
+decision. It is written by `seed-box.sh` at upload time.
+
+On a box, `/opt/houses/RESTORED` answers "this box's data came from X at time T
+with N rows" and `/opt/houses/SEED` answers what the box bootstrapped from.
+`action=diagnose` prints both.
 
 ## Gotchas (learned the hard way)
 
-- **The standby writes to its own smoke DB** (`/opt/houses/<side>-smoke.db`)
-  — that is the design. Never point the live unit's HOUSES_SQLITE_PATH at a
-  smoke copy and vice versa; run-instance.sh derives it from ACTIVE, so
-  don't hand-edit unit files to override it.
-- **HOUSES_PORT in /etc/houses.env is ignored** (run-instance.sh sets it).
-  Leave it out.
-- **The LAN `.env` still contains sheet-era keys** (HOUSES_SHEET_ID,
-  GOOGLE_SHEETS_SERVICE_ACCOUNT) — they crash pydantic at boot
-  (extra_forbidden). Strip them when installing /etc/houses.env.
-- **A1 capacity**: if the instance won't launch, retry over a day; a $4–6
-  VPS with 4+ GB RAM is the fallback — the scripts don't care what the box
-  is, only that Ubuntu + systemd + Caddy exist.
-- **Rollback restores the pre-flip DB snapshot unconditionally** — anything
-  written between flip and rollback is lost by design (deterministic,
-  short window). If you need those writes, don't roll back; fix forward.
+- **The rule's target is the only "who is live" fact.** `terraform apply` never
+  changes it (the rules ignore changes to `target`); only the workflow's
+  `set-target` does. If you ever edit traffic by hand, you have moved production.
+- **Both L4 rules must target the same instance.** The workflow refuses to
+  proceed when they disagree, and `--diagnose` prints the box's own state.
+- **Never attach the static address to an instance.** It belongs to the rules;
+  an instance's address is ephemeral and only for SSH.
+- **`HOUSES_PORT` in `/etc/houses.env` is ignored** — `run-instance.sh` sets 8765
+  (the app's single port, the same for both roles).
+- **The standby's app must be stopped while anything writes its database.** The
+  install and the rebase both stop it themselves; don't start it by hand.
+- **The LAN `.env` still contains sheet-era keys** (`HOUSES_SHEET_ID`,
+  `GOOGLE_SHEETS_SERVICE_ACCOUNT`) — they crash pydantic at boot
+  (`extra_forbidden`). Strip them when refreshing `gs://houses-seed/houses.env`.
+- **Rollback moves traffic; it does not restore data.** The rollout never writes
+  the owner's database, so the previous owner is still serving its own untouched
+  state.
+- **Break-glass** if the workflow itself is unusable: the operator key (shell +
+  sudo) on the ephemeral IP, the GCP serial console for a box that will not boot,
+  or `gh workflow run Release -f action=provision` to rebuild the standby.

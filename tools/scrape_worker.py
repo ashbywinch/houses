@@ -33,7 +33,7 @@ import httpx
 
 from houses.rightmove_scraper import scrape
 
-# lucidlint: ignore private-import cookie mint — only minting entry point; mirrors tools/deploy/release.sh
+# lucidlint: ignore private-import cookie mint — only minting entry point; mirrors tools/deploy/install-artifact.sh
 from houses.web.auth import _make_session_cookie
 
 
