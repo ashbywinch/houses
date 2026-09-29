@@ -17,12 +17,13 @@
 # them. Anything else: silent no-op — and stdout/stderr are NOT silenced
 # for the sanctioned shapes, so box marks stream back to the workflow.
 #
-# Sanctioned shapes:
-#   sudo /opt/houses/release.sh <ref>         — deploy to standby (arg forwarded)
-#   sudo /opt/houses/switch.sh                — flip
-#   sudo /opt/houses/switch.sh --rollback     — undo last flip (arg forwarded)
-#   sudo /opt/houses/switch.sh --diagnose     — read-only box state dump
-#   sudo journalctl <options>                 — read-only logs
+# Sanctioned shapes (exactly what release.yml calls — see tools/deploy/provision.md):
+#   sudo /opt/houses/install-artifact.sh gs://<bucket>/<sha256>.tar.gz
+#   sudo /opt/houses/switch.sh --snapshot
+#   sudo /opt/houses/switch.sh --unfreeze
+#   sudo /opt/houses/switch.sh --rebase <rows>
+#   sudo /opt/houses/switch.sh --restore gs://<bucket>/<object>.db
+#   sudo /opt/houses/switch.sh --diagnose
 #
 # Usage: install-deploy-allowlist.sh "$(cat deploy.pub)"
 set -eu

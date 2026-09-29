@@ -1,6 +1,13 @@
 # Example values — copy to terraform.tfvars and fill in (terraform.tfvars is
-# gitignored). project comes from the GCP console (project selector).
+# gitignored). `project` comes from the GCP console (project selector).
 #
-#   project = "houses-123456"
+# Operator-only create once, before `terraform init`:
+#   gsutil mb -l us-west1 -b on gs://houses-tfstate
+#
+#   project = "houses-498215"
 #   region  = "us-west1"      # free e2-micro: us-west1 | us-central1 | us-east1
 #   zone    = "us-west1-a"
+#   operator_ssh_public_key_path = "/home/you/.ssh/houses_operator.pub"
+#   deploy_pubkey                = "ssh-ed25519 AAAA… deploy@houses"
+#   provision_ref                = "main"
+#   provision_artifact           = "gs://houses-artifacts/<sha256>.tar.gz"

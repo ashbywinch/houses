@@ -82,7 +82,7 @@ def _apply(conn):
     # the stream is lazy — count it BEFORE the apply mutates the table
     remap_count = sum(1 for _ in rows_to_remap(conn, mapping))
     ok = apply_migration(
-        conn, "unused.db", persons["id"], data, mapping, rows_to_remap(conn, mapping), use_backup=False, verify=False
+        conn, persons["id"], data, mapping, rows_to_remap(conn, mapping), backup_path=None, verify=False
     )
     assert ok
     return mapping, remap_count
@@ -220,8 +220,8 @@ def test_apply_reports_the_real_applied_count():
     mapping = collect_mapping(value)
     assert mapping, "seed must have persons"
     result = apply_migration(
-        conn, "seed.db", persons_id, data, mapping,
-        rows_to_remap(conn, mapping), use_backup=False, verify=True,
+        conn, persons_id, data, mapping,
+        rows_to_remap(conn, mapping), backup_path=None, verify=True,
     )
     assert result.ok
     assert result.applied > 0, "the apply generator itself must report rows rewritten"
