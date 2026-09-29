@@ -40,20 +40,32 @@ class _FakeResponse:
         return {"routes": [{"summary": {"duration": self._duration_s}}]}
 
 
+class _FakeStationLookup:
+    """StationLookupService fake: returns a fixed station for any name."""
+
+    def __init__(self, station):
+        self._station = station
+
+    def find(self, name):
+        return self._station
+
+
 @pytest.mark.asyncio
 async def test_drive_minutes_from_location_posts_origin_coords():
     """_get_drive_minutes_from_location estimates from known coordinates
     directly — the no-postcode fallback path."""
-    from houses.transit_route import _get_drive_minutes_from_location, _LookupSeam
+    from houses.transit_route import _get_drive_minutes_from_location
+    from tests.helpers import make_services
 
     fake = _FakeDirectionsClient(duration_s=720)  # 12 min
     station = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
+    services = make_services(station_lookup=_FakeStationLookup(station))
     result = await _get_drive_minutes_from_location(
         GeoPoint(51.5, -0.1),
         "Maidenhead Rail Station",
         _client_factory=lambda *a, **k: fake,
         _no_cache=True,
-        _lookups=_LookupSeam(find_station=lambda name: station, geocode_address=lambda addr: None),
+        services=services,
     )
 
     assert result == 12
@@ -66,22 +78,21 @@ async def test_drive_minutes_from_location_posts_origin_coords():
 async def test_drive_minutes_from_postcode_geocodes_then_estimates():
     """_get_drive_minutes geocodes the postcode, then delegates to the
     same coords-based estimate — the two paths share the ORS call."""
-    from dag.attempt import Attempt
     from houses.transit_route import _get_drive_minutes
-
-    async def geocode_ok(addr):
-        return Attempt.succeeded(GeoPoint(51.5, -0.1))
-
-    from houses.transit_route import _LookupSeam
+    from tests.helpers import FakeGeocoder, make_services
 
     fake = _FakeDirectionsClient(duration_s=900)  # 15 min
     station = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
+    services = make_services(
+        geocoder=FakeGeocoder(result=GeoPoint(51.5, -0.1)),
+        station_lookup=_FakeStationLookup(station),
+    )
     result = await _get_drive_minutes(
         "SL6 3YZ",
         "Maidenhead Rail Station",
         _client_factory=lambda *a, **k: fake,
         _no_cache=True,
-        _lookups=_LookupSeam(geocode=geocode_ok, find_station=lambda name: station, geocode_address=lambda addr: None),
+        services=services,
     )
 
     assert result == 15
@@ -92,18 +103,14 @@ async def test_drive_minutes_from_postcode_geocodes_then_estimates():
 async def test_drive_minutes_from_postcode_returns_none_when_ungeocodable():
     """An ungeocodable postcode yields None (the walk stays) — never an
     exception that could fail the commute."""
-    from dag.attempt import Attempt
     from houses.transit_route import _get_drive_minutes
+    from tests.helpers import FakeGeocoder, make_services
 
-    async def ungeocodable(addr):
-        return Attempt.impossible("no geo")
-
-    from houses.transit_route import _LookupSeam
-
+    services = make_services(geocoder=FakeGeocoder(result=None))
     result = await _get_drive_minutes(
         "NOT A POSTCODE",
         "Maidenhead Rail Station",
-        _lookups=_LookupSeam(geocode=ungeocodable, geocode_address=ungeocodable),
+        services=services,
     )
 
     assert result is None

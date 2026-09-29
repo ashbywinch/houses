@@ -98,37 +98,31 @@ class _DrivingLegJson:
         )
 
 
-@dataclass(frozen=True)
-class _LookupSeam:
-    """The test-injection seam for drive estimates — the three lookups a
-    drive minute needs, each defaulting to the production implementation.
-
-    The parameter-object sibling of ``FetchArgs``: keeps the drive helpers'
-    signatures bounded instead of one kwarg per lookup.
-    """
-
-    geocode: Any | None = None  # postcode -> Attempt[GeoPoint]
-    find_station: Any | None = None  # station name -> Station | None
-    geocode_address: Any | None = None  # address -> Attempt[GeoPoint]
-
-
 async def _get_drive_minutes(
     origin_postcode: str,
     station_name: str,
     *,
     _client_factory=None,
     _no_cache: bool = False,
-    _lookups: _LookupSeam | None = None,
+    services: Any | None = None,
 ) -> int | None:
     """Drive time from a postcode to a station.  The postcode is
     geocoded first — callers that already hold coordinates should use
-    ``_get_drive_minutes_from_location`` and skip the lookup."""
-    seam = _lookups or _LookupSeam()
-    geocode_fn = seam.geocode or geocode
-    geocode_address_fn = seam.geocode_address or geocode_address
-    origin_coords = (await geocode_fn(origin_postcode)).value_or_none()
-    if origin_coords is None:
-        origin_coords = (await geocode_address_fn(origin_postcode)).value_or_none()
+    ``_get_drive_minutes_from_location`` and skip the lookup.
+
+    ``services`` threads the container the way ``location.geocode`` does:
+    when given, resolution runs through ``services.geocoder`` so tests
+    inject the real service seams instead of function fakes.
+    """
+    geocoder = services.geocoder if services is not None else None
+    if geocoder is not None:
+        origin_coords = (await geocoder.geocode_postcode(origin_postcode)).value_or_none()
+        if origin_coords is None:
+            origin_coords = (await geocoder.geocode_address(origin_postcode)).value_or_none()
+    else:
+        origin_coords = (await geocode(origin_postcode)).value_or_none()
+        if origin_coords is None:
+            origin_coords = (await geocode_address(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
     return await _get_drive_minutes_from_location(
@@ -136,7 +130,7 @@ async def _get_drive_minutes(
         station_name,
         _client_factory=_client_factory,
         _no_cache=_no_cache,
-        _lookups=_lookups,
+        services=services,
     )
 
 
@@ -146,17 +140,19 @@ async def _get_drive_minutes_from_location(
     *,
     _client_factory=None,
     _no_cache: bool = False,
-    _lookups: _LookupSeam | None = None,
+    services: Any | None = None,
 ) -> int | None:
     """Drive time from known coordinates to a station — the fallback
     when a property has no postcode but does have a best location."""
-    seam = _lookups or _LookupSeam()
-    find_station_fn = seam.find_station or find_station
-    geocode_address_fn = seam.geocode_address or geocode_address
-    station = find_station_fn(station_name)
+    station_lookup = services.station_lookup if services is not None else None
+    station = station_lookup.find(station_name) if station_lookup is not None else find_station(station_name)
     dest_coords = station.location if station else None
     if dest_coords is None:
-        dest_coords = (await geocode_address_fn(station_name)).value_or_none()
+        geocoder = services.geocoder if services is not None else None
+        if geocoder is not None:
+            dest_coords = (await geocoder.geocode_address(station_name)).value_or_none()
+        else:
+            dest_coords = (await geocode_address(station_name)).value_or_none()
     if dest_coords is None:
         return None
 
