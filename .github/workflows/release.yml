@@ -106,6 +106,18 @@ jobs:
           # `consistent` themselves.
           TARGET=$(rule_target houses-l4-https)
           TARGET_HTTP=$(rule_target houses-l4-http)
+          if [ -z "$TARGET" ]; then
+            # GREENFIELD: no rules exist yet — only bake/scaffold are valid.
+            # Not an error: consumers gate on `consistent`.
+            echo "::warning::no L4 rules yet — greenfield. action=bake and action=scaffold only, until scaffold creates the plane."
+            echo "owner="
+            echo "standby="
+            echo "owner_ip="
+            echo "standby_ip="
+            echo "target="
+            echo "consistent=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$TARGET" = "$TARGET_HTTP" ]; then
             CONSISTENT=true
           else
@@ -614,7 +626,10 @@ jobs:
           printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
           chmod 600 /tmp/sa.json
           gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
-          rm -f /tmp/sa.json
+          # terraform's GCS backend / google provider reads ADC, not the active
+          # gcloud account — keep the key file exported for the rest of the job
+          # (first-flight fix 2026-09-29).
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json" >> "$GITHUB_ENV"
           printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
         env:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
@@ -687,7 +702,10 @@ jobs:
           printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
           chmod 600 /tmp/sa.json
           gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
-          rm -f /tmp/sa.json
+          # terraform's GCS backend / google provider reads ADC, not the active
+          # gcloud account — keep the key file exported for the rest of the job
+          # (first-flight fix 2026-09-29).
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json" >> "$GITHUB_ENV"
           printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
         env:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
@@ -775,7 +793,10 @@ jobs:
           printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
           chmod 600 /tmp/sa.json
           gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
-          rm -f /tmp/sa.json
+          # terraform's GCS backend / google provider reads ADC, not the active
+          # gcloud account — keep the key file exported for the rest of the job
+          # (first-flight fix 2026-09-29).
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json" >> "$GITHUB_ENV"
           printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
         env:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
