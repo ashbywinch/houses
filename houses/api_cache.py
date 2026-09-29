@@ -41,6 +41,7 @@ _ClientT = TypeVar("_ClientT", httpx.AsyncClient, httpx.Client)
 
 CACHE_DIR = Path("data/api_cache")
 
+
 # lucidlint: ignore unused,unused-setter test-injection API — unit conftest calls set_cache_dir() to isolate the cache
 def set_cache_dir(path: str | Path) -> None:
     """Override the cache directory (used by tests to isolate caches)."""
@@ -73,10 +74,12 @@ class _UrlQuery:
     a request identity comes from the network, not from a caller."""
 
     params: dict[str, str] | None
+
     # lucidlint: ignore record-shape to_dict return IS the cache-key fragment edge — the parsed URL query must pass
     # through verbatim, a class for it would be ceremony at the transport boundary (coding-standards.md)
     def to_dict(self) -> dict:
         return self.params or {}
+
 
 # lucidlint: ignore-file data-clump this module's public cache API deliberately threads one request identity (method,
 # lucidlint: ignore record-shape the return is the params fragment entering the cache key (coding-standards.md)
@@ -95,10 +98,7 @@ def _wire_params(params: WirePayload | None) -> dict[str, Any] | None:
     return wire or None
 
 
-
-def _make_key(
-    method: str, url: str, params: WirePayload | None, body: str | None
-) -> str:
+def _make_key(method: str, url: str, params: WirePayload | None, body: str | None) -> str:
     parts = [method.upper(), url]
     wire = _wire_params(params)
     if wire:
@@ -111,7 +111,6 @@ def _make_key(
 
 def _cache_path(key: str) -> Path:
     return CACHE_DIR / f"{key}.json"
-
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -130,7 +129,6 @@ def get_cached(
     if path.exists():
         return json.loads(path.read_text())
     return None
-
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -187,16 +185,12 @@ def _cached_secret_key() -> str:
     return _cached_secret_key_value
 
 
-
-def evict_cached(
-    method: str, url: str, params: WirePayload | None, body: str | None
-) -> None:
+def evict_cached(method: str, url: str, params: WirePayload | None, body: str | None) -> None:
     """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
     _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
 
 
-
-
+# lucidlint: ignore long-param-list the flat signature is this helper's ease-of-use contract (cache callers)
 async def with_cache(  # lucidlint: ignore record-shape return is the cached API response body — wire format
     method: str,
     url: str,
@@ -204,6 +198,7 @@ async def with_cache(  # lucidlint: ignore record-shape return is the cached API
     body: WirePayload | None = None,
     *,
     fetch,
+    no_store: bool = False,
 ) -> dict[str, Any]:
     """Check disk cache first; on miss call ``fetch``, cache result, return.
 
@@ -216,6 +211,10 @@ async def with_cache(  # lucidlint: ignore record-shape return is the cached API
     at the cache-key edge; legacy plain dicts pass through unchanged.
     """
     body_str = json.dumps(_wire_params(body), sort_keys=True) if body else None
+    if no_store:
+        # test-injection seam (``_no_cache``), the DI sibling of a client
+        # factory: call the fetch without reading or writing the disk cache
+        return await fetch()
     cached = get_cached(method, url, params, body_str)
     if cached is not None:
         return cached

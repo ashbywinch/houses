@@ -7,9 +7,23 @@ from unittest.mock import patch
 import pytest
 from httpx import AsyncClient, Client, MockTransport, Response
 
+from houses import apigw
 from houses.api_cache import set_cache_dir
 from houses.settings import settings
 from tests.unit.isolation_fixtures import _sqlite_memory  # noqa: F401 — re-exported for integration tests
+
+
+@pytest.fixture(autouse=True)
+def _clean_gate():
+    """Reset the gateway quota/pacing state per test — mirrors the unit
+    conftest's isolation. Mocked 403s (e.g. the all-APIs-fail test) flip
+    profiles with quota_statuses into exhausted, and that state must not
+    leak into the next test (2026-09-28: Google 403 now marks exhausted)."""
+    apigw.GATE.clear_quota()
+    apigw.GATE.reset_pacing()
+    yield
+    apigw.GATE.clear_quota()
+    apigw.GATE.reset_pacing()
 
 
 @pytest.fixture(autouse=True)

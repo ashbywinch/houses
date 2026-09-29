@@ -29,6 +29,7 @@ from houses.services import (
     RoutePlanner,
     SchoolLookupService,
     Services,
+    StationLookupService,
     TownDescService,
     WalkabilityService,
     _AuthorizationUrl,
@@ -370,6 +371,7 @@ def make_services(
     | EPCLookupService
     | CouncilTaxService
     | RailFareService
+    | StationLookupService
     | OAuthService
     | Any,
 ) -> Services:

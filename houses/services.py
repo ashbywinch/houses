@@ -40,6 +40,8 @@ from houses.school import School
 from houses.school_gender import SchoolGender
 from houses.schools import SchoolLookupOptions, compute_school_commute, find_nearest
 from houses.settings import settings
+from houses.stations import Station
+from houses.stations import find as _find_station
 from houses.tfl_client import TflClient
 from houses.town_desc import generate_town_description
 from houses.walkability import WalkabilityPayload, enrich_walkability
@@ -102,8 +104,10 @@ class _GoogleClientConfig:
         # lucidlint: ignore record-shape to_dict construction mirrors the client-config nesting (coding-standards.md)
         return dict(
             web=dict(
-                client_id=self.client_id, client_secret=self.client_secret,
-                auth_uri=self.auth_uri, token_uri=self.token_uri,
+                client_id=self.client_id,
+                client_secret=self.client_secret,
+                auth_uri=self.auth_uri,
+                token_uri=self.token_uri,
                 redirect_uris=self.redirect_uris,
             )
         )
@@ -165,8 +169,6 @@ class OAuthService(Protocol):
         ...
 
 
-
-
 class WalkabilityService(Protocol):
     """Walk time to town centre and nearby amenities."""
 
@@ -208,6 +210,13 @@ class RailFareService(Protocol):
     ) -> _RailFarePair: ...
 
 
+class StationLookupService(Protocol):
+    """Find a station by name — the destination side of a drive estimate."""
+
+    @staticmethod
+    def find(name: str) -> Station | None: ...
+
+
 class DriveTimeService(Protocol):
     """Estimate driving time from an origin to a station.
 
@@ -217,21 +226,31 @@ class DriveTimeService(Protocol):
     location.
     """
 
-    @staticmethod
-    async def estimate(origin_postcode: str, station_name: str) -> int | None: ...
+    async def estimate(self, origin_postcode: str, station_name: str) -> int | None: ...
+
+    async def estimate_from_location(self, origin, station_name: str) -> int | None: ...
+
+
+class _DefaultStationLookup:
+    """Registry-backed station lookup — the module singleton's find."""
 
     @staticmethod
-    async def estimate_from_location(origin, station_name: str) -> int | None: ...
+    def find(name: str) -> Station | None:
+        return _find_station(name)
 
 
 class _DefaultDriveTimeService:
-    @staticmethod
-    async def estimate(origin_postcode: str, station_name: str) -> int | None:
-        return await _transit_route._get_drive_minutes(origin_postcode, station_name)
+    """Real drive-estimate wrapper — forwards to transit_route, threading
+    the container so every estimate runs the same tested path."""
 
-    @staticmethod
-    async def estimate_from_location(origin, station_name: str) -> int | None:
-        return await _transit_route._get_drive_minutes_from_location(origin, station_name)
+    def __init__(self, services: Services | None = None):
+        self._services: Services | None = services
+
+    async def estimate(self, origin_postcode: str, station_name: str) -> int | None:
+        return await _transit_route._get_drive_minutes(origin_postcode, station_name, services=self._services)
+
+    async def estimate_from_location(self, origin, station_name: str) -> int | None:
+        return await _transit_route._get_drive_minutes_from_location(origin, station_name, services=self._services)
 
 
 class _DefaultOAuthService:
@@ -351,11 +370,7 @@ def _make_settings_source(
 ):
     if node_id in SETTINGS_SOURCE_CACHE:
         return SETTINGS_SOURCE_CACHE[node_id]
-    node = (
-        PersonsSourceNode(node_id, value_type)
-        if node_id == "persons"
-        else SettingsInputNode(node_id, value_type)
-    )
+    node = PersonsSourceNode(node_id, value_type) if node_id == "persons" else SettingsInputNode(node_id, value_type)
     if latest_node_result_fn is None:
         latest_node_result_fn = latest_node_result
     persisted = latest_node_result_fn(node_id)
@@ -384,6 +399,7 @@ def _make_settings_source(
 # get_services at module top and these wrappers can import their modules here
 # without a cycle. The default geocoder/route-planner receive the Services
 # container and thread it into the location functions.
+
 
 class _DefaultGeocoder:
     """Real geocoder wrapper — forwards to houses.location, threading the
@@ -501,9 +517,7 @@ def _default_auth_enabled() -> bool:
 @dataclasses.dataclass
 class Services:
     auth_enabled: bool = dataclasses.field(default_factory=_default_auth_enabled)
-    geocoder: GeocodingService = dataclasses.field(
-        default_factory=lambda: cast(GeocodingService, _DefaultGeocoder())
-    )
+    geocoder: GeocodingService = dataclasses.field(default_factory=lambda: cast(GeocodingService, _DefaultGeocoder()))
     route_planner: RoutePlanner = dataclasses.field(default_factory=_DefaultRoutePlanner)
     tfl_client_factory: Callable[..., Any] = dataclasses.field(default_factory=_default_tfl_client_factory)
     commute_router: Any = dataclasses.field(default_factory=_default_commute_router)
@@ -514,6 +528,7 @@ class Services:
     council_tax_service: CouncilTaxService = dataclasses.field(default_factory=_DefaultCouncilTax)
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
     drive_time_service: DriveTimeService = dataclasses.field(default_factory=_DefaultDriveTimeService)
+    station_lookup: StationLookupService = dataclasses.field(default_factory=_DefaultStationLookup)
     oauth_service: OAuthService = dataclasses.field(default_factory=_DefaultOAuthService)
     # Test seam: injected reader for the settings persistence lookup
     # (None = use dag.persistence.latest_node_result).
@@ -536,7 +551,6 @@ class Services:
         default_factory=lambda: _make_settings_source("whatif_started_at", str, lambda: "")
     )
     # Per-request mutable state (lazily initialized by accessors)
-    geo_state: Any | None = None
     geo_cache: dict | None = None
     bus_fare_registry: Any | None = None
     rail_fare_registry: Any | None = None
@@ -583,6 +597,8 @@ class Services:
         # explicitly instead of re-resolving the request container.
         if isinstance(self.geocoder, _DefaultGeocoder):
             self.geocoder._services = self
+        if isinstance(self.drive_time_service, _DefaultDriveTimeService):
+            self.drive_time_service._services = self
 
     @property
     def settings_view(self):

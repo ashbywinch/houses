@@ -34,10 +34,19 @@ class WirePayload(Protocol):
     through our code as the object, and ``to_dict()`` is called ONCE at
     the network edge (httpx kwarg, cache key, envelope, json.dumps) —
     never a verbatim payload dict threaded through a seam.
+
+    The default implementation serializes the dataclass fields
+    generically, applying ``wire_key_rewrites`` where a field name cannot
+    be the wire key (e.g. ``point_lat`` → ``point.lat``). Subclasses add
+    data, never hand-built dicts.
     """
-    # lucidlint: ignore record-shape Protocol to_dict return IS the transport-seam contract — every implementing
+    # lucidlint: ignore record-shape Protocol serializer return IS the transport-seam contract — every implementing
     # record serializes here, the boundary owns the shape (coding-standards.md)
-    def to_dict(self) -> dict: ...
+    def to_dict(self) -> dict:
+        serialized = asdict_serializable(self)
+        for src, dst in getattr(self, "wire_key_rewrites", {}).items():
+            serialized[dst] = serialized.pop(src)
+        return serialized
 
 
 @dataclasses.dataclass(frozen=True)
