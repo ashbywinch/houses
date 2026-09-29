@@ -25,6 +25,10 @@ permissions:
 #               NAMED object (never from the owner) and flip. For when the owner's
 #               data must not be carried forward at all.
 #   diagnose  — read-only state dump of BOTH boxes.
+#   scaffold  — one-time, GREENFIELD only: the two boxes + target instances +
+#               the L4 rules, when no rules exist yet. Requires houses-base
+#               (run action=bake first); a missing image or an existing plane
+#               fails the job loudly — there is no fallback bootstrap.
 #
 # The box never flips routes and holds no GCP credentials; CI does the flip with
 # its own service account. The box's only identity is its instance service
@@ -49,11 +53,11 @@ on:
         required: false
         default: 'main'
       action:
-        description: 'release | build | install | cutover | rollback | recover | diagnose | provision | bake'
+        description: 'release | build | install | cutover | rollback | recover | diagnose | provision | bake | scaffold'
         required: false
         default: 'release'
         type: choice
-        options: ['release', 'build', 'install', 'cutover', 'rollback', 'recover', 'diagnose', 'provision', 'bake']
+        options: ['release', 'build', 'install', 'cutover', 'rollback', 'recover', 'diagnose', 'provision', 'bake', 'scaffold']
       artifact:
         description: 'install only: an existing gs://<bucket>/<sha256>.tar.gz (blank = build one now)'
         required: false
@@ -690,6 +694,9 @@ jobs:
           REGION="${ZONE%-*}"
           cd terraform
           terraform init -input=false
+          # -target: the bake owns only the builder (created from the STOCK
+          # image). On an empty project a full apply would try to create the
+          # boxes from houses-base before this very bake has produced it.
           terraform apply -auto-approve -input=false \
             -var "project=$PROJECT" \
             -var "region=$REGION" \
@@ -697,6 +704,7 @@ jobs:
             -var "operator_ssh_public_key_path=/tmp/operator.pub" \
             -var "deploy_pubkey=$DEPLOY_PUBKEY" \
             -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
+            -target=google_compute_instance.base_builder \
             -replace=google_compute_instance.base_builder
         env:
           DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
@@ -738,6 +746,68 @@ jobs:
             --format='value(name,status,diskSizeGb)'
           echo "base image ready: boxes built from now on use it"
         timeout-minutes: 20
+
+  # ── the one-time greenfield scaffold ──────────────────────────────────
+  # The workflow's resolve step needs both boxes, both target instances and
+  # both rules to exist before ANY rollout action can run; nothing in the
+  # workflow creates them. This action is that creation — once. Guarded to
+  # refuse once the plane exists (use action=release from then on), and loud
+  # if houses-base is missing (action=bake must run first).
+  scaffold:
+    if: ${{ inputs.action == 'scaffold' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+          printf '%s\n' "$OPERATOR_PUBKEY" > /tmp/operator.pub
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+          OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
+      - name: Guard — refuses when the plane already exists
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          if gcloud compute forwarding-rules describe houses-l4-https --region "$REGION" --project "$PROJECT" >/dev/null 2>&1; then
+            echo "::error::the L4 rules already exist — this is not a greenfield scaffold; use action=release"
+            exit 1
+          fi
+          echo "scaffolding the two-instance data plane"
+      - name: terraform apply — the two boxes + target instances + rules
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          cd terraform
+          terraform init -input=false
+          # base_image defaults to houses-base: boxes boot FROM the baked
+          # image. A missing image fails this apply loudly (bake first).
+          terraform apply -auto-approve -input=false \
+            -var "project=$PROJECT" \
+            -var "region=$REGION" \
+            -var "zone=$ZONE" \
+            -var "operator_ssh_public_key_path=/tmp/operator.pub" \
+            -var "deploy_pubkey=$DEPLOY_PUBKEY" \
+            -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
+            -var "provision_artifact=${{ inputs.artifact }}"
+          terraform output
+        env:
+          DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
+        timeout-minutes: 30
+      - name: Notes
+        run: |
+          echo "boxes bootstrapping from houses-base: watch with action=diagnose"
+          echo "next: gh workflow run Release -f action=release; then cutover/recover"
 
   # ── read-only state dump ──────────────────────────────────────────────
   diagnose:
