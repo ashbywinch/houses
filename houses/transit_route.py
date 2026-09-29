@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from houses import apis
-from houses.location import geocode, geocode_address
-from houses.stations import find as find_station
 from houses.web.json_utils import optional_parse
 
 logger = logging.getLogger(__name__)
@@ -102,27 +100,23 @@ async def _get_drive_minutes(
     origin_postcode: str,
     station_name: str,
     *,
+    services,
     _client_factory=None,
     _no_cache: bool = False,
-    services: Any | None = None,
 ) -> int | None:
     """Drive time from a postcode to a station.  The postcode is
     geocoded first — callers that already hold coordinates should use
     ``_get_drive_minutes_from_location`` and skip the lookup.
 
-    ``services`` threads the container the way ``location.geocode`` does:
-    when given, resolution runs through ``services.geocoder`` so tests
-    inject the real service seams instead of function fakes.
+    ``services`` is REQUIRED and is the one code path: production threads
+    the ``Services`` container (``_DefaultDriveTimeService``, park-and-ride),
+    tests inject ``make_services`` fakes — no fallback branch exists to
+    drift untested from production.
     """
-    geocoder = services.geocoder if services is not None else None
-    if geocoder is not None:
-        origin_coords = (await geocoder.geocode_postcode(origin_postcode)).value_or_none()
-        if origin_coords is None:
-            origin_coords = (await geocoder.geocode_address(origin_postcode)).value_or_none()
-    else:
-        origin_coords = (await geocode(origin_postcode)).value_or_none()
-        if origin_coords is None:
-            origin_coords = (await geocode_address(origin_postcode)).value_or_none()
+    geocoder = services.geocoder
+    origin_coords = (await geocoder.geocode_postcode(origin_postcode)).value_or_none()
+    if origin_coords is None:
+        origin_coords = (await geocoder.geocode_address(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
     return await _get_drive_minutes_from_location(
@@ -138,21 +132,16 @@ async def _get_drive_minutes_from_location(
     origin_coords,
     station_name: str,
     *,
+    services,
     _client_factory=None,
     _no_cache: bool = False,
-    services: Any | None = None,
 ) -> int | None:
     """Drive time from known coordinates to a station — the fallback
     when a property has no postcode but does have a best location."""
-    station_lookup = services.station_lookup if services is not None else None
-    station = station_lookup.find(station_name) if station_lookup is not None else find_station(station_name)
+    station = services.station_lookup.find(station_name)
     dest_coords = station.location if station else None
     if dest_coords is None:
-        geocoder = services.geocoder if services is not None else None
-        if geocoder is not None:
-            dest_coords = (await geocoder.geocode_address(station_name)).value_or_none()
-        else:
-            dest_coords = (await geocode_address(station_name)).value_or_none()
+        dest_coords = (await services.geocoder.geocode_address(station_name)).value_or_none()
     if dest_coords is None:
         return None
 
@@ -186,8 +175,20 @@ async def apply_park_and_ride_to_journeys(
     origin_postcode: str,
     max_walk_minutes: int,
     _drive_fn=None,
+    services: Any | None = None,
 ) -> dict:
-    get_drive = _drive_fn if _drive_fn is not None else _get_drive_minutes
+    if _drive_fn is not None:
+        get_drive = _drive_fn
+    else:
+        if services is None:
+            raise TypeError(
+                "apply_park_and_ride_to_journeys needs services= for the real "
+                "drive estimate (TflClient threads its container)"
+            )
+
+        async def get_drive(postcode: str, station: str) -> int | None:
+            return await _get_drive_minutes(postcode, station, services=services)
+
     journeys = data.get("journeys", [])
     if not journeys:
         return data

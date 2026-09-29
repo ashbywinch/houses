@@ -359,7 +359,8 @@ class TflTransitNode(DerivedNode[Commute]):
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
 
-        client_factory = self._client_factory or get_services().tfl_client_factory
+        services = get_services()
+        client_factory = self._client_factory or services.tfl_client_factory
         client = client_factory(
             origin_str,
             dest_str,
@@ -367,6 +368,7 @@ class TflTransitNode(DerivedNode[Commute]):
             TflRouteOptions(
                 park_and_ride=self._has_car,
                 allow_bus=self._allow_bus,
+                services=services,
             ),
         )
         # Dispatch the override DIRECTLY — a fake client factory supplies

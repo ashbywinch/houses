@@ -226,11 +226,9 @@ class DriveTimeService(Protocol):
     location.
     """
 
-    @staticmethod
-    async def estimate(origin_postcode: str, station_name: str) -> int | None: ...
+    async def estimate(self, origin_postcode: str, station_name: str) -> int | None: ...
 
-    @staticmethod
-    async def estimate_from_location(origin, station_name: str) -> int | None: ...
+    async def estimate_from_location(self, origin, station_name: str) -> int | None: ...
 
 
 class _DefaultStationLookup:
@@ -242,13 +240,17 @@ class _DefaultStationLookup:
 
 
 class _DefaultDriveTimeService:
-    @staticmethod
-    async def estimate(origin_postcode: str, station_name: str) -> int | None:
-        return await _transit_route._get_drive_minutes(origin_postcode, station_name)
+    """Real drive-estimate wrapper — forwards to transit_route, threading
+    the container so every estimate runs the same tested path."""
 
-    @staticmethod
-    async def estimate_from_location(origin, station_name: str) -> int | None:
-        return await _transit_route._get_drive_minutes_from_location(origin, station_name)
+    def __init__(self, services: Services | None = None):
+        self._services: Services | None = services
+
+    async def estimate(self, origin_postcode: str, station_name: str) -> int | None:
+        return await _transit_route._get_drive_minutes(origin_postcode, station_name, services=self._services)
+
+    async def estimate_from_location(self, origin, station_name: str) -> int | None:
+        return await _transit_route._get_drive_minutes_from_location(origin, station_name, services=self._services)
 
 
 class _DefaultOAuthService:
@@ -595,6 +597,8 @@ class Services:
         # explicitly instead of re-resolving the request container.
         if isinstance(self.geocoder, _DefaultGeocoder):
             self.geocoder._services = self
+        if isinstance(self.drive_time_service, _DefaultDriveTimeService):
+            self.drive_time_service._services = self
 
     @property
     def settings_view(self):
