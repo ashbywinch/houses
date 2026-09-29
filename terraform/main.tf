@@ -204,9 +204,9 @@ resource "google_service_account" "box_deploy" {
 # and the Caddy repo at rollout time. The bake script has no secrets and no app —
 # the artifact supplies code, the seed supplies data.
 #
-# Re-bake: `terraform apply -replace=google_compute_instance.base_builder
-# -replace=google_compute_image.base` (the workflow's `action=bake` does exactly
-# that). The boxes pick the new image up when they are next rebuilt.
+# Re-bake: the workflow's `action=bake` (terraform apply -target/-replace
+# google_compute_instance.base_builder, then the image is recreated from its
+# finished disk). The boxes pick the new image up when they are next rebuilt.
 resource "google_compute_instance" "base_builder" {
   name         = "houses-base-builder"
   machine_type = var.machine_type

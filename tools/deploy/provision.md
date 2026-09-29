@@ -73,28 +73,38 @@ The layout this all targets:
    gsutil iam ch serviceAccount:$SA:objectAdmin gs://houses-tfstate
    ```
 
-## 2. First apply (the two instances + the rules)
+## 2. The greenfield scaffold (the one-time creation — via the workflow)
+
+The rollout machinery cannot start on an empty project: `resolve` needs both
+boxes, both target instances and both L4 rules to exist. Creating them is the
+**`scaffold` action** — never a hand-run terraform.
 
 ```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars   # fill project/region/zone
-# edit: operator_ssh_public_key_path, deploy_pubkey, provision_ref
-terraform init -migrate-state                  # moves any local state into GCS
-terraform plan                                 # read it: 2 e2-micro, L4 rules, SA
-terraform apply
-terraform output                               # ssh_house / ssh_standby / address
+# 0. the base image must exist first — bake it (the builder is stock-image,
+#    the only resource the bake touches):
+gh workflow run Release -f action=bake
+#    wait for the run: builder TERMINATED -> houses-base created
+
+# 1. build the artifact the fresh boxes bootstrap from (optional but usual —
+#    a bare scaffold still works; the first release fills the boxes):
+gh workflow run Release -f action=build -f ref=main
+
+# 2. create the two boxes + target instances + rules:
+gh workflow run Release -f action=scaffold -f artifact=gs://houses-artifacts/<sha256>.tar.gz
 ```
 
-`terraform apply` renders `tools/deploy/box-bootstrap.sh` into each instance's
-`startup-script` metadata, so a fresh box builds itself: packages → operator key
-→ artifact (fetch with the instance SA, sha256 verified) → layout/units/sudoers
-→ deploy-key allowlist → seed restore → migrations → app env → Caddy → markers.
-~5–10 minutes per box; watch with
-`ssh -i ~/.ssh/houses_operator ubuntu@<ephemeral-ip> "sudo tail -f /var/log/syslog"`.
+The scaffold applies the whole config: the two instances boot from
+`houses-base` (default `base_image` — a missing image fails the job loudly:
+run `action=bake` first; there is no stock fallback for a box), each renders
+`tools/deploy/box-bootstrap.sh` into `startup-script` metadata and builds
+itself: packages → operator key → artifact (instance SA, sha256 verified) →
+layout/units/sudoers → deploy-key allowlist → seed restore → migrations → app
+env → Caddy → markers. The action refuses if the L4 rules already exist —
+from then on it is `action=release`, every time.
 
-`provision_artifact` must name a real `gs://houses-artifacts/<sha256>.tar.gz`.
-The first one comes from a `Release` dispatch with `action=build` (or `release`),
-which builds it in CI and uploads it.
+Watch a bootstrap with
+`ssh -i ~/.ssh/houses_operator ubuntu@<ephemeral-ip> "sudo tail -f /var/log/syslog"`
+or `gh workflow run Release -f action=diagnose`.
 
 ## 2b. Adoption — from today's single box to the two-instance data plane
 
@@ -116,11 +126,10 @@ existing box's database is trustworthy. **Read the warning first.**
 
 **Variant A — the live database is trustworthy (the normal adoption).**
 
-1. `terraform init -migrate-state` and apply. The two new instances
-   (`houses`, `houses-standby`) are created from the base image; the existing
-   box is left exactly as it is. `houses-static` stays attached to IT for now
-   (two pieces of infrastructure cannot own one address), so traffic keeps
-   flowing to the old box.
+1. Run `action=scaffold`. The two new instances (`houses`, `houses-standby`)
+   are created from the base image; the existing box is left exactly as it is.
+   `houses-static` stays attached to IT for now (two pieces of infrastructure
+   cannot own one address), so traffic keeps flowing to the old box.
 2. `gh workflow run Release -f action=release` — builds the artifact, rebuilds
    `houses-standby`, installs and smokes it.
 3. Publish the live database to the new plane — this is the step that needs the
@@ -143,10 +152,10 @@ existing box's database is trustworthy. **Read the warning first.**
 **Variant B — the live database is NOT trustworthy (today's case).** Skip the
 snapshot of the old box entirely; its data is abandoned:
 
-1. `terraform init -migrate-state`, then apply (as above), then detach the
-   address from the old box and apply again so the rules hold it — the old box
-   may keep serving on an ephemeral address, or not serve at all; that is the
-   point.
+1. Run `action=scaffold`, then detach the address from the old box and re-run
+   `action=scaffold`'s apply equivalent (or apply once the address is free) so
+   the rules hold it — the old box may keep serving on an ephemeral address,
+   or not serve at all; that is the point.
 2. `action=release` → build + rebuild the standby + install + smoke.
 3. `action=recover -f snapshot=gs://houses-seed/latest.db` → the standby is
    restored from the human-validated seed (or from any object you name), migrated,

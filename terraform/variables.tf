@@ -17,13 +17,13 @@ variable "zone" {
 
 
 variable "base_image" {
-  description = "The baked OS image every box is created from. Created by the Release workflow's bake action (not by terraform — an image must be taken from a finished disk); the boxes reference it by name, and the bootstrap's own apt install remains the fallback if it does not exist yet."
+  description = "The baked OS image every box is created from. Created by the Release workflow's bake action (not by terraform — an image must be taken from a finished disk); the boxes reference it by name. If the image does not exist the apply FAILS — run action=bake first; there is no stock-image fallback for a box."
   type        = string
   default     = "houses-base"
 }
 
 variable "stock_image" {
-  description = "The upstream image the BASE IMAGE is baked from. The boxes are created from the baked image, not from this — see google_compute_image.base."
+  description = "The upstream image the BASE IMAGE is baked from (used only by the houses-base-builder). The boxes are created from the baked image (var.base_image), never from this."
   type        = string
   default     = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
 }
