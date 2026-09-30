@@ -335,12 +335,30 @@ jobs:
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --diagnose" \
             || echo "standby unreachable — check the console"
         timeout-minutes: 3
+      - name: Bring the OWNER's tooling current (tooling-only refresh)
+        # The owner's only install is its bootstrap; its /opt/houses scripts
+        # would otherwise lag every artifact generation and lack verbs the
+        # release uses on it (2026-09-30: the smoke relay died on the owner's
+        # stale switch.sh). The deploy key is allowlisted for install-artifact.sh.
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@${{ needs.resolve.outputs.owner_ip }}" \
+            "sudo /opt/houses/install-artifact.sh --tooling-only $ARTIFACT"
+        timeout-minutes: 15
       - name: Build the smoke review surface (owner Caddy relays the standby)
         # The human review surface of the rollout: houses-smoke must show the
         # fresh STANDBY, wired by the process — never by hand. The deploy key
-        # is allowlisted for switch.sh on every box.
+        # is allowlisted for switch.sh on every box; gcloud (for the standby's
+        # internal IP) runs as the CI SA.
         run: |
           set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
           PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
@@ -351,6 +369,8 @@ jobs:
           echo "smoke relay: $OWNER_IP -> $SB_INT"
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay $SB_INT"
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
         timeout-minutes: 5
 
   # ── cutover (THE human gate) ──────────────────────────────────────────
