@@ -29,6 +29,9 @@ set -euo pipefail
 
 ROOT="${HOUSES_ROOT:-/opt/houses}"
 APP="$ROOT/app"
+# Same cwd rule as install-artifact.sh: the restored app's venv resolves
+# top-level imports from CWD — always run from the app root.
+cd "$APP"
 PY="$APP/.venv/bin/python"
 DB="$ROOT/data/houses.db"
 ACTION="${1:-}"

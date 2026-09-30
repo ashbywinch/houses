@@ -22,6 +22,10 @@ set -euo pipefail
 
 ROOT="${HOUSES_ROOT:-/opt/houses}"
 APP="$ROOT/app"
+# This script runs from wherever the caller happened to be (the workflow SSH
+# lands in the operator home): the venv python resolves top-level imports
+# (``scripts``) from the CWD — ``cd`` to the app root or every smoke import
+# chain that touches scripts.* crashes with ModuleNotFoundError (2026-09-30).
 LOG_DIR="${HOUSES_LOG_DIR:-$ROOT/logs/releases}"
 OBJECT="${1:?usage: install-artifact.sh gs://bucket/<sha256>.tar.gz}"
 DB="$ROOT/data/houses.db"
@@ -192,13 +196,19 @@ SECRET=$(grep '^HOUSES_SESSION_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2- || 
 COOKIE=$(HOUSES_SESSION_SECRET="$SECRET" "$VENV_PY" -c '
 from houses.web.auth import _make_session_cookie
 print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True))
-' 2>/dev/null </dev/null)
+' 2>/dev/null </dev/null) || {
+  mark "FAILED: the smoke cookie could not be minted (venv import chain) — see the app root for scripts/"
+  exit 1
+}
 
 echo "== smoke: /health"
 curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"'
 
 echo "== smoke: /api/properties/all (>= 1 house record)"
-ALL=$(curl -fsS --max-time 1800 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all")
+ALL=$(curl -fsS --max-time 1800 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all") || {
+  mark "FAILED: smoke /api/properties/all did not answer"
+  exit 1
+}
 RIDS=$(printf '%s' "$ALL" | "$VENV_PY" -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("properties", d)))' 2>/dev/null || echo 0)
 echo "   house records served: $RIDS"
 [ "$RIDS" -gt 0 ] || { mark "FAILED: smoke /api/properties/all returned no house records"; exit 1; }
