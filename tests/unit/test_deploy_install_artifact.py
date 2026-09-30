@@ -116,7 +116,7 @@ def _stubs(tmp_path: Path) -> Path:
     return bin_dir
 
 
-def test_the_fast_path_reaches_install_ready_and_leaves_the_app_stopped(tmp_path):
+def test_the_fast_path_reaches_review_ready_and_leaves_the_app_serving(tmp_path):
     root = _box(tmp_path)
     bin_dir = _stubs(tmp_path)
     env_file = tmp_path / "houses.env"
@@ -136,10 +136,13 @@ def test_the_fast_path_reaches_install_ready_and_leaves_the_app_stopped(tmp_path
 
     assert result.returncode == 0, output
     assert "the box already runs" in output, "this test must exercise the fast path"
-    assert f"INSTALL READY: artifact {SHA}" in output
+    assert f"REVIEW READY: artifact {SHA}" in output
     # The rehearsal and the smoke really ran before that verdict.
     assert "migrations: 1 applied+checked, 0 failed" in output
     assert "house records served: 1" in output
-    # ...and the last thing the installer did was stop the app for the gate.
+    # The standby IS the review surface: the app stays SERVING (never stopped),
+    # and the standby's role URL (houses-smoke) was written into the env the
+    # app reads at its next start.
     calls = systemctl_log.read_text().splitlines()
-    assert calls[-1] == "systemctl stop houses.service", calls
+    assert "systemctl stop houses.service" not in calls, calls
+    assert "HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net" in env_file.read_text()

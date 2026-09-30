@@ -188,12 +188,10 @@ mark "memory pre-flight ok (${FREE_MB} MiB free)"
 
 # The standby's role URL is the smoke hostname (the review surface). The
 # default from the seed env is production; the flip re-sets the new owner.
-SEF=/etc/houses.env
-if grep -q '^HOUSES_PUBLIC_URL=' "$SEF"; then
-  sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net#' "$SEF"
+if grep -q '^HOUSES_PUBLIC_URL=' "$ENV_FILE"; then
+  sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net#' "$ENV_FILE"
 else
-  printf '%s
-' 'HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net' >> "$SEF"
+  printf '%s\n' 'HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net' >> "$ENV_FILE"
 fi
 mark "standby public URL: houses-smoke.blueumbrella.net"
 
