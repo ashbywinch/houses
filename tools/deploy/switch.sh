@@ -155,7 +155,9 @@ fi
 if [ "$ACTION" = "--unfreeze" ]; then
   mark "unfreeze: starting the app"
   systemctl start houses.service
-  for i in $(seq 1 60); do
+  # first start after a restore is COLD (measured ~5.5 min on e2-micro) —
+  # 10 min window; beyond that is stuck, not slow.
+  for i in $(seq 1 300); do
     curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && break
     sleep 2
   done
@@ -224,7 +226,7 @@ _finish_restore() {
   # up on a restored, verified, migrated database.
   mark "restore: starting the app on the restored DB"
   systemctl restart houses.service
-  for i in $(seq 1 60); do
+  for i in $(seq 1 300); do
     curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && break
     sleep 2
   done

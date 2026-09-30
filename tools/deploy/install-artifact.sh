@@ -166,7 +166,10 @@ mark "memory pre-flight ok (${FREE_MB} MiB free)"
 
 mark "starting the app for the smoke"
 systemctl restart houses.service
-for i in $(seq 1 120); do
+# A fresh box's FIRST start is cold: restored DB (100+ MB) + the property-DAG
+# load, measured ~5.5 min on an e2-micro (2026-09-30). 10 min window, still
+# loud: a box that is not healthy by then is genuinely stuck.
+for i in $(seq 1 300); do
   curl -fsS --max-time 5 "localhost:$PORT/health" >/dev/null 2>&1 && break
   sleep 2
 done
