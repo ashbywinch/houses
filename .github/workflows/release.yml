@@ -299,7 +299,7 @@ jobs:
     # A rollout rebuilds the standby first (provision) and then installs this
     # artifact onto it; `action=install` re-installs onto the existing box
     # without a rebuild (a retry after a failed install, or a hotfix probe).
-    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.consistent == 'true' && (inputs.action == 'install' || needs.provision.result == 'success') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' && (inputs.action == 'install' || needs.provision.result == 'success') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
       BOX_USER: ${{ secrets.BOX_USER }}
@@ -359,7 +359,7 @@ jobs:
   # ── cutover (THE human gate) ──────────────────────────────────────────
   cutover:
     needs: [resolve, image-stale, bake]
-    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -511,7 +511,7 @@ jobs:
   # trade, and the approval below is where it is accepted.
   recover:
     needs: [resolve, image-stale, bake]
-    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -672,7 +672,7 @@ jobs:
     # the chain re-bakes on drift: a bake that ran must have succeeded
     # Part of every rollout (a fresh box per rollout — replace-not-repair), and
     # standalone for a box that needs rebuilding between rollouts.
-    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && needs.image-stale.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     outputs:
       # The rebuilt instance's address is NEW (ephemeral) — everything downstream
@@ -766,17 +766,9 @@ jobs:
     needs: [image-stale]
     # Manual (action=bake) or automatic (the chain detected drift) — never a
     # human prompt inside a release.
-    if: ${{ inputs.action == 'bake' || needs.image-stale.outputs.drifted == 'true' }}
+    if: ${{ inputs.action == 'bake' || (needs.image-stale.result == 'success' && needs.image-stale.outputs.drifted == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
-
-
       - uses: actions/checkout@v7
         with:
           ref: main
