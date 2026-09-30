@@ -191,21 +191,30 @@ curl -fsS --max-time 30 "localhost:$PORT/health" >/dev/null 2>&1 || {
 mark "app healthy on :$PORT"
 
 # The authenticated smoke: mint a superuser cookie with the app's own code, so
-# /api/* (auth-gated) actually executes.
+# /api/* (auth-gated) actually executes. The mint runs BEFORE the app starts
+# (moved after 2026-09-30): minting during the smoke imported the full app
+# tree WHILE the fresh process ground through its property-DAG load and
+# failed under the memory pressure of the same window — idle, it succeeds
+# (593 MiB free passed the gate; no OOM in dmesg, so it was a pure
+# pressure-window failure). The cookie does not need the app running.
 SECRET=$(grep '^HOUSES_SESSION_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)
 [ -n "$SECRET" ] || { mark "FAILED: HOUSES_SESSION_SECRET missing from $ENV_FILE"; exit 1; }
-# The cookie is CAPTURED, never echoed: the print goes into the substitution,
-# stderr is discarded, and the curls use it only in a -H header (-v is never
-# used), so the superuser cookie cannot appear in this transcript (review
-# finding — the value is not logged; this comment pins that it must stay that
-# way).
+# The cookie is CAPTURED, never echoed: the print goes into the substitution
+# and the curls use it only in a -H header (-v is never used), so the
+# superuser cookie cannot appear in this transcript. The mint's STDERR is
+# captured to a file and surfaced on failure — a failing mint names its
+# traceback, not a generic message.
+MINT_ERR=$(mktemp)
 COOKIE=$(HOUSES_SESSION_SECRET="$SECRET" "$VENV_PY" -c '
 from houses.web.auth import _make_session_cookie
 print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True))
-' 2>/dev/null </dev/null) || {
-  mark "FAILED: the smoke cookie could not be minted (venv import chain) — see the app root for scripts/"
+' 2>"$MINT_ERR" </dev/null) || {
+  mark "FAILED: the smoke cookie could not be minted — traceback:"
+  cat "$MINT_ERR" >&2
+  rm -f "$MINT_ERR"
   exit 1
 }
+rm -f "$MINT_ERR"
 
 mark "smoke: /health"
 curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"' || {
