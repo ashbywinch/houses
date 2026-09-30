@@ -94,7 +94,20 @@ resource "google_compute_subnetwork" "houses" {
 }
 
 # SSH is the control plane (key-only, from anywhere); 80/443 are the L4 rule's
-# passthrough into the box's Caddy. The app port (8765) is never exposed.
+# passthrough into the box's Caddy. The app port (8765) is never exposed to
+# the internet — but the OWNER's Caddy relays the human review surface
+# (houses-smoke) to the STANDBY's app, so 8765 is open BETWEEN the boxes
+# only (10.0.0.0/24, tag houses).
+resource "google_compute_firewall" "internal_app" {
+  name          = "houses-allow-internal-app"
+  network       = google_compute_network.houses.name
+  allow {
+    protocol = "tcp"
+    ports    = ["8765"]
+  }
+  source_tags  = ["houses"]
+  target_tags  = ["houses"]
+}
 resource "google_compute_firewall" "ssh" {
   name          = "houses-allow-ssh"
   network       = google_compute_network.houses.name
