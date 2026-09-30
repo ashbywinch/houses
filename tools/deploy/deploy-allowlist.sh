@@ -21,9 +21,10 @@ set -eu
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 SHA256_HEX_CHARS=64   # the artifact's key IS its sha256, in hex
 
-# --- the rollout install: install-artifact.sh <gs://bucket/<sha256>.tar.gz> ---
-# The OBJECT is the only argument, and it must be a content-addressed artifact
-# name — the script re-verifies the sha256 against the key it fetches.
+# --- the rollout install: install-artifact.sh [--tooling-only] <gs://...tar.gz>
+# The OBJECT is the content-addressed artifact name — the script re-verifies
+# the sha256 against the key it fetches. --tooling-only (owner-side refresh,
+# no app work) is the one allowed prefix.
 case "$CMD" in
   "sudo /opt/houses/install-artifact.sh "*|"sudo /opt/houses/install-artifact.sh --tooling-only "*)
     case "$CMD" in
@@ -110,6 +111,8 @@ case "$CMD" in
     case "$IP" in
       *[!0-9.]*|"") echo "deploy-allowlist: bad relay IP" >&2; exit 1 ;;
     esac
+    DOTS=$(printf '%s' "$IP" | tr -cd '.' | wc -c)
+    [ "$DOTS" = 3 ] || { echo "deploy-allowlist: bad relay IP (need 4 octets)" >&2; exit 1; }
     case "$IP" in
       *.*.*.*.*|*..*|.*|*.) echo "deploy-allowlist: bad relay IP" >&2; exit 1 ;;
     esac
