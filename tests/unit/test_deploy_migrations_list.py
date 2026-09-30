@@ -145,7 +145,9 @@ def test_every_rollout_rebuilds_the_standby_and_moves_the_certificate():
     assert "inputs.action == 'release'" in rebuild, "a release must rebuild the box"
     assert "inputs.action == 'provision'" in rebuild, "a bare rebuild must stay possible"
     assert "-replace " in rebuild, "the box is replaced, not patched"
-    assert "needs: [resolve, build, provision]" in workflow, "install must follow the rebuild"
+    assert (
+        "needs: [resolve, build, provision, image-stale]" in workflow
+    ), "install must follow the rebuild (and the image-drift gate)"
     # The instance lifecycle belongs to Terraform; traffic is moved ONLY by the
     # rules' target. A hand-run create/delete here would be the 2026-09-24 outage.
     assert "instances create" not in workflow
