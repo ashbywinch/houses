@@ -1,0 +1,38 @@
+name: Bake image pipeline
+
+# The houses-base machine image is kept FRESH by its own pipeline — never by
+# the release chain (a builder creation must not sit on a rollout's critical
+# path; 2026-09-30: zone capacity blocked two rollouts while boxes sat live).
+#
+# Triggers:
+#   - any push touching the files the image is baked FROM
+#   - nightly (belt: a drifted image is caught before a release needs it)
+#   - manual dispatch (the same action=bake the release docs describe)
+#
+# It dispatches the Release workflow's bake job — ONE implementation of the
+# bake lives there (release.yml), reused here, so the steps never fork.
+
+on:
+  push:
+    paths:
+      - 'tools/deploy/base-image.sh'
+      - 'tools/deploy/box-setup.sh'
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-bake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trigger the Release workflow's bake
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml -f action=bake -f ref=${{ github.event_name == 'push' && github.ref_name || github.sha || 'main' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
