@@ -151,7 +151,6 @@ jobs:
     if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'cutover' || inputs.action == 'recover' }}
     runs-on: ubuntu-latest
     outputs:
-      drifted: ${{ steps.check.outputs.drifted }}
       wanted: ${{ steps.check.outputs.wanted }}
     env:
       GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
@@ -171,17 +170,15 @@ jobs:
           WANTED=$(bash tools/deploy/bake-ref.sh)
           BAKED=$(gcloud compute images describe "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" \
                     --format='value(description)' 2>/dev/null | grep -o 'bake_ref=[0-9a-f]\{64\}' | cut -d= -f2 || true)
-          DRIFTED=false
           if [ -z "$BAKED" ]; then
-            echo "::warning::image has no bake_ref (pre-drift bake) — the chain will re-bake it"
-            DRIFTED=true
-          elif [ "$BAKED" != "$WANTED" ]; then
-            echo "::warning::image source drifted (image=$BAKED main=$WANTED) — the chain will re-bake it"
-            DRIFTED=true
-          else
-            echo "image source matches main ($BAKED)"
+            echo "::error::image has no bake_ref — the bake image pipeline has not stamped it; wait for action=bake/pipeline then re-run"
+            exit 1
           fi
-          echo "drifted=$DRIFTED" >> "$GITHUB_OUTPUT"
+          if [ "$BAKED" != "$WANTED" ]; then
+            echo "::error::image source drifted (image=$BAKED main=$WANTED) — the bake pipeline must re-bake before this release; re-run after it lands"
+            exit 1
+          fi
+          echo "image source matches main ($BAKED)"
           echo "wanted=$WANTED" >> "$GITHUB_OUTPUT"
   build:
     if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' || inputs.action == 'install' }}
@@ -295,11 +292,11 @@ jobs:
 
   # ── install on the standby (the rehearsal) ────────────────────────────
   install:
-    needs: [resolve, build, provision, image-stale, bake]
+    needs: [resolve, build, provision, image-stale]
     # A rollout rebuilds the standby first (provision) and then installs this
     # artifact onto it; `action=install` re-installs onto the existing box
     # without a rebuild (a retry after a failed install, or a hotfix probe).
-    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' && (inputs.action == 'install' || needs.provision.result == 'success') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' && (inputs.action == 'install' || needs.provision.result == 'success') }}
     runs-on: ubuntu-latest
     env:
       BOX_USER: ${{ secrets.BOX_USER }}
@@ -358,8 +355,8 @@ jobs:
 
   # ── cutover (THE human gate) ──────────────────────────────────────────
   cutover:
-    needs: [resolve, image-stale, bake]
-    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    needs: [resolve, image-stale]
+    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -510,8 +507,8 @@ jobs:
   # old copies. Recovery means the writes since that object are gone; that is the
   # trade, and the approval below is where it is accepted.
   recover:
-    needs: [resolve, image-stale, bake]
-    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    needs: [resolve, image-stale]
+    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -668,11 +665,11 @@ jobs:
 
   # ── rebuild a box from the artifact (replace-not-repair) ──────────────
   provision:
-    needs: [resolve, build, image-stale, bake]
+    needs: [resolve, build, image-stale]
     # the chain re-bakes on drift: a bake that ran must have succeeded
     # Part of every rollout (a fresh box per rollout — replace-not-repair), and
     # standalone for a box that needs rebuilding between rollouts.
-    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && needs.image-stale.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
+    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && needs.image-stale.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') }}
     runs-on: ubuntu-latest
     outputs:
       # The rebuilt instance's address is NEW (ephemeral) — everything downstream
@@ -763,10 +760,10 @@ jobs:
   # image is the OS half of a fresh box, so a stale one is a stale box. The boxes
   # do not change here — they pick the new image up when they are next rebuilt.
   bake:
-    needs: [image-stale]
-    # Manual (action=bake) or automatic (the chain detected drift) — never a
-    # human prompt inside a release.
-    if: ${{ inputs.action == 'bake' || (needs.image-stale.result == 'success' && needs.image-stale.outputs.drifted == 'true') }}
+    # Run standalone (action=bake) or by the bake image pipeline — NEVER
+    # inside a release chain: a builder creation must not sit on the rollout's
+    # critical path (2026-09-30: zone capacity blocked two rollouts).
+    if: ${{ inputs.action == 'bake' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
