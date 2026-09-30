@@ -21,12 +21,16 @@ set -eu
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 SHA256_HEX_CHARS=64   # the artifact's key IS its sha256, in hex
 
-# --- the rollout install: install-artifact.sh <gs://bucket/<sha256>.tar.gz> ---
-# The OBJECT is the only argument, and it must be a content-addressed artifact
-# name — the script re-verifies the sha256 against the key it fetches.
+# --- the rollout install: install-artifact.sh [--tooling-only] <gs://...tar.gz>
+# The OBJECT is the content-addressed artifact name — the script re-verifies
+# the sha256 against the key it fetches. --tooling-only (owner-side refresh,
+# no app work) is the one allowed prefix.
 case "$CMD" in
-  "sudo /opt/houses/install-artifact.sh "*)
-    OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh "}
+  "sudo /opt/houses/install-artifact.sh "*|"sudo /opt/houses/install-artifact.sh --tooling-only "*)
+    case "$CMD" in
+      "sudo /opt/houses/install-artifact.sh --tooling-only "*) OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh --tooling-only "} ;;
+      *) OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh "} ;;
+    esac
     case "$OBJECT" in
       gs://*/*.tar.gz)
         rest=${OBJECT#gs://}
@@ -95,6 +99,37 @@ case "$CMD" in
     esac
     ;;
 esac
+
+# --- switch.sh --smoke-relay <ip|off> (owner relays houses-smoke to the
+# --- standby; off retires it post-flip — smoke must never mirror production)
+if [ "$CMD" = "sudo /opt/houses/switch.sh --smoke-relay off" ]; then
+  exec sudo /opt/houses/switch.sh --smoke-relay off
+fi
+case "$CMD" in
+  "sudo /opt/houses/switch.sh --smoke-relay "*)
+    IP=${CMD#"sudo /opt/houses/switch.sh --smoke-relay "}
+    case "$IP" in
+      *[!0-9.]*|"") echo "deploy-allowlist: bad relay IP" >&2; exit 1 ;;
+    esac
+    DOTS=$(printf '%s' "$IP" | tr -cd '.' | wc -c)
+    [ "$DOTS" = 3 ] || { echo "deploy-allowlist: bad relay IP (need 4 octets)" >&2; exit 1; }
+    case "$IP" in
+      *.*.*.*.*|*..*|.*|*.) echo "deploy-allowlist: bad relay IP" >&2; exit 1 ;;
+    esac
+    exec sudo /opt/houses/switch.sh --smoke-relay "$IP"
+    ;;
+esac
+
+# --- switch.sh --public-url — the two role URLs ONLY (never arbitrary) ----
+if [ "$CMD" = "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blueumbrella.net" ] || \
+   [ "$CMD" = "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net" ]; then
+  exec sudo /opt/houses/switch.sh --public-url "${CMD##*--public-url }"
+fi
+
+# --- switch.sh --serve (start the standby app for the review surface) -----
+if [ "$CMD" = "sudo /opt/houses/switch.sh --serve" ]; then
+  exec sudo /opt/houses/switch.sh --serve
+fi
 
 # --- switch.sh --diagnose (read-only state dump) --------------------------
 if [ "$CMD" = "sudo /opt/houses/switch.sh --diagnose" ]; then
