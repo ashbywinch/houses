@@ -174,29 +174,12 @@ if [ "$FREE_MB" -lt 450 ]; then
 fi
 mark "memory pre-flight ok (${FREE_MB} MiB free)"
 
-mark "starting the app for the smoke"
-systemctl restart houses.service
-# A fresh box's FIRST start is cold: restored DB (100+ MB) + the property-DAG
-# load, measured ~5.5 min on an e2-micro (2026-09-30). 10 min window, still
-# loud: a box that is not healthy by then is genuinely stuck.
-for i in $(seq 1 300); do
-  curl -fsS --max-time 5 "localhost:$PORT/health" >/dev/null 2>&1 && break
-  sleep 2
-done
-curl -fsS --max-time 30 "localhost:$PORT/health" >/dev/null 2>&1 || {
-  mark "FAILED: the app did not become healthy on :$PORT"
-  journalctl -u houses.service --since="5 minutes ago" --no-pager 2>/dev/null | tail -40 || true
-  exit 1
-}
-mark "app healthy on :$PORT"
-
-# The authenticated smoke: mint a superuser cookie with the app's own code, so
-# /api/* (auth-gated) actually executes. The mint runs BEFORE the app starts
-# (moved after 2026-09-30): minting during the smoke imported the full app
-# tree WHILE the fresh process ground through its property-DAG load and
-# failed under the memory pressure of the same window — idle, it succeeds
-# (593 MiB free passed the gate; no OOM in dmesg, so it was a pure
-# pressure-window failure). The cookie does not need the app running.
+# The authenticated smoke needs a superuser cookie minted with the app's own
+# code. The mint runs while the app is STOPPED, on idle memory: minting during
+# the smoke would import the full app tree WHILE the fresh process ground
+# through its property-DAG startup load and fail in that pressure window —
+# idle it succeeds (verified as root and non-root; the memory gate above has
+# just confirmed headroom). The cookie does not need the app running.
 SECRET=$(grep '^HOUSES_SESSION_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)
 [ -n "$SECRET" ] || { mark "FAILED: HOUSES_SESSION_SECRET missing from $ENV_FILE"; exit 1; }
 # The cookie is CAPTURED, never echoed: the print goes into the substitution
@@ -215,6 +198,23 @@ print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", 
   exit 1
 }
 rm -f "$MINT_ERR"
+mark "smoke cookie minted (not echoed)"
+
+mark "starting the app for the smoke"
+systemctl restart houses.service
+# A fresh box's FIRST start is cold: restored DB (100+ MB) + the property-DAG
+# load, measured ~5.5 min on an e2-micro (2026-09-30). 10 min window, still
+# loud: a box that is not healthy by then is genuinely stuck.
+for i in $(seq 1 300); do
+  curl -fsS --max-time 5 "localhost:$PORT/health" >/dev/null 2>&1 && break
+  sleep 2
+done
+curl -fsS --max-time 30 "localhost:$PORT/health" >/dev/null 2>&1 || {
+  mark "FAILED: the app did not become healthy on :$PORT"
+  journalctl -u houses.service --since="5 minutes ago" --no-pager 2>/dev/null | tail -40 || true
+  exit 1
+}
+mark "app healthy on :$PORT"
 
 mark "smoke: /health"
 curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"' || {
