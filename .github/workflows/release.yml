@@ -812,6 +812,7 @@ jobs:
           # micro capacity of the moment (2026-09-30: us-west1-a refused the
           # builder twice on capacity). Retried with backoff for the same
           # transient-capacity class.
+          ok=0
           for attempt in 1 2 3; do
             if terraform apply -auto-approve -input=false \
               -var "project=$PROJECT" \
@@ -823,12 +824,15 @@ jobs:
               -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
               -target=google_compute_instance.base_builder \
               -replace=google_compute_instance.base_builder; then
+              ok=1
               break
             fi
             echo "bake apply attempt $attempt failed (capacity?) — retrying in 120s"
             sleep 120
           done
-          # the loop's last apply exit code decides (set -e catches a total fail)
+          # the loop exit status is the LAST body command's (sleep = 0) — never
+          # rely on set -e: the explicit flag is the truth after retries
+          [ "$ok" = 1 ] || { echo "::error::bake apply failed after 3 attempts"; exit 1; }
         env:
           DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
         timeout-minutes: 30
