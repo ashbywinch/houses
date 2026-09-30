@@ -99,6 +99,35 @@ case "$CMD" in
     ;;
 esac
 
+# --- switch.sh --smoke-relay <ip|off> (owner relays houses-smoke to the
+# --- standby; off retires it post-flip — smoke must never mirror production)
+if [ "$CMD" = "sudo /opt/houses/switch.sh --smoke-relay off" ]; then
+  exec sudo /opt/houses/switch.sh --smoke-relay off
+fi
+case "$CMD" in
+  "sudo /opt/houses/switch.sh --smoke-relay "*)
+    IP=${CMD#"sudo /opt/houses/switch.sh --smoke-relay "}
+    case "$IP" in
+      *[!0-9.]*|"") echo "deploy-allowlist: bad relay IP" >&2; exit 1 ;;
+    esac
+    case "$IP" in
+      *.*.*.*.*|*..*|.*|*.) echo "deploy-allowlist: bad relay IP" >&2; exit 1 ;;
+    esac
+    exec sudo /opt/houses/switch.sh --smoke-relay "$IP"
+    ;;
+esac
+
+# --- switch.sh --public-url — the two role URLs ONLY (never arbitrary) ----
+if [ "$CMD" = "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blueumbrella.net" ] || \
+   [ "$CMD" = "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net" ]; then
+  exec sudo /opt/houses/switch.sh --public-url "${CMD##*--public-url }"
+fi
+
+# --- switch.sh --serve (start the standby app for the review surface) -----
+if [ "$CMD" = "sudo /opt/houses/switch.sh --serve" ]; then
+  exec sudo /opt/houses/switch.sh --serve
+fi
+
 # --- switch.sh --diagnose (read-only state dump) --------------------------
 if [ "$CMD" = "sudo /opt/houses/switch.sh --diagnose" ]; then
   exec sudo /opt/houses/switch.sh --diagnose
