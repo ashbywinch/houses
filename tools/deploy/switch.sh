@@ -87,6 +87,10 @@ fi
 LOG="$LOG_DIR/switch-${TS}-${ACTION##--}.log"
 mark() { echo "== $(date -u +%FT%TZ) $*"; logger -t houses-rollout "switch $*" 2>/dev/null || true; }
 
+# Same rule as install-artifact.sh: no silent set -e death — the failing
+# command is marked before exit.
+trap 'rc=$?; mark "FAILED at: $BASH_COMMAND (rc=$rc)"; exit $rc' ERR
+
 [ -x "$PY" ] || { mark "FAILED: no venv at $PY — install the artifact first"; exit 1; }
 [ "$(id -u)" = 0 ] || { mark "FAILED: run as root"; exit 1; }
 # --snapshot's STDOUT is the .backup bytes and NOTHING else (CI writes them

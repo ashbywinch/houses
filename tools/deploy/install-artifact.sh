@@ -38,6 +38,12 @@ LOG="$LOG_DIR/install-artifact-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 mark() { echo "== $(date -u +%FT%TZ) $*"; logger -t houses-rollout "install-artifact $*" 2>/dev/null || true; }
 
+# NEVER a silent death: any command that would trigger set -e logs the exact
+# failing command line + rc to the box log AND the transcript before exiting.
+# Without this, a pipe/grep or an unfenced curl inside the smoke died without a
+# mark and the failure was undiscoverable (2026-09-30 forensics).
+trap 'rc=$?; mark "FAILED at: $BASH_COMMAND (rc=$rc)"; exit $rc' ERR
+
 [ "$(id -u)" = 0 ] || { echo "install-artifact: run as root" >&2; exit 1; }
 
 # The object name IS the content hash. Refuse anything that is not exactly one
@@ -201,10 +207,13 @@ print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", 
   exit 1
 }
 
-echo "== smoke: /health"
-curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"'
+mark "smoke: /health"
+curl -fsS --max-time 180 "localhost:$PORT/health" | grep -qE '"status": ?"ok"' || {
+  mark "FAILED: smoke /health did not report status ok"
+  exit 1
+}
 
-echo "== smoke: /api/properties/all (>= 1 house record)"
+mark "smoke: /api/properties/all (>= 1 house record)"
 ALL=$(curl -fsS --max-time 1800 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/properties/all") || {
   mark "FAILED: smoke /api/properties/all did not answer"
   exit 1
