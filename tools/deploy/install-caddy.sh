@@ -78,7 +78,12 @@ systemctl enable --now caddy
 # must fail the install, not the settle window after traffic has moved.
 systemctl restart caddy
 for attempt in $(seq 1 30); do
-  if curl -fsS -k --max-time 5 --resolve "$MAIN:443:127.0.0.1" "https://$MAIN/health" >/dev/null 2>&1; then
+  # ANY HTTP answer (200, 404, 502...) proves Caddy terminates TLS and the
+  # site block loads. NOT -f and NOT /health-specific: at bootstrap the app is
+  # deliberately STOPPED (the install job + human gate own starting it), so
+  # /health is a 502 — which is precisely the "caddy is up" signal, not a
+  # failure. curl exits 0 for any HTTP status; nonzero means no TLS at all.
+  if curl -sk --max-time 5 --resolve "$MAIN:443:127.0.0.1" "https://$MAIN/" >/dev/null 2>&1; then
     echo "caddy installed and serving TLS: https://$MAIN -> 127.0.0.1:8765"
     exit 0
   fi
