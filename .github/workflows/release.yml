@@ -145,7 +145,7 @@ jobs:
 
   # ── the artifact ──────────────────────────────────────────────────────
   build:
-    if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' }}
+    if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' || inputs.action == 'install' }}
     runs-on: ubuntu-latest
     outputs:
       artifact: ${{ steps.pack.outputs.artifact }}
