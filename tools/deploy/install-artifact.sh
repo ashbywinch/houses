@@ -22,6 +22,15 @@ set -euo pipefail
 
 ROOT="${HOUSES_ROOT:-/opt/houses}"
 APP="$ROOT/app"
+
+# A box that only needs to be CURRENT (never installed — e.g. the OWNER, whose
+# only install is at bootstrap) can refresh its tooling without any app work.
+# The deploy key is allowlisted for install-artifact.sh on every box, so the
+# release keeps every box's /opt/houses scripts current before using a verb
+# that a stale copy would not know (2026-09-30: the smoke relay died on the
+# owner's pre-verb switch.sh).
+TOOLING_ONLY=0
+[ "${1:-}" = "--tooling-only" ] && { TOOLING_ONLY=1; shift; }
 # This script runs from wherever the caller happened to be (the workflow SSH
 # lands in the operator home): the venv python resolves top-level imports
 # (``scripts``) from the CWD — ``cd`` to the app root or every smoke import
@@ -145,8 +154,9 @@ bash "$APP/tools/deploy/box-setup.sh"
 # skip on sha match, so the pass is cheap.
 if [ -f /opt/houses/install-artifact.sh ] && ! cmp -s "$0" /opt/houses/install-artifact.sh; then
   mark "re-executing the refreshed install-artifact.sh (content changed)"
-  exec /opt/houses/install-artifact.sh "$OBJECT"
+  exec /opt/houses/install-artifact.sh --tooling-only "$OBJECT"
 fi
+[ "$TOOLING_ONLY" = 1 ] && { mark "tooling refreshed only — no app work (owner role)"; exit 0; }
 
 # ── 6. migration rehearsal: apply + check every migration ──────────────
 # The runner's summary line is the gate: exit 0 is not enough, and the runner
