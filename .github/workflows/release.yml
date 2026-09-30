@@ -804,15 +804,37 @@ jobs:
           # -target: the bake owns only the builder (created from the STOCK
           # image). On an empty project a full apply would try to create the
           # boxes from houses-base before this very bake has produced it.
-          terraform apply -auto-approve -input=false \
-            -var "project=$PROJECT" \
-            -var "region=$REGION" \
-            -var "zone=$ZONE" \
-            -var "operator_ssh_public_key_path=/tmp/operator.pub" \
-            -var "deploy_pubkey=$DEPLOY_PUBKEY" \
-            -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
-            -target=google_compute_instance.base_builder \
-            -replace=google_compute_instance.base_builder
+          # The builder uses e2-small (not the box's e2-micro): the bake is
+          # the one instance creation that must not depend on the free-tier
+          # micro capacity of the moment (2026-09-30: us-west1-a refused the
+          # builder twice on capacity). Retried with backoff for the same
+          # transient-capacity class.
+          ok=0
+          for attempt in 1 2 3; do
+            if OUT=$(terraform apply -auto-approve -input=false \
+              -var "project=$PROJECT" \
+              -var "region=$REGION" \
+              -var "zone=$ZONE" \
+              -var "machine_type=e2-small" \
+              -var "operator_ssh_public_key_path=/tmp/operator.pub" \
+              -var "deploy_pubkey=$DEPLOY_PUBKEY" \
+              -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
+              -target=google_compute_instance.base_builder \
+              -replace=google_compute_instance.base_builder 2>&1); then
+              ok=1
+              break
+            fi
+            if ! printf '%s\n' "$OUT" | grep -qE "does not have enough resources|capacity"; then
+              printf '%s\n' "$OUT"
+              echo "::error::bake apply failed with a NON-capacity error — not retrying"
+              exit 1
+            fi
+            echo "bake apply attempt $attempt failed on zone capacity — retrying in 120s"
+            [ "$attempt" -lt 3 ] && sleep 120
+          done
+          # the loop exit status is the LAST body command's (sleep = 0) — never
+          # rely on set -e: the explicit flag is the truth after retries
+          [ "$ok" = 1 ] || { echo "::error::bake apply failed after 3 tries (capacity)"; exit 1; }
         env:
           DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
         timeout-minutes: 30
