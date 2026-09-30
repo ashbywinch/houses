@@ -304,13 +304,16 @@ if [ "$ACTION" = "--smoke-relay" ]; then
     mark "smoke relay removed"
   else
     # idempotent block: replace any existing relay target inside the block
-    BLOCK='# The human review surface of the rollout: houses-smoke ALWAYS shows the
+    BLOCK=$(cat <<EOF
+# The human review surface of the rollout: houses-smoke ALWAYS shows the
 # STANDBY app (the fresh side), never the owner. The release process writes
 # this relay after every standby rebuild.
 houses-smoke.blueumbrella.net {
     tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
-    reverse_proxy http://'$TARGET_IP':8765
-}'
+    reverse_proxy http://${TARGET_IP}:8765
+}
+EOF
+)
     # uniform block: drop any existing relay, append the fresh one (idempotent)
     sed -i '/# The human review surface/,/^}/d' "$CADDYFILE"
     printf '%s\n' "$BLOCK" >> "$CADDYFILE"

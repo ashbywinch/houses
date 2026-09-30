@@ -145,32 +145,44 @@ jobs:
 
   # ── the artifact ──────────────────────────────────────────────────────
   image-stale:
-    if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' }}
+    # Runs for every chain that consumes the image; emits drifted=true when
+    # the baked image no longer matches main's bake source — the chain then
+    # RE-BAKES in the same run (no human), because a stale image is a stale box.
+    if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'cutover' || inputs.action == 'recover' }}
     runs-on: ubuntu-latest
+    outputs:
+      drifted: ${{ steps.check.outputs.drifted }}
+      wanted: ${{ steps.check.outputs.wanted }}
     env:
       GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || 'main' }}
-      - name: Confirm the baked image matches main's bake source
+      - name: Compare the image's bake_ref to main's bake source
+        id: check
         run: |
           set -euo pipefail
           printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          chmod 600 /tmp/sa.json
           gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
           rm -f /tmp/sa.json
           PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
-          WANTED=$(git rev-parse :tools/deploy/base-image.sh :tools/deploy/box-setup.sh | tr -d '\n' | sha256sum | cut -d' ' -f1)
-          BAKED=$(gcloud compute images describe "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" --format='value(description)' | grep -o 'bake_ref=[0-9a-f]\{64\}' | cut -d= -f2 || true)
+          WANTED=$(bash tools/deploy/bake-ref.sh)
+          BAKED=$(gcloud compute images describe "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" \
+                    --format='value(description)' 2>/dev/null | grep -o 'bake_ref=[0-9a-f]\{64\}' | cut -d= -f2 || true)
+          DRIFTED=false
           if [ -z "$BAKED" ]; then
-            echo "::error::the image has no bake_ref — it predates the drift mechanism; run action=bake"
-            exit 1
+            echo "::warning::image has no bake_ref (pre-drift bake) — the chain will re-bake it"
+            DRIFTED=true
+          elif [ "$BAKED" != "$WANTED" ]; then
+            echo "::warning::image source drifted (image=$BAKED main=$WANTED) — the chain will re-bake it"
+            DRIFTED=true
+          else
+            echo "image source matches main ($BAKED)"
           fi
-          if [ "$BAKED" != "$WANTED" ]; then
-            echo "::error::image source drifted (image bake_ref=$BAKED, main wants $WANTED) — run action=bake before releasing"
-            exit 1
-          fi
-          echo "image source matches main ($BAKED)"
+          echo "drifted=$DRIFTED" >> "$GITHUB_OUTPUT"
+          echo "wanted=$WANTED" >> "$GITHUB_OUTPUT"
   build:
     if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' || inputs.action == 'install' }}
     runs-on: ubuntu-latest
@@ -283,11 +295,11 @@ jobs:
 
   # ── install on the standby (the rehearsal) ────────────────────────────
   install:
-    needs: [resolve, build, provision, image-stale]
+    needs: [resolve, build, provision, image-stale, bake]
     # A rollout rebuilds the standby first (provision) and then installs this
     # artifact onto it; `action=install` re-installs onto the existing box
     # without a rebuild (a retry after a failed install, or a hotfix probe).
-    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.consistent == 'true' && (inputs.action == 'install' || needs.provision.result == 'success') }}
+    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.consistent == 'true' && (inputs.action == 'install' || needs.provision.result == 'success') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
       BOX_USER: ${{ secrets.BOX_USER }}
@@ -346,8 +358,8 @@ jobs:
 
   # ── cutover (THE human gate) ──────────────────────────────────────────
   cutover:
-    needs: [resolve, image-stale]
-    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' }}
+    needs: [resolve, image-stale, bake]
+    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -498,8 +510,8 @@ jobs:
   # old copies. Recovery means the writes since that object are gone; that is the
   # trade, and the approval below is where it is accepted.
   recover:
-    needs: [resolve, image-stale]
-    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' }}
+    needs: [resolve, image-stale, bake]
+    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -656,10 +668,11 @@ jobs:
 
   # ── rebuild a box from the artifact (replace-not-repair) ──────────────
   provision:
-    needs: [resolve, build, image-stale]
+    needs: [resolve, build, image-stale, bake]
+    # the chain re-bakes on drift: a bake that ran must have succeeded
     # Part of every rollout (a fresh box per rollout — replace-not-repair), and
     # standalone for a box that needs rebuilding between rollouts.
-    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') }}
+    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     runs-on: ubuntu-latest
     outputs:
       # The rebuilt instance's address is NEW (ephemeral) — everything downstream
@@ -750,7 +763,10 @@ jobs:
   # image is the OS half of a fresh box, so a stale one is a stale box. The boxes
   # do not change here — they pick the new image up when they are next rebuilt.
   bake:
-    if: ${{ inputs.action == 'bake' }}
+    needs: [image-stale]
+    # Manual (action=bake) or automatic (the chain detected drift) — never a
+    # human prompt inside a release.
+    if: ${{ inputs.action == 'bake' || needs.image-stale.outputs.drifted == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -759,14 +775,15 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8
+
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
       - name: Authenticate gcloud
-      - id: ref
-        name: Record the bake source ref (the baked files' shas)
-        run: |
-          set -euo pipefail
-          BAKE_REF=$(git rev-parse :tools/deploy/base-image.sh :tools/deploy/box-setup.sh | tr -d '\n' | sha256sum | cut -d' ' -f1)
-          echo "bake_ref=$BAKE_REF" >> "$GITHUB_OUTPUT"
-          echo "bake_ref=$BAKE_REF (image will reject releases baked from a different source)"
         run: |
           set -euo pipefail
           printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
@@ -780,6 +797,13 @@ jobs:
         env:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
           OPERATOR_PUBKEY: ${{ secrets.OPERATOR_PUBKEY }}
+      - id: ref
+        name: Record the bake source ref (the baked files' shas)
+        run: |
+          set -euo pipefail
+          BAKE_REF=$(bash tools/deploy/bake-ref.sh)
+          echo "bake_ref=$BAKE_REF" >> "$GITHUB_OUTPUT"
+          echo "bake_ref=$BAKE_REF (the drift check compares every chain against this)"
       - name: terraform apply -replace the builder (the bake runs on first boot)
         run: |
           set -euo pipefail

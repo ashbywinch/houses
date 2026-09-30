@@ -61,6 +61,14 @@ STUB_SYSTEMCTL = """#!/bin/sh
 printf 'systemctl %s\\n' "$*" >> "${SYSTEMCTL_LOG}"
 exit 0
 """
+STUB_SWITCH = """#!/bin/sh
+# The one writer of the role URL: --public-url appends to the env file the
+# installer delegates to, exactly like the real switch.sh.
+case "$1" in
+  --public-url) printf 'HOUSES_PUBLIC_URL=%s\n' "$2" >> "${HOUSES_ENV_FILE:-/etc/houses.env}" ;;
+esac
+exit 0
+"""
 STUB_ID = """#!/bin/sh
 # The installer must think it runs as root (the box's deploy key does).
 case "$1" in -u) printf '0\\n' ;; *) exit 0 ;; esac
@@ -81,6 +89,12 @@ def _box(tmp_path: Path) -> Path:
     (root / "logs" / "releases").mkdir(parents=True)
     (root / "app" / "serve_prod.py").write_text("")
     (root / "app" / "tools" / "deploy" / "box-setup.sh").write_text("exit 0\n")
+    # The one writer of the role URL: switch.sh --public-url (the installer
+    # delegates to it — maintain the single-writer rule in the sandbox too).
+    (root / "switch.sh").write_text(
+        STUB_SWITCH
+    )
+    (root / "switch.sh").chmod(EXECUTABLE)
     (root / "app" / "tools" / "deploy" / "run_migrations.py").write_text("")
     (root / "app" / "tools" / "deploy" / "migrations.list").write_text(
         "scripts/backfill_person_ids.py scripts/backfill_person_ids.check.py\n"

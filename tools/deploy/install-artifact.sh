@@ -188,11 +188,9 @@ mark "memory pre-flight ok (${FREE_MB} MiB free)"
 
 # The standby's role URL is the smoke hostname (the review surface). The
 # default from the seed env is production; the flip re-sets the new owner.
-if grep -q '^HOUSES_PUBLIC_URL=' "$ENV_FILE"; then
-  sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net#' "$ENV_FILE"
-else
-  printf '%s\n' 'HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net' >> "$ENV_FILE"
-fi
+# ONE writer of the role URL: switch.sh --public-url owns the env-file logic
+# (same sed/append, one place) — install just declares the STANDBY's role.
+bash "$ROOT/switch.sh" --public-url https://houses-smoke.blueumbrella.net
 mark "standby public URL: houses-smoke.blueumbrella.net"
 
 # The authenticated smoke needs a superuser cookie minted with the app's own
