@@ -807,15 +807,28 @@ jobs:
           # -target: the bake owns only the builder (created from the STOCK
           # image). On an empty project a full apply would try to create the
           # boxes from houses-base before this very bake has produced it.
-          terraform apply -auto-approve -input=false \
-            -var "project=$PROJECT" \
-            -var "region=$REGION" \
-            -var "zone=$ZONE" \
-            -var "operator_ssh_public_key_path=/tmp/operator.pub" \
-            -var "deploy_pubkey=$DEPLOY_PUBKEY" \
-            -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
-            -target=google_compute_instance.base_builder \
-            -replace=google_compute_instance.base_builder
+          # The builder uses e2-small (not the box's e2-micro): the bake is
+          # the one instance creation that must not depend on the free-tier
+          # micro capacity of the moment (2026-09-30: us-west1-a refused the
+          # builder twice on capacity). Retried with backoff for the same
+          # transient-capacity class.
+          for attempt in 1 2 3; do
+            if terraform apply -auto-approve -input=false \
+              -var "project=$PROJECT" \
+              -var "region=$REGION" \
+              -var "zone=$ZONE" \
+              -var "machine_type=e2-small" \
+              -var "operator_ssh_public_key_path=/tmp/operator.pub" \
+              -var "deploy_pubkey=$DEPLOY_PUBKEY" \
+              -var "provision_ref=${{ github.event_name == 'push' && github.ref_name || inputs.ref || 'main' }}" \
+              -target=google_compute_instance.base_builder \
+              -replace=google_compute_instance.base_builder; then
+              break
+            fi
+            echo "bake apply attempt $attempt failed (capacity?) — retrying in 120s"
+            sleep 120
+          done
+          # the loop's last apply exit code decides (set -e catches a total fail)
         env:
           DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
         timeout-minutes: 30
