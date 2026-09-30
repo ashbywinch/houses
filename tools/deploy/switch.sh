@@ -12,6 +12,10 @@
 #                          # snapshot — for a recovery when the owner's data is
 #                          # not trustworthy and must not be carried forward
 #   switch.sh --diagnose   # read-only box state dump (artifact, seed, restored)
+#   switch.sh --smoke-relay <ip> | off   # THIS box's Caddy relays houses-smoke
+#                                      # to the STANDBY app (owner box; off = remove)
+#   switch.sh --public-url <url>       # set HOUSES_PUBLIC_URL for THIS box (role urls)
+#   switch.sh --serve                  # start the app for the review surface (standby)
 #
 # The FLIP is not here. Traffic moves by pointing the L4 forwarding rules at this
 # instance's target (`gcloud … forwarding-rules set-target`, run by CI with its
@@ -288,5 +292,62 @@ if [ "$ACTION" = "--restore" ]; then
   _finish_restore "$STAGED" "" "$SOURCE"
 fi
 
-echo "usage: switch.sh [--snapshot | --unfreeze | --rebase [<rows>] | --restore <gs://…> | --diagnose]" >&2
+# ── the smoke review surface (process-built; owner relays the STANDBY's app) ──
+if [ "$ACTION" = "--smoke-relay" ]; then
+  TARGET_IP="${2:-}"
+  CADDYFILE=/etc/caddy/Caddyfile
+  [ -f "$CADDYFILE" ] || { mark "FAILED: no Caddyfile — --smoke-relay is only valid on a Caddy host"; exit 1; }
+  if [ "$TARGET_IP" = "off" ]; then
+    # remove the smoke block entirely (post-flip: the standby must never mirror
+    # production, and its app is stopped until the next rollout builds it)
+    sudo sed -i '/# The human review surface/,/^}/d' "$CADDYFILE" 2>/dev/null || sed -i '/# The human review surface/,/^}/d' "$CADDYFILE"
+    mark "smoke relay removed"
+  else
+    # idempotent block: replace any existing relay target inside the block
+    BLOCK='# The human review surface of the rollout: houses-smoke ALWAYS shows the
+# STANDBY app (the fresh side), never the owner. The release process writes
+# this relay after every standby rebuild.
+houses-smoke.blueumbrella.net {
+    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+    reverse_proxy http://'$TARGET_IP':8765
+}'
+    # uniform block: drop any existing relay, append the fresh one (idempotent)
+    sed -i '/# The human review surface/,/^}/d' "$CADDYFILE"
+    printf '%s\n' "$BLOCK" >> "$CADDYFILE"
+  fi
+  systemctl reload caddy
+  sudo rm -f /etc/caddy/Caddyfile.bak-*
+  mark "smoke relay set: houses-smoke -> http://$TARGET_IP:8765"
+  exit 0
+fi
+
+if [ "$ACTION" = "--public-url" ]; then
+  URL="${2:-}"
+  [ -n "$URL" ] || { mark "FAILED: --public-url needs a URL"; exit 1; }
+  ENV_FILE="${HOUSES_ENV_FILE:-/etc/houses.env}"
+  if grep -q '^HOUSES_PUBLIC_URL=' "$ENV_FILE"; then
+    sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL='"$URL"'#' "$ENV_FILE"
+  else
+    printf 'HOUSES_PUBLIC_URL=%s
+' "$URL" >> "$ENV_FILE"
+  fi
+  mark "public_url set: $URL (takes effect at the next app start)"
+  exit 0
+fi
+
+if [ "$ACTION" = "--serve" ]; then
+  systemctl start houses.service 2>/dev/null || { mark "FAILED: could not start houses.service"; exit 1; }
+  for i in $(seq 1 300); do
+    curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && break
+    sleep 2
+  done
+  curl -fsS --max-time 30 localhost:8765/health >/dev/null 2>&1 || {
+    mark "FAILED: the app did not become healthy after --serve"
+    exit 1
+  }
+  mark "SERVING: app healthy on 127.0.0.1:8765 — this box is the review surface until approved"
+  exit 0
+fi
+
+echo "usage: switch.sh [--snapshot | --unfreeze | --rebase [<rows>] | --restore <gs://…> | --diagnose | --smoke-relay <ip|off> | --public-url <url> | --serve]" >&2
 exit 2

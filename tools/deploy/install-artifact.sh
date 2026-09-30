@@ -186,6 +186,17 @@ if [ "$FREE_MB" -lt 450 ]; then
 fi
 mark "memory pre-flight ok (${FREE_MB} MiB free)"
 
+# The standby's role URL is the smoke hostname (the review surface). The
+# default from the seed env is production; the flip re-sets the new owner.
+SEF=/etc/houses.env
+if grep -q '^HOUSES_PUBLIC_URL=' "$SEF"; then
+  sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net#' "$SEF"
+else
+  printf '%s
+' 'HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net' >> "$SEF"
+fi
+mark "standby public URL: houses-smoke.blueumbrella.net"
+
 # The authenticated smoke needs a superuser cookie minted with the app's own
 # code. The mint runs while the app is STOPPED, on idle memory: minting during
 # the smoke would import the full app tree WHILE the fresh process ground
@@ -270,7 +281,7 @@ if [ "$PENDING" -gt 0 ]; then
 fi
 
 # ── 8. the standby waits, stopped ──────────────────────────────────────
-mark "stopping the app — the standby waits stopped until the cutover"
-systemctl stop houses.service
-mark "INSTALL READY: artifact $ACTUAL_SHA on $(hostname) — smoke verified at http://localhost:$PORT"
-mark "next: a human reads this transcript and approves the cutover (snapshot -> rebase -> start -> set-target -> settle)"
+# The standby IS the review surface: it stays RUNNING at houses-smoke until the
+# human approves the flip (the process wrote its smoke URL before the smoke).
+mark "REVIEW READY: artifact $ACTUAL_SHA on $(hostname) — smoke verified at http://localhost:$PORT"
+mark "app is SERVING at houses-smoke.blueumbrella.net — the human reviews it, then approves the flip"

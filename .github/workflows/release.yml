@@ -299,6 +299,23 @@ jobs:
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --diagnose" \
             || echo "standby unreachable — check the console"
         timeout-minutes: 3
+      - name: Build the smoke review surface (owner Caddy relays the standby)
+        # The human review surface of the rollout: houses-smoke must show the
+        # fresh STANDBY, wired by the process — never by hand. The deploy key
+        # is allowlisted for switch.sh on every box.
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          SB_INT=$(gcloud compute instances describe "${{ needs.resolve.outputs.standby }}" \
+            --zone "$ZONE" --project "$PROJECT" --format='value(networkInterfaces[0].networkIP)')
+          OWNER_IP="${{ needs.resolve.outputs.owner_ip }}"
+          echo "smoke relay: $OWNER_IP -> $SB_INT"
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay $SB_INT"
+        timeout-minutes: 5
 
   # ── cutover (THE human gate) ──────────────────────────────────────────
   cutover:
@@ -487,9 +504,12 @@ jobs:
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
+          # The recovered box becomes the OWNER: its role URL is production.
+          # The restore starts the app, which reads the env — so the URL is
+          # written first (same ssh session, one connection).
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --restore $SOURCE"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net && sudo /opt/houses/switch.sh --restore $SOURCE"
         timeout-minutes: 45
       - name: Flip the L4 rules to the recovered box
         run: |
@@ -525,6 +545,19 @@ jobs:
             sleep 15
           done
           echo "RECOVERY VERIFIED: $polls healthy reads over 5 minutes"
+      - name: Retire the smoke relay on the former owner
+        # The former owner is the new STANDDBY: its app is stopped and its
+        # Caddy relay pointed at the (now-production) recovered box. Remove
+        # it — houses-smoke must never mirror production. The next rollout's
+        # install rebuilds the relay on the new owner towards the new standby.
+        if: success()
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@${{ needs.resolve.outputs.owner_ip }}" "sudo /opt/houses/switch.sh --smoke-relay off"
+        timeout-minutes: 5
       - name: Record the outcome
         if: always()
         run: |
