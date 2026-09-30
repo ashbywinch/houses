@@ -154,7 +154,9 @@ bash "$APP/tools/deploy/box-setup.sh"
 # skip on sha match, so the pass is cheap.
 if [ -f /opt/houses/install-artifact.sh ] && ! cmp -s "$0" /opt/houses/install-artifact.sh; then
   mark "re-executing the refreshed install-artifact.sh (content changed)"
-  exec /opt/houses/install-artifact.sh --tooling-only "$OBJECT"
+  # preserve the ORIGINAL mode: a full install must stay a full install after
+  # the re-exec; only a tooling-only invocation re-execs tooling-only.
+  exec /opt/houses/install-artifact.sh ${TOOLING_ONLY:+--tooling-only} "$OBJECT"
 fi
 [ "$TOOLING_ONLY" = 1 ] && { mark "tooling refreshed only — no app work (owner role)"; exit 0; }
 
