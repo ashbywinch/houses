@@ -111,6 +111,12 @@ case "$CMD" in
     case "$IP" in
       *[!0-9.]*|"") echo "deploy-allowlist: bad relay IP" >&2; exit 1 ;;
     esac
+    # the relay may only target the boxes' own VPC subnet (10.0.0.0/24) —
+    # never an arbitrary internal address a compromised deploy key could pick
+    case "$IP" in
+      10.0.0.*) : ;;
+      *) echo "deploy-allowlist: relay IP outside the VPC subnet" >&2; exit 1 ;;
+    esac
     DOTS=$(printf '%s' "$IP" | tr -cd '.' | wc -c)
     [ "$DOTS" = 3 ] || { echo "deploy-allowlist: bad relay IP (need 4 octets)" >&2; exit 1; }
     case "$IP" in
