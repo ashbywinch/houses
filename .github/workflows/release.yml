@@ -144,6 +144,33 @@ jobs:
           echo "STANDBY:            $STANDBY ($STANDBY_IP)"
 
   # ── the artifact ──────────────────────────────────────────────────────
+  image-stale:
+    if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' }}
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+      - name: Confirm the baked image matches main's bake source
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          WANTED=$(git rev-parse :tools/deploy/base-image.sh :tools/deploy/box-setup.sh | tr -d '\n' | sha256sum | cut -d' ' -f1)
+          BAKED=$(gcloud compute images describe "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" --format='value(description)' | grep -o 'bake_ref=[0-9a-f]\{64\}' | cut -d= -f2 || true)
+          if [ -z "$BAKED" ]; then
+            echo "::error::the image has no bake_ref — it predates the drift mechanism; run action=bake"
+            exit 1
+          fi
+          if [ "$BAKED" != "$WANTED" ]; then
+            echo "::error::image source drifted (image bake_ref=$BAKED, main wants $WANTED) — run action=bake before releasing"
+            exit 1
+          fi
+          echo "image source matches main ($BAKED)"
   build:
     if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' || inputs.action == 'install' }}
     runs-on: ubuntu-latest
@@ -256,7 +283,7 @@ jobs:
 
   # ── install on the standby (the rehearsal) ────────────────────────────
   install:
-    needs: [resolve, build, provision]
+    needs: [resolve, build, provision, image-stale]
     # A rollout rebuilds the standby first (provision) and then installs this
     # artifact onto it; `action=install` re-installs onto the existing box
     # without a rebuild (a retry after a failed install, or a hotfix probe).
@@ -299,10 +326,27 @@ jobs:
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --diagnose" \
             || echo "standby unreachable — check the console"
         timeout-minutes: 3
+      - name: Build the smoke review surface (owner Caddy relays the standby)
+        # The human review surface of the rollout: houses-smoke must show the
+        # fresh STANDBY, wired by the process — never by hand. The deploy key
+        # is allowlisted for switch.sh on every box.
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          SB_INT=$(gcloud compute instances describe "${{ needs.resolve.outputs.standby }}" \
+            --zone "$ZONE" --project "$PROJECT" --format='value(networkInterfaces[0].networkIP)')
+          OWNER_IP="${{ needs.resolve.outputs.owner_ip }}"
+          echo "smoke relay: $OWNER_IP -> $SB_INT"
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay $SB_INT"
+        timeout-minutes: 5
 
   # ── cutover (THE human gate) ──────────────────────────────────────────
   cutover:
-    needs: [resolve]
+    needs: [resolve, image-stale]
     if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' }}
     runs-on: ubuntu-latest
     environment: production
@@ -365,9 +409,12 @@ jobs:
           # count, which the box verifies the restore against before installing it.
           # Any failure here leaves the standby's app stopped; the unfreeze step
           # below restarts the owner, so traffic never moves onto a bad copy.
+          # The recovered box becomes the OWNER: write the production role URL
+          # first (the rebase's start reads the env), then rebase from the
+          # piped snapshot on the same connection.
           cat /tmp/snapshot.db | ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
             -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net && sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}"
           # The GCS copy is now the archive; the runner's own <db>.pre-<basename>
           # backups live on the standby/owner box. Nothing further is deleted.
         timeout-minutes: 45
@@ -451,7 +498,7 @@ jobs:
   # old copies. Recovery means the writes since that object are gone; that is the
   # trade, and the approval below is where it is accepted.
   recover:
-    needs: [resolve]
+    needs: [resolve, image-stale]
     if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' }}
     runs-on: ubuntu-latest
     environment: production
@@ -487,9 +534,12 @@ jobs:
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
+          # The recovered box becomes the OWNER: its role URL is production.
+          # The restore starts the app, which reads the env — so the URL is
+          # written first (same ssh session, one connection).
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --restore $SOURCE"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net && sudo /opt/houses/switch.sh --restore $SOURCE"
         timeout-minutes: 45
       - name: Flip the L4 rules to the recovered box
         run: |
@@ -525,6 +575,19 @@ jobs:
             sleep 15
           done
           echo "RECOVERY VERIFIED: $polls healthy reads over 5 minutes"
+      - name: Retire the smoke relay on the former owner
+        # The former owner is the new STANDDBY: its app is stopped and its
+        # Caddy relay pointed at the (now-production) recovered box. Remove
+        # it — houses-smoke must never mirror production. The next rollout's
+        # install rebuilds the relay on the new owner towards the new standby.
+        if: success()
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@${{ needs.resolve.outputs.owner_ip }}" "sudo /opt/houses/switch.sh --smoke-relay off"
+        timeout-minutes: 5
       - name: Record the outcome
         if: always()
         run: |
@@ -593,7 +656,7 @@ jobs:
 
   # ── rebuild a box from the artifact (replace-not-repair) ──────────────
   provision:
-    needs: [resolve, build]
+    needs: [resolve, build, image-stale]
     # Part of every rollout (a fresh box per rollout — replace-not-repair), and
     # standalone for a box that needs rebuilding between rollouts.
     if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' && (inputs.action == 'provision' || github.event_name == 'push' || inputs.action == 'release') }}
@@ -697,6 +760,13 @@ jobs:
         with:
           terraform_version: 1.9.8
       - name: Authenticate gcloud
+      - id: ref
+        name: Record the bake source ref (the baked files' shas)
+        run: |
+          set -euo pipefail
+          BAKE_REF=$(git rev-parse :tools/deploy/base-image.sh :tools/deploy/box-setup.sh | tr -d '\n' | sha256sum | cut -d' ' -f1)
+          echo "bake_ref=$BAKE_REF" >> "$GITHUB_OUTPUT"
+          echo "bake_ref=$BAKE_REF (image will reject releases baked from a different source)"
         run: |
           set -euo pipefail
           printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
@@ -765,7 +835,7 @@ jobs:
           gcloud compute images create "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" \
             --project "$PROJECT" \
             --source-disk=houses-base-builder --source-disk-zone="$ZONE" \
-            --description="Baked OS layer for the houses boxes (packages + Caddy + layout)."
+            --description="Baked OS layer for the houses boxes (packages + Caddy + layout). bake_ref=${{ steps.ref.outputs.bake_ref }}"
           gcloud compute images describe "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" \
             --format='value(name,status,diskSizeGb)'
           echo "base image ready: boxes built from now on use it"
