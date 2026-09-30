@@ -26,6 +26,7 @@ APP="$ROOT/app"
 # lands in the operator home): the venv python resolves top-level imports
 # (``scripts``) from the CWD — ``cd`` to the app root or every smoke import
 # chain that touches scripts.* crashes with ModuleNotFoundError (2026-09-30).
+cd "$APP"
 LOG_DIR="${HOUSES_LOG_DIR:-$ROOT/logs/releases}"
 OBJECT="${1:?usage: install-artifact.sh gs://bucket/<sha256>.tar.gz}"
 DB="$ROOT/data/houses.db"
