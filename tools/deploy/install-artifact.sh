@@ -136,6 +136,17 @@ fi
 # ── 5. layout + tooling from THIS artifact ─────────────────────────────
 mark "refreshing box layout and tooling from the artifact"
 bash "$APP/tools/deploy/box-setup.sh"
+# Re-exec from the REFRESHED copy when it differs: this script is running
+# from the PREVIOUS artifact's snapshot, and the refresh has just overwritten
+# it with the NEW tooling. Without the re-exec every deploy-script fix
+# lags exactly one run behind (2026-09-30 — the cd fix and the mint move
+# each executed once too late). The second pass sees identical content and
+# stops. $OBJECT is the same content-addressed reference; the fetch/unpack
+# skip on sha match, so the pass is cheap.
+if [ -f /opt/houses/install-artifact.sh ] && ! cmp -s "$0" /opt/houses/install-artifact.sh; then
+  mark "re-executing the refreshed install-artifact.sh (content changed)"
+  exec /opt/houses/install-artifact.sh "$OBJECT"
+fi
 
 # ── 6. migration rehearsal: apply + check every migration ──────────────
 # The runner's summary line is the gate: exit 0 is not enough, and the runner
