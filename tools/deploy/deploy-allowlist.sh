@@ -25,8 +25,11 @@ SHA256_HEX_CHARS=64   # the artifact's key IS its sha256, in hex
 # The OBJECT is the only argument, and it must be a content-addressed artifact
 # name — the script re-verifies the sha256 against the key it fetches.
 case "$CMD" in
-  "sudo /opt/houses/install-artifact.sh "*)
-    OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh "}
+  "sudo /opt/houses/install-artifact.sh "*|"sudo /opt/houses/install-artifact.sh --tooling-only "*)
+    case "$CMD" in
+      "sudo /opt/houses/install-artifact.sh --tooling-only "*) OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh --tooling-only "} ;;
+      *) OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh "} ;;
+    esac
     case "$OBJECT" in
       gs://*/*.tar.gz)
         rest=${OBJECT#gs://}
