@@ -33,6 +33,16 @@ class PropertyRegistry:
                 f"nodes. Reuse the registered instance, or remove() it first."
             )
         self._properties[rid] = prop
+        # The current home is a DAG node (docs/dag-library.md → "Never
+        # live on read"): every status node is wired into its dep set so a
+        # status write fans the re-derivation out through signals. Auth
+        # tests register minimal property stand-ins without status nodes
+        # — those are not candidates either way.
+        from houses.nodes.current_home_node import current_home_node
+
+        status = getattr(prop, "comment_status", None)
+        if status is not None:
+            current_home_node().add_status(status, self)
 
     def get(self, rid: str) -> PropertyNodes | None:
         try:

@@ -151,9 +151,8 @@ def test_zero_day_provenance_shows_0x_and_never_1x():
         == 200
     )
     flush_all()
-    mcc = client.get("/api/properties/42ZZ0001/detail").json()["affordability"]["monthly_commute_cost"]
-    assert mcc["succeeded"], mcc.get("error")
-    claims = _claims(mcc["provenance"])
+    mcc = client.get("/api/properties/42ZZ0001/provenance").json()["affordability.monthly_commute_cost"]
+    claims = _claims(mcc)
     stale = [s for s in claims if "Pimlico" in s and "1x/wk" in s]
     assert not stale, f"provenance claims Pimlico at 1x/wk after a 0-day what-if: {stale[:4]}"
     pimlico = [s for s in claims if "Pimlico" in s and "0x/wk" in s]
@@ -185,13 +184,13 @@ def test_zero_day_persons_projection_names_the_zero():
         == 200
     )
     flush_all()
-    mcc = client.get("/api/properties/42ZZ0002/detail").json()["affordability"]["monthly_commute_cost"]
+    mcc = client.get("/api/properties/42ZZ0002/provenance").json()["affordability.monthly_commute_cost"]
     # THE CONTRACT: the persons projection — the one place a reader sees
     # their destinations listed — names the zero. Read it from the
     # breakdown's own `persons` source (subtrees nested inside a planner
     # record the state that planner used; it takes the address, never the
     # place, so a trips-only edit never re-plans it).
-    persons_src = (mcc["provenance"].get("sources") or {}).get("persons") or {}
+    persons_src = (mcc.get("sources") or {}).get("persons") or {}
     persons_text = str(persons_src.get("value") or "")
     assert "Pimlico" in persons_text, "fixture must carry the persons projection"
     assert "Pimlico — Pimlico Rd, London · 0 days/week (not commuted)" in persons_text, (
@@ -220,11 +219,24 @@ def test_zero_day_delta_provenance_exists():
     home.comment_status.push("current", "test")
     register_property("42ZZ0004", home)
     flush_all()
+    # The DAG recalculation contract: the baseline and this property's
+    # delta settle through the scheduler. In the synchronous test drain
+    # the mid-drain fan-out lands on the node's own refresh — run it
+    # deterministically (the signal path is the library's contract).
+    import asyncio
+
+    from houses import property_registry as _pr
+    from houses.nodes.current_home_node import current_home_node
+
+    asyncio.run(current_home_node().refresh(force=True))
+    _candidate = _pr.get_property("42ZZ0003")
+    assert _candidate is not None and _candidate.delta_vs_home is not None
+    asyncio.run(_candidate.delta_vs_home.refresh(force=True))
     detail = client.get("/api/properties/42ZZ0003/detail").json()
     delta = ((detail.get("affordability") or {}).get("group_monthly_cost") or {}).get("value", {}).get("delta_vs_home")
     assert delta is not None, "fixture must carry a delta for the provenance check to mean anything"
-    prov = delta.get("couple", {}).get("provenance") if isinstance(delta.get("couple"), dict) else None
-    assert prov is not None, "the monthly difference carries no provenance — add delta_vs_home provenance to the wire"
+    prov = client.get("/api/properties/42ZZ0003/provenance").json().get("monthly_delta.couple")
+    assert prov is not None, "the monthly difference carries no provenance — the endpoint must serve it"
 
 
 def test_zero_day_provenance_survives_recompute_without_replan():
@@ -254,8 +266,8 @@ def test_zero_day_provenance_survives_recompute_without_replan():
         },
     )
     flush_all()
-    first = client.get("/api/properties/42ZZ0010/detail").json()["affordability"]["monthly_commute_cost"]
-    assert first["succeeded"]
+    first = client.get("/api/properties/42ZZ0010/provenance").json()["affordability.monthly_commute_cost"]
+    assert first
     # Force the breakdown to rebuild its provenance from the parked chain
     # (no re-plan: the journey nodes stay untouched by construction).
     sched = get_scheduler()
@@ -264,6 +276,6 @@ def test_zero_day_provenance_survives_recompute_without_replan():
     import asyncio
 
     asyncio.get_event_loop().run_until_complete(node.build_provenance())
-    second = client.get("/api/properties/42ZZ0010/detail").json()["affordability"]["monthly_commute_cost"]
-    stale = [s for s in _claims(second["provenance"]) if "Pimlico" in s and "1x/wk" in s]
+    second = client.get("/api/properties/42ZZ0010/provenance").json()["affordability.monthly_commute_cost"]
+    stale = [s for s in _claims(second) if "Pimlico" in s and "1x/wk" in s]
     assert not stale, f"rebuilt provenance regressed to 1x/wk: {stale[:4]}"

@@ -9,11 +9,9 @@ import logging
 import textwrap
 import traceback
 from abc import abstractmethod
-from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
-from threading import Lock
 from types import FunctionType, ModuleType
 from typing import Any, Generic, NamedTuple, TypeVar, cast, override
 
@@ -24,18 +22,6 @@ from dag.node import Node, NodeJson
 from dag.persistence import latest_node_result
 from dag.scheduler import assert_mutation_allowed, get_scheduler
 from dag.signals import Connection, Slot
-
-# The serve path's documented contract is "no re-read, no recompute".
-# _stored_provenance used to fetch the row from the DB per node per
-# request — a property detail serializes dozens of nodes, so a cold
-# 243K-row SQLite (thin e2-micro page cache) made every page pay
-# seconds the contract says it should not. This bounded cache makes the
-# cost match the contract: one parse per persisted value, refreshed
-# exactly at persist (the new tree replaces the entry), memory-bounded
-# to the active UI set (front page + rolling details).
-_PROVENANCE_CACHE: OrderedDict[str, Provenance] = OrderedDict()
-_PROVENANCE_CACHE_MAX = 1024
-_PROVENANCE_CACHE_LOCK = Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -655,14 +641,7 @@ class DerivedNode(Node[T], Generic[T]):
         frozen serve of the previous row).
         """
         try:
-            record = await self.to_json(dep_attempts=dep_attempts, active_deps=active_deps)
-            # The persist boundary: this exact dict is what the row stores.
-            # Refresh the read cache with it so serve-path reads switch to
-            # the freshly persisted tree immediately (never a stale entry).
-            prov = record.get("provenance")
-            if isinstance(prov, dict):
-                self._note_persisted_provenance(self._id, prov)
-            return record
+            return await self.to_json(dep_attempts=dep_attempts, active_deps=active_deps)
         # lucidlint: ignore broad-except to_json failure degrades to an error-result dict so the attempt still persists
         except Exception as e:
             logger.debug(
@@ -969,52 +948,22 @@ class DerivedNode(Node[T], Generic[T]):
                 description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
             )
 
-    @classmethod
-    def _stored_provenance(cls, node_id: str) -> Provenance | None:
+    @staticmethod
+    def _stored_provenance(node_id: str) -> Provenance | None:
         """A node's recorded tree, or None when it has none to serve.
 
         A tree that will not rebuild is a data defect: the warning names
         the node and the reason, and the read still answers (the live
         leaf) rather than failing the whole tree.
         """
-        with _PROVENANCE_CACHE_LOCK:
-            cached = _PROVENANCE_CACHE.get(node_id)
-            if cached is not None:
-                return cached
-            prov_dict = (latest_node_result(node_id) or {}).get("provenance")
-            if not (isinstance(prov_dict, dict) and prov_dict.get("label")):
-                return None
-            parsed = None
-            try:
-                parsed = Provenance.from_dict(prov_dict)
-            except (KeyError, TypeError, ValueError) as e:
-                logger.warning("%s: stored provenance is unreadable (%s); serving the live leaf", node_id, e)
-                return None
-            _PROVENANCE_CACHE[node_id] = parsed
-            _PROVENANCE_CACHE.move_to_end(node_id)
-            while len(_PROVENANCE_CACHE) > _PROVENANCE_CACHE_MAX:
-                _PROVENANCE_CACHE.popitem(last=False)
-            return parsed
-
-    @classmethod
-    def _note_persisted_provenance(cls, node_id: str, prov_dict: dict) -> None:
-        """Refresh the read cache at persist time (the one write point).
-
-        Called with the SAME dict that was just written to the row, so
-        reads immediately serve the freshly persisted tree — no stale
-        entry survives a refresh.
-        """
+        prov_dict = (latest_node_result(node_id) or {}).get("provenance")
         if not (isinstance(prov_dict, dict) and prov_dict.get("label")):
-            return
+            return None
         try:
-            parsed = Provenance.from_dict(prov_dict)
-        except (KeyError, TypeError, ValueError):
-            return
-        with _PROVENANCE_CACHE_LOCK:
-            _PROVENANCE_CACHE[node_id] = parsed
-            _PROVENANCE_CACHE.move_to_end(node_id)
-            while len(_PROVENANCE_CACHE) > _PROVENANCE_CACHE_MAX:
-                _PROVENANCE_CACHE.popitem(last=False)
+            return Provenance.from_dict(prov_dict)
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning("%s: stored provenance is unreadable (%s); serving the live leaf", node_id, e)
+            return None
 
     @staticmethod
     async def _dep_recorded_subtree(dep: Node, att: Attempt | None) -> Provenance:
@@ -1048,13 +997,16 @@ class DerivedNode(Node[T], Generic[T]):
     Default is CALC — override in subclasses that source from
     APIs, geocoding, config, or user input."""
 
+
     provenance_formula: Formula | None = None
     """Override to return a Formula for computed values.
     Default is None — no formula. Used for self-only formulas and the
     never-persisted render; the persist path calls
     ``provenance_formula_for`` when it can hand over the bound attempts."""
 
-    def provenance_formula_for(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Formula | None:
+    def provenance_formula_for(
+        self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]
+    ) -> Formula | None:
         """Formula rendered from the BOUND calculating attempts.
 
         The persist path passes the attempts this evaluation computed

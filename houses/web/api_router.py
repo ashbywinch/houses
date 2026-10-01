@@ -119,6 +119,8 @@ def _require_property(rid: str) -> PropertyNodes:
     return prop
 
 
+
+
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     # Extract session cookie from WebSocket headers — Starlette's Request
@@ -427,7 +429,7 @@ async def get_all_properties():
         # the record at the consumption boundary.
         summary = SummaryJson(**await prop.to_json_summary())
         wire = _attach_scrape_state(summary, rid)
-        await attach_monthly_delta(wire, rid, get_services().property_registry)
+        await attach_monthly_delta(wire, rid)
         if rid in stale_push_rids():
             wire["push_stale"] = True
         results[rid] = wire
@@ -476,8 +478,28 @@ async def get_property(rid: str):
 async def get_property_detail(rid: str):
     prop = _require_property(rid)
     detail = await prop.to_json_detail()
-    await attach_monthly_delta(detail, rid, get_services().property_registry)
+    await attach_monthly_delta(detail, rid)
+
     return detail
+
+
+@api_router.get("/properties/{rid}/provenance")
+async def get_property_provenance(rid: str):
+    """The detail-surface provenance, fetched ONLY when the user reveals
+    a derivation (P8) — never embedded in the detail payload. Served from
+    the persisted rows; nothing recomputes."""
+    prop = _require_property(rid)
+    provenance = await prop.to_provenance_map()
+    # The monthly delta's derivation lives on the DAG node (one tree for
+    # both sides); the UI keys its toggle by side, so serve it under both.
+    delta = getattr(prop, "delta_vs_home", None)
+    if delta is not None:
+        tree = (await delta.build_provenance()).to_dict()
+        provenance["monthly_delta.couple"] = tree
+        provenance["monthly_delta.others"] = tree
+    return provenance
+
+
 
 
 @api_router.patch("/properties/{rid}/address")

@@ -361,6 +361,7 @@ Every financial setting has its own `UserInputNode`, created by `Services.__post
 | **Typed values, not dicts** | Frozen dataclasses / Pydantic models so the value type is self-documenting and the TypeAdapter round-trips safely |
 | **Service results wrapped in Attempt** | `School | None` → `Attempt.succeeded(school)` or `Attempt.impossible("not found")` |
 | **Reads and writes are non-blocking** | A read (serialization/API) serves persisted state as-is and NEVER walks the graph or recomputes. Every recompute is scheduled by whatever makes it necessary — a dependency write, or a deploy invalidating persisted fingerprints (`PropertyNodes.schedule_code_stale_nodes()` at startup). The queue dedupes by node id and drains in the background; a first boot may take tens of minutes to settle, and that is expected. |
+| **Never live on read** | There is NO requirement that anything be live on read. A read serves the persisted value — even one whose inputs have since changed; correctness is restored by the DAG's recalculation (a dependency write signalling the node, a deploy invalidating fingerprints, or a regeneration). Reads never block on, spawn, or race the recalculation. The current-home baseline and the monthly deltas are DAG nodes exactly on this contract: a status write or a baseline re-price fans the re-derivation out through signals. |
 
 ### Bumping node_id
 

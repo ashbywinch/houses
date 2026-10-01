@@ -487,6 +487,19 @@ class PropertyNodes:
             ),
         )
 
+        # The monthly "vs your home" comparison — a DAG node like every
+        # other calculation (docs/dag-library.md → Design Rules): deps are
+        # own group cost + the global current-home node; the subtraction,
+        # its wire value and its provenance are all the DAG's own record.
+        from houses.nodes.current_home_node import current_home_node
+        from houses.nodes.delta_vs_home_node import DeltaVsHomeNode
+
+        self.delta_vs_home: DeltaVsHomeNode = DeltaVsHomeNode(
+            f"{rid}/delta_vs_home",
+            group_node=self.group_monthly_cost,
+            current_home=current_home_node(),
+        )
+
         # ── Signal wiring ──────────────────────────────────────────────
         # Wire every Node to PropertyNodes.changed so the frontend
         # is notified via WebSocket whenever any value changes.
@@ -628,7 +641,7 @@ class PropertyNodes:
     async def _commute_breakdown_json(self) -> dict:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""
-        return await self.commute_breakdown.to_json()
+        return await self.commute_breakdown.to_json_value()
 
     def _commuted_destinations(self) -> set[str]:
         """Selector keys whose destination is actually commuted (trips
@@ -693,28 +706,28 @@ class PropertyNodes:
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json_detail(self) -> dict[str, Any]:
         location = _LocationJson(
-            best_location=await self.best_location.to_json(),
-            geocode=await self.geocode.to_json(),
-            rightmove_location=await self.rightmove_location.to_json(),
-            precise_location=await self.precise_location.to_json(),
+            best_location=await self.best_location.to_json_value(),
+            geocode=await self.geocode.to_json_value(),
+            rightmove_location=await self.rightmove_location.to_json_value(),
+            precise_location=await self.precise_location.to_json_value(),
         )
         schools = _SchoolsJson(
-            primary=_SchoolEntry(school=await self.primary_school.to_json()),
-            secondary=_SchoolEntry(school=await self.secondary_school.to_json()),
+            primary=_SchoolEntry(school=await self.primary_school.to_json_value()),
+            secondary=_SchoolEntry(school=await self.secondary_school.to_json_value()),
         )
         affordability = _AffordabilityJson(
-            stamp_duty=await self.stamp_duty.to_json(),
-            council_tax=await self.council_tax.to_json(),
-            works_estimates=await self.works_estimates.to_json(),
-            total_works=await self.total_works.to_json(),
-            total_equity=await self.total_equity.to_json(),
-            life_insurance_total=await self.life_insurance_total.to_json(),
-            mortgage_required=await self.mortgage_required.to_json(),
-            monthly_mortgage=await self.monthly_mortgage.to_json(),
-            monthly_sinking_fund=await self.monthly_sinking_fund.to_json(),
-            rental_income=await self.rental_income.to_json(),
+            stamp_duty=await self.stamp_duty.to_json_value(),
+            council_tax=await self.council_tax.to_json_value(),
+            works_estimates=await self.works_estimates.to_json_value(),
+            total_works=await self.total_works.to_json_value(),
+            total_equity=await self.total_equity.to_json_value(),
+            life_insurance_total=await self.life_insurance_total.to_json_value(),
+            mortgage_required=await self.mortgage_required.to_json_value(),
+            monthly_mortgage=await self.monthly_mortgage.to_json_value(),
+            monthly_sinking_fund=await self.monthly_sinking_fund.to_json_value(),
+            rental_income=await self.rental_income.to_json_value(),
             monthly_commute_cost=await self._commute_breakdown_json(),
-            group_monthly_cost=await self.group_monthly_cost.to_json(),
+            group_monthly_cost=await self.group_monthly_cost.to_json_value(),
         )
         apportionment = _CouncilTaxApportionmentJson(
             main_payers=await self.council_tax_payers.to_json_value(),
@@ -722,36 +735,36 @@ class PropertyNodes:
             ignored=await self.annexe_ignored.to_json_value(),
         )
         area = _AreaJson(
-            walkability=await self.walkability.to_json(),
-            town_description=await self.town_desc.to_json(),
+            walkability=await self.walkability.to_json_value(),
+            town_description=await self.town_desc.to_json_value(),
         )
         triage = _TriageJson(
-            favourite=await self.favourite.to_json(),
-            dismissed=await self.dismissed.to_json(),
-            is_viewed=await self.is_viewed.to_json(),
-            user_notes=await self.user_notes.to_json(),
-            triage_status=await self.triage_status.to_json(),
+            favourite=await self.favourite.to_json_value(),
+            dismissed=await self.dismissed.to_json_value(),
+            is_viewed=await self.is_viewed.to_json_value(),
+            user_notes=await self.user_notes.to_json_value(),
+            triage_status=await self.triage_status.to_json_value(),
         )
         comments = _CommentsJson(
-            status=await self.comment_status.to_json(),
-            status_reason=await self.comment_status_reason.to_json(),
-            group_notes=await self.comment_group_notes.to_json(),
-            ashby_comments=await self.comment_ashby_comments.to_json(),
-            design_needed=await self.comment_design_needed.to_json(),
-            planning_needed=await self.comment_planning_needed.to_json(),
+            status=await self.comment_status.to_json_value(),
+            status_reason=await self.comment_status_reason.to_json_value(),
+            group_notes=await self.comment_group_notes.to_json_value(),
+            ashby_comments=await self.comment_ashby_comments.to_json_value(),
+            design_needed=await self.comment_design_needed.to_json_value(),
+            planning_needed=await self.comment_planning_needed.to_json_value(),
         )
         rec = _DetailJson(
             rid=self.rid,
-            best_address=await self.best_address.to_json(),
-            user_entered_address=await self.user_entered_address.to_json(),
-            rightmove_url=await self.rightmove_url.to_json(),
-            rightmove_price=await self.rightmove_price.to_json(),
-            rightmove_bedrooms=await self.rightmove_bedrooms.to_json(),
-            town_name=await self.town_name.to_json(),
-            epc=await self.epc.to_json(),
+            best_address=await self.best_address.to_json_value(),
+            user_entered_address=await self.user_entered_address.to_json_value(),
+            rightmove_url=await self.rightmove_url.to_json_value(),
+            rightmove_price=await self.rightmove_price.to_json_value(),
+            rightmove_bedrooms=await self.rightmove_bedrooms.to_json_value(),
+            town_name=await self.town_name.to_json_value(),
+            epc=await self.epc.to_json_value(),
             location=location.to_dict(),
             commutes={
-                self._commute_wire_key(k, self._commute_wire_map()): await v.to_json()
+                self._commute_wire_key(k, self._commute_wire_map()): await v.to_json_value()
                 for k, v in self.commute_selectors.items()
                 if k in self._commuted_destinations()
             },
@@ -762,8 +775,59 @@ class PropertyNodes:
             triage=triage.to_dict(),
             comments=comments.to_dict(),
             settings=_SettingsBlock(
-                persons=await self._svc.persons_source.to_json(),
+                persons=await self._svc.persons_source.to_json_value(),
                 financial=_SettingsFinancial(status="succeeded", value=aggregate_dict(self._svc.setting_nodes)),
             ),
         )
         return rec.to_dict()
+
+
+    async def to_provenance_map(self) -> dict[str, dict]:
+        """Provenance for every detail-surface node, keyed by dotted path.
+
+        The detail wire carries no provenance (P8: a derivation is
+        revealed only when the user asks). The trees are served HERE, on
+        demand, from the persisted rows (serve path — no recompute).
+        Dotted paths mirror the detail payload's node layout, and are the
+        contract the frontend's ProvenanceToggle looks up.
+        """
+        async def _prov(node) -> dict:
+            return (await node.build_provenance()).to_dict()
+
+        pairs: list[tuple[str, Any]] = [
+            ("location.best_location", self.best_location),
+            ("location.geocode", self.geocode),
+            ("location.rightmove_location", self.rightmove_location),
+            ("location.precise_location", self.precise_location),
+            ("schools.primary", self.primary_school),
+            ("schools.secondary", self.secondary_school),
+            ("affordability.stamp_duty", self.stamp_duty),
+            ("affordability.council_tax", self.council_tax),
+            ("affordability.works_estimates", self.works_estimates),
+            ("affordability.total_works", self.total_works),
+            ("affordability.total_equity", self.total_equity),
+            ("affordability.life_insurance_total", self.life_insurance_total),
+            ("affordability.mortgage_required", self.mortgage_required),
+            ("affordability.monthly_mortgage", self.monthly_mortgage),
+            ("affordability.monthly_sinking_fund", self.monthly_sinking_fund),
+            ("affordability.rental_income", self.rental_income),
+            ("affordability.monthly_commute_cost", self.commute_breakdown),
+            ("affordability.group_monthly_cost", self.group_monthly_cost),
+            ("area.walkability", self.walkability),
+            ("area.town_description", self.town_desc),
+            ("best_address", self.best_address),
+            ("user_entered_address", self.user_entered_address),
+            ("rightmove_url", self.rightmove_url),
+            ("rightmove_price", self.rightmove_price),
+            ("rightmove_bedrooms", self.rightmove_bedrooms),
+            ("town_name", self.town_name),
+            ("epc", self.epc),
+            ("settings.persons", self._svc.persons_source),
+        ]
+        result: dict[str, dict] = {}
+        for path, node in pairs:
+            result[path] = await _prov(node)
+        for key, selector in self.commute_selectors.items():
+            if key in self._commuted_destinations():
+                result[f"commutes.{self._commute_wire_key(key, self._commute_wire_map())}"] = await _prov(selector)
+        return result

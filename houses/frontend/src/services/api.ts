@@ -1,4 +1,4 @@
-import type { PropertyDetail, PropertySummary } from '../types'
+import type { PropertyDetail, PropertySummary, Provenance } from '../types'
 import { useAuthStore } from '../stores/auth'
 import router from '../router'
 
@@ -90,6 +90,14 @@ export function removeProperty(rid: string): Promise<Response> {
     headers: { ...authHeaders() },
   })
     .then(checkFor401)
+}
+
+export function fetchPropertyProvenance(rid: string): Promise<Record<string, Provenance>> {
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/provenance`, {
+    headers: { ...authHeaders() },
+  })
+    .then(checkFor401)
+    .then(r => parseJson(r))
 }
 
 export function fetchPropertyDetail(rid: string): Promise<PropertyDetail> {

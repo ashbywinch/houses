@@ -123,7 +123,8 @@ def test_apply_changes_only_the_named_trip_count():
     base_mcc = base["affordability"]["monthly_commute_cost"]
     assert base_mcc["succeeded"], f"baseline breakdown stuck: {base_mcc.get('status')} {base_mcc.get('error')}"
     assert Decimal(base_mcc["value"]["persons"]["Simon"]["yearly_gbp"]) == Decimal("5.50") * 3 * 46
-    base_pimlico = [fl for fl in base_mcc["provenance"]["formula"]["lines"] if "Pimlico" in fl["label"]]
+    base_prov = client.get(f"/api/properties/{rid}/provenance").json()["affordability.monthly_commute_cost"]
+    base_pimlico = [fl for fl in base_prov["formula"]["lines"] if "Pimlico" in fl["label"]]
     assert base_pimlico, "fixture must carry a Pimlico formula line for the stale-claim check to mean anything"
     assert all("1x/wk" in fl["label"] for fl in base_pimlico)
 
@@ -181,7 +182,8 @@ def test_apply_changes_only_the_named_trip_count():
     # row must present the multiplication — Pimlico at 0x/wk = £0.00/yr —
     # and nowhere claim Pimlico is still commuted at its pre-scenario
     # 1x/wk (the stale tree the ⓘ rendered on 90970053).
-    pimlico_lines = [fl for fl in mcc["provenance"]["formula"]["lines"] if "Pimlico" in fl["label"]]
+    mcc_prov = client.get(f"/api/properties/{rid}/provenance").json()["affordability.monthly_commute_cost"]
+    pimlico_lines = [fl for fl in mcc_prov["formula"]["lines"] if "Pimlico" in fl["label"]]
     assert pimlico_lines, "the zero-trip destination must appear in the how-calculated lines"
     assert all("0x/wk" in fl["label"] for fl in pimlico_lines), (
         f"expected 0x/wk on the Pimlico lines: {[fl['label'] for fl in pimlico_lines]}"
@@ -198,5 +200,5 @@ def test_apply_changes_only_the_named_trip_count():
             parts.extend(_claims(child))
         return [p for p in parts if p]
 
-    stale = [s for s in _claims(mcc["provenance"]) if "Pimlico" in s and "1x/wk" in s]
+    stale = [s for s in _claims(mcc_prov) if "Pimlico" in s and "1x/wk" in s]
     assert not stale, f"provenance still claims Pimlico at 1x/wk: {stale}"

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
-import type { MonthlyBaseline, Provenance } from '../types'
+import type { MonthlyBaseline } from '../types'
 import { blockWholePoundsKey, monthlyFigure, rejectWholePoundsPaste, wholePoundsValue } from '../formatters/money'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
@@ -46,10 +46,10 @@ const fmt = (n: number | undefined): string =>
 function row(
   label: string,
   value: number | undefined,
-  provenance?: Provenance,
-): { label: string; value: string; provenance?: Provenance } | null {
+  path?: string,
+): { label: string; value: string; path?: string } | null {
   if (value == null || value === 0) return null
-  return { label, value: fmt(value), provenance }
+  return { label, value: fmt(value), path }
 }
 
 /** Row labels for the joint-owners' breakdown — mortgage and rental
@@ -59,17 +59,16 @@ function row(
 function coupleRows() {
   const b = props.affordability?.group_monthly_cost?.value?.couple_breakdown
   if (!b) return []
-  const a = props.affordability ?? {}
   return [
-    row('Mortgage', b.mortgage, a.monthly_mortgage?.provenance),
-    row('Council tax', b.council_tax, a.council_tax?.provenance),
-    row('Annexe council tax', b.annexe_council_tax, a.council_tax?.provenance),
-    row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
-    row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
-    row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
-    row('Rental income', b.rental_income, a.rental_income?.provenance),
-    row('Rent paid', b.rent_paid, a.group_monthly_cost?.provenance),
-  ].filter((r): r is { label: string; value: string; provenance?: Provenance } => r !== null)
+    row('Mortgage', b.mortgage, 'affordability.monthly_mortgage'),
+    row('Council tax', b.council_tax, 'affordability.council_tax'),
+    row('Annexe council tax', b.annexe_council_tax, 'affordability.council_tax'),
+    row('Sinking fund', b.sinking_fund, 'affordability.monthly_sinking_fund'),
+    row('Commutes', b.commutes, 'affordability.monthly_commute_cost'),
+    row('Life insurance', b.insurance, 'affordability.life_insurance_total'),
+    row('Rental income', b.rental_income, 'affordability.rental_income'),
+    row('Rent paid', b.rent_paid, 'affordability.group_monthly_cost'),
+  ].filter((r): r is { label: string; value: string; path?: string } => r !== null)
 }
 
 /** Row labels for the other adults' breakdown — their rent paid is their
@@ -77,15 +76,14 @@ function coupleRows() {
 function othersRows() {
   const b = props.affordability?.group_monthly_cost?.value?.others_breakdown
   if (!b) return []
-  const a = props.affordability ?? {}
   return [
-    row('Council tax', b.council_tax, a.council_tax?.provenance),
-    row('Annexe council tax', b.annexe_council_tax, a.council_tax?.provenance),
-    row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
-    row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
-    row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
-    row('Rent paid', b.rent_paid, a.group_monthly_cost?.provenance),
-  ].filter((r): r is { label: string; value: string; provenance?: Provenance } => r !== null)
+    row('Council tax', b.council_tax, 'affordability.council_tax'),
+    row('Annexe council tax', b.annexe_council_tax, 'affordability.council_tax'),
+    row('Sinking fund', b.sinking_fund, 'affordability.monthly_sinking_fund'),
+    row('Commutes', b.commutes, 'affordability.monthly_commute_cost'),
+    row('Life insurance', b.insurance, 'affordability.life_insurance_total'),
+    row('Rent paid', b.rent_paid, 'affordability.group_monthly_cost'),
+  ].filter((r): r is { label: string; value: string; path?: string } => r !== null)
 }
 
 /** When the total can't be calculated, name the leaf reason the UI
@@ -107,7 +105,7 @@ const homeShortAddress = computed(() => (props.monthlyBaseline?.address ?? '').s
 
 const deltaVsHome = computed(() => props.affordability?.group_monthly_cost?.value?.delta_vs_home ?? null)
 
-function vsRow(side: 'couple' | 'others'): { label: string; value: string; title: string; provenance?: Provenance } | null {
+function vsRow(side: 'couple' | 'others'): { label: string; value: string; title: string; path?: string } | null {
   const d = deltaVsHome.value?.[side]
   if (props.isCurrentHome || !d || !homeShortAddress.value) return null
   const total = props.affordability?.group_monthly_cost?.value?.[side]?.value
@@ -116,7 +114,7 @@ function vsRow(side: 'couple' | 'others'): { label: string; value: string; title
     label: `vs your home (${homeShortAddress.value})`,
     value: monthlyFigure({ delta: d }),
     title: `£${total} − £${base} = ${d.value}. ≈ = council tax estimated.`,
-    provenance: (d as { provenance?: Provenance }).provenance,
+    path: `monthly_delta.${side}`,
   }
 }
 const coupleVsRow = computed(() => vsRow('couple'))
@@ -292,7 +290,7 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
           >£?</span>
         </div>
       </div>
-      <ProvenanceToggle v-if="affordability?.total_works?.provenance" :provenance="affordability?.total_works?.provenance" title="Cost of works" />
+      <ProvenanceToggle v-if="rid && affordability?.total_works" :rid="rid" path="affordability.total_works" title="Cost of works" />
 
       <!-- Rental Income (editable by current person) -->
       <div class="costs-row">
@@ -320,7 +318,7 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
           <template v-else>£0</template>
         </span>
               </div>
-      <ProvenanceToggle v-if="affordability?.rental_income?.provenance" :provenance="affordability?.rental_income?.provenance" title="Rental income" />
+      <ProvenanceToggle v-if="rid && affordability?.rental_income" :rid="rid" path="affordability.rental_income" title="Rental income" />
 
       <!-- Monthly cost by group — S+L and the other adults are shown as
            SEPARATE blocks; the per-group components come from the DAG
@@ -329,7 +327,7 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
         <div class="costs-row costs-row--group">
           <span class="costs-label">
             {{ affordability.group_monthly_cost.value.couple_label }}
-            <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
+            <ProvenanceToggle v-if="rid && affordability?.group_monthly_cost" :rid="rid" path="affordability.group_monthly_cost" title="Total monthly cost" />
           </span>
           <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">
             {{ monthlyFigure({ absolute: Number(affordability.group_monthly_cost.value.couple.value), approx: totalMonthlyApprox }) }}
@@ -339,8 +337,9 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
           <span class="costs-label">{{ coupleVsRow.label }}</span>
           <span class="costs-value">{{ coupleVsRow.value }}</span>
           <ProvenanceToggle
-            v-if="coupleVsRow.provenance"
-            :provenance="coupleVsRow.provenance"
+            v-if="rid && coupleVsRow.path"
+            :rid="rid"
+            :path="coupleVsRow.path"
             title="Monthly difference vs your home"
           />
         </div>
@@ -349,8 +348,9 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
             <span class="costs-label">{{ row.label }}</span>
             <span class="costs-value">{{ row.value }}</span>
             <ProvenanceToggle
-              v-if="row.provenance"
-              :provenance="row.provenance"
+              v-if="rid && row.path"
+              :rid="rid"
+              :path="row.path"
               :title="row.label"
             />
           </div>
@@ -358,7 +358,7 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
         <div v-if="affordability?.group_monthly_cost?.value?.others" class="costs-row costs-row--group costs-row--group-others">
           <span class="costs-label">
             {{ affordability.group_monthly_cost.value.others_label }}
-            <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
+            <ProvenanceToggle v-if="rid && affordability?.group_monthly_cost" :rid="rid" path="affordability.group_monthly_cost" title="Total monthly cost" />
           </span>
           <span class="costs-value">
             {{ monthlyFigure({ absolute: Number(affordability.group_monthly_cost.value.others.value), approx: totalMonthlyApprox }) }}
@@ -368,8 +368,9 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
           <span class="costs-label">{{ othersVsRow.label }}</span>
           <span class="costs-value">{{ othersVsRow.value }}</span>
           <ProvenanceToggle
-            v-if="othersVsRow.provenance"
-            :provenance="othersVsRow.provenance"
+            v-if="rid && othersVsRow.path"
+            :rid="rid"
+            :path="othersVsRow.path"
             title="Monthly difference vs your home"
           />
         </div>
@@ -378,8 +379,9 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
             <span class="costs-label">{{ row.label }}</span>
             <span class="costs-value">{{ row.value }}</span>
             <ProvenanceToggle
-              v-if="row.provenance"
-              :provenance="row.provenance"
+              v-if="rid && row.path"
+              :rid="rid"
+              :path="row.path"
               :title="row.label"
             />
           </div>
@@ -397,7 +399,7 @@ function canEdit(person: { person_id?: string; name?: string }): boolean {
         Couldn't look up Council Tax — make sure the property's address is complete and correct
         (Edit address above).
       </p>
-      <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly housing cost" />
+      <ProvenanceToggle v-if="rid && affordability?.group_monthly_cost" :rid="rid" path="affordability.group_monthly_cost" title="Total monthly housing cost" />
     </div>
 
     <!-- EPC scale -->
