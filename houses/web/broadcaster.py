@@ -17,9 +17,9 @@ from dataclasses import dataclass
 
 from fastapi import WebSocket
 
+from houses.nodes.current_home_node import CURRENT_STATUS
 from houses.nodes.property_nodes import SummaryJson
 from houses.services_provider import get_services
-from houses.web.monthly_delta import CURRENT_STATUS
 from houses.web.monthly_delta import attach as attach_monthly_delta
 from houses.web.settings_payload import SettingsPayloadJson, settings_payload
 
@@ -101,7 +101,7 @@ async def _push_summary(rid: str) -> SummaryJson | None:
     # record at the consumption boundary, then serialize at the edge.
     summary = SummaryJson(**await prop.to_json_summary())
     wire = summary.to_dict()
-    await attach_monthly_delta(wire, rid, get_services().property_registry)
+    await attach_monthly_delta(wire, rid)
     msg = json.dumps(_PropertyUpdatedEnvelope(rid=rid, data=wire).to_dict())
     dead: list[WebSocket] = []
     for ws in list(_websocket_clients):

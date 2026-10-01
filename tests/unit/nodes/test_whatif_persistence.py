@@ -297,7 +297,8 @@ def test_commute_total_provenance_reflects_the_scenario_trips(whatif_world):
     assert Decimal(value["yearly_total_gbp"]) == Decimal("0.00"), (
         "Pimlico is Simon's only commuted destination: the yearly total is £0"
     )
-    formula = mcc["provenance"].get("formula") or {}
+    prov = client.get(f"/api/properties/{rid}/provenance").json()["affordability.monthly_commute_cost"]
+    formula = prov.get("formula") or {}
     lines = [str(line.get("label", "")) for line in (formula.get("lines") or [])]
     pimlico_lines = [entry for entry in lines if "Pimlico" in entry]
     assert pimlico_lines and all("0x/wk" in entry for entry in pimlico_lines), (
@@ -457,8 +458,7 @@ def test_monthly_mortgage_provenance_shows_the_price_chain(whatif_world):
     these things' contract (2026-09-17)."""
     client, rid = whatif_world
     drain_recompute()
-    detail = client.get(f"/api/properties/{rid}/detail").json()
-    prov = detail["affordability"]["monthly_mortgage"]["provenance"]
+    prov = client.get(f"/api/properties/{rid}/provenance").json()["affordability.monthly_mortgage"]
     claims = " | ".join(_provenance_claims(prov))
 
     assert "£500,000.00" in claims, f"the house price must appear: {claims}"

@@ -1,14 +1,25 @@
-import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import CostsSection from '../CostsSection.vue'
 import * as api from '../../services/api'
+import { fetchPropertyProvenance } from '../../services/api'
 import type { MonthlyBaseline } from '../../types'
 
+// Cracked provenance contract: the wire carries none; the ⓘ loads the
+// property's map (real store) only when opened. The maps below serve the
+// fixture trees keyed by endpoint path.
+const provApi = vi.hoisted(() => ({ maps: {} as Record<string, Record<string, unknown>> }))
 vi.mock('../../services/api', () => ({
   patchWorksEstimate: vi.fn().mockResolvedValue(new Response()),
   patchRentalIncome: vi.fn().mockResolvedValue(new Response()),
+  fetchPropertyProvenance: vi.fn(async (rid: string) => provApi.maps[rid] ?? {}),
 }))
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  provApi.maps = {}
+})
 
 function mountCosts(overrides?: Record<string, unknown>, pinia?: ReturnType<typeof createPinia>) {
   const activePinia = pinia ?? createPinia()
@@ -483,6 +494,10 @@ describe('CostsSection — vs-row provenance widget (defect 1)', () => {
   }
 
   function mountWithDelta() {
+    provApi.maps.test123 = {
+      'monthly_delta.couple': deltaProvenance,
+      'monthly_delta.others': deltaProvenance,
+    }
     return mountCosts({
       affordability: {
         group_monthly_cost: {
@@ -513,6 +528,7 @@ describe('CostsSection — vs-row provenance widget (defect 1)', () => {
     const vsToggles = toggles.filter((t) => t.props('title') === 'Monthly difference vs your home')
     expect(vsToggles).toHaveLength(2)
     await vsToggles[0].find('button.provenance-toggle__trigger').trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('Monthly difference vs your home')
     expect(wrapper.text()).toContain('+1308.06/mo')
   })
@@ -522,6 +538,7 @@ describe('CostsSection — vs-row provenance widget (defect 1)', () => {
     const toggles = wrapper.findAllComponents({ name: 'ProvenanceToggle' })
     const vsToggles = toggles.filter((t) => t.props('title') === 'Monthly difference vs your home')
     await vsToggles[1].find('button.provenance-toggle__trigger').trigger('click')
+    await flushPromises()
     const text = wrapper.text()
     expect(text).toContain('This property (S+L)')
     expect(text).toContain('£3091.67/mo')
@@ -529,7 +546,10 @@ describe('CostsSection — vs-row provenance widget (defect 1)', () => {
     expect(text).toContain('£1783.61/mo')
   })
 
-  it('renders no vs-row ⓘ when the delta carries no provenance', () => {
+  it('shows a vs-row ⓘ whenever the delta exists; the tree loads on click (P8)', async () => {
+    // The wire no longer tells the client whether a delta derivation is
+    // available — the ⓘ is the affordance itself, and the tree fetches
+    // on the open click. An untouched map must not crash the open.
     const wrapper = mountCosts({
       affordability: {
         group_monthly_cost: {
@@ -545,16 +565,17 @@ describe('CostsSection — vs-row provenance widget (defect 1)', () => {
             },
           },
           error: null,
-          provenance: {},
         },
       },
       monthlyBaseline: homeBaseline,
     })
     expect(wrapper.findAll('.costs-row--vs')).toHaveLength(2)
-    // The group totals still carry their own ⓘ toggles (provenance: {} is
-    // truthy in the template's v-if) — but no vs-row delta toggle: the
-    // delta derivation title must be absent.
     const toggles = wrapper.findAllComponents({ name: 'ProvenanceToggle' })
-    expect(toggles.filter((t) => t.props('title') === 'Monthly difference vs your home')).toHaveLength(0)
+    const vsToggles = toggles.filter((t) => t.props('title') === 'Monthly difference vs your home')
+    expect(vsToggles).toHaveLength(2)
+    await vsToggles[0].find('button.provenance-toggle__trigger').trigger('click')
+    await flushPromises()
+    expect(fetchPropertyProvenance).toHaveBeenCalledWith('test123')
+    expect(wrapper.find('.provenance-toggle__body').exists()).toBe(true)
   })
 })

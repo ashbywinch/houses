@@ -167,7 +167,7 @@ def test_empty_payer_settings_split_both_bills_across_all_adults():
 
     # THE PROVENANCE CONTRACT: the derivation must state the bills and
     # who pays, so the figures are checkable (P2, one step away).
-    prov = detail["affordability"]["group_monthly_cost"]["provenance"]
+    prov = client.get("/api/properties/42555556/provenance").json()["affordability.group_monthly_cost"]
     text = (prov.get("value") or "") + " " + (prov.get("description") or "")
     assert "council tax" in text.lower()
     for name in ("Simon", "Lorena", "Ashby"):

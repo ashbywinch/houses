@@ -10,6 +10,9 @@ const store = usePropertiesStore()
 const props = defineProps<{
   commutes: any
   currentPerson?: string | null
+  /** The property owning these commutes — the provenance store keys on
+   *  it (the on-demand /provenance endpoint). */
+  rid?: string
 }>()
 
 /** The colour bands are the person's own thresholds from Settings
@@ -107,8 +110,10 @@ function toggleCommute(key: string) {
         <!-- Provenance: the ONE widget, same as the costs and settings
              surfaces — no hand-rolled trigger (ⓘ-reveals-tree). -->
         <ProvenanceToggle
-          v-if="c?.provenance"
-          :provenance="provenanceForMode(c.provenance, c?.value?.mode)"
+          v-if="rid && c"
+          :rid="rid"
+          :path="`commutes.${key}`"
+          :transform="(p) => provenanceForMode(p, c?.value?.mode)"
           title="Commute"
         />
       </div>

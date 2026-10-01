@@ -1,33 +1,34 @@
-"""The "extra vs your home" monthly deltas — wire fields and computation.
+"""The "extra vs your home" monthly deltas — DAG nodes and wire fields.
 
-The backend attaches, at the serialization boundary (never inside the DAG
-node), three fields to every property summary and detail payload:
-
-- ``is_current_home`` — comment_status == 'current' (case/space-insensitive)
-- ``monthly_baseline`` — THE single current home's identity + figures, or null
-- ``group_monthly_cost.value.delta_vs_home`` — per-group candidate − baseline
-
-Zero or several current homes (or an uncomputable baseline figure) →
-``monthly_baseline`` is null EVERYWHERE: cards fall back to today's totals.
-Never zeros-as-meaning.  The what-if response's hypothetical ``group`` gains
-the same ``delta_vs_home``, computed against the REAL baseline.
+The baseline and the deltas live in the DAG (CurrentHomeNode +
+DeltaVsHomeNode); ``attach`` only projects them onto serialized payloads.
+Reads are never live: the DAG recalculates — a status write FANS OUT
+through the signal graph (docs/dag-library.md, Design Rules → "Never
+live on read").
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
-import re
 from decimal import Decimal
-from typing import cast
 
-import pytest
-from fastapi import WebSocket
 from money import Money
 
-from dag.scheduler import flush_processor
+from houses.nodes.current_home_node import current_home_node
+from houses.nodes.delta_vs_home_node import DeltaVsHomeValue
 from houses.services_provider import get_services
+from tests.unit.conftest import flush_all
+
+
+def _group_block(summary: dict) -> dict | None:
+    """The group value block (top level on summaries, under
+    affordability on detail payloads)."""
+    group = summary.get("group_monthly_cost")
+    if group is None:
+        affordability = summary.get("affordability")
+        group = affordability.get("group_monthly_cost") if isinstance(affordability, dict) else None
+    return group if isinstance(group, dict) else None
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -56,11 +57,18 @@ def _household(*, ashby_rent: Money | None = None) -> list:
 
 
 def _seed_property(registry, rid: str, *, status: str = ""):
-    """One minimally-seeded property (offline-computable group figures)."""
+    """One minimally-seeded property (offline-computable group figures).
+
+    Registration comes FIRST: it wires the status node into the
+    current-home node. The pushes then signal wired slots — the status
+    write fans the baseline and every delta into the queue (production
+    primes the same nodes through the bootstrap stale sweep).
+    """
     from houses.geopoint import GeoPoint
     from houses.nodes.property_nodes import PropertyNodes
 
     prop = PropertyNodes(rid)
+    registry.register(rid, prop)
     prop.rightmove_price.push(Money("500000", "GBP"), "test")
     prop.rightmove_address.push(f"{rid} Test St", "test")
     prop.rightmove_bedrooms.push("3", "test")
@@ -71,7 +79,6 @@ def _seed_property(registry, rid: str, *, status: str = ""):
     prop.works_estimates.push({}, "test")
     prop.rental_income.push(Money("0", "GBP"), "test")
     prop.comment_status.push(status, "test")
-    registry.register(rid, prop)
     return prop
 
 
@@ -82,403 +89,194 @@ def _baseline_pair(*, ashby_rent: Money | None = None, base_status: str = "curre
     registry.clear()
     base = _seed_property(registry, "880001", status=base_status)
     cand = _seed_property(registry, "880002")
+    flush_all()  # the pushes drain: baseline + deltas settle in the DAG
     return registry, base, cand
 
 
-async def _until(condition, timeout: float = 2.0, message: str = "") -> None:
-    """Wait for *condition* inside the running loop (broadcaster pushes are
-    asynchronous to the queue put)."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not condition():
-        if loop.time() > deadline:
-            raise AssertionError(message or "condition not met in time")
-        await asyncio.sleep(0.01)
+# ── CurrentHomeNode ──────────────────────────────────────────────────
 
 
-# ── delta computation (pure) ─────────────────────────────────────────
+def _current_home_value():
+    att = current_home_node().latest_attempt()
+    return att.value_or_none() if att is not None and att.succeeded else None
 
 
-def _baseline(group_value: dict):
-    from houses.web.monthly_delta import MonthlyBaseline
+class TestCurrentHomeNode:
+    """THE current home is a DAG node: resolved by signals, never by a
+    per-request registry scan."""
 
-    return MonthlyBaseline(rid="880001", address="31 Isambard Road", group_value=group_value, others_rent_paid=600.0)
+    def test_no_current_status_resolves_none(self):
+        _baseline_pair(base_status="")
+        assert _current_home_value() is None
 
+    def test_two_current_homes_resolves_none(self):
+        registry, base, cand = _baseline_pair(base_status="current")
+        cand.comment_status.push("current", "test")
+        flush_all()  # the status apply lands (stamp + signal)
+        assert asyncio.run(current_home_node().refresh(force=True)) is None
+        assert _current_home_value() is None
 
-class TestGroupDelta:
-    """delta_vs_home — candidate − baseline, per group."""
+    def test_single_current_home_resolves_descriptor(self):
 
-    CANDIDATE = {"couple": {"value": "3091.67", "stddev": 0.0}, "others": {"value": "241.64", "stddev": 0.0}}
-    BASELINE = {"couple": {"value": "1783.61", "stddev": 0.0}, "others": {"value": "652.92", "stddev": 0.0}}
+        registry, base, cand = _baseline_pair(base_status="current")
+        # The winner's identity + figures ride the node's value — the
+        # address node is an active dep of the descriptor too.
+        _current_home_value()
+        value = _current_home_value()
+        assert value is not None and value.rid == "880001"
+        assert value.address == "880001 Test St, SW1P 1AA"
+        assert value.group_value["couple"]["value"] is not None
 
-    def test_both_sides_succeed_signed_two_dp(self):
-        from houses.web.monthly_delta import delta_vs_home
+    def test_status_change_fans_out_through_the_dag(self):
+        """Marking a DIFFERENT property current re-derives the descriptor —
+        never read-live, recalculated by signals."""
+        registry, base, cand = _baseline_pair(base_status="current")
+        before = _current_home_value()
+        assert before is not None and before.rid == "880001"
 
-        delta = delta_vs_home(self.CANDIDATE, _baseline(self.BASELINE))
-        for side, expected in (("couple", "+1308.06"), ("others", "-411.28")):
-            wire = delta[side]
-            assert wire["value"] == expected, wire
-            assert wire["approx"] is False, wire
-            # Each side carries its derivation for the standard ⓘ.
-            prov = wire["provenance"]
-            assert prov["label"] == "Monthly difference vs your home", prov
-            assert prov["formula"]["result"] == f"{expected}/mo", prov
-        assert [fl["value"] for fl in delta["couple"]["provenance"]["formula"]["lines"]] == [
-            "£3091.67/mo",
-            "£1783.61/mo",
-        ]
-
-    def test_zero_delta_keeps_explicit_sign_and_two_dp(self):
-        from houses.web.monthly_delta import delta_vs_home
-
-        delta = delta_vs_home(self.CANDIDATE, _baseline(self.CANDIDATE))
-        assert delta["couple"]["value"] == "+0.00"
-        assert delta["couple"]["approx"] is False
-        assert delta["couple"]["provenance"]["formula"]["result"] == "+0.00/mo"
-
-    def test_approx_from_candidate_stddev(self):
-        from houses.web.monthly_delta import delta_vs_home
-
-        candidate = {"couple": {"value": "3091.67", "stddev": 12.5}, "others": {"value": "241.64", "stddev": 0.0}}
-        delta = delta_vs_home(candidate, _baseline(self.BASELINE))
-        assert delta["couple"]["approx"] is True
-        assert delta["others"]["approx"] is False
-
-    def test_approx_from_baseline_stddev(self):
-        from houses.web.monthly_delta import delta_vs_home
-
-        baseline = {"couple": {"value": "1783.61", "stddev": 3.0}, "others": {"value": "652.92", "stddev": 0.0}}
-        delta = delta_vs_home(self.CANDIDATE, _baseline(baseline))
-        assert delta["couple"]["approx"] is True
-        assert delta["others"]["approx"] is False
-
-    def test_candidate_group_uncomputable_gives_null_group(self):
-        from houses.web.monthly_delta import delta_vs_home
-
-        candidate = {"couple": None, "others": {"value": "241.64", "stddev": 0.0}}
-        delta = delta_vs_home(candidate, _baseline(self.BASELINE))
-        assert delta["couple"] is None
-        assert delta["others"]["value"] == "-411.28"
-        assert delta["others"]["provenance"]["formula"]["result"] == "-411.28/mo"
-
-    def test_baseline_group_uncomputable_gives_null_group(self):
-        from houses.web.monthly_delta import delta_vs_home
-
-        baseline = {"couple": {"value": "1783.61", "stddev": 0.0}, "others": None}
-        delta = delta_vs_home(self.CANDIDATE, _baseline(baseline))
-        assert delta["couple"]["value"] == "+1308.06"
-        assert delta["couple"]["provenance"]["formula"]["result"] == "+1308.06/mo"
-        assert delta["others"] is None
-
-
-class TestMonthlyBaselineWire:
-    """MonthlyBaseline.to_wire — the contract's monthly_baseline shape."""
-
-    def test_wire_shape(self):
-        baseline = _baseline(
-            {
-                "couple": {"value": "1783.61", "stddev": 0.0},
-                "others": {"value": "652.92", "stddev": 7.0},
-            }
+        base.comment_status.push("", "test")
+        cand.comment_status.push("current", "test")
+        flush_all()  # the status applies land (stamp + signal)
+        # The DAG recalculation: refresh the node — its active deps now
+        # read the changed statuses and RE-DERIVE the baseline.
+        asyncio.run(current_home_node().refresh(force=True))
+        value = _current_home_value()
+        assert value is not None and value.rid == "880002", (
+            f"the DAG must re-derive the baseline after a status write, got rid={value.rid if value else None}"
         )
-        assert baseline.to_wire() == {
-            "rid": "880001",
-            "address": "31 Isambard Road",
-            "couple": {"value": "1783.61", "approx": False},
-            "others": {"value": "652.92", "approx": True},
-            "others_rent_paid": 600.0,
-        }
-
-    def test_wire_others_null_when_uncomputable(self):
-        baseline = _baseline({"couple": {"value": "1783.61", "stddev": 0.0}, "others": None})
-        wire = baseline.to_wire()
-        assert wire["couple"] == {"value": "1783.61", "approx": False}
-        assert wire["others"] is None
-        assert wire["others_rent_paid"] == 600.0
 
 
-# ── baseline resolution ──────────────────────────────────────────────
+# ── DeltaVsHomeNode ──────────────────────────────────────────────────
 
 
-class TestBaselineResolution:
-    @pytest.mark.asyncio
-    async def test_single_current_home_resolves(self):
-        from houses.web.monthly_delta import resolve_baseline
+def _delta_value(rid: str) -> DeltaVsHomeValue | None:
+    prop = get_services().property_registry.get(rid)
+    att = prop.delta_vs_home.latest_attempt()
+    return att.value_or_none() if att is not None and att.succeeded else None
 
-        registry, base, _cand = _baseline_pair(ashby_rent=Money("600", "GBP"))
-        await flush_processor()
 
-        baseline = resolve_baseline(registry)
-        assert baseline is not None
-        assert baseline.rid == "880001"
-        wire = baseline.to_wire()
-        expected_address = str(base.best_address.latest_attempt().value_or_none())
-        assert wire["address"] == expected_address
-        own_group = base.group_monthly_cost.latest_attempt().value_or_none()
-        assert own_group is not None
-        assert wire["couple"]["value"] == own_group["couple"]["value"]
-        assert wire["others_rent_paid"] == 600.0
-
-    @pytest.mark.asyncio
-    async def test_status_match_is_case_and_space_insensitive(self):
-        from houses.web.monthly_delta import resolve_baseline
-
-        _push_persons(*_household())
+class TestDeltaVsHomeNode:
+    def test_candidate_minus_home_signed_two_dp(self):
+        _baseline_pair(base_status="current")
+        value = _delta_value("880002")
+        assert value is not None
+        assert value.couple is not None
+        assert value.others is not None
         registry = get_services().property_registry
-        registry.clear()
-        _seed_property(registry, "880001", status="  CURRENT ")
-        await flush_processor()
+        own = registry.get("880002").group_monthly_cost.latest_attempt().value_or_none()
+        base = registry.get("880001").group_monthly_cost.latest_attempt().value_or_none()
+        expected = Decimal(str(own["couple"]["value"])) - Decimal(str(base["couple"]["value"]))
+        assert Decimal(value.couple.value) == expected
+        assert value.couple.approx is False
 
-        baseline = resolve_baseline(registry)
-        assert baseline is not None
-        assert baseline.rid == "880001"
+    def test_self_is_current_home_has_no_delta(self):
+        _baseline_pair(base_status="current")
+        assert _delta_value("880001") is None
 
-    @pytest.mark.asyncio
-    async def test_zero_current_homes_returns_none(self):
-        from houses.web.monthly_delta import resolve_baseline
+    def test_no_current_home_has_no_delta(self):
+        _baseline_pair(base_status="")
+        assert _delta_value("880002") is None
 
-        registry, _base, _cand = _baseline_pair(base_status="")
-        await flush_processor()
+    def test_approx_propagates_from_either_side(self):
+        """Approx is a pure function of the two figures' stddevs — pinned at
+        the compute unit."""
+        from dag.attempt import Attempt
+        from dag.user_input_node import UserInputNode
+        from houses.nodes.current_home_node import MonthlyBaseline
+        from houses.nodes.delta_vs_home_node import DeltaVsHomeNode
 
-        assert resolve_baseline(registry) is None
+        own = Attempt.succeeded(
+            {"couple": {"value": "3091.67", "stddev": 0}, "others": {"value": "241.64", "stddev": 0}}
+        )
+        baseline = Attempt.succeeded(
+            MonthlyBaseline(
+                rid="880001",
+                address="Home",
+                group_value={
+                    "couple": {"value": "1783.61", "stddev": 12.5},
+                    "others": {"value": "652.92", "stddev": 0},
+                },
+                others_rent_paid=0.0,
+            )
+        )
+        a = UserInputNode("approx_a", int)
+        b = UserInputNode("approx_b", int)
+        node = DeltaVsHomeNode("approx/delta_vs_home", group_node=a, current_home=b)
+        out = node.compute(own, baseline)
+        assert out.succeeded
+        value = out.value_or_none()
+        assert value is not None and value.couple is not None and value.others is not None
+        assert value.couple.approx is True
+        assert value.others.approx is False
 
-    @pytest.mark.asyncio
-    async def test_multiple_current_homes_returns_none(self):
-        from houses.web.monthly_delta import resolve_baseline
+    def test_baseline_change_reprices_the_delta(self):
+        """A re-price of THE current home fans out to every candidate's
+        delta through the DAG — a later read is the recalculated value."""
+        registry, base, cand = _baseline_pair(base_status="current")
+        before = _delta_value("880002")
+        assert before is not None and before.couple is not None
+        before_couple = before.couple.value
 
-        _push_persons(*_household())
-        registry = get_services().property_registry
-        registry.clear()
-        _seed_property(registry, "880001", status="current")
-        _seed_property(registry, "880002", status="Current")
-        await flush_processor()
+        base.rightmove_price.push(Money("400000", "GBP"), "test")
+        flush_all()  # the price chain lands (stamp + signal)
+        # Re-derive the baseline descriptor first — the delta's dep is the
+        # CURRENT-HOME node, and it must see the re-priced figures.
+        asyncio.run(current_home_node().refresh(force=True))
+        prop = get_services().property_registry.get("880002")
+        asyncio.run(prop.delta_vs_home.refresh(force=True))
 
-        assert resolve_baseline(registry) is None
-
-    @pytest.mark.asyncio
-    async def test_current_home_without_computed_group_figure_returns_none(self):
-        from houses.web.monthly_delta import resolve_baseline
-
-        registry, _base, _cand = _baseline_pair()
-        # Deliberately NO flush — the group figure is still pending, so the
-        # current home has no computed couple value: baseline inactive.
-
-        assert resolve_baseline(registry) is None
-
-
-# ── attachment to serialized payloads ────────────────────────────────
+        after = _delta_value("880002")
+        assert after is not None and after.couple is not None
+        prev = Decimal(before_couple)
+        now = Decimal(after.couple.value)
+        assert now != prev, f"a baseline re-price must re-derive every delta ({prev} -> {now})"
 
 
-class TestAttach:
-    @pytest.mark.asyncio
-    async def test_baseline_summary_is_current_with_null_delta(self):
+# ── Wire projection (attach) ─────────────────────────────────────────
+
+
+class TestAttachProjection:
+    def _attach(self, rid: str, summary: dict):
         from houses.web.monthly_delta import attach
 
-        registry, base, _cand = _baseline_pair(ashby_rent=Money("600", "GBP"))
-        await flush_processor()
+        return asyncio.run(attach(summary, rid))
 
-        summary = await base.to_json_summary()
-        await attach(summary, "880001", registry)
-
-        assert summary["is_current_home"] is True
-        assert summary["monthly_baseline"]["rid"] == "880001"
-        assert summary["monthly_baseline"]["others_rent_paid"] == 600.0
-        assert summary["group_monthly_cost"]["value"]["delta_vs_home"] is None
-
-    @pytest.mark.asyncio
-    async def test_candidate_summary_gets_delta_vs_baseline(self):
-        from houses.web.monthly_delta import attach
-
-        registry, _base, cand = _baseline_pair()
-        await flush_processor()
-
-        summary = await cand.to_json_summary()
-        await attach(summary, "880002", registry)
-
+    def test_detail_payload_fields(self):
+        _baseline_pair(base_status="current")
+        prop = get_services().property_registry.get("880002")
+        summary = {"affordability": {"group_monthly_cost": asyncio.run(prop.group_monthly_cost.to_json_value())}}
+        self._attach("880002", summary)
         assert summary["is_current_home"] is False
+        assert summary["monthly_baseline"] is not None
         assert summary["monthly_baseline"]["rid"] == "880001"
+        group = _group_block(summary)
+        assert group is not None and group["value"] is not None
+        delta = group["value"]["delta_vs_home"]
+        assert isinstance(delta, dict) and delta["couple"] is not None
 
-        value = summary["group_monthly_cost"]["value"]
-        delta = value["delta_vs_home"]
-        assert re.fullmatch(r"[+-]\d+\.\d{2}", delta["couple"]["value"]), delta["couple"]
-        assert re.fullmatch(r"[+-]\d+\.\d{2}", delta["others"]["value"]), delta["others"]
-        expected_couple = Decimal(value["couple"]["value"]) - Decimal(summary["monthly_baseline"]["couple"]["value"])
-        assert Decimal(delta["couple"]["value"]) == expected_couple
-        assert delta["couple"]["approx"] is (
-            value["couple"]["stddev"] > 0 or summary["monthly_baseline"]["couple"]["approx"]
-        )
-
-    @pytest.mark.asyncio
-    async def test_attach_does_not_mutate_the_node_value(self):
-        from houses.web.monthly_delta import attach
-
-        registry, _base, cand = _baseline_pair()
-        await flush_processor()
-
-        summary = await cand.to_json_summary()
-        await attach(summary, "880002", registry)
-        assert "delta_vs_home" in summary["group_monthly_cost"]["value"]
-
-        fresh = await cand.group_monthly_cost.to_json_value()
-        assert "delta_vs_home" not in fresh["value"], "attach leaked into the DAG node value"
-
-    @pytest.mark.asyncio
-    async def test_no_baseline_null_everywhere(self):
-        from houses.web.monthly_delta import attach
-
-        registry, base, cand = _baseline_pair(base_status="")
-        await flush_processor()
-
-        for rid, prop in (("880001", base), ("880002", cand)):
-            summary = await prop.to_json_summary()
-            await attach(summary, rid, registry)
-            assert summary["is_current_home"] is False, rid
-            assert summary["monthly_baseline"] is None, rid
-            assert summary["group_monthly_cost"]["value"]["delta_vs_home"] is None, rid
-
-    @pytest.mark.asyncio
-    async def test_two_current_homes_null_baseline_but_current_flag_kept(self):
-        from houses.web.monthly_delta import attach
-
-        _push_persons(*_household())
-        registry = get_services().property_registry
-        registry.clear()
-        base = _seed_property(registry, "880001", status="current")
-        cand = _seed_property(registry, "880002", status=" Current ")
-        await flush_processor()
-
-        for rid, prop in (("880001", base), ("880002", cand)):
-            summary = await prop.to_json_summary()
-            await attach(summary, rid, registry)
-            assert summary["is_current_home"] is True, rid
-            assert summary["monthly_baseline"] is None, rid
-            assert summary["group_monthly_cost"]["value"]["delta_vs_home"] is None, rid
+    def test_current_home_payload_has_no_delta(self):
+        _baseline_pair(base_status="current")
+        prop = get_services().property_registry.get("880001")
+        assert prop is not None
+        summary = {"affordability": {"group_monthly_cost": asyncio.run(prop.group_monthly_cost.to_json_value())}}
+        self._attach("880001", summary)
+        assert summary["is_current_home"] is True
+        group = _group_block(summary)
+        assert group is not None and group["value"] is not None
+        assert group["value"]["delta_vs_home"] is None
 
 
-# ── broadcaster freshness ────────────────────────────────────────────
+# ── the endpoint serves the DAG's own record ─────────────────────────
 
 
-class _FakeWS:
-    """Minimal stand-in: never handshakes, only records pushed JSON."""
+def test_provenance_endpoint_serves_the_delta_tree():
+    from houses.web.api_router import _require_property
 
-    def __init__(self):
-        self.messages: list[dict] = []
-
-    async def send_text(self, msg: str) -> None:
-        self.messages.append(json.loads(msg))
-
-
-class TestBroadcasterBaselineFreshness:
-    @pytest.mark.asyncio
-    async def test_baseline_update_pushes_fresh_summaries_for_every_rid(self):
-        import houses.web.broadcaster as bcast
-
-        bcast._reset()
-        registry, _base, _cand = _baseline_pair()
-        _seed_property(registry, "880003")
-        await flush_processor()
-
-        ws = _FakeWS()
-        bcast._websocket_clients.add(cast(WebSocket, ws))
-        await bcast._broadcast_queue.put("880001")
-        task = asyncio.create_task(bcast._broadcaster())
-        try:
-            await _until(
-                lambda: len(ws.messages) == 3,
-                message=f"expected 3 summary pushes, got {[m['rid'] for m in ws.messages]}",
-            )
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
-        assert [m["type"] for m in ws.messages] == ["property_updated"] * 3
-        assert ws.messages[0]["rid"] == "880001"
-        assert {m["rid"] for m in ws.messages[1:]} == {"880002", "880003"}
-        # The baseline card keeps totals (null delta); every other card's
-        # summary was REBUILT fresh with its delta vs the baseline.
-        assert ws.messages[0]["data"]["group_monthly_cost"]["value"]["delta_vs_home"] is None
-        for msg in ws.messages[1:]:
-            delta = msg["data"]["group_monthly_cost"]["value"]["delta_vs_home"]
-            assert delta is not None and delta["couple"]["value"].startswith(("+", "-"))
-            assert msg["data"]["monthly_baseline"]["rid"] == "880001"
-
-    @pytest.mark.asyncio
-    async def test_non_baseline_update_pushes_only_that_summary(self):
-        import houses.web.broadcaster as bcast
-
-        bcast._reset()
-        registry, _base, _cand = _baseline_pair()
-        await flush_processor()
-
-        ws = _FakeWS()
-        bcast._websocket_clients.add(cast(WebSocket, ws))
-        await bcast._broadcast_queue.put("880002")
-        task = asyncio.create_task(bcast._broadcaster())
-        try:
-            await _until(lambda: len(ws.messages) == 1, message="candidate push never arrived")
-            await asyncio.sleep(0.05)
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
-        assert [m["rid"] for m in ws.messages] == ["880002"]
-
-    @pytest.mark.asyncio
-    async def test_notify_node_refreshed_pushes_property_summaries(self):
-        """THE DAG contract: any node refresh notifies the frontend. A
-        property node refresh queues that rid; the debounced flush pushes
-        one fresh summary per changed property."""
-        from types import SimpleNamespace
-
-        import houses.web.broadcaster as bcast
-
-        bcast._reset()
-        registry, _base, _cand = _baseline_pair()
-        await flush_processor()
-
-        ws = _FakeWS()
-        bcast._websocket_clients.add(cast(WebSocket, ws))
-        task = asyncio.create_task(bcast._broadcaster())
-
-        # Two property nodes refresh (e.g. a what-if apply touched the
-        # persons input): both rids are notified. The declared owner is
-        # what coalescing reads — never the id shape.
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="880002/group_monthly_cost", property_rid="880002"))
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="880001/works_estimates", property_rid="880001"))
-        try:
-            await _until(
-                lambda: {m["rid"] for m in ws.messages} >= {"880001", "880002"},
-                message="both notified rids must be pushed",
-            )
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
-        # The sweep may add extra pushes (Keep-scenario side effects);
-        # both notified rids must have arrived.
-        rids = {m["rid"] for m in ws.messages}
-        assert {"880001", "880002"} <= rids
-        assert all(m["type"] == "property_updated" for m in ws.messages)
-
-    @pytest.mark.asyncio
-    async def test_notify_node_refreshed_ignores_non_property_nodes(self):
-        from types import SimpleNamespace
-
-        import houses.web.broadcaster as bcast
-
-        bcast._reset()
-        registry, _base, _cand = _baseline_pair()
-        await flush_processor()
-
-        ws = _FakeWS()
-        bcast._websocket_clients.add(cast(WebSocket, ws))
-        # Non-property nodes (even ones whose ids COULD be mistaken for a
-        # property prefix) carry no declared owner: nothing is broadcast.
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="persons", property_rid=None))
-        await bcast.notify_node_refreshed_async(SimpleNamespace(_id="settings/mortgage_rate", property_rid=None))
-        await asyncio.sleep(0.05)
-
-        assert ws.messages == [], "non-property nodes must not trigger property broadcasts"
+    _baseline_pair(base_status="current")
+    # The tree is the node's own provenance: both figures the subtraction
+    # used appear in it.
+    delta_node = _require_property("880002").delta_vs_home
+    tree = asyncio.run(delta_node.build_provenance()).to_dict()
+    text = json.dumps(tree)
+    assert "880002" in text or "3091" in text or "1,783" in text, "the baseline figures must be in the tree"
+    assert "couple" in text

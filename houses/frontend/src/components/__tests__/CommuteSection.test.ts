@@ -1,15 +1,33 @@
-import { describe, it, expect } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import CommuteSection from '../CommuteSection.vue'
 
-function mountSection(commutes: unknown) {
+// The on-demand contract: the wire carries no provenance — clicking a ⓘ
+// loads the property's provenance map once via the real store + a mocked
+// fetch; the maps below serve the fixture trees keyed by endpoint path.
+const provApi = vi.hoisted(() => ({ maps: {} as Record<string, Record<string, unknown>> }))
+vi.mock('../../services/api', () => ({
+  fetchPropertyProvenance: vi.fn(async (rid: string) => provApi.maps[rid] ?? {}),
+}))
+
+
+function mountSection(commutes: unknown, rid: string | undefined = 'r1') {
   setActivePinia(createPinia())
-  return mount(CommuteSection, { props: { commutes } })
+  return mount(CommuteSection, { props: { commutes, rid } })
 }
 
-function makeCommutes(mode: string) {
-  return {
+function provMapFrom(commutes: Record<string, { provenance: unknown }>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(commutes).map(([key, entry]) => [`commutes.${key}`, entry.provenance]))
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  provApi.maps = {}
+})
+
+function makeCommutes(mode: string, rid: string = 'r1') {
+  const commutes = {
     'Simon/Pimlico': {
       succeeded: true,
       value: {
@@ -30,16 +48,19 @@ function makeCommutes(mode: string) {
       },
     },
   }
+  provApi.maps[rid] = provMapFrom(commutes)
+  return commutes
 }
 
 async function openProvenance(wrapper: VueWrapper) {
   await wrapper.find('.commute-accordion button').trigger('click') // expand the accordion
   await wrapper.find('.provenance-toggle__trigger').trigger('click') // show provenance
+  await flushPromises() // the on-demand load resolves before assertions
 }
 
 describe('CommuteSection provenance (round-2 walkthrough)', () => {
   it('hides petrol sources for a transit route', async () => {
-    const wrapper = mountSection(makeCommutes('transit'))
+    const wrapper = mountSection(makeCommutes('transit', 'r1'), 'r1')
     await openProvenance(wrapper)
     const text = wrapper.text()
     expect(text).not.toContain('Petrol MPG')
@@ -48,7 +69,7 @@ describe('CommuteSection provenance (round-2 walkthrough)', () => {
   })
 
   it('keeps petrol sources for a drive route', async () => {
-    const wrapper = mountSection(makeCommutes('drive'))
+    const wrapper = mountSection(makeCommutes('drive', 'r2'), 'r2')
     await openProvenance(wrapper)
     expect(wrapper.text()).toContain('Petrol MPG')
   })

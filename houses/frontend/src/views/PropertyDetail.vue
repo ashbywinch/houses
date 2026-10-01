@@ -307,8 +307,9 @@ async function saveAddress() {
                 </template>
               </span>
               <ProvenanceToggle
-                v-if="monthlyGroups && detail?.affordability?.group_monthly_cost?.provenance"
-                :provenance="detail.affordability.group_monthly_cost.provenance"
+                v-if="monthlyGroups && detail?.affordability?.group_monthly_cost"
+                :rid="rid"
+                path="affordability.group_monthly_cost"
                 title="Total monthly housing cost"
                 popover
               />
@@ -329,8 +330,9 @@ async function saveAddress() {
                 </template>
               </span>
               <ProvenanceToggle
-                v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined && detail?.affordability?.group_monthly_cost?.provenance"
-                :provenance="detail.affordability.group_monthly_cost.provenance"
+                v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined && detail?.affordability?.group_monthly_cost"
+                :rid="rid"
+                path="affordability.group_monthly_cost"
                 title="Total monthly housing cost"
                 popover
               />

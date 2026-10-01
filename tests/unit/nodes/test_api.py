@@ -544,6 +544,37 @@ def _iter_provenance(value, path, out) -> None:
             _iter_provenance(child, f"{path}[{i}]", out)
 
 
+def _strip(value: object) -> object:
+    """Deep-copy a wire payload with every provenance key removed (mirror
+    of api_router._strip_provenance) — assertion helper for the
+    provenance-free detail contract."""
+    if isinstance(value, dict):
+        out: dict = {}
+        for key, child in value.items():
+            if key == "provenance":
+                continue
+            out[key] = _strip(child)
+        return out
+    if isinstance(value, list):
+        return [_strip(i) for i in value]
+    return value
+
+
+def _count_provenance(value, _path: str = "") -> int:
+    """Count provenance dicts at any depth of a wire payload — the zero
+    assertion for the provenance-free detail contract."""
+    if isinstance(value, dict):
+        n = 1 if isinstance(value.get("provenance"), dict) else 0
+        for key, child in value.items():
+            if key == "provenance":
+                continue
+            n += _count_provenance(child, f"{_path}/{key}")
+        return n
+    if isinstance(value, list):
+        return sum(_count_provenance(i, _path) for i in value)
+    return 0
+
+
 class TestProvenanceUserFriendly:
     """The FAIL-FAST guard: provenance values must be human, never raw
     machine dumps. A future node whose projection returns a dict that
@@ -586,14 +617,30 @@ class TestProvenanceUserFriendly:
         return False
 
     def test_all_provenance_values_are_user_friendly(self):
-        """Every provenance value in a full property detail must be scalar
-        or an allowlisted friendly shape — never a raw machine dict."""
+        """Every provenance value the on-demand endpoint serves must be
+        scalar or an allowlisted friendly shape — never a raw machine
+        dict. The detail payload itself no longer carries provenance; the
+        endpoint is the ONLY surface the UI's reveal widgets read."""
         client, rid = self._seed()
         detail = client.get(f"/api/properties/{rid}/detail").json()
+        leftover: list[tuple[str, dict]] = []
+        _iter_provenance(detail, "detail", leftover)
+        assert not leftover, f"detail payload must not embed provenance: {leftover[:4]}"
+        prov_map = client.get(f"/api/properties/{rid}/provenance").json()
+        assert prov_map, "the on-demand endpoint serves every detail-surface node"
 
         bad: list[tuple[str, object]] = []
         provenances: list[tuple[str, dict]] = []
-        _iter_provenance(detail, "detail", provenances)
+        for path, prov in prov_map.items():
+            provenances.append((path, prov))
+        # _iter_provenance walks nested dicts; reuse it on a wrapper so
+        # nested provenance (e.g. per-person subtrees) is still checked.
+        for path, prov in list(provenances):
+            nested: list[tuple[str, dict]] = []
+            _iter_provenance(prov, path, nested)
+            for nested_path, pv in nested:
+                if (nested_path, pv) not in provenances:
+                    provenances.append((nested_path, pv))
         for section, prov in provenances:
             leaves: list[tuple[str, object]] = []
             _provenance_walk(prov, section, leaves)
@@ -614,13 +661,18 @@ class TestProvenanceUserFriendly:
         so a what-if re-prices it — provenance is never staler than its
         value.)"""
         client, rid = self._seed()
+        prov_map = client.get(f"/api/properties/{rid}/provenance").json()
         detail = client.get(f"/api/properties/{rid}/detail").json()
+        # The commute derivations must all live on the on-demand endpoint.
+        assert _strip(detail) == detail, "the detail wire must carry no provenance"
 
         mode_prefix = ("Transit ", "Driving ", "Walking ", "Drive ", "Car ")
         bad: list[tuple[str, str]] = []
         seen = 0
-        provenances: list[tuple[str, dict]] = []
-        _iter_provenance(detail, "detail", provenances)
+        provenances: list[tuple[str, dict]] = [
+            (path, prov) for path, prov in prov_map.items() if path.startswith("commutes.")
+        ]
+        assert provenances, "the provenance endpoint must serve the commute trees"
         for section, prov in provenances:
             leaves: list[tuple[str, object]] = []
             _provenance_walk(prov, section, leaves)
