@@ -536,6 +536,7 @@ jobs:
   # The restore/migrate happened during rollout PREP (when the standby was
   # built and smoke-reviewed) — there is no snapshot, no rebase, no DB op here.
   flip:
+    needs: [resolve]
     if: ${{ inputs.action == 'flip' && needs.resolve.outputs.consistent == 'true' }}
     runs-on: ubuntu-latest
     environment: production
