@@ -16,12 +16,25 @@
 #                                      # to the STANDBY app (owner box; off = remove)
 #   switch.sh --public-url <url>       # set HOUSES_PUBLIC_URL for THIS box (role urls)
 #   switch.sh --serve                  # start the app for the review surface (standby)
+#   switch.sh --role <url>             # the recover-rollout FLIP: make THIS box live
+#                                      # under <url>. The box must already be the
+#                                      # APPROVED review surface — its DB and app are
+#                                      # the contract; NOTHING is restored, rebased or
+#                                      # migrated here. Writes the role URL and
+#                                      # restarts the app to read it, then health-checks.
+#   switch.sh --stop                   # the flip's other half: stop THIS box's app
+#                                      # (the abandoned side goes dark; nothing else).
 #
-# The FLIP is not here. Traffic moves by pointing the L4 forwarding rules at this
-# instance's target (`gcloud … forwarding-rules set-target`, run by CI with its
-# own credentials); the box never touches routes and holds no GCP key. The role of
-# a box — owner or standby — is exactly that rule's target
-# (docs/anti-fragile-rollout-plan.md, Phase 2).
+# The FULL cutover flip is not here either: traffic moves by pointing the L4
+# forwarding rules at this instance's target (`gcloud … forwarding-rules
+# set-target`, run by CI with its own credentials); the box never touches routes
+# and holds no GCP key. The role of a box — owner or standby — is exactly that
+# rule's target (docs/anti-fragile-rollout-plan.md, Phase 2).
+#
+# In a RECOVER rollout the approved review surface is the flip's artifact:
+# once the user approves the smoke box, the flip MUST NOT change anything on
+# that box except make it live — hence --role (the only data-touching surface
+# is the env file: the role URL), and --stop for the abandoned side.
 #
 # A cutover is: CI freezes the OWNER (--snapshot stops the app, so no write can
 # land between the freeze and the copy — zero write loss), pipes that snapshot
@@ -328,8 +341,13 @@ if [ "$ACTION" = "--public-url" ]; then
   URL="${2:-}"
   [ -n "$URL" ] || { mark "FAILED: --public-url needs a URL"; exit 1; }
   ENV_FILE="${HOUSES_ENV_FILE:-/etc/houses.env}"
+  # The URL rides a sed substitution (delimiter #) — escape the two
+  # replacement metacharacters from the value so an operator-supplied
+  # URL can never corrupt the line.
+  URL_SAFE="${URL//&/\\&}"
+  URL_SAFE="${URL_SAFE//#/\\#}"
   if grep -q '^HOUSES_PUBLIC_URL=' "$ENV_FILE"; then
-    sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL='"$URL"'#' "$ENV_FILE"
+    sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL='"$URL_SAFE"'#' "$ENV_FILE"
   else
     printf 'HOUSES_PUBLIC_URL=%s
 ' "$URL" >> "$ENV_FILE"
@@ -352,5 +370,51 @@ if [ "$ACTION" = "--serve" ]; then
   exit 0
 fi
 
-echo "usage: switch.sh [--snapshot | --unfreeze | --rebase [<rows>] | --restore <gs://…> | --diagnose | --smoke-relay <ip|off> | --public-url <url> | --serve]" >&2
+if [ "$ACTION" = "--role" ]; then
+  # Recover-rollout flip: make THIS box live under <url>. The box already is the
+  # approved review surface — its DB and app are the contract. The role URL rides
+  # the env the app reads at start, so the app restarts to apply it; the DB file
+  # is NEVER touched here.
+  URL="${2:-}"
+  [ -n "$URL" ] || { mark "FAILED: --role needs a URL"; exit 1; }
+  ENV_FILE="${HOUSES_ENV_FILE:-/etc/houses.env}"
+  # The URL rides a sed substitution (delimiter #) — escape the two
+  # replacement metacharacters from the value so an operator-supplied
+  # URL can never corrupt the line.
+  URL_SAFE="${URL//&/\\&}"
+  URL_SAFE="${URL_SAFE//#/\\#}"
+  if grep -q '^HOUSES_PUBLIC_URL=' "$ENV_FILE"; then
+    sed -i 's#^HOUSES_PUBLIC_URL=.*#HOUSES_PUBLIC_URL='"$URL_SAFE"'#' "$ENV_FILE"
+  else
+    printf 'HOUSES_PUBLIC_URL=%s
+' "$URL" >> "$ENV_FILE"
+  fi
+  mark "role url set: $URL — restarting the app to apply it"
+  systemctl restart houses.service 2>/dev/null || { mark "FAILED: could not restart houses.service"; exit 1; }
+  for i in $(seq 1 300); do
+    curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && break
+    sleep 2
+  done
+  curl -fsS --max-time 30 localhost:8765/health >/dev/null 2>&1 || {
+    mark "FAILED: the app did not become healthy after --role"
+    exit 1
+  }
+  mark "LIVE: app serving the production URL on 127.0.0.1:8765"
+  exit 0
+fi
+
+if [ "$ACTION" = "--stop" ]; then
+  # The flip's other half: the box that no longer serves production goes dark.
+  # Its app stops; its DB and files stay exactly as they were.
+  systemctl stop houses.service 2>/dev/null || true
+  sleep 1
+  if systemctl is-active --quiet houses.service; then
+    mark "FAILED: houses.service is still active after --stop"
+    exit 1
+  fi
+  mark "app stopped — this box no longer serves"
+  exit 0
+fi
+
+echo "usage: switch.sh [--snapshot | --unfreeze | --rebase [<rows>] | --restore <gs://…> | --diagnose | --smoke-relay <ip|off> | --public-url <url> | --serve | --role <url> | --stop]" >&2
 exit 2

@@ -23,7 +23,16 @@ permissions:
 #   rollback  — flip the rules back to the other box. Ungated: the emergency undo.
 #   recover   — GATED. The EXCEPTION path: restore the standby's database from a
 #               NAMED object (never from the owner) and flip. For when the owner's
-#               data must not be carried forward at all.
+#               data must not be carried forward at all. The restore is ROLLOUT
+#               PREP: it happens when the standby is built and smoke-reviewed.
+#   flip      — GATED (environment: production). The recover-rollout flip: make
+#               the APPROVED review box live and NOTHING else. Invariant: once
+#               the smoke box is user-approved, the flip MUST NOT change anything
+#               on that box except make it live — no restore, no rebase, no
+#               migrate, no DB touch. It writes the production role URL (the app
+#               restarts to read it), retires the smoke relay, stops the
+#               abandoned box's app, points the L4 rules at the approved box,
+#               and watches public health through the settle window.
 #   diagnose  — read-only state dump of BOTH boxes.
 #   scaffold  — one-time, GREENFIELD only: the two boxes + target instances +
 #               the L4 rules, when no rules exist yet. Requires houses-base
@@ -53,11 +62,11 @@ on:
         required: false
         default: 'main'
       action:
-        description: 'release | build | install | cutover | rollback | recover | diagnose | provision | bake | scaffold'
+        description: 'release | build | install | cutover | rollback | recover | flip | diagnose | provision | bake | scaffold'
         required: false
         default: 'release'
         type: choice
-        options: ['release', 'build', 'install', 'cutover', 'rollback', 'recover', 'diagnose', 'provision', 'bake', 'scaffold']
+        options: ['release', 'build', 'install', 'cutover', 'rollback', 'recover', 'flip', 'diagnose', 'provision', 'bake', 'scaffold']
       artifact:
         description: 'install only: an existing gs://<bucket>/<sha256>.tar.gz (blank = build one now)'
         required: false
@@ -148,6 +157,8 @@ jobs:
     # Runs for every chain that consumes the image; emits drifted=true when
     # the baked image no longer matches main's bake source — the chain then
     # RE-BAKES in the same run (no human), because a stale image is a stale box.
+    # The flip consumes NO image and NO artifact — the approved box is the
+    # contract; a stale image must never gate it.
     if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'cutover' || inputs.action == 'recover' }}
     runs-on: ubuntu-latest
     outputs:
@@ -517,6 +528,106 @@ jobs:
           echo "owner after:   ${{ needs.resolve.outputs.standby }}"
           echo "Rollback (if needed): gh workflow run Release -f action=rollback -f ref=main"
           echo "Clean pre-migration backups retained: ${{ steps.snapshot.outputs.snapshot_object }} (GCS) + each box's <db>.pre-<migration> files"
+
+  # ── flip: make the APPROVED review box live, nothing else ─────────────
+  # Recover-rollout flip. Invariant: once the smoke box is user-approved the
+  # flip MUST NOT change anything on that box except make it live. The box
+  # already runs the approved DB and app (its local /health is the contract).
+  # The restore/migrate happened during rollout PREP (when the standby was
+  # built and smoke-reviewed) — there is no snapshot, no rebase, no DB op here.
+  flip:
+    if: ${{ inputs.action == 'flip' && needs.resolve.outputs.consistent == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      BOX_USER: ${{ secrets.BOX_USER }}
+      BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+      OWNER_IP: ${{ needs.resolve.outputs.owner_ip }}
+      STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
+    steps:
+      - name: Prepare the deploy key
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+      - name: Authenticate gcloud
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
+          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
+          rm -f /tmp/sa.json
+        env:
+          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Preflight — ops safety, not acceptance
+        run: |
+          set -euo pipefail
+          # Acceptance already happened: the user approved this box on the
+          # review surface. This check is ops safety only — if the approved
+          # box stopped serving, nothing is flipped (docs/rollout-prd.md, §7).
+          # The flip never re-verifies, re-restores or re-migrates the box.
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20             "$BOX_USER@$STANDBY_IP" "curl -fsS --max-time 10 localhost:8765/health" \
+            | grep -E '"status":"ok"' || { echo "::error::the approved box is not serving — nothing is flipped"; exit 1; }
+          echo "preflight ok: approved box is serving on $STANDBY_IP"
+      - name: Promote — production role URL on the approved box
+        run: |
+          set -euo pipefail
+          # The ONLY change to the approved box: its role URL (the app reads
+          # it at start, so the app restarts to apply it). The DB file is
+          # untouched. Uses the --public-url verb already on the box — no
+          # installation, no new tooling: the flip must work on the boxes
+          # exactly as they were approved (docs/rollout-prd.md, R1/R2).
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net && sudo systemctl restart houses.service"
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$BOX_USER@$STANDBY_IP" "for i in \$(seq 1 150); do curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && exit 0; sleep 2; done; echo 'approved box did not become healthy'; exit 1"
+      - name: Darken — retire the smoke relay and stop the abandoned box
+        run: |
+          set -euo pipefail
+          # The old owner's Caddy stops relaying houses-smoke (the review
+          # surface ends at approval), then its app stops. Both are remote
+          # ops with tooling already on the box — nothing is installed to
+          # the live/owner box, ever, during a rollout. Its files and DB
+          # stay exactly as they were (the pre-flip archive).
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay off && sudo systemctl stop houses.service"
+      - name: Flip the L4 rules to the approved box
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          REGION="${ZONE%-*}"
+          TARGET="${{ needs.resolve.outputs.standby }}-target"
+          for rule in houses-l4-http houses-l4-https; do
+            gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
+              --target-instance "$TARGET"
+          done
+          echo "flipped houses-l4-http + houses-l4-https -> $TARGET"
+      - name: Continuity probe — public health responds (not acceptance)
+        if: success()
+        run: |
+          set -euo pipefail
+          # Acceptance happened on the review surface BEFORE the flip (the
+          # user approval); the flip changes nothing about the approved box.
+          # This probe only confirms the moved site responds promptly. A
+          # failure is an anomaly to investigate or roll back — it is NOT a
+          # stability gate; nothing is approved or waited-into-shape after the
+          # flip (docs/rollout-prd.md, §1 and §7).
+          ok=""
+          for i in $(seq 1 12); do
+            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
+            S=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("status",""))' 2>/dev/null || true)
+            [ "$S" = "ok" ] && { echo "probe $i: public health ok"; ok=1; break; }
+            echo "probe $i: not healthy yet"
+            sleep 10
+          done
+          [ -n "$ok" ] || { echo "::error::public health did not come up after the flip — investigate or rollback"; exit 1; }
+          # DAG convergence is reported, never gated: the approved box
+          # converged during its review; a fresh-cutover boot's background
+          # sweep is expected and reads never block on it.
+          echo "CONTINUITY OK: public site serving on the approved box"
+      - name: Record the outcome
+        if: always()
+        run: |
+          echo "approved box: ${{ needs.resolve.outputs.standby }} (was the smoke surface; now production)"
+          echo "abandoned box: ${{ needs.resolve.outputs.owner }} (app stopped, relay retired — its DB kept as-is)"
+          echo "Rollback (if needed): gh workflow run Release -f action=rollback -f ref=main"
 
   # ── recover: put production on a database from a NAMED OBJECT, then flip ──
   #
