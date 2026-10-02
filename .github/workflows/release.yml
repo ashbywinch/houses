@@ -975,6 +975,7 @@ jobs:
           # The builder uses e2-small (not the box's e2-micro): the bake is
           # the one instance creation that must not depend on the free-tier
           # micro capacity of the moment (2026-09-30: us-west1-a refused the
+          # builder twice on capacity). Retried with backoff for the same
           # transient-capacity class.
           #
           # Backoff shape (2026-10-02): GCP's pool-exhausted error is INSTANT
@@ -982,8 +983,11 @@ jobs:
           # horizon) sat inside a run-long outage: six immediate rejections
           # across two runs and it never had a chance. Exponential backoff
           # instead: 120s → 240s → 480s → 960s → 1500s, a ~55-minute horizon
-          # inside the step's raised 65-minute cap. Still ONLY retried for the
-          # capacity class — any other error fails immediately. ONE retry
+          # inside the step's 90-minute cap (raised from 65 on a PR-review
+          # finding, 2026-10-02: the sleeps alone total ~55 min and the final
+          # successful apply after an outage is slower than usual, so 65 was
+          # thin enough to kill the step mid-backoff). Still ONLY retried for
+          # the capacity class — any other error fails immediately. ONE retry
           # mechanism, deliberately no dispatch-level retry on top.
           ok=0
           attempt=0
@@ -1019,7 +1023,7 @@ jobs:
           [ "$ok" = 1 ] || { echo "::error::bake apply failed after 6 tries (capacity)"; exit 1; }
         env:
           DEPLOY_PUBKEY: ${{ secrets.DEPLOY_PUBKEY }}
-        timeout-minutes: 65
+        timeout-minutes: 90
       - name: Wait for the bake to FINISH (the bake script powers the box off when done)
         run: |
           set -euo pipefail
