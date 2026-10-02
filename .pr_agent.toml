@@ -48,16 +48,17 @@ repo_context_files = [
 extra_headers = '{"cf-aig-request-timeout": "1800000", "cf-aig-max-attempts": "0", "cf-aig-backoff": "exponential"}'
 
 [pr_code_suggestions]
-# The suggestions tool runs a NON-reasoning model on purpose (2026-10-02).
-# The reasoning model (deepseek-v4-flash via dynamic/fallback2) never produced
-# parseable suggestions: at 0.2 it looped in thought for 25 min
-# (finish_reason=length, content=null); at 0.8 it stopped looping but emitted
-# prose with a hallucinated file path, and pr-agent's suggestions parser
-# hard-failed the run. deepseek/deepseek-flash (non-reasoning, seen completing
-# in 5-60 s on this gateway) returns the structured YAML the tool expects.
-# The REVIEW keeps the reasoning model — its chain of thought is the value;
-# only the suggestions tool moves off it.
-model = "deepseek/deepseek-flash"
+# 2026-10-02 investigation: the reasoning model (deepseek-v4-flash via
+# dynamic/fallback2) never produced parseable suggestions — at 0.2 it
+# looped in thought for 25 min (finish_reason=length, content=null); at
+# 0.8 it stopped looping but emitted prose with invented paths, and
+# pr-agent's suggestions parser hard-failed the run. Per-tool 'model' is
+# NOT read by this version's suggestions generator (it always uses the
+# global [config] chain — verified in the pinned source), so the fix is a
+# strict output contract in the prompt, which IS read.
+# The tool's default temperature is 0.2; [config] temperature = 0.8 now
+# governs these calls too (the loop fix).
+extra_instructions = """Return the code suggestions as a SINGLE YAML document and nothing else. No markdown code fences, no prose before or after, no JSON. The document is a YAML list; every item has exactly these keys: 'file', 'relevant_line', 'name', 'comment'. 'file' MUST be one of the file paths present verbatim in the PR diff above — never an invented, similar or reformatted path. 'relevant_line' must be the exact line text from the diff. 'comment' must be a single plain-text line without quote or colon ambiguities."""
 
 [pr_reviewer]
 # Key review findings post INLINE as GitHub review threads (resolvable).
