@@ -17,6 +17,18 @@ ai_timeout = 1800 # reviews on large diffs take minutes; the upstream default is
 custom_model_max_tokens = 128000
 max_model_tokens = 128000
 fallback_models = []
+# Sampling temperature — raised from the 0.2 default to 0.8 (2026-10-02).
+# The /improve (suggestions) run looped in thought for 25 minutes at 0.2:
+# 124,972 of 131,072 completion tokens were repetition, finish_reason=length,
+# content=null, and pr-agent posted "Failed to generate code suggestions".
+# Looping is the known low-temperature failure mode of reasoning models
+# (arXiv:2512.12895 — looping falls sharply by T≈0.8; DeepSeek/HF cards
+# recommend high T for reasoners). omp runs this same model family at T=0
+# without looping only because its generations are short and tool-chunked —
+# pr-agent's single long generation needs the exploration. Temperature is a
+# stopgap, not a fix: if loops persist at 0.8, move only the suggestions tool
+# to a non-reasoning model instead of raising further.
+temperature = 0.8
 
 verbosity_level = 3
 repo_context_from_default_branch = true # standards docs read from main (maintainer-controlled), never the PR head
