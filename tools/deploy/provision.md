@@ -317,9 +317,12 @@ gh workflow run Release -f action=rollback -f ref=main
 #    install, or a probe)
 gh workflow run Release -f action=install -f artifact=gs://houses-artifacts/<sha256>.tar.gz
 
-# 6. the owner's data is not trustworthy? recover onto a named object instead
-#    of carrying it forward — §7b
-gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db -f approval=approved
+# 6. the owner's data is not trustworthy? RECOVER-PREP onto a named object
+#    instead of carrying it forward — UNGATED (restore + review surface only):
+gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
+#    then, after reviewing the served box, promote with the GATED flip (§7b):
+gh workflow run Release -f action=build -f ref=main
+gh workflow run Release -f action=flip -f approval=approved -f artifact=gs://houses-artifacts/<sha256>.tar.gz
 ```
 
 What each phase owns:
@@ -391,14 +394,30 @@ migration that never ran, a stalled cascade, a botched restore, a box that is
 simply broken. Do not snapshot it and do not "carry it forward and fix it
 later".
 
+Recovery is TWO steps, and the split is the point: the restore happens BEFORE
+any approval. `action=recover` is ungated PREP — it leaves the standby serving
+the restored database on the REVIEW surface; the approval comes only at the
+flip, which promotes that exact, already-reviewed box and touches nothing on it
+but the role URL (2026-10-02: recover used to restore AFTER its gate and then
+flip, so the box that went live was never the one approved).
+
 ```bash
+# 1. PREP (ungated): restore the named object onto the STANDBY and serve it
+#    at houses-smoke.blueumbrella.net for review. No traffic change; the owner
+#    never touches it and keeps serving production.
 gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
+
+# 2. review the served box (its database IS the contract), then PROMOTE:
+gh workflow run Release -f action=build -f ref=main        # fresh artifact (the flip's tooling sync)
+gh workflow run Release -f action=flip -f approval=approved -f artifact=gs://houses-artifacts/<sha256>.tar.gz
+#    approve the production environment gate — that approval is where the
+#    trade is accepted: every write since the object was made is gone.
 ```
 
-What it does: restores that object onto the **standby**, runs the migrations +
-checks on the quiescent copy, starts the app, and flips the rules — with the
-`production` environment approval in front of it, because the cost is real:
-**every write since that object was made is gone**. The owner is never read.
+`action=recover` restores that object onto the **standby**, runs the migrations
++ checks on the quiescent copy, starts the app with the smoke role URL, and
+stops — the flip is the ONLY traffic move, and it is gated. The owner is never
+read.
 
 Choosing the source is a human decision made once, in the incident:
 
@@ -411,7 +430,8 @@ Choosing the source is a human decision made once, in the incident:
 Then: the recovered box is the owner. The abandoned box becomes the standby and
 the **next rollout replaces it** (`provision`), so its data cannot come back.
 Note that `rollback` is NOT the undo here — it would move traffic back onto the
-data you just abandoned; the undo is another `recover` with a different object.
+data you just abandoned; the undo is another recovery — `recover` then `flip` —
+with a different object.
 
 **Recovery is verified by the rollout's own mechanism**: the restore's
 `integrity_check` + row count, the runner's `migrations: <N> applied+checked,

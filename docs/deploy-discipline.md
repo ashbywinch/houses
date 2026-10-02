@@ -57,10 +57,14 @@ is SERVING; it is not evidence about the data — that verdict is the runner's
 `migrations: N applied+checked, 0 failed`, which the box refuses to start without.
 
 **When the owner's data must not be carried forward** (a silent migration skip, a
-stalled cascade, a botched restore), `action=recover` restores the standby's
-database from an object a human names and flips — the owner is never read, no
-snapshot is taken, and the writes since that object are gone by design. See
-tools/deploy/provision.md §7b.
+stalled cascade, a botched restore), recovery is restore-first, approve-later:
+`action=recover` restores the standby's database from an object a human names
+and SERVES it on the review surface — UNGATED, because it moves no traffic —
+then the human reviews the restored box and `action=flip` (gated) promotes it
+with no DB touch. The owner is never read; the writes since that object are
+gone by design; and no job may both restore a database and move traffic
+(2026-10-02: recover used to restore after its approval gate, so the approved
+box and the box that went live differed). See tools/deploy/provision.md §7b.
 
 **The rule's target is the only "who is live" fact.** The two instances
 (`houses`, `houses-standby`) are fixed resources whose roles rotate with it;
