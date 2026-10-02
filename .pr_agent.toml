@@ -47,6 +47,18 @@ repo_context_files = [
 # client (PR-Agent's retry_with_fallback_models) owns retries.
 extra_headers = '{"cf-aig-request-timeout": "1800000", "cf-aig-max-attempts": "0", "cf-aig-backoff": "exponential"}'
 
+[pr_improve]
+# The suggestions tool runs a NON-reasoning model on purpose (2026-10-02).
+# The reasoning model (deepseek-v4-flash via dynamic/fallback2) never produced
+# parseable suggestions: at 0.2 it looped in thought for 25 min
+# (finish_reason=length, content=null); at 0.8 it stopped looping but emitted
+# prose with a hallucinated file path, and pr-agent's suggestions parser
+# hard-failed the run. deepseek/deepseek-flash (non-reasoning, seen completing
+# in 5-60 s on this gateway) returns the structured YAML the tool expects.
+# The REVIEW keeps the reasoning model — its chain of thought is the value;
+# only the suggestions tool moves off it.
+model = "deepseek/deepseek-flash"
+
 [pr_reviewer]
 # Key review findings post INLINE as GitHub review threads (resolvable).
 # main's branch protection has required_conversation_resolution — the PR
