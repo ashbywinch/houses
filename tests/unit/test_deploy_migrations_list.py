@@ -193,4 +193,4 @@ def test_the_bake_retries_capacity_with_exponential_backoff():
     assert 'while [ "$attempt" -lt 6 ]' in bake, "six attempts"
     assert "BACKOFF=$((BACKOFF * 2))" in bake, "exponential backoff"
     assert '[ "$BACKOFF" -gt 1500 ]' in bake, "the backoff is capped"
-    assert "timeout-minutes: 65" in bake, "the step cap matches the ~55-min horizon"
+    assert "timeout-minutes: 90" in bake, "the cap must clear the ~55-min sleep sum + apply overhead"
