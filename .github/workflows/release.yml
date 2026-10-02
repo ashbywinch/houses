@@ -715,6 +715,21 @@ jobs:
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blueumbrella.net && sudo /opt/houses/switch.sh --restore $SOURCE"
         timeout-minutes: 45
+      - name: Verify the review surface serves before REVIEW READY
+        run: |
+          set -euo pipefail
+          # The human approves the SERVING box — never a promise. The restored
+          # app on an e2-micro can take minutes to become healthy; poll the
+          # EXTERNAL smoke hostname (the whole chain: owner's relay ->
+          # standby -> app -> restored DB) up to 10 minutes.
+          ok=0
+          for i in $(seq 1 60); do
+            H=$(curl -sS -m 10 https://houses-smoke.blueumbrella.net/health 2>/dev/null || true)
+            printf '%s' "$H" | grep -qE '"status":"ok"' && { echo "review surface serving (poll $i): $H"; ok=1; break; }
+            sleep 10
+          done
+          [ "$ok" = 1 ] || { echo "::error::the review surface did not become healthy — re-run action=recover after diagnosing (journalctl -u houses.service)"; exit 1; }
+          echo "REVIEWABLE: https://houses-smoke.blueumbrella.net serves the restored $SOURCE"
       - name: REVIEW READY — the traffic move is `flip`, gated
         run: |
           echo "REVIEW READY: ${{ needs.resolve.outputs.standby }} serves $SOURCE at https://houses-smoke.blueumbrella.net"
