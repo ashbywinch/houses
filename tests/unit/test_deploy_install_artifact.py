@@ -14,9 +14,11 @@ naming the artifact, and the app left STOPPED.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import subprocess
+import tarfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -74,6 +76,14 @@ STUB_ID = """#!/bin/sh
 case "$1" in -u) printf '0\\n' ;; *) exit 0 ;; esac
 exit 0
 """
+STUB_GSUTIL = """#!/bin/sh
+# `gsutil -q cp <src> <dst>`: the sandbox's fetch stub substitutes the LOCAL
+# tarball named by GSUTIL_SRC for the fake GCS object — the installer still
+# verifies the object by hashing the bytes it fetched (the name IS the proof),
+# so the stub only supplies the bytes.
+if [ "$1" = "-q" ]; then shift; fi
+cp "${GSUTIL_SRC:?}" "$3"
+"""
 STUB_SCHEMA = (
     "CREATE TABLE node_results (id INTEGER PRIMARY KEY, node_id TEXT, result_json BLOB,"
     " dep_timestamps TEXT, created_at TEXT, code_version TEXT);"
@@ -123,6 +133,7 @@ def _stubs(tmp_path: Path) -> Path:
         ("curl", STUB_CURL),
         ("systemctl", STUB_SYSTEMCTL),
         ("id", STUB_ID),
+        ("gsutil", STUB_GSUTIL),
     ):
         executable = bin_dir / name
         executable.write_text(body)
@@ -160,3 +171,70 @@ def test_the_fast_path_reaches_review_ready_and_leaves_the_app_serving(tmp_path)
     calls = systemctl_log.read_text().splitlines()
     assert "systemctl stop houses.service" not in calls, calls
     assert "HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net" in env_file.read_text()
+
+
+def _tarball(tmp_path: Path) -> tuple[Path, str]:
+    """A REAL artifact tarball (tools/deploy + units + ARTIFACT_REF) whose
+    sha256 IS its object key — the installer verifies what it fetched."""
+    stage = tmp_path / "tarball-src"
+    (stage / "tools" / "deploy").mkdir(parents=True)
+    (stage / "units").mkdir()
+    (stage / "tools" / "deploy" / "box-setup.sh").write_text("#!/bin/sh\nexit 0\n")
+    (stage / "tools" / "deploy" / "switch.sh").write_text("#!/bin/sh\nexit 0\n")
+    (stage / "tools" / "deploy" / "run_migrations.py").write_text("")
+    (stage / "tools" / "deploy" / "migrations.list").write_text("m a\n")
+    (stage / "units" / "houses.service").write_text("")
+    (stage / "ARTIFACT_REF").write_text("main\n")
+    tarball = tmp_path / "artifact.tar.gz"
+    with tarfile.open(tarball, "w:gz") as tf:
+        for p in sorted(stage.rglob("*")):
+            if p.is_file():
+                tf.add(p, arcname=p.relative_to(stage))
+    return tarball, hashlib.sha256(tarball.read_bytes()).hexdigest()
+
+
+def test_tooling_only_sync_never_stops_or_swaps_the_app(tmp_path):
+    """2026-10-02: install-artifact.sh --tooling-only stopped the standby's app
+    (and swapped its whole checkout) before the flip's preflight — killing the
+    review surface the preflight checks. A tooling sync must refresh ONLY the
+    tooling: no systemctl, no app swap, no ARTIFACT rewrite."""
+    root = _box(tmp_path)  # ARTIFACT marker names SHA (the OLD artifact)
+    bin_dir = _stubs(tmp_path)
+    env_file = tmp_path / "houses.env"
+    env_file.write_text("HOUSES_SESSION_SECRET=secret\n")
+    systemctl_log = tmp_path / "systemctl.log"
+    systemctl_log.write_text("")
+    tarball, sha = _tarball(tmp_path)
+    obj = f"gs://houses-artifacts/{sha}.tar.gz"
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "HOUSES_ROOT": str(root),
+        "GSUTIL_SRC": str(tarball),
+        "HOUSES_ENV_FILE": str(env_file),
+        "SYSTEMCTL_LOG": str(systemctl_log),
+    }
+    result = subprocess.run(
+        [str(INSTALLER), "--tooling-only", obj], capture_output=True, text=True, env=env
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode == 0, output
+    assert "TOOLING now at" in output
+    # The app was NEVER touched: no systemctl call at all.
+    assert systemctl_log.read_text() == "", "a tooling-only sync must not stop or restart the app"
+    # The APP's marker still names the old artifact; the TOOLING marker names the new.
+    assert f"sha256={SHA} ref=main" in (root / "ARTIFACT").read_text()
+    tooling = (root / "TOOLING").read_text()
+    assert f"sha256={sha} ref=main" in tooling
+    # The app tree was not swapped: no staging dir left behind, old app intact.
+    assert not (root / ".app-incoming").exists()
+    assert (root / "app" / ".venv" / "bin" / "python").exists()
+    # A second sync of the same object is a no-op (the TOOLING marker matches).
+    again = subprocess.run(
+        [str(INSTALLER), "--tooling-only", obj], capture_output=True, text=True, env=env
+    )
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "tooling already at" in again.stdout + again.stderr
+    assert systemctl_log.read_text() == ""

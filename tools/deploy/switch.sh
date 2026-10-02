@@ -64,6 +64,8 @@ if [ "$ACTION" = "--diagnose" ]; then
   echo "host=$(hostname) time=$(date -u +%FT%TZ)"
   echo "----- /opt/houses/ARTIFACT (which build this box runs) -----"
   if [ -f "$ROOT/ARTIFACT" ]; then cat "$ROOT/ARTIFACT"; else echo "none (no artifact installed yet)"; fi
+  echo "----- /opt/houses/TOOLING (which artifact's tooling this box runs) -----"
+  if [ -f "$ROOT/TOOLING" ]; then cat "$ROOT/TOOLING"; else echo "none (tooling came with the installed artifact)"; fi
   echo "----- /opt/houses/SEED (what this box was bootstrapped from) -----"
   if [ -f "$ROOT/SEED" ]; then cat "$ROOT/SEED"; else echo "none (not bootstrapped from a seed)"; fi
   echo "----- /opt/houses/RESTORED (which database this box was last restored to) -----"

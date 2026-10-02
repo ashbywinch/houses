@@ -38,6 +38,12 @@ permissions:
 #               the L4 rules, when no rules exist yet. Requires houses-base
 #               (run action=bake first); a missing image or an existing plane
 #               fails the job loudly — there is no fallback bootstrap.
+#   DOUBLE GATE on every traffic move (cutover / flip / recover):
+#   (1) the job declares environment: production — GitHub pauses it until the
+#       required human reviewer approves, and (2) the job's first step refuses
+#       to run unless the dispatch carried approval=approved. Both must hold;
+#       neither alone may move traffic (2026-10-02: the environment had no
+#       protection rules configured, so a flip autopassed the gate and ran).
 #
 # The box never flips routes and holds no GCP credentials; CI does the flip with
 # its own service account. The box's only identity is its instance service
@@ -75,6 +81,12 @@ on:
         description: 'recover only: the database object to restore (gs://bucket/object.db)'
         required: false
         default: 'gs://houses-seed/latest.db'
+      approval:
+        description: 'flip/cutover/recover only: explicit human approval to move traffic. REQUIRED: approved — anything else fails the job before any box or traffic operation'
+        required: false
+        default: 'pending'
+        type: choice
+        options: ['pending', 'approved']
 
 jobs:
   # ── who is live ───────────────────────────────────────────────────────
@@ -396,6 +408,11 @@ jobs:
       OWNER_IP: ${{ needs.resolve.outputs.owner_ip }}
       STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
     steps:
+      - name: Human approval gate — a traffic move may not start without it
+        if: ${{ inputs.approval != 'approved' }}
+        run: |
+          echo "::error::action=${{ inputs.action }} moves production traffic, and this dispatch did not carry approval=approved. Nothing ran — no box command, no traffic change. Re-dispatch with -f approval=approved ONLY after the human has approved the surface."
+          exit 1
       - name: Prepare the deploy key
         run: |
           set -euo pipefail
@@ -546,6 +563,11 @@ jobs:
       OWNER_IP: ${{ needs.resolve.outputs.owner_ip }}
       STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
     steps:
+      - name: Human approval gate — a traffic move may not start without it
+        if: ${{ inputs.approval != 'approved' }}
+        run: |
+          echo "::error::action=${{ inputs.action }} moves production traffic, and this dispatch did not carry approval=approved. Nothing ran — no box command, no traffic change. Re-dispatch with -f approval=approved ONLY after the human has approved the surface."
+          exit 1
       - name: Prepare the deploy key
         run: |
           set -euo pipefail
@@ -658,6 +680,11 @@ jobs:
       STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
       SOURCE: ${{ inputs.snapshot || 'gs://houses-seed/latest.db' }}
     steps:
+      - name: Human approval gate — a traffic move may not start without it
+        if: ${{ inputs.approval != 'approved' }}
+        run: |
+          echo "::error::action=${{ inputs.action }} moves production traffic, and this dispatch did not carry approval=approved. Nothing ran — no box command, no traffic change. Re-dispatch with -f approval=approved ONLY after the human has approved the surface."
+          exit 1
       - name: Guard — never recover onto the box that owns the traffic
         run: |
           set -euo pipefail

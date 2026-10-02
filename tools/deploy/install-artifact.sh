@@ -76,13 +76,27 @@ trap cleanup EXIT
 # records the sha this checkout came from, so "already here" is a fact, not a
 # guess. Anything else (a re-install, a different artifact, no marker) takes the
 # full fetch/verify/unpack path.
-if grep -q "^sha256=$EXPECTED_SHA " "$ROOT/ARTIFACT" 2>/dev/null; then
+# ── 1. the artifact ────────────────────────────────────────────────────
+# A rollout rebuilds the box first, and the bootstrap installs exactly this
+# object — re-fetching ~100 MB to unpack the same bytes is pure waste. The marker
+# records the sha this checkout came from, so "already here" is a fact, not a
+# guess. A TOOLING-only sync matches its own TOOLING marker (the tooling's
+# provenance — the app's ARTIFACT marker is untouched by a tooling sync, so it
+# keeps naming what the APP runs).
+if [ "$TOOLING_ONLY" = 1 ]; then
+  if grep -q "^sha256=$EXPECTED_SHA " "$ROOT/TOOLING" 2>/dev/null; then
+    mark "tooling already at $EXPECTED_SHA — nothing to do (the app is untouched)"
+    exit 0
+  fi
+elif grep -q "^sha256=$EXPECTED_SHA " "$ROOT/ARTIFACT" 2>/dev/null; then
   mark "the box already runs $EXPECTED_SHA (the bootstrap installed it) — skipping fetch and unpack"
   # The marker match IS the proof of equality; ACTUAL_SHA is what every later
   # message and the receipt are keyed on, so it must be set on this path too.
   ACTUAL_SHA="$EXPECTED_SHA"
   VENV_PY="$APP/.venv/bin/python"
-else
+fi
+
+if [ -z "${ACTUAL_SHA:-}" ]; then
   mark "fetching $OBJECT with the instance identity"
   # 10 × 15 s: an IAM binding created with the box can still be propagating, and a
   # rollout that fails at the first fetch is a false alarm an operator has to
@@ -104,21 +118,36 @@ else
   }
   mark "sha256 verified: $ACTUAL_SHA"
 
-  # ── 3. unpack into a staging tree, PROVE it, then swap ───────────────
-  # Never unpack over the live checkout: a file the new artifact dropped would
-  # linger and shadow. The app is stopped first, and the swap only happens once
-  # the staged venv has proven it can import the app — so a bad artifact leaves
-  # the previous tree untouched.
-  mark "stopping the app (nothing writes during an install)"
-  systemctl stop houses.service 2>/dev/null || true
-  rm -rf "$STAGE"
-  mkdir -p "$STAGE"
-  tar -xzf "$TARBALL" -C "$STAGE"
-  mark "unpacked into $STAGE"
-  VENV_PY="$STAGE/.venv/bin/python"
+  if [ "$TOOLING_ONLY" = 1 ]; then
+    # TOOLING-ONLY: extract ONLY the tooling + units + ref into a staging tree.
+    # The app, its venv, the database and the RUNNING app are never touched —
+    # "no app work" is the point of the shape, and stopping the app here would
+    # kill the flip's own preflight surface (2026-10-02: the sync stopped the
+    # standby's app before the preflight that checks it). There is no venv
+    # receipt to prove: nothing of the app is installed.
+    mark "tooling-only: extracting tools/deploy + units + ARTIFACT_REF (the app is untouched)"
+    rm -rf "$STAGE"
+    mkdir -p "$STAGE"
+    tar -xzf "$TARBALL" -C "$STAGE" tools/deploy units ARTIFACT_REF
+  else
+    # ── 3. unpack into a staging tree, PROVE it, then swap ───────────────
+    # Never unpack over the live checkout: a file the new artifact dropped would
+    # linger and shadow. The app is stopped first, and the swap only happens once
+    # the staged venv has proven it can import the app — so a bad artifact leaves
+    # the previous tree untouched.
+    mark "stopping the app (nothing writes during an install)"
+    systemctl stop houses.service 2>/dev/null || true
+    rm -rf "$STAGE"
+    mkdir -p "$STAGE"
+    tar -xzf "$TARBALL" -C "$STAGE"
+    mark "unpacked into $STAGE"
+    VENV_PY="$STAGE/.venv/bin/python"
+  fi
 fi
 
-# ── 4. the receipt: does this checkout import the app? ─────────────────
+# ── 4. the receipt: does this checkout import the app? (full installs only) ─
+# A tooling-only sync installs nothing of the app and has nothing to prove here.
+if [ "$TOOLING_ONLY" != 1 ]; then
 [ -x "$VENV_PY" ] || { mark "FAILED: the artifact carries no runnable venv at $VENV_PY"; exit 1; }
 # Run from / so the import can ONLY come from the venv: with the cwd inside the
 # checkout, `import houses` would find the source tree and pass either way.
@@ -141,8 +170,34 @@ if [ "$VENV_PY" = "$STAGE/.venv/bin/python" ]; then
   chmod 644 "$ROOT/ARTIFACT"
   mark "installed: $(cat "$ROOT/ARTIFACT")"
 fi
+fi
 
 # ── 5. layout + tooling from THIS artifact ─────────────────────────────
+if [ "$TOOLING_ONLY" = 1 ]; then
+  # The application tree is untouched and stays in place; box-setup installs
+  # the tooling FROM THE STAGED TREE (HOUSES_ARTIFACT_TREE), so the box's
+  # scripts become THIS artifact's, not the older app's.
+  mark "refreshing box tooling from $ACTUAL_SHA (app + DB + live app untouched)"
+  HOUSES_ARTIFACT_TREE="$STAGE" bash "$STAGE/tools/deploy/box-setup.sh"
+  RECEIPT_REF=$(head -1 "$STAGE/ARTIFACT_REF" 2>/dev/null || true)
+  printf 'sha256=%s ref=%s installed_at=%s\n' \
+    "$ACTUAL_SHA" "${RECEIPT_REF:-unknown}" "$(date -u +%FT%TZ)" > "$ROOT/TOOLING"
+  chmod 644 "$ROOT/TOOLING"
+  # Re-exec from the REFRESHED copy when it differs: this script is running
+  # from the PREVIOUS artifact's snapshot, and the sync has just overwritten
+  # it with the NEW tooling. Without the re-exec every tooling fix lags exactly
+  # one run behind. The second pass sees the TOOLING marker and stops. The
+  # staging tree is removed before the re-exec either way — a sync leaves no
+  # app work behind.
+  if [ -f /opt/houses/install-artifact.sh ] && ! cmp -s "$0" /opt/houses/install-artifact.sh; then
+    rm -rf "$STAGE"
+    mark "re-executing the refreshed install-artifact.sh (content changed)"
+    exec /opt/houses/install-artifact.sh --tooling-only "$OBJECT"
+  fi
+  rm -rf "$STAGE"
+  mark "TOOLING now at $ACTUAL_SHA — the app was not stopped, not swapped, not started"
+  exit 0
+fi
 mark "refreshing box layout and tooling from the artifact"
 bash "$APP/tools/deploy/box-setup.sh"
 # Re-exec from the REFRESHED copy when it differs: this script is running
@@ -154,11 +209,8 @@ bash "$APP/tools/deploy/box-setup.sh"
 # skip on sha match, so the pass is cheap.
 if [ -f /opt/houses/install-artifact.sh ] && ! cmp -s "$0" /opt/houses/install-artifact.sh; then
   mark "re-executing the refreshed install-artifact.sh (content changed)"
-  # preserve the ORIGINAL mode: a full install must stay a full install after
-  # the re-exec; only a tooling-only invocation re-execs tooling-only.
-  exec /opt/houses/install-artifact.sh ${TOOLING_ONLY:+--tooling-only} "$OBJECT"
+  exec /opt/houses/install-artifact.sh "$OBJECT"
 fi
-[ "$TOOLING_ONLY" = 1 ] && { mark "tooling refreshed only — no app work (owner role)"; exit 0; }
 
 # ── 6. migration rehearsal: apply + check every migration ──────────────
 # The runner's summary line is the gate: exit 0 is not enough, and the runner
