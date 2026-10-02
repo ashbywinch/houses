@@ -559,35 +559,44 @@ jobs:
           rm -f /tmp/sa.json
         env:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
+      - name: Sync the flip tooling to the approved box (sanctioned shape)
+        run: |
+          set -euo pipefail
+          # The new box gets everything: the --role/--stop verbs reach the
+          # approved box through install-artifact.sh --tooling-only (the
+          # deploy key's sanctioned shape). Tooling only — the app, DB and
+          # served state are untouched; the owner gets nothing (the PRD's
+          # live-box rule). The artifact object is required for a flip.
+          [ -n "${{ inputs.artifact }}" ] || { echo "::error::flip needs artifact=<gs://...tar.gz> (dispatch action=build first, pass its object)"; exit 1; }
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/install-artifact.sh --tooling-only ${{ inputs.artifact }}"
       - name: Preflight — ops safety, not acceptance
         run: |
           set -euo pipefail
           # Acceptance already happened: the user approved this box on the
           # review surface. This check is ops safety only — if the approved
-          # box stopped serving, nothing is flipped (docs/rollout-prd.md, §7).
-          # The flip never re-verifies, re-restores or re-migrates the box.
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20             "$BOX_USER@$STANDBY_IP" "curl -fsS --max-time 10 localhost:8765/health" \
-            | grep -E '"status":"ok"' || { echo "::error::the approved box is not serving — nothing is flipped"; exit 1; }
-          echo "preflight ok: approved box is serving on $STANDBY_IP"
+          # surface stopped serving, nothing is flipped (docs/rollout-prd.md,
+          # §7). Checked from the runner (no box command): the smoke hostname
+          # routes to the approved app — exactly the surface the user approved.
+          H=$(curl -sS -m 15 https://houses-smoke.blueumbrella.net/health)
+          printf '%s' "$H" | grep -E '"status":"ok"' >/dev/null || { echo "::error::the approved surface is not serving: $H"; exit 1; }
+          echo "preflight ok: approved surface is serving"
       - name: Promote — production role URL on the approved box
         run: |
           set -euo pipefail
-          # The ONLY change to the approved box: its role URL (the app reads
-          # it at start, so the app restarts to apply it). The DB file is
-          # untouched. Uses the --public-url verb already on the box — no
-          # installation, no new tooling: the flip must work on the boxes
-          # exactly as they were approved (docs/rollout-prd.md, R1/R2).
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net && sudo systemctl restart houses.service"
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$BOX_USER@$STANDBY_IP" "for i in \$(seq 1 150); do curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && exit 0; sleep 2; done; echo 'approved box did not become healthy'; exit 1"
-      - name: Darken — retire the smoke relay and stop the abandoned box
+          # The ONLY served-state change to the approved box: its role URL.
+          # --role writes HOUSES_PUBLIC_URL, restarts the app to read it, and
+          # waits for local health — a sanctioned switch.sh verb, on the box
+          # after the tooling sync above. The DB file is untouched.
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --role https://houses.blueumbrella.net"
+      - name: Darken — retire the smoke relay (the only owner op)
         run: |
           set -euo pipefail
           # The old owner's Caddy stops relaying houses-smoke (the review
-          # surface ends at approval), then its app stops. Both are remote
-          # ops with tooling already on the box — nothing is installed to
-          # the live/owner box, ever, during a rollout. Its files and DB
-          # stay exactly as they were (the pre-flip archive).
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay off && sudo systemctl stop houses.service"
+          # surface ends at approval). Nothing else touches the owner — no
+          # install, no stop verb, no data change (docs/rollout-prd.md, R5).
+          # The abandoned box keeps running until a later cleanup; its files
+          # and DB stay exactly as they were (the pre-flip archive).
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay off"
       - name: Flip the L4 rules to the approved box
         run: |
           set -euo pipefail
