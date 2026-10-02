@@ -152,3 +152,29 @@ def test_every_rollout_rebuilds_the_standby_and_moves_the_certificate():
     # rules' target. A hand-run create/delete here would be the 2026-09-24 outage.
     assert "instances create" not in workflow
     assert "instances delete" not in workflow
+
+
+def test_traffic_moving_jobs_fail_closed_without_the_human_approval():
+    """2026-10-02: a flip ran without any approval because the production
+    environment had NO protection rules — GitHub autopassed the declared
+    environment gate. Every traffic-moving job must now refuse BEFORE any box
+    or traffic operation unless the dispatch carried approval=approved; the
+    environment gate is a second lock, never the only one."""
+    workflow = WORKFLOW.read_text()
+    # The dispatch input must exist and default FAIL-CLOSED (no default that
+    # means "go").
+    inputs = workflow[workflow.index("workflow_dispatch:") : workflow.index("jobs:")]
+    assert "approval:" in inputs
+    assert "default: 'pending'" in inputs
+    assert "options: ['pending', 'approved']" in inputs
+    for job in ("cutover", "flip", "recover"):
+        block = _job_block(workflow, job)
+        gate = block.index("- name: Human approval gate")
+        assert "inputs.approval != 'approved'" in block, f"{job} loses the gate condition"
+        assert "approval=approved" in block, f"{job} loses the re-dispatch instruction"
+        # NO box or traffic operation may precede the gate: a guard that sits
+        # after the first ssh or set-target is not a guard.
+        for op in ("forwarding-rules", "switch.sh", "install-artifact.sh",
+                   "--snapshot", "--restore", "--rebase", "--smoke-relay", "--role "):
+            idx = block.find(op)
+            assert idx == -1 or gate < idx, f"{job}: {op!r} precedes the approval gate"

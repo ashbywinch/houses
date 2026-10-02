@@ -272,12 +272,22 @@ sudo /opt/houses/switch.sh --diagnose                               — read-onl
 operator key and reads logs directly. Nothing else is forwarded — an unknown command
 is a silent no-op, so a shape that is not listed here does nothing at all.
 
-## 5b. Human prod gate (GitHub Environments)
+## 5b. Human prod gate — the DOUBLE gate on every traffic move
 
-Repo → Settings → Environments → **production** → Protection rules: **Required
-reviewers** = you, "Allow administrators to bypass" = false. The workflow's
-`cutover` job declares `environment: production`, so every traffic move waits for
-your explicit approval. `rollback` stays ungated: it is the emergency undo.
+Traffic moves (`cutover`, `flip`, `recover`) are held by TWO independent locks;
+either one missing means the job refuses:
+
+1. **The GitHub environment gate.** Repo → Settings → Environments →
+   **production** → Protection rules: **Required reviewers** = you,
+   "Allow administrators to bypass" = false (CHECK this is actually configured
+   — on 2026-10-02 the environment had NO protection rules at all, so GitHub
+   autopassed the declared gate and a flip ran without any approval).
+2. **The dispatch's approval input.** The three jobs' FIRST step fails loudly
+   unless the dispatch carried `-f approval=approved`. A traffic move can never
+   silently skip or autopass this: no approval in the dispatch → nothing runs,
+   not even a box command. The command examples in §6 all carry it.
+
+`rollback` stays ungated: it is the unapproved emergency undo.
 
 ## 6. A rollout (the whole loop)
 
@@ -295,8 +305,9 @@ gh workflow run Release -f action=release -f ref=main
 #                  ok, `migrations: N applied+checked, 0 failed`, app healthy,
 #                  smoke ok, then INSTALL READY with the app STOPPED.
 
-# 3. the flip — approve the `production` environment when the job waits
-gh workflow run Release -f action=cutover -f ref=main
+# 3. the flip — the dispatch carries the approval input, and the job waits at
+#    the `production` environment gate for your reviewer approval
+gh workflow run Release -f action=cutover -f ref=main -f approval=approved
 
 # 4. something wrong? undo in one command (no DB restore: the rollout never
 #    writes the owner's database)
@@ -308,7 +319,7 @@ gh workflow run Release -f action=install -f artifact=gs://houses-artifacts/<sha
 
 # 6. the owner's data is not trustworthy? recover onto a named object instead
 #    of carrying it forward — §7b
-gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
+gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db -f approval=approved
 ```
 
 What each phase owns:

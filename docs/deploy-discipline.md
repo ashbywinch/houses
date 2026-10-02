@@ -89,6 +89,28 @@ deployment. A direct deploy is impossible, not merely discouraged. Verify the
 guard after any box rebuild: `sudo -n -l` must list exactly those three commands,
 and `sudo -n systemctl restart houses` must fail.
 
+
+## The human prod gate — the dispatch and the environment (double lock)
+
+Traffic moves (`cutover`, `flip`, `recover`) are held by TWO independent locks;
+with either one missing the job refuses:
+
+1. **The GitHub environment gate.** Repo → Settings → Environments →
+   **production** → Protection rules: **Required reviewers** = you,
+   "Allow administrators to bypass" = false. Verify this is actually enforced:
+   on 2026-10-02 the environment had NO protection rules (`protection_rules: []`),
+   so GitHub autopassed the environment every run declared and a flip executed
+   without a single approval.
+2. **The dispatch's approval input.** `flip`/`cutover`/`recover` start with a
+   "Human approval gate" step that fails loudly unless the dispatch carried
+   `-f approval=approved` — before any box command, before any traffic change.
+   The input defaults to `pending` (fail-closed); the environment gate is a
+   second lock, never the only one.
+
+`rollback` stays ungated: it is the emergency undo. A traffic move without BOTH
+locks is the 2026-10-02 incident; patch the workflow or this doc for a change
+to what "approved" means, never the other way round.
+
 ## A UI feature is NOT done on green tests
 
 Done means: (a) the persona walk of the live surface passes — tap the buttons,
@@ -237,9 +259,10 @@ boxes).
    instance** from it, install, rehearse and smoke; read the transcript (the new
    box's seed → migrations → receipt, then the install's verify → receipt →
    migrations → smoke).
-3. `Release` with `action=cutover` → **read the evidence and approve** when the job
-   waits on the `production` environment; it snapshots the owner, rebases the
-   standby, starts it, flips the rules, and holds the settle window.
+3. `Release` with `action=cutover -f approval=approved` → **read the evidence and
+   approve** when the job waits on the `production` environment; it snapshots the
+   owner, rebases the standby, starts it, flips the rules, and holds the settle
+   window.
 4. Confirm `https://houses.blueumbrella.net/health` and
    `terraform output live_target`.
 5. Record the outcome (and anything surprising) in this file or the plan.
@@ -281,13 +304,11 @@ missing-migration failure can no longer masquerade as success.
 
 **Verdicts** (the callers, `switch.sh --diagnose` and the human gate read exactly
 this):
-
 ```
 == run_migrations <iso-ts> manifest=<path> db=<path> mode=apply
 migration <apply-basename>: apply ok; backup ok; check ok
 migrations: <N> applied+checked, <M> failed
 ```
-
 Exit 0 only when `<M>` is 0. Each run leaves one `run-migrations-<timestamp>.log`
 (root-owned, newest 32 kept).
 
