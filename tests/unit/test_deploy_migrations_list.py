@@ -178,3 +178,19 @@ def test_traffic_moving_jobs_fail_closed_without_the_human_approval():
                    "--snapshot", "--restore", "--rebase", "--smoke-relay", "--role "):
             idx = block.find(op)
             assert idx == -1 or gate < idx, f"{job}: {op!r} precedes the approval gate"
+
+
+def test_the_bake_retries_capacity_with_exponential_backoff():
+    """2026-10-02: the bake's fixed 3×120s retry sat inside a continuous
+    pool-exhaustion outage (six instant rejections across two runs in 11
+    minutes) and never had a chance — the ~5-minute horizon is an order of
+    magnitude shorter than the capacity-clearing cadence. The capacity retry
+    must be exponential over a ~55-minute window and must still fail
+    immediately on any NON-capacity error. ONE retry mechanism — no
+    dispatch-level retry on top."""
+    bake = _job_block(WORKFLOW.read_text(), "bake")
+    assert "does not have enough resources|capacity" in bake, "only the capacity class is retried"
+    assert 'while [ "$attempt" -lt 6 ]' in bake, "six attempts"
+    assert "BACKOFF=$((BACKOFF * 2))" in bake, "exponential backoff"
+    assert '[ "$BACKOFF" -gt 1500 ]' in bake, "the backoff is capped"
+    assert "timeout-minutes: 65" in bake, "the step cap matches the ~55-min horizon"
