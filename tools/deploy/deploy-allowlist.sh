@@ -132,6 +132,12 @@ if [ "$CMD" = "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blue
   exec sudo /opt/houses/switch.sh --public-url "${CMD##*--public-url }"
 fi
 
+# --- switch.sh --role https://houses.blueumbrella.net (the flip's promote:
+# role URL + app restart + health — the production URL only, never arbitrary) --
+if [ "$CMD" = "sudo /opt/houses/switch.sh --role https://houses.blueumbrella.net" ]; then
+  exec sudo /opt/houses/switch.sh --role https://houses.blueumbrella.net
+fi
+
 # --- switch.sh --serve (start the standby app for the review surface) -----
 if [ "$CMD" = "sudo /opt/houses/switch.sh --serve" ]; then
   exec sudo /opt/houses/switch.sh --serve
