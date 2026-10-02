@@ -47,7 +47,7 @@ repo_context_files = [
 # client (PR-Agent's retry_with_fallback_models) owns retries.
 extra_headers = '{"cf-aig-request-timeout": "1800000", "cf-aig-max-attempts": "0", "cf-aig-backoff": "exponential"}'
 
-[pr_improve]
+[pr_code_suggestions]
 # The suggestions tool runs a NON-reasoning model on purpose (2026-10-02).
 # The reasoning model (deepseek-v4-flash via dynamic/fallback2) never produced
 # parseable suggestions: at 0.2 it looped in thought for 25 min
