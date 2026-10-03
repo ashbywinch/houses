@@ -172,7 +172,7 @@ jobs:
     # RE-BAKES in the same run (no human), because a stale image is a stale box.
     # The flip consumes NO image and NO artifact — the approved box is the
     # contract; a stale image must never gate it.
-    if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'cutover' || inputs.action == 'recover' }}
+    if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'cutover' }}
     runs-on: ubuntu-latest
     outputs:
       wanted: ${{ steps.check.outputs.wanted }}
@@ -468,11 +468,17 @@ jobs:
           # Any failure here leaves the standby's app stopped; the unfreeze step
           # below restarts the owner, so traffic never moves onto a bad copy.
           # The recovered box becomes the OWNER: write the production role URL
-          # first (the rebase's start reads the env), then rebase from the
-          # piped snapshot on the same connection.
+          # in its OWN ssh call first (the rebase's start reads the env).
+          # ONE sanctioned shape per ssh: the deploy-key allowlist matches the
+          # WHOLE remote command string exactly, so `--public-url X && --rebase Y`
+          # in one call matches NOTHING and is a silent no-op — exit 0, nothing
+          # run (2026-10-03: that is exactly what the recover prep and this
+          # rebase had been doing).
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net"
           cat /tmp/snapshot.db | ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
             -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net && sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}"
           # The GCS copy is now the archive; the runner's own <db>.pre-<basename>
           # backups live on the standby/owner box. Nothing further is deleted.
         timeout-minutes: 45
@@ -707,13 +713,20 @@ jobs:
           chmod 600 /tmp/deploy.key
           # PREP, not promote: the standby's role URL is the SMOKE hostname and
           # the rules never move here. The restore starts the app, which reads
-          # the env — so the URL is written first (same ssh session, one
-          # connection). What the human reviews at houses-smoke is EXACTLY the
-          # database that will serve: flip changes nothing on this box but the
-          # role URL.
+          # the env — so the URL is written first, in its OWN ssh call.
+          # ONE sanctioned shape per ssh: the deploy-key allowlist matches the
+          # WHOLE remote command string exactly, so `--public-url X && --restore Y`
+          # in one call matches NOTHING and is a silent no-op — exit 0, nothing
+          # run. What the human reviews at houses-smoke is EXACTLY the database
+          # that will serve: flip changes nothing on this box but the role URL.
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blueumbrella.net"
+      - name: Restore the named database and start the app as the review surface
+        run: |
+          set -euo pipefail
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blueumbrella.net && sudo /opt/houses/switch.sh --restore $SOURCE"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --restore $SOURCE"
         timeout-minutes: 45
       - name: Verify the review surface serves before REVIEW READY
         run: |
