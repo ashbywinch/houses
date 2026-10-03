@@ -223,3 +223,22 @@ def test_the_bake_retries_capacity_with_exponential_backoff():
     assert "BACKOFF=$((BACKOFF * 2))" in bake, "exponential backoff"
     assert '[ "$BACKOFF" -gt 1500 ]' in bake, "the backoff is capped"
     assert "timeout-minutes: 90" in bake, "the cap must clear the ~55-min sleep sum + apply overhead"
+
+
+def test_no_step_chains_two_deploy_key_commands():
+    """2026-10-03: the deploy-key allowlist matches the WHOLE remote command
+    string exactly, so `sudo switch.sh --public-url X && sudo switch.sh
+    --restore Y` in ONE ssh matches nothing and is a SILENT NO-OP — exit 0,
+    nothing run. That is how the recover prep "restored" nothing for 10
+    minutes and how the cutover's rebase never restored; both hid behind a
+    green step. One sanctioned shape per ssh call, always."""
+    workflow = WORKFLOW.read_text()
+    for chained in ("&& sudo /opt/houses", "; sudo /opt/houses", "&& sudo -n /opt/houses"):
+        assert chained not in workflow, f"chained deploy-key command (silent no-op): {chained!r}"
+    # The two multi-verb flows must still do BOTH things — in separate calls.
+    rec = _job_block(workflow, "recover")
+    assert "switch.sh --public-url https://houses-smoke.blueumbrella.net" in rec
+    assert "switch.sh --restore $SOURCE" in rec
+    cut = _job_block(workflow, "cutover")
+    assert "switch.sh --public-url https://houses.blueumbrella.net" in cut
+    assert "switch.sh --rebase " in cut
