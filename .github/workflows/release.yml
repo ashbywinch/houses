@@ -698,6 +698,8 @@ jobs:
           # URL). install-artifact.sh stops the app, swaps the tree, proves the
           # venv, rehearses the migrations on the box's current database and
           # smokes; the restore below then lays down the named object.
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
             -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/install-artifact.sh ${{ needs.build.outputs.artifact }}"

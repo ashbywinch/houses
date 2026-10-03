@@ -266,3 +266,22 @@ def test_no_step_chains_two_deploy_key_commands():
     cut = _job_block(workflow, "cutover")
     assert "switch.sh --public-url https://houses.blueumbrella.net" in cut
     assert "switch.sh --rebase " in cut
+
+
+
+def test_the_deploy_key_is_written_before_its_first_use_in_a_job():
+    """2026-10-03: the recover prep's install step ssh'd with
+    `-i /tmp/deploy.key` before any step in that job had written the key —
+    'Identity file … not accessible' → permission denied, 4 seconds in. The
+    key persists across a job's steps, but only if something wrote it first;
+    a new step inserted above the writer silently breaks the whole job."""
+    workflow = WORKFLOW.read_text()
+    problems = []
+    for job in ("recover", "flip", "cutover", "install", "provision", "rollback"):
+        steps = re.split(r"\n      - name: ", _job_block(workflow, job))
+        first_use = next((i for i, s in enumerate(steps) if "-i /tmp/deploy.key" in s), None)
+        if first_use is None:
+            continue
+        if not any("> /tmp/deploy.key" in s for s in steps[: first_use + 1]):
+            problems.append(f"{job}: {steps[first_use].splitlines()[0]!r} uses the key before it is written")
+    assert not problems, problems
