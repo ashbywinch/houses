@@ -130,10 +130,17 @@ class CurrentHomeNode(DerivedNode):
     """
 
     def __init__(self, node_id: str = "settings/current_home"):
+        # _registry MUST exist before super().__init__: the base constructor
+        # loads a persisted attempt and the scheduler may call _is_stale()
+        # during register() — which reaches _get_active_deps() →
+        # _current_property() — before this subclass body runs.
+        # (2026-10-03: with a persisted current_home attempt in the DB the
+        # app crashed at startup: 'CurrentHomeNode' object has no attribute
+        # '_registry'.)
+        self._registry: Any = None
         # dep_names=None: the dep set grows with registrations (set_deps);
         # compute receives attempts positionally in active-dep order.
         super().__init__(node_id, MonthlyBaseline | None, ())
-        self._registry: Any = None
 
     # -- dep wiring ------------------------------------------
     def add_status(self, status_node: Node, registry: Any) -> None:
