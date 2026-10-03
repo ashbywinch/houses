@@ -21,10 +21,11 @@ permissions:
 #               verify rows/integrity + migrate + check + start) → flip the rules
 #               → settle. Any failure restarts the owner's app; traffic never moved.
 #   rollback  — flip the rules back to the other box. Ungated: the emergency undo.
-#   recover   — GATED. The EXCEPTION path: restore the standby's database from a
-#               NAMED object (never from the owner) and flip. For when the owner's
-#               data must not be carried forward at all. The restore is ROLLOUT
-#               PREP: it happens when the standby is built and smoke-reviewed.
+#   recover   — UNGATED rollout PREP. The EXCEPTION path: restore the
+#               standby's database from a NAMED object (never from the owner)
+#               and serve it as the REVIEW SURFACE at houses-smoke. NO traffic
+#               change, NO production state touched. The human reviews the
+#               RESTORED box, then `flip` (below, gated) makes it live.
 #   flip      — GATED (environment: production). The recover-rollout flip: make
 #               the APPROVED review box live and NOTHING else. Invariant: once
 #               the smoke box is user-approved, the flip MUST NOT change anything
@@ -38,7 +39,7 @@ permissions:
 #               the L4 rules, when no rules exist yet. Requires houses-base
 #               (run action=bake first); a missing image or an existing plane
 #               fails the job loudly — there is no fallback bootstrap.
-#   DOUBLE GATE on every traffic move (cutover / flip / recover):
+#   DOUBLE GATE on every traffic move (cutover / flip):
 #   (1) the job declares environment: production — GitHub pauses it until the
 #       required human reviewer approves, and (2) the job's first step refuses
 #       to run unless the dispatch carried approval=approved. Both must hold;
@@ -82,7 +83,7 @@ on:
         required: false
         default: 'gs://houses-seed/latest.db'
       approval:
-        description: 'flip/cutover/recover only: explicit human approval to move traffic. REQUIRED: approved — anything else fails the job before any box or traffic operation'
+        description: 'flip/cutover only: explicit human approval to move traffic. REQUIRED: approved — anything else fails the job before any box or traffic operation'
         required: false
         default: 'pending'
         type: choice
@@ -661,30 +662,31 @@ jobs:
           echo "abandoned box: ${{ needs.resolve.outputs.owner }} (app stopped, relay retired — its DB kept as-is)"
           echo "Rollback (if needed): gh workflow run Release -f action=rollback -f ref=main"
 
-  # ── recover: put production on a database from a NAMED OBJECT, then flip ──
+  # ── recover: RESTORE-only rollout PREP from a NAMED OBJECT (UNGATED) ──
   #
   # The exception path, for when the owner's data must NOT be carried forward
-  # (a silent migration skip, a stalled cascade, a botched restore). The owner is
-  # never read and never snapshotted: this box's database comes from the object a
-  # human names — deliberately, in an incident, not automatically from a pile of
-  # old copies. Recovery means the writes since that object are gone; that is the
-  # trade, and the approval below is where it is accepted.
+  # (a silent migration skip, a stalled cascade, a botched restore). The owner
+  # is never read and never snapshotted: the STANDBY's database comes from the
+  # object a human names — deliberately, in an incident, not automatically
+  # from a pile of old copies. Recovery means the writes since that object are
+  # gone; that trade is accepted at the FLIP's approval, never here.
+  #
+  # UNGATED BY DESIGN: this job only prepares the standby — restore + serve
+  # the review surface at houses-smoke. It moves NO traffic and touches NO
+  # production state. The human then approves the RESTORED, SERVING box, and
+  # `flip` (gated, next) makes it live WITHOUT touching the DB. 2026-10-02:
+  # recover used to restore AFTER its approval gate and then flip — the box
+  # that went live was never the one approved; the split IS the invariant.
   recover:
-    needs: [resolve, image-stale]
-    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' }}
+    needs: [resolve]
+    if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' }}
     runs-on: ubuntu-latest
-    environment: production
     env:
       BOX_USER: ${{ secrets.BOX_USER }}
       BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
       STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
       SOURCE: ${{ inputs.snapshot || 'gs://houses-seed/latest.db' }}
     steps:
-      - name: Human approval gate — a traffic move may not start without it
-        if: ${{ inputs.approval != 'approved' }}
-        run: |
-          echo "::error::action=${{ inputs.action }} moves production traffic, and this dispatch did not carry approval=approved. Nothing ran — no box command, no traffic change. Re-dispatch with -f approval=approved ONLY after the human has approved the surface."
-          exit 1
       - name: Guard — never recover onto the box that owns the traffic
         run: |
           set -euo pipefail
@@ -696,81 +698,47 @@ jobs:
             gs://*/*.db) : ;;
             *) echo "::error::snapshot must name an object: gs://<bucket>/<object>.db"; exit 1 ;;
           esac
-          echo "recovering ${{ needs.resolve.outputs.standby }} from $SOURCE"
+          echo "preparing ${{ needs.resolve.outputs.standby }} from $SOURCE"
           echo "::warning::the owner (${{ needs.resolve.outputs.owner }}) is NOT read — its data is being abandoned, and every write since $SOURCE is lost"
-      - name: Authenticate gcloud
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
-          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
-          rm -f /tmp/sa.json
-        env:
-          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
-      - name: Restore the named database and start the app
+      - name: Restore the named database and serve it as the REVIEW SURFACE
         run: |
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
-          # The recovered box becomes the OWNER: its role URL is production.
-          # The restore starts the app, which reads the env — so the URL is
-          # written first (same ssh session, one connection).
+          # PREP, not promote: the standby's role URL is the SMOKE hostname and
+          # the rules never move here. The restore starts the app, which reads
+          # the env — so the URL is written first (same ssh session, one
+          # connection). What the human reviews at houses-smoke is EXACTLY the
+          # database that will serve: flip changes nothing on this box but the
+          # role URL.
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net && sudo /opt/houses/switch.sh --restore $SOURCE"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blueumbrella.net && sudo /opt/houses/switch.sh --restore $SOURCE"
         timeout-minutes: 45
-      - name: Flip the L4 rules to the recovered box
+      - name: Verify the review surface serves before REVIEW READY
         run: |
           set -euo pipefail
-          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
-          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
-          REGION="${ZONE%-*}"
-          TARGET="${{ needs.resolve.outputs.standby }}-target"
-          for rule in houses-l4-http houses-l4-https; do
-            gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
-              --target-instance "$TARGET"
+          # The human approves the SERVING box — never a promise. The restored
+          # app on an e2-micro can take minutes to become healthy; poll the
+          # EXTERNAL smoke hostname (the whole chain: owner's relay ->
+          # standby -> app -> restored DB) up to 10 minutes.
+          ok=0
+          for i in $(seq 1 60); do
+            H=$(curl -sS -m 10 https://houses-smoke.blueumbrella.net/health 2>/dev/null || true)
+            printf '%s' "$H" | grep -qE '"status":"ok"' && { echo "review surface serving (poll $i): $H"; ok=1; break; }
+            sleep 10
           done
-          echo "flipped houses-l4-http + houses-l4-https -> $TARGET ($SOURCE)"
-      - name: Unfreeze — nothing to do on the owner
-        if: failure()
+          [ "$ok" = 1 ] || { echo "::error::the review surface did not become healthy — re-run action=recover after diagnosing (journalctl -u houses.service)"; exit 1; }
+          echo "REVIEWABLE: https://houses-smoke.blueumbrella.net serves the restored $SOURCE"
+      - name: REVIEW READY — the traffic move is `flip`, gated
         run: |
-          echo "::warning::recovery did not complete. The owner was never touched, so whatever served before still serves — but if it is broken, recovery is still outstanding."
-      - name: Verify public health through the settle window (5 minutes)
-        if: success()
-        run: |
-          set -euo pipefail
-          deadline=$(( $(date +%s) + 300 ))
-          polls=0
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
-            read -r S DB LW < <(printf '%s' "$H" | python3 -c 'import sys,json; d=json.loads(sys.stdin.read()); print(d.get("status",""), d.get("db",""), d.get("last_write",""))' 2>/dev/null || echo "  ")
-            if [ "$S" != "ok" ] || [ "$DB" != "ok" ] || [ -z "$LW" ]; then
-              echo "::error::public health is not ok (status='$S' db='$DB' last_write='$LW') — the recovery flip is NOT complete"
-              exit 1
-            fi
-            polls=$((polls + 1))
-            echo "settle poll $polls: last_write=$LW"
-            sleep 15
-          done
-          echo "RECOVERY VERIFIED: $polls healthy reads over 5 minutes"
-      - name: Retire the smoke relay on the former owner
-        # The former owner is the new STANDDBY: its app is stopped and its
-        # Caddy relay pointed at the (now-production) recovered box. Remove
-        # it — houses-smoke must never mirror production. The next rollout's
-        # install rebuilds the relay on the new owner towards the new standby.
-        if: success()
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-            "$BOX_USER@${{ needs.resolve.outputs.owner_ip }}" "sudo /opt/houses/switch.sh --smoke-relay off"
-        timeout-minutes: 5
-      - name: Record the outcome
-        if: always()
-        run: |
-          echo "owner before: ${{ needs.resolve.outputs.owner }} (its data was NOT carried forward)"
-          echo "owner after:  ${{ needs.resolve.outputs.standby }}, restored from $SOURCE"
-          echo "NOTE: rollback is NOT the undo here — it would move traffic back onto the data you just abandoned."
+          echo "REVIEW READY: ${{ needs.resolve.outputs.standby }} serves $SOURCE at https://houses-smoke.blueumbrella.net"
+          echo "The owner (${{ needs.resolve.outputs.owner }}) still serves production, untouched."
+          echo "To promote after review:"
+          echo "  1. gh workflow run Release -f action=build -f ref=main   # a fresh artifact for the flip's tooling sync"
+          echo "  2. gh workflow run Release -f action=flip -f approval=approved -f artifact=gs://houses-artifacts/<sha>.tar.gz"
+          echo "     (approve the production environment gate — the only moment the trade is accepted)"
+          echo "NOT the undo here: rollback would move traffic back onto the abandoned data."
 
   # ── rollback (the emergency undo — ungated) ───────────────────────────
   rollback:

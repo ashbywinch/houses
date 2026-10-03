@@ -167,7 +167,7 @@ def test_traffic_moving_jobs_fail_closed_without_the_human_approval():
     assert "approval:" in inputs
     assert "default: 'pending'" in inputs
     assert "options: ['pending', 'approved']" in inputs
-    for job in ("cutover", "flip", "recover"):
+    for job in ("cutover", "flip"):
         block = _job_block(workflow, job)
         gate = block.index("- name: Human approval gate")
         assert "inputs.approval != 'approved'" in block, f"{job} loses the gate condition"
@@ -178,6 +178,35 @@ def test_traffic_moving_jobs_fail_closed_without_the_human_approval():
                    "--snapshot", "--restore", "--rebase", "--smoke-relay", "--role "):
             idx = block.find(op)
             assert idx == -1 or gate < idx, f"{job}: {op!r} precedes the approval gate"
+
+
+def test_no_job_may_both_restore_a_db_and_flip_traffic():
+    """2026-10-02: recover used to restore the DB AFTER its approval gate and
+    then flip — the box that went live was never the box the human approved.
+    The invariant: restore is UNGATED PREP onto the standby (it becomes the
+    review surface), and the gated `flip` makes the already-restored box live
+    without touching the DB. No single job may contain both a restore and a
+    rules move."""
+    workflow = WORKFLOW.read_text()
+    for job in ("cutover", "flip", "recover"):
+        block = _job_block(workflow, job)
+        restores = "--restore " in block
+        flips = "forwarding-rules" in block or "set-target" in block
+        assert not (restores and flips), f"{job} both restores a DB and moves traffic"
+    # recover is ungated PREP: no environment gate, no approval guard, no
+    # rules move; it restores to the STANDBY and serves the REVIEW surface.
+    rec = _job_block(workflow, "recover")
+    assert "environment: production" not in rec, "prep must not be gated"
+    assert "Human approval gate" not in rec
+    assert "--restore " in rec
+    assert "houses-smoke.blueumbrella.net" in rec, "recover serves the review surface, not production"
+    assert "forwarding-rules" not in rec and "set-target" not in rec
+    # The gated traffic movers never restore: the box they promote is the one
+    # that was reviewed.
+    for job in ("cutover", "flip"):
+        block = _job_block(workflow, job)
+        assert "--restore " not in block, f"{job} must never restore after its gate"
+        assert "environment: production" in block, f"{job} must declare the environment gate"
 
 
 def test_the_bake_retries_capacity_with_exponential_backoff():
