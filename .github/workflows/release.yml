@@ -554,11 +554,13 @@ jobs:
           echo "Clean pre-migration backups retained: ${{ steps.snapshot.outputs.snapshot_object }} (GCS) + each box's <db>.pre-<migration> files"
 
   # ── flip: make the APPROVED review box live, nothing else ─────────────
-  # Recover-rollout flip. Invariant: once the smoke box is user-approved the
-  # flip MUST NOT change anything on that box except make it live. The box
-  # already runs the approved DB and app (its local /health is the contract).
-  # The restore/migrate happened during rollout PREP (when the standby was
-  # built and smoke-reviewed) — there is no snapshot, no rebase, no DB op here.
+  # Recover-rollout flip. The approved box is FINAL: prep already restored
+  # the database, wrote the FINAL production role URL and started the app,
+  # and the surface was health-verified. After approval NOTHING changes on
+  # that box — no install, no tooling, no role URL, no restart, no DB op;
+  # this job only retires the smoke relay on the abandoned owner and moves
+  # the traffic rules (2026-10-03: the box must be exactly what was
+  # approved, so every box-side action moved before the gate).
   flip:
     needs: [resolve]
     if: ${{ inputs.action == 'flip' && needs.resolve.outputs.consistent == 'true' }}
@@ -568,7 +570,6 @@ jobs:
       BOX_USER: ${{ secrets.BOX_USER }}
       BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
       OWNER_IP: ${{ needs.resolve.outputs.owner_ip }}
-      STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
     steps:
       - name: Human approval gate — a traffic move may not start without it
         if: ${{ inputs.approval != 'approved' }}
@@ -588,16 +589,6 @@ jobs:
           rm -f /tmp/sa.json
         env:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
-      - name: Sync the flip tooling to the approved box (sanctioned shape)
-        run: |
-          set -euo pipefail
-          # The new box gets everything: the --role/--stop verbs reach the
-          # approved box through install-artifact.sh --tooling-only (the
-          # deploy key's sanctioned shape). Tooling only — the app, DB and
-          # served state are untouched; the owner gets nothing (the PRD's
-          # live-box rule). The artifact object is required for a flip.
-          [ -n "${{ inputs.artifact }}" ] || { echo "::error::flip needs artifact=<gs://...tar.gz> (dispatch action=build first, pass its object)"; exit 1; }
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/install-artifact.sh --tooling-only ${{ inputs.artifact }}"
       - name: Preflight — ops safety, not acceptance
         run: |
           set -euo pipefail
@@ -609,14 +600,6 @@ jobs:
           H=$(curl -sS -m 15 https://houses-smoke.blueumbrella.net/health)
           printf '%s' "$H" | grep -E '"status":"ok"' >/dev/null || { echo "::error::the approved surface is not serving: $H"; exit 1; }
           echo "preflight ok: approved surface is serving"
-      - name: Promote — production role URL on the approved box
-        run: |
-          set -euo pipefail
-          # The ONLY served-state change to the approved box: its role URL.
-          # --role writes HOUSES_PUBLIC_URL, restarts the app to read it, and
-          # waits for local health — a sanctioned switch.sh verb, on the box
-          # after the tooling sync above. The DB file is untouched.
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --role https://houses.blueumbrella.net"
       - name: Darken — retire the smoke relay (the only owner op)
         run: |
           set -euo pipefail
@@ -706,21 +689,19 @@ jobs:
           esac
           echo "preparing ${{ needs.resolve.outputs.standby }} from $SOURCE"
           echo "::warning::the owner (${{ needs.resolve.outputs.owner }}) is NOT read — its data is being abandoned, and every write since $SOURCE is lost"
-      - name: Restore the named database and serve it as the REVIEW SURFACE
+      - name: Set the FINAL production role URL on the standby
         run: |
           set -euo pipefail
           printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
           chmod 600 /tmp/deploy.key
-          # PREP, not promote: the standby's role URL is the SMOKE hostname and
-          # the rules never move here. The restore starts the app, which reads
-          # the env — so the URL is written first, in its OWN ssh call.
-          # ONE sanctioned shape per ssh: the deploy-key allowlist matches the
-          # WHOLE remote command string exactly, so `--public-url X && --restore Y`
-          # in one call matches NOTHING and is a silent no-op — exit 0, nothing
-          # run. What the human reviews at houses-smoke is EXACTLY the database
-          # that will serve: flip changes nothing on this box but the role URL.
+          # The box must be FINAL before the human approves it: production
+          # role URL written FIRST (the restore's start reads the env), in
+          # its OWN ssh call. ONE sanctioned shape per ssh: the deploy-key
+          # allowlist matches the WHOLE remote command string exactly, so
+          # `--public-url X && --restore Y` in one call matches NOTHING and
+          # is a silent no-op — exit 0, nothing run (2026-10-03).
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses-smoke.blueumbrella.net"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net"
       - name: Restore the named database and start the app as the review surface
         run: |
           set -euo pipefail
@@ -728,6 +709,12 @@ jobs:
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --restore $SOURCE"
         timeout-minutes: 45
+      - name: Record the surface the reviewer will look at
+        run: |
+          echo "REVIEW SURFACE: the approved box is FINAL (production role URL)."
+          echo "Review it through https://houses-smoke.blueumbrella.net (the owner relays to it)."
+          echo "NOTE: OAuth callbacks use the production URL by design — signing in on the"
+          echo "review hostname redirects to the production hostname."
       - name: Verify the review surface serves before REVIEW READY
         run: |
           set -euo pipefail
@@ -746,11 +733,11 @@ jobs:
       - name: REVIEW READY — the traffic move is `flip`, gated
         run: |
           echo "REVIEW READY: ${{ needs.resolve.outputs.standby }} serves $SOURCE at https://houses-smoke.blueumbrella.net"
+          echo "The box is FINAL: production role URL, restored DB, app running, surface verified."
           echo "The owner (${{ needs.resolve.outputs.owner }}) still serves production, untouched."
-          echo "To promote after review:"
-          echo "  1. gh workflow run Release -f action=build -f ref=main   # a fresh artifact for the flip's tooling sync"
-          echo "  2. gh workflow run Release -f action=flip -f approval=approved -f artifact=gs://houses-artifacts/<sha>.tar.gz"
-          echo "     (approve the production environment gate — the only moment the trade is accepted)"
+          echo "To promote after review (NOTHING changes on the approved box):"
+          echo "  gh workflow run Release -f action=flip -f approval=approved -f ref=main"
+          echo "  (approve the production environment gate — the only moment the trade is accepted)"
           echo "NOT the undo here: rollback would move traffic back onto the abandoned data."
 
   # ── rollback (the emergency undo — ungated) ───────────────────────────
