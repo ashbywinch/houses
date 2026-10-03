@@ -48,17 +48,19 @@ repo_context_files = [
 extra_headers = '{"cf-aig-request-timeout": "1800000", "cf-aig-max-attempts": "0", "cf-aig-backoff": "exponential"}'
 
 [pr_code_suggestions]
-# 2026-10-02 investigation: the reasoning model (deepseek-v4-flash via
-# dynamic/fallback2) never produced parseable suggestions — at 0.2 it
-# looped in thought for 25 min (finish_reason=length, content=null); at
-# 0.8 it stopped looping but emitted prose with invented paths, and
-# pr-agent's suggestions parser hard-failed the run. Per-tool 'model' is
-# NOT read by this version's suggestions generator (it always uses the
-# global [config] chain — verified in the pinned source), so the fix is a
-# strict output contract in the prompt, which IS read.
-# The tool's default temperature is 0.2; [config] temperature = 0.8 now
-# governs these calls too (the loop fix).
-extra_instructions = """Return the code suggestions as a SINGLE YAML document and nothing else. No markdown code fences, no prose before or after, no JSON. The document is a YAML list; every item has exactly these keys: 'file', 'relevant_line', 'name', 'comment'. 'file' MUST be one of the file paths present verbatim in the PR diff above — never an invented, similar or reformatted path. 'relevant_line' must be the exact line text from the diff. 'comment' must be a single plain-text line without quote or colon ambiguities."""
+# DISABLED (2026-10-02). The suggestions tool is off: the auto run no longer
+# invokes /improve (see push_commands below). Reasons, in order:
+#   * the pinned version's suggestions generator always uses the global
+#     [config] model chain (per-tool 'model' is NOT read — verified in the
+#     pinned source), so it cannot be pointed at a format-reliable model;
+#   * the reasoning model on that chain loops at low temperature and, once
+#     temperature fixes the loop, emits its own YAML shape instead of the
+#     parser's contract — hard-failing the whole review run;
+#   * upstream's own design treats suggestions as advisory
+#     (qodo-ai/pr-agent#2729 / #2730: unparseable output should degrade to
+#     "no suggestions", not crash), and our gate only needs the review.
+# The tool may still be run deliberately with a `/improve` comment; this
+# section stays so that path has a sane contract, but nothing auto-runs it.
 
 [pr_reviewer]
 # Key review findings post INLINE as GitHub review threads (resolvable).
@@ -76,8 +78,9 @@ extra_instructions = "In addition to your standard review, check the PR against 
 
 [github_action_config]
 handle_push_trigger = true
-push_commands = ["/review", "/improve"]
-# A human posting "/skip" on the PR skips the AI review for that PR
-# (the check-review step passes on it). Deliberate opt-out only — the
+# The auto run reviews only — suggestions are disabled (see the
+# [pr_code_suggestions] block). /improve remains available as a deliberate
+# comment-triggered command.
+push_commands = ["/review"]
 # default is that every PR gets reviewed.
 skip_commands = ["/skip"]
