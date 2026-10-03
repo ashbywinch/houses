@@ -394,30 +394,39 @@ migration that never ran, a stalled cascade, a botched restore, a box that is
 simply broken. Do not snapshot it and do not "carry it forward and fix it
 later".
 
-Recovery is TWO steps, and the split is the point: the restore happens BEFORE
-any approval. `action=recover` is ungated PREP — it leaves the standby serving
-the restored database on the REVIEW surface; the approval comes only at the
-flip, which promotes that exact, already-reviewed box and touches nothing on it
-but the role URL (2026-10-02: recover used to restore AFTER its gate and then
-flip, so the box that went live was never the one approved).
+Recovery is TWO steps, and the split is the point: **everything that touches
+the box happens BEFORE the approval**. `action=recover` is ungated PREP — it
+restores the named object, writes the FINAL production role URL, starts the
+app and waits until the review surface actually serves. The approval then
+comes at the flip, which moves the traffic rules and retires the smoke relay
+— and touches nothing on the approved box (2026-10-02: recover used to
+restore AFTER its gate; 2026-10-03: the flip used to install tooling and
+rewrite the role URL after the gate. Both meant the box that went live was
+never exactly the box that was approved).
+
+The box is reviewed through `houses-smoke.blueumbrella.net` (the owner relays
+to it) even though its role URL is production by then — the approval is for
+the REAL thing, not a rehearsal. One consequence: OAuth callbacks use the
+production URL, so signing in on the review hostname redirects to the
+production hostname (which, before the flip, is still the old owner).
 
 ```bash
-# 1. PREP (ungated): restore the named object onto the STANDBY and serve it
-#    at houses-smoke.blueumbrella.net for review. No traffic change; the owner
-#    never touches it and keeps serving production.
+# 1. PREP (ungated): restore the named object onto the STANDBY, write the
+#    production role URL, start the app, verify the surface serves. No
+#    traffic change; the owner is untouched and keeps serving production.
 gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
 
-# 2. review the served box (its database IS the contract), then PROMOTE:
-gh workflow run Release -f action=build -f ref=main        # fresh artifact (the flip's tooling sync)
-gh workflow run Release -f action=flip -f approval=approved -f artifact=gs://houses-artifacts/<sha256>.tar.gz
+# 2. review the FINAL box at https://houses-smoke.blueumbrella.net, then
+#    PROMOTE — the flip changes nothing on it:
+gh workflow run Release -f action=flip -f approval=approved -f ref=main
 #    approve the production environment gate — that approval is where the
 #    trade is accepted: every write since the object was made is gone.
 ```
 
-`action=recover` restores that object onto the **standby**, runs the migrations
-+ checks on the quiescent copy, starts the app with the smoke role URL, and
-stops — the flip is the ONLY traffic move, and it is gated. The owner is never
-read.
+`action=flip` retires the smoke relay on the abandoned owner and moves both
+L4 rules to the approved box, then probes public health. No install, no
+tooling, no role URL, no restart, no DB op on the approved box. The owner is
+never read.
 
 Choosing the source is a human decision made once, in the incident:
 

@@ -193,13 +193,14 @@ def test_no_job_may_both_restore_a_db_and_flip_traffic():
         restores = "--restore " in block
         flips = "forwarding-rules" in block or "set-target" in block
         assert not (restores and flips), f"{job} both restores a DB and moves traffic"
-    # recover is ungated PREP: no environment gate, no approval guard, no
-    # rules move; it restores to the STANDBY and serves the REVIEW surface.
+    # recover is ungated PREP and it makes the box FINAL: production role
+    # URL (OAuth callbacks by design), restore, serve + verify the surface.
     rec = _job_block(workflow, "recover")
     assert "environment: production" not in rec, "prep must not be gated"
     assert "Human approval gate" not in rec
     assert "--restore " in rec
-    assert "houses-smoke.blueumbrella.net" in rec, "recover serves the review surface, not production"
+    assert "switch.sh --public-url https://houses.blueumbrella.net" in rec, "the box is FINAL before approval"
+    assert "houses-smoke.blueumbrella.net" in rec, "the reviewer views it at the smoke hostname"
     assert "forwarding-rules" not in rec and "set-target" not in rec
     # The gated traffic movers never restore: the box they promote is the one
     # that was reviewed.
@@ -207,6 +208,23 @@ def test_no_job_may_both_restore_a_db_and_flip_traffic():
         block = _job_block(workflow, job)
         assert "--restore " not in block, f"{job} must never restore after its gate"
         assert "environment: production" in block, f"{job} must declare the environment gate"
+
+
+def test_flip_changes_nothing_on_the_approved_box():
+    """2026-10-03: the box must be exactly what the human approved. Every
+    box-side action (install, tooling, role URL, restart, DB op) happens in
+    the ungated prep; the gated flip only retires the smoke relay on the
+    abandoned OWNER and moves the traffic rules. If a flip step can ssh to
+    the standby at all, the invariant is one edit away from being broken."""
+    flip = _job_block(WORKFLOW.read_text(), "flip")
+    approved_box_ops = ("STANDBY_IP", "install-artifact.sh", "switch.sh --role",
+                        "switch.sh --public-url", "switch.sh --restore")
+    for op in approved_box_ops:
+        assert op not in flip, f"flip touches the approved box: {op!r}"
+    # It does still do its actual job: owner relay retirement + rules move.
+    assert "needs.resolve.outputs.owner_ip" in flip
+    assert "switch.sh --smoke-relay off" in flip
+    assert "forwarding-rules set-target" in flip
 
 
 def test_the_bake_retries_capacity_with_exponential_backoff():
@@ -223,3 +241,22 @@ def test_the_bake_retries_capacity_with_exponential_backoff():
     assert "BACKOFF=$((BACKOFF * 2))" in bake, "exponential backoff"
     assert '[ "$BACKOFF" -gt 1500 ]' in bake, "the backoff is capped"
     assert "timeout-minutes: 90" in bake, "the cap must clear the ~55-min sleep sum + apply overhead"
+
+
+def test_no_step_chains_two_deploy_key_commands():
+    """2026-10-03: the deploy-key allowlist matches the WHOLE remote command
+    string exactly, so `sudo switch.sh --public-url X && sudo switch.sh
+    --restore Y` in ONE ssh matches nothing and is a SILENT NO-OP — exit 0,
+    nothing run. That is how the recover prep "restored" nothing for 10
+    minutes and how the cutover's rebase never restored; both hid behind a
+    green step. One sanctioned shape per ssh call, always."""
+    workflow = WORKFLOW.read_text()
+    for chained in ("&& sudo /opt/houses", "; sudo /opt/houses", "&& sudo -n /opt/houses"):
+        assert chained not in workflow, f"chained deploy-key command (silent no-op): {chained!r}"
+    # The two multi-verb flows must still do BOTH things — in separate calls.
+    rec = _job_block(workflow, "recover")
+    assert "switch.sh --public-url https://houses.blueumbrella.net" in rec
+    assert "switch.sh --restore $SOURCE" in rec
+    cut = _job_block(workflow, "cutover")
+    assert "switch.sh --public-url https://houses.blueumbrella.net" in cut
+    assert "switch.sh --rebase " in cut
