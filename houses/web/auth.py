@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -370,6 +370,38 @@ def _is_secure(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
+def _oauth_redirect_uri(request: Request) -> str:
+    """The OAuth callback URI for the hostname THIS request arrived on.
+
+    The rollout reviews a box at the review hostname while the box already
+    carries its FINAL production URL (nothing on it may change after the
+    human approves it). A login must therefore come back to the hostname the
+    user is actually on, not to ``public_url``.
+
+    Only hostnames the deployment owns are ever used — ``public_url``,
+    ``review_url`` and ``frontend_url``. Anything else (a spoofed ``Host`` /
+    ``X-Forwarded-Host``) falls back to ``public_url``, so Google can never
+    be pointed at an attacker's callback. Behind the TLS-terminating proxy
+    ``X-Forwarded-Host`` is trusted exactly like ``_is_secure`` trusts
+    ``X-Forwarded-Proto``; without it the direct ``Host`` is used.
+    """
+    fallback = settings.public_url.rstrip("/") + "/api/auth/callback"
+    hosts = {
+        urlparse(u).netloc
+        for u in (settings.public_url, settings.review_url, settings.frontend_url)
+        if u
+    }
+    host = request.url.netloc
+    if settings.public_url.startswith("https://"):
+        forwarded = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+        if forwarded:
+            host = forwarded
+    if host not in hosts:
+        return fallback
+    scheme = "https" if _is_secure(request) else request.url.scheme
+    return f"{scheme}://{host}/api/auth/callback"
+
+
 def _origin_allowed(request: Request) -> bool:
     """CSRF guard for the session-minting endpoint.
 
@@ -385,6 +417,9 @@ def _origin_allowed(request: Request) -> bool:
     return origin in {
         settings.frontend_url.rstrip("/"),
         settings.public_url.rstrip("/"),
+        # The rollout's review surface: the browser is ON this origin while
+        # the box already carries its final production URL.
+        settings.review_url.rstrip("/"),
     }
 
 
@@ -415,7 +450,7 @@ def _clear_session_cookie(response, secure: bool) -> None:
 
 
 @auth_router.get("/login")
-async def login():
+async def login(request: Request):
     """Initiate Google OAuth flow.
 
     Returns JSON with ``auth_url`` (redirect browser to Google).
@@ -425,7 +460,7 @@ async def login():
 
     svc = get_services()
     try:
-        oauth_url = svc.oauth_service.create_authorization_url(state)
+        oauth_url = svc.oauth_service.create_authorization_url(state, _oauth_redirect_uri(request))
         authorization_url, code_verifier = oauth_url.url, oauth_url.code_verifier
     except ImportError:
         return {"status": "error", "detail": "google-auth libraries not installed"}
@@ -470,7 +505,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 
     svc = get_services()
     try:
-        user = svc.oauth_service.exchange_code(code, code_verifier, state)
+        user = svc.oauth_service.exchange_code(code, code_verifier, state, _oauth_redirect_uri(request))
         if not user.email_verified:
             return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 

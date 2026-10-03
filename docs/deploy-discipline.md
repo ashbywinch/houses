@@ -58,8 +58,9 @@ is SERVING; it is not evidence about the data — that verdict is the runner's
 
 **When the owner's data must not be carried forward** (a silent migration skip, a
 stalled cascade, a botched restore), recovery is prep-first, approve-last:
-`action=recover` is ungated prep and it leaves the box **FINAL** — restored
-database, production role URL, app started, review surface verified — and the
+`action=recover` is ungated prep and it leaves the box **FINAL** — the current
+artifact installed (app + tooling), the restored database, the production role
+URL, the app started, the review surface verified — and the
 gated `action=flip` then only retires the smoke relay on the abandoned owner
 and moves the traffic rules. Nothing on the approved box changes after the
 approval, by construction (2026-10-02: recover used to restore after its gate;

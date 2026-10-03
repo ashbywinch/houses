@@ -205,7 +205,7 @@ jobs:
           echo "image source matches main ($BAKED)"
           echo "wanted=$WANTED" >> "$GITHUB_OUTPUT"
   build:
-    if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' || inputs.action == 'install' }}
+    if: ${{ github.event_name == 'push' || inputs.action == 'release' || inputs.action == 'build' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'recover' }}
     runs-on: ubuntu-latest
     outputs:
       artifact: ${{ steps.pack.outputs.artifact }}
@@ -667,7 +667,7 @@ jobs:
   # recover used to restore AFTER its approval gate and then flip — the box
   # that went live was never the one approved; the split IS the invariant.
   recover:
-    needs: [resolve]
+    needs: [resolve, build]
     if: ${{ inputs.action == 'recover' && needs.resolve.outputs.consistent == 'true' }}
     runs-on: ubuntu-latest
     env:
@@ -689,6 +689,19 @@ jobs:
           esac
           echo "preparing ${{ needs.resolve.outputs.standby }} from $SOURCE"
           echo "::warning::the owner (${{ needs.resolve.outputs.owner }}) is NOT read — its data is being abandoned, and every write since $SOURCE is lost"
+      - name: Install the current artifact on the standby (app + tooling)
+        run: |
+          set -euo pipefail
+          # The box must be FINAL before approval — the APP CODE included (the
+          # host-aware OAuth fix is what lets the reviewer sign in on the
+          # review hostname while the box already carries its production role
+          # URL). install-artifact.sh stops the app, swaps the tree, proves the
+          # venv, rehearses the migrations on the box's current database and
+          # smokes; the restore below then lays down the named object.
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/install-artifact.sh ${{ needs.build.outputs.artifact }}"
+        timeout-minutes: 90
       - name: Set the FINAL production role URL on the standby
         run: |
           set -euo pipefail

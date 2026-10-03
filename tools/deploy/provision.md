@@ -225,11 +225,17 @@ The worker mints its auth cookie from the LAN `.env`'s
 the queue simply holds jobs with backoff and the worker drains them on return: no
 data loss, only scrape latency.
 
-## 4. Google OAuth — allow the prod hostname
+## 4. Google OAuth — allow the app's hostnames
 
 In the Google Cloud console, OAuth consent screen → **Authorized redirect URIs**
 for the web client in `/etc/houses.env` (same project, no new credentials):
 - `https://houses.blueumbrella.net/api/auth/callback`
+- `https://houses-smoke.blueumbrella.net/api/auth/callback` — the rollout's
+  review surface. The app builds the login redirect from the hostname each
+  request arrived on (allowlisted by `HOUSES_PUBLIC_URL` / `HOUSES_REVIEW_URL`
+  / `HOUSES_FRONTEND_URL`; `HOUSES_REVIEW_URL` defaults to the smoke host), so
+  a reviewer signs in ON the review hostname while the box already carries its
+  final production role URL.
 
 ## 4b. Production guard (applied automatically by box-setup.sh)
 
@@ -396,8 +402,9 @@ later".
 
 Recovery is TWO steps, and the split is the point: **everything that touches
 the box happens BEFORE the approval**. `action=recover` is ungated PREP — it
-restores the named object, writes the FINAL production role URL, starts the
-app and waits until the review surface actually serves. The approval then
+installs the current artifact (app + tooling), writes the FINAL production
+role URL, restores the named object, starts the app and waits until the
+review surface actually serves. The approval then
 comes at the flip, which moves the traffic rules and retires the smoke relay
 — and touches nothing on the approved box (2026-10-02: recover used to
 restore AFTER its gate; 2026-10-03: the flip used to install tooling and
@@ -406,14 +413,14 @@ never exactly the box that was approved).
 
 The box is reviewed through `houses-smoke.blueumbrella.net` (the owner relays
 to it) even though its role URL is production by then — the approval is for
-the REAL thing, not a rehearsal. One consequence: OAuth callbacks use the
-production URL, so signing in on the review hostname redirects to the
-production hostname (which, before the flip, is still the old owner).
+the REAL thing, not a rehearsal. Login on the review hostname works because
+the app builds the OAuth redirect from the hostname each request arrived on
+(see §4) — no URL change, no restart, nothing after approval.
 
 ```bash
-# 1. PREP (ungated): restore the named object onto the STANDBY, write the
-#    production role URL, start the app, verify the surface serves. No
-#    traffic change; the owner is untouched and keeps serving production.
+# 1. PREP (ungated): install the current artifact, write the production role
+#    URL, restore the named object, start the app, verify the surface serves.
+#    No traffic change; the owner is untouched and keeps serving production.
 gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
 
 # 2. review the FINAL box at https://houses-smoke.blueumbrella.net, then

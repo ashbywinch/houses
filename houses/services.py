@@ -139,13 +139,20 @@ class _RailFarePair:
     lorena: Commute | None
 
 
-def _google_client_config() -> _GoogleClientConfig:
+def _google_client_config(redirect_uri: str) -> _GoogleClientConfig:
+    """The Google client config for ONE redirect URI.
+
+    The caller supplies the redirect (see `houses.web.auth._oauth_redirect_uri`):
+    the rollout reviews a box at the review hostname before it serves
+    production, and the box already carries its final production URL — a login
+    must come back to the hostname the user is actually on.
+    """
     return _GoogleClientConfig(
         client_id=settings.web_client_id,
         client_secret=settings.web_client_secret,
         auth_uri="https://accounts.google.com/o/oauth2/auth",
         token_uri="https://oauth2.googleapis.com/token",
-        redirect_uris=[settings.public_url.rstrip("/") + "/api/auth/callback"],
+        redirect_uris=[redirect_uri],
     )
 
 
@@ -154,12 +161,12 @@ class OAuthService(Protocol):
     for user identity information."""
 
     @staticmethod
-    def create_authorization_url(state: str) -> _AuthorizationUrl:
+    def create_authorization_url(state: str, redirect_uri: str) -> _AuthorizationUrl:
         """Return the authorization URL and its PKCE code verifier."""
         ...
 
     @staticmethod
-    def exchange_code(code: str, code_verifier: str, state: str) -> GoogleUserInfo:
+    def exchange_code(code: str, code_verifier: str, state: str, redirect_uri: str) -> GoogleUserInfo:
         """Exchange an authorization code for user info."""
         ...
 
@@ -257,8 +264,8 @@ class _DefaultOAuthService:
     """Real Google OAuth implementation."""
 
     @staticmethod
-    def create_authorization_url(state: str) -> _AuthorizationUrl:
-        client_config = _google_client_config().to_dict()
+    def create_authorization_url(state: str, redirect_uri: str) -> _AuthorizationUrl:
+        client_config = _google_client_config(redirect_uri).to_dict()
         flow = Flow.from_client_config(
             client_config,
             scopes=[
@@ -267,7 +274,7 @@ class _DefaultOAuthService:
                 "https://www.googleapis.com/auth/userinfo.profile",
             ],
         )
-        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
+        flow.redirect_uri = redirect_uri
         authorization_url, _state_from_flow = flow.authorization_url(
             access_type="online",
             include_granted_scopes="false",
@@ -277,8 +284,8 @@ class _DefaultOAuthService:
         return _AuthorizationUrl(url=authorization_url, code_verifier=code_verifier)
 
     @staticmethod
-    def exchange_code(code: str, code_verifier: str, state: str) -> GoogleUserInfo:
-        client_config = _google_client_config().to_dict()
+    def exchange_code(code: str, code_verifier: str, state: str, redirect_uri: str) -> GoogleUserInfo:
+        client_config = _google_client_config(redirect_uri).to_dict()
         flow = Flow.from_client_config(
             client_config,
             scopes=[
@@ -287,7 +294,7 @@ class _DefaultOAuthService:
                 "https://www.googleapis.com/auth/userinfo.profile",
             ],
         )
-        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
+        flow.redirect_uri = redirect_uri
         flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
         # google_auth_oauthlib is untyped and its inferred Credentials union
