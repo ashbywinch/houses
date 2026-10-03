@@ -320,6 +320,7 @@ class FakeOAuthService(OAuthService):
         verify_error: Exception | None = None,
     ):
         self.auth_url = auth_url
+        self.redirect_uris: list[str] = []
         self._id_info = id_info or {
             "email": "ashby@example.com",
             "email_verified": True,
@@ -329,11 +330,13 @@ class FakeOAuthService(OAuthService):
         self._verify_error = verify_error
 
     @override
-    def create_authorization_url(self, state: str) -> _AuthorizationUrl:
+    def create_authorization_url(self, state: str, redirect_uri: str) -> _AuthorizationUrl:
+        self.redirect_uris.append(redirect_uri)
         return _AuthorizationUrl(url=self.auth_url, code_verifier="fake_code_verifier")
 
     @override
-    def exchange_code(self, code: str, code_verifier: str, state: str) -> GoogleUserInfo:
+    def exchange_code(self, code: str, code_verifier: str, state: str, redirect_uri: str) -> GoogleUserInfo:
+        self.redirect_uris.append(redirect_uri)
         return GoogleUserInfo(**self._id_info)
 
     @override

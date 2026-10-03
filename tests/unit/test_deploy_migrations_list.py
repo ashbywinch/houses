@@ -199,6 +199,12 @@ def test_no_job_may_both_restore_a_db_and_flip_traffic():
     assert "environment: production" not in rec, "prep must not be gated"
     assert "Human approval gate" not in rec
     assert "--restore " in rec
+    # The app code rides the prep too: the box must be FINAL — the
+    # host-aware OAuth fix is what lets the reviewer sign in on the review
+    # hostname while the box already carries its production role URL.
+    assert "install-artifact.sh" in rec
+    assert "needs.build.outputs.artifact" in rec
+    assert "needs: [resolve, build]" in WORKFLOW.read_text()
     assert "switch.sh --public-url https://houses.blueumbrella.net" in rec, "the box is FINAL before approval"
     assert "houses-smoke.blueumbrella.net" in rec, "the reviewer views it at the smoke hostname"
     assert "forwarding-rules" not in rec and "set-target" not in rec

@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     frontend_url: str = Field(default="http://localhost:5173", alias="HOUSES_FRONTEND_URL")
     public_url: str = Field(default="http://localhost:8765", alias="HOUSES_PUBLIC_URL")
 
+    # The rollout's review surface. A browser signing in HERE must be
+    # redirected back HERE — the box already carries its final production
+    # public_url before the human approves it, so auth must follow the
+    # hostname the user is actually on. Only hosts in this set (public_url,
+    # review_url, frontend_url) are ever used for the OAuth redirect.
+    review_url: str = Field(
+        default="https://houses-smoke.blueumbrella.net", alias="HOUSES_REVIEW_URL"
+    )
+
     working_weeks_per_year: int = 46
     weekly_simon_trips: int = 1
     weekly_lorena_trips: int = 2

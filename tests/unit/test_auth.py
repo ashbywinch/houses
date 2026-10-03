@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from houses.server import app
 from houses.services_provider import _request_services as _sp
 from houses.services_provider import get_services
+from houses.settings import settings
 from houses.web.auth import _make_session_cookie, _oauth_states, _OAuthState, get_session_user
 from tests.helpers import FakeOAuthService, make_services
 
@@ -110,6 +111,42 @@ class TestLogin:
         assert isinstance(state_data, _OAuthState)
         assert len(state_data.code_verifier) > 0
         _oauth_states.clear()
+
+    def test_login_redirects_back_to_the_hostname_the_user_is_on(self):
+        """The rollout reviews a box at the review hostname while the box
+        already carries its FINAL production URL (nothing on it may change
+        after approval). A login there must come back THERE."""
+        saved = settings.public_url
+        settings.public_url = "https://houses.blueumbrella.net"
+        try:
+            resp = client.get(
+                "/api/auth/login",
+                headers={
+                    "x-forwarded-host": "houses-smoke.blueumbrella.net",
+                    "x-forwarded-proto": "https",
+                },
+            )
+            assert resp.status_code == 200
+            fake = get_services().oauth_service
+            assert fake.redirect_uris == ["https://houses-smoke.blueumbrella.net/api/auth/callback"]
+        finally:
+            settings.public_url = saved
+
+    def test_login_never_follows_an_unknown_host(self):
+        """A spoofed Host/X-Forwarded-Host must never steer Google to a
+        callback the deployment does not own — it falls back to public_url."""
+        saved = settings.public_url
+        settings.public_url = "https://houses.blueumbrella.net"
+        try:
+            resp = client.get(
+                "/api/auth/login",
+                headers={"x-forwarded-host": "evil.example.com", "x-forwarded-proto": "https"},
+            )
+            assert resp.status_code == 200
+            fake = get_services().oauth_service
+            assert fake.redirect_uris == ["https://houses.blueumbrella.net/api/auth/callback"]
+        finally:
+            settings.public_url = saved
 
 
 def _push_person_emails(emails_by_name: dict[str, str], *, superuser: set[str] | None = None) -> None:
