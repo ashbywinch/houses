@@ -65,22 +65,25 @@ def _redact(url: object) -> str:
 
 
 def _caller_chain(limit: int = 8) -> str:
-    """App frames that led to this call, innermost last; gateway and test
-    frames excluded — what remains is the production caller."""
+    """App frames that led to this call, outermost first (it reads as the
+    call chain, the app's own call site last); gateway and test frames
+    excluded — what remains is the production path."""
     frames = [
         f"{Path(f.filename).name}:{f.lineno} {f.name}"
         for f in traceback.extract_stack()[:-1]
         if "/houses/" in f.filename.replace("\\", "/") and "/tests/" not in f.filename and f.filename != __file__
     ]
-    return " <- ".join(reversed(frames[-limit:])) or "-"
+    return " <- ".join(frames[-limit:]) or "-"
 
 
 def _body_snippet(resp: httpx.Response | None, limit: int = 300) -> str:
-    """The response body, whitespace-collapsed and truncated; "" if unreadable."""
+    """The response body, whitespace-collapsed, secrets masked, truncated;
+    "" if unreadable. Redacted for the same reason as the URL: a body is
+    echoed into the log, and a key that came back in it would be too."""
     if resp is None:
         return ""
     with suppress(Exception):
-        return " ".join(resp.text.split())[:limit]
+        return _SECRET_PARAM_RE.sub(r"\1***", " ".join(resp.text.split()))[:limit]
     return ""
 
 
