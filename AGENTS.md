@@ -116,6 +116,7 @@ make stop                       # Stop dev server + frontend
 - **Deploy / rebuild the box (GCP, terraform + provision workflow)**: [tools/deploy/provision.md](tools/deploy/provision.md)
 - **Backups — where they live and how to judge one**: [tools/deploy/provision.md](tools/deploy/provision.md) → §8; `tools/deploy/verify-backup.sh` (copies, then runs the rollout's own gates; `MIGRATION-COMPATIBLE` ≠ data-trusted — trust is a human call from `.meta`'s captured_from/at)
 - **Lucidlint review log (accepted/deferred findings)**: [docs/lucidlint-review-log.md](docs/lucidlint-review-log.md)
+- **Rollout incident log (2026-10-03 ORS quota)**: [docs/rollout-2026-10-03-incident.md](docs/rollout-2026-10-03-incident.md) — live bug list from the recovery rollout (request overuse, retry model, cache carriage).
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Remaining work (uncertainty in the DAG library, usability backlog)**: [docs/remaining-work-plan.md](docs/remaining-work-plan.md)
 - **Anti-fragile rollout plan (deploy reliability redesign)**: [docs/anti-fragile-rollout-plan.md](docs/anti-fragile-rollout-plan.md)
