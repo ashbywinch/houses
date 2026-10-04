@@ -307,11 +307,13 @@ async def api_fetch(
                 if api.is_quota(e.response.status_code):
                     GATE.mark_quota_exhausted(api)
                     raise DailyQuotaError(
-                        f"{api}: HTTP {e.response.status_code} (daily quota) for {url}"
-                        + (f" — {body_text}" if body_text else "")
+                        _redact(
+                            f"{api}: HTTP {e.response.status_code} (daily quota) for {url}"
+                            + (f" — {body_text}" if body_text else "")
+                        )
                     ) from e
                 raise GatewayHttpError(
-                    f"{e} — {body_text}" if body_text else str(e),
+                    _redact(f"{e} — {body_text}" if body_text else str(e)),
                     request=e.request,
                     response=e.response,
                     retry_after=_retry_after_seconds(e.response),
@@ -326,7 +328,10 @@ async def api_fetch(
                 )
                 GATE.mark_quota_exhausted(api)
                 raise DailyQuotaError(
-                    f"{api}: HTTP {resp.status_code} (daily quota) for {url}" + (f" — {body_text}" if body_text else "")
+                    _redact(
+                        f"{api}: HTTP {resp.status_code} (daily quota) for {url}"
+                        + (f" — {body_text}" if body_text else "")
+                    )
                 )
             try:
                 resp.raise_for_status()
@@ -338,7 +343,7 @@ async def api_fetch(
                     body_text or "(no body)",
                 )
                 raise GatewayHttpError(
-                    f"{e} — {body_text}" if body_text else str(e),
+                    _redact(f"{e} — {body_text}" if body_text else str(e)),
                     request=e.request,
                     response=e.response,
                     retry_after=_retry_after_seconds(e.response),
