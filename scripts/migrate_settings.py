@@ -16,9 +16,9 @@ Safe to re-run — idempotent.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 
+import dag.persistence as per
 import houses.services as services
 from houses.nodes.settings_node import API_KEY_TO_NODE, SETTING_DEFAULTS
 from scripts.db import conn as _conn
@@ -27,29 +27,29 @@ from scripts.db import conn as _conn
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _read_persons(conn: sqlite3.Connection) -> list[dict]:
     """Return list of person dicts from the latest succeeded persons row."""
-    row = conn.execute(
-        "SELECT id, result_json FROM node_results "
-        "WHERE node_id = 'persons' AND json_extract(result_json, '$.status') = 'succeeded' "
-        "ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    if row is None:
-        return []
-    return json.loads(row["result_json"])["value"]
+    columns = ", ".join(per.record_select_columns(conn))
+    rows = conn.execute(
+        f"SELECT rowid AS rowid, {columns} FROM node_results WHERE node_id = 'persons'"
+        " ORDER BY created_at DESC, rowid DESC"
+    ).fetchall()
+    for row in rows:
+        record = per.read_node_record(row)
+        if record.get("status") == "succeeded":
+            return list(record.get("value") or [])
+    return []
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _write_persons(conn: sqlite3.Connection, persons: list[dict]) -> int:
     """Write persons data, return new row id."""
-    # lucidlint: ignore record-shape wire-format dict — node_results DB row payload, serialization boundary owns the
-    result = json.dumps({"status": "succeeded", "value": persons})
-    cur = conn.execute(
-        "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-        ("persons", result, "2026-07-30T23:00:00"),
+    row_id = per.save_node_result(
+        "persons",
+        {"status": "succeeded", "value": persons},
+        created_at="2026-07-30T23:00:00",
     )
-    conn.commit()
-    if cur.lastrowid is None:
+    if not row_id:
         raise RuntimeError("INSERT into node_results returned no row id")
-    return cur.lastrowid
+    return row_id
 
 
 def _migrate_persons(conn: sqlite3.Connection) -> bool:
@@ -98,12 +98,18 @@ def _migrate_persons(conn: sqlite3.Connection) -> bool:
 
 def _cleanup_corrupted_rows(conn: sqlite3.Connection) -> None:
     """Delete rows that have deposit_equity (old format) to prevent accidental load."""
-    deleted = conn.execute(
-        "DELETE FROM node_results WHERE node_id = 'persons' "
-        "AND json_extract(result_json, '$.value[0].deposit_equity') IS NOT NULL"
-    ).rowcount
-    if deleted:
-        print(f"  Deleted {deleted} old-format persons row(s).")
+    columns = ", ".join(per.record_select_columns(conn))
+    stale = []
+    for row in conn.execute(
+        f"SELECT rowid AS rowid, {columns} FROM node_results WHERE node_id = 'persons'"
+    ).fetchall():
+        value = per.read_node_record(row).get("value")
+        if isinstance(value, list) and value and isinstance(value[0], dict) and "deposit_equity" in value[0]:
+            stale.append(row["rowid"])
+    for row_id in stale:
+        conn.execute("DELETE FROM node_results WHERE rowid = ?", (row_id,))
+    if stale:
+        print(f"  Deleted {len(stale)} old-format persons row(s).")
     conn.commit()
 
 
@@ -113,18 +119,20 @@ def _migrate_financial(conn: sqlite3.Connection) -> bool:
     Already run — this is a no-op if individual nodes already exist.
     """
 
+    columns = ", ".join(per.record_select_columns(conn))
     row = conn.execute(
-        "SELECT result_json FROM node_results WHERE node_id = 'financial' ORDER BY id DESC LIMIT 1"
+        f"SELECT rowid AS rowid, {columns} FROM node_results WHERE node_id = 'financial'"
+        " ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     if row is None:
         print("  No old financial blob found.")
         return False
 
-    old = json.loads(row["result_json"])
-    if old.get("status") != "succeeded":
+    blob = per.read_node_record(row)
+    if blob.get("status") != "succeeded":
         return False
 
-    old_value = old.get("value", {})
+    old_value = blob.get("value", {})
     pushed = 0
     for api_key, value in old_value.items():
         node_id = API_KEY_TO_NODE.get(api_key)
