@@ -306,7 +306,6 @@ class CommuteRouter:
         self._congestion_fn: Callable[[str | GeoPoint], bool] = congestion_fn or self.in_congestion_zone
 
     GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
-    ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 
     # Congestion zone — central London postcode outcodes never worth driving to
     _CONGESTION_OUTCODES: frozenset[str] = frozenset(

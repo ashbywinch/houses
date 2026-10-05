@@ -54,6 +54,7 @@ from pint import Quantity
 from houses.api_cache import cached_async_client
 from houses.geopoint import GeoPoint
 from houses.location import geocode
+from houses.ors_endpoints import ORS_MATRIX
 from houses.settings import settings
 from tools.commute.payload_checks import fail, same_payload
 from tools.commute.rightmove_url import build_search_url, parse_search_url
@@ -95,7 +96,7 @@ def user_label(label: str) -> str:
     layer control and marker popups."""
     return html.escape(label)
 
-ORS_MATRIX_URL = "https://api.openrouteservice.org/v2/matrix/driving-car"
+ORS_MATRIX_URL = f"{ORS_MATRIX}/driving-car"
 ENGINE_VERSION = "drive-isochrone-v1"
 SEARCHES_VERSION = "drive-searches-v1"
 DEFAULT_CONFIG = Path("data/commute/drive_destinations.json")

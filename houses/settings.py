@@ -46,6 +46,11 @@ class Settings(BaseSettings):
 
     tfl_api_key: str = Field(default="", alias="TFL_API_KEY")
     ors_api_key: str = Field(default="", alias="HEIGIT_API_KEY")
+    # HeiGIT moved every API to api.heigit.org/<service>/<version>/ and
+    # deprecated api.openrouteservice.org (2026-04-28); from 2026-08-27 the
+    # deprecated host carries 10% of the quota and its usage is invisible in
+    # the account dashboard. Paths live in houses/ors_endpoints.py.
+    ors_base_url: str = Field(default="https://api.heigit.org", alias="HOUSES_ORS_BASE_URL")
     google_maps_api_key: str = Field(default="", alias="PLACES_API_KEY")
     llm_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
     llm_model: str = Field(default="deepseek/deepseek-chat", alias="HOUSES_LLM_MODEL")

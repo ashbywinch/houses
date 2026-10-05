@@ -76,10 +76,10 @@ def mock_httpx():
             if "api.postcodes.io" in url:
                 return Response(200, json={"status": 200, "result": {"latitude": 51.5, "longitude": -0.1}})
             # ORS Directions (driving or walking)
-            if "openrouteservice.org/v2/directions" in url:
+            if "/v2/directions" in url:
                 return Response(200, json={"routes": [{"summary": {"distance": 50, "duration": 1800}}]})
-            # ORS Geocode
-            if "openrouteservice.org/geocode" in url:
+            # ORS geocoding — Pelias, under its own service prefix on HeiGIT
+            if "/pelias/" in url:
                 return Response(200, json={"features": [{"geometry": {"coordinates": [-0.1, 51.5]}}]})
             # Google Maps Geocode
             if "maps.googleapis.com/maps/api/geocode" in url:

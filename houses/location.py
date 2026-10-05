@@ -16,6 +16,7 @@ from dag.attempt import Attempt
 from houses import apis
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.geopoint import GeoPoint
+from houses.ors_endpoints import PELIAS_REVERSE
 from houses.services_provider import get_services
 from houses.settings import settings
 from houses.web.json_utils import WirePayload
@@ -30,7 +31,7 @@ HTTP_5XX_END = 600
 
 POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
-ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
+
 
 
 # ── Geocoder query params (external API wire shapes) ───────────────
@@ -360,7 +361,7 @@ async def find_nearest_town_name(
     houses.location globals.
     """
     options = options or ReverseGeocodeOptions()
-    rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
+    rev_url = PELIAS_REVERSE
     params = _OrsReverseParams(point_lat=lat, point_lon=lon, size=1, boundary_country="GBR")
     headers = {}
     api_key = options.api_key
