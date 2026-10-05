@@ -52,13 +52,20 @@ class Settings(BaseSettings):
     # the account dashboard. Paths live in houses/ors_endpoints.py.
     ors_base_url: str = Field(default="https://api.heigit.org", alias="HOUSES_ORS_BASE_URL")
     google_maps_api_key: str = Field(default="", alias="PLACES_API_KEY")
-    llm_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    # The account's OpenRouter guardrails exclude the older DeepSeek models
-    # (V3 "deepseek-chat" and the Pro line) — every town description came back
-    # 404 "Model blocked by guardrail". V4.1 Flash is the intended model; it
-    # reasons by default, so town_desc sends reasoning={"enabled": false}
-    # (without it the whole token budget goes to reasoning, content=None).
-    llm_model: str = Field(default="deepseek/deepseek-v4.1-flash", alias="HOUSES_LLM_MODEL")
+    # ALL LLM access goes through Cloudflare AI Gateway (skill://cloudflare-ai-gateway):
+    # the gateway holds the provider keys (BYOK), picks the model via its text
+    # route, and reports per-repo analytics. The credential is the GATEWAY token
+    # (same secret PR-Agent uses) — the app never holds an OpenRouter key.
+    llm_base_url: str = Field(
+        default="https://gateway.ai.cloudflare.com/v1/e21a5be58ac1e8f7d5619539feb2dc3d/default/compat",
+        alias="HOUSES_LLM_BASE_URL",
+    )
+    llm_api_key: str = Field(default="", alias="CLOUDFLARE_AIGATEWAY_TOKEN")
+    # The model name selects Cloudflare's dynamic route, not a provider model:
+    # `fallback2` is the text chain. The route's model reasons by default, so
+    # town_desc sends reasoning={"enabled": false} — without it the whole token
+    # budget goes to reasoning and the response carries content=None.
+    llm_model: str = Field(default="dynamic/fallback2", alias="HOUSES_LLM_MODEL")
     llm_temperature: float = 0.7
     llm_max_tokens: int = 150
     trace: bool = Field(default=False, alias="HOUSES_TRACE")

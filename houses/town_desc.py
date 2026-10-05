@@ -20,7 +20,18 @@ def _reset():
     _town_cache.clear()
 
 
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# ALL LLM access goes through Cloudflare AI Gateway (skill://cloudflare-ai-gateway):
+# the gateway owns the provider keys (BYOK), the text route (`dynamic/fallback2`)
+# and per-repo analytics. The app authenticates with the gateway token and never
+# holds a provider key. The endpoint URL comes from settings.llm_base_url.
+CHAT_COMPLETIONS_PATH = "/chat/completions"
+
+# Gateway request headers: tag the traffic so Cloudflare's analytics attribute it
+# to this app (the local agent proxy does the same for OMP), and keep retries on
+# the client — the DAG re-raises transient failures, and a gateway retry would
+# pay for the same generation twice (skill://cloudflare-ai-gateway → Retries).
+GATEWAY_HEADERS = {"cf-aig-metadata": '{"source":"app","repo":"houses"}', "cf-aig-max-attempts": "0"}
 
 
 @dataclass(frozen=True)
@@ -119,18 +130,23 @@ async def generate_town_description(
             reasoning=_Reasoning(enabled=False),
         )
 
+        url = f"{settings.llm_base_url}{CHAT_COMPLETIONS_PATH}"
+
         async def _fetch():
             async with client_factory(timeout=15.0) as client:
                 resp = await client.post(
-                    API_URL,
+                    url,
                     json=body.to_dict(),
-                    headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+                    headers={
+                        "Authorization": f"Bearer {settings.llm_api_key}",
+                        **GATEWAY_HEADERS,
+                    },
                 )
             assert isinstance(resp, httpx.Response)
             resp.raise_for_status()
             return resp.json()
 
-        result = await with_cache_fn("POST", API_URL, body=body, fetch=_fetch)
+        result = await with_cache_fn("POST", url, body=body, fetch=_fetch)
         raw = (result["choices"][0]["message"].get("content") or "").strip()
         if not raw:
             # A reasoning model that ignored the switch spends the budget

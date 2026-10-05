@@ -196,14 +196,18 @@ class TestGenerateTownDescription:
         assert result.value_or_none() == "A leafy suburb."
 
     @pytest.mark.asyncio
-    async def test_asks_for_no_reasoning_on_the_intended_model(self):
-        """The intended model reasons by default and spends the whole token
-        budget thinking (finish_reason=length, content=None) — the request
-        must switch reasoning off, or every description fails."""
+    async def test_goes_through_the_gateway_with_reasoning_off(self):
+        """All LLM access goes through Cloudflare AI Gateway: the request must
+        carry the gateway base URL, the gateway token, the route name as the
+        model, the analytics/retry headers — and reasoning switched off, since
+        the route's model otherwise spends the whole budget thinking
+        (finish_reason=length, content=None)."""
+        from houses.settings import settings
         from houses.town_desc import _reset
 
         _reset()
         sent: dict = {}
+        seen: dict = {}
 
         class _FakeCM:
             async def __aenter__(self):
@@ -211,8 +215,11 @@ class TestGenerateTownDescription:
 
             async def __aexit__(self, *a):
                 return False
+
         class _FakeClient:
             async def post(self, url, json=None, headers=None):
+                seen["url"] = url
+                seen.update(headers or {})
                 sent.update(json or {})
                 return httpx.Response(
                     200,
@@ -231,8 +238,13 @@ class TestGenerateTownDescription:
             with_cache_fn=_fake_cache,
         )
 
+        assert seen["url"] == f"{settings.llm_base_url}/chat/completions"
+        assert "gateway.ai.cloudflare.com" in seen["url"]
+        assert seen["Authorization"] == f"Bearer {settings.llm_api_key}"
+        assert seen["cf-aig-max-attempts"] == "0"
+        assert '"repo":"houses"' in seen["cf-aig-metadata"]
+        assert sent.get("model") == "dynamic/fallback2"
         assert sent.get("reasoning") == {"enabled": False}
-        assert sent.get("model") == "deepseek/deepseek-v4.1-flash"
 
     @pytest.mark.asyncio
     async def test_no_content_is_an_impossible_attempt_not_a_crash(self):
