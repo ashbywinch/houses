@@ -115,28 +115,35 @@ def _split_values(record: dict) -> _SplitValues:
     )
 
 
-_COMMIT_EVERY = 10_000
-"""Bound the journal: 250k converted rows in one transaction means a huge WAL
-and a rollback that has to undo all of it (the 2026-09-24 lesson in the
-person-id migration: a single 860k-row transaction OOM-killed the box)."""
+_CHUNK_ROWS = 2_000
+"""Rows per read and per commit. Bounding BOTH is what keeps the migration
+inside the box's memory: the table's blobs are ~330 MB in total, so reading
+them all at once (or holding one transaction over them) is an OOM, not a
+slow path — the person-id migration learned this the hard way on 2026-09-23."""
 
 
-def convert_all(conn: sqlite3.Connection, rows: list) -> int | None:
-    """Convert every row; the count converted, or None on the first unreadable row.
+def convert_all(conn: sqlite3.Connection, pending_sql: str) -> int | None:
+    """Convert every pending row; the count, or None on the first unreadable row.
 
-    Commits in bounded batches and reports progress — a 250k-row conversion on
-    a box disk takes minutes, and silence reads as a hang.
+    Streams in chunks and commits in bounded batches. Both bounds are the
+    lesson from the person-id migration (2026-09-23: a dry-run that read the
+    whole table — and an apply with one 860k-row transaction — OOM-killed the
+    box): 250k rows of blobs is ~330 MB in Python objects, and a single
+    transaction's journal is worse.
     """
     applied = 0
-    for row_id, raw in rows:
-        if not convert_row(conn, row_id, raw):
-            conn.commit()
-            return None
-        applied += 1
-        if applied % _COMMIT_EVERY == 0:
-            conn.commit()
-            print(f"  converted {applied} rows…", flush=True)
-    conn.commit()
+    cursor = conn.execute(pending_sql)
+    while True:
+        chunk = cursor.fetchmany(_CHUNK_ROWS)
+        if not chunk:
+            break
+        for row_id, raw in chunk:
+            if not convert_row(conn, row_id, raw):
+                conn.commit()
+                return None
+            applied += 1
+        conn.commit()
+        print(f"  converted {applied} rows…", flush=True)
     return applied
 
 
@@ -206,11 +213,9 @@ def apply_migration(
 
     applied = convert_all(
         conn,
-        conn.execute(
-            "SELECT id, result_json FROM node_results WHERE result_json IS NOT NULL AND result_json != ''"
-        ).fetchall(),
+        "SELECT id, result_json FROM node_results"
+        " WHERE result_json IS NOT NULL AND result_json != ''",
     )
-    conn.commit()
     if applied is None:
         return MigrationResult(ok=False, applied=0, dropped_column=False)
     dropped = drop_legacy_column(conn)
