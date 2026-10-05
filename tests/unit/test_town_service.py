@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from houses.apis.ors import SETTLEMENT_LAYERS
 from houses.location import ReverseGeocodeOptions, find_nearest_town_name
 from houses.town_desc import generate_town_description
 
@@ -113,6 +114,48 @@ class TestFindNearestTownName:
             )
 
 
+
+    @pytest.mark.asyncio
+    async def test_asks_for_settlements_not_streets(self):
+        """The same unconstrained-reverse trap as the walkability fallback:
+        without layers, Pelias names the *street* the house is on (or a
+        school) as the "nearest town"."""
+        seen: dict = {}
+
+        class _FakeCM:
+            async def __aenter__(self):
+                return _FakeClient()
+
+            async def __aexit__(self, *a):
+                return False
+
+        class _FakeClient:
+            async def get(self, url, params=None, headers=None):
+                seen.update(params or {})
+                return _FakeResp()
+
+        class _FakeResp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"features": [{"properties": {"locality": "Southall"}}]}
+
+        await find_nearest_town_name(
+            51.5,
+            -0.1,
+            options=ReverseGeocodeOptions(
+                api_key="key",
+                get_cached_fn=lambda *a, **k: None,
+                set_cached_fn=lambda *a, **k: None,
+                client_factory=lambda **k: _FakeCM(),
+            ),
+        )
+
+        assert seen.get("layers") == SETTLEMENT_LAYERS
+        assert "street" not in str(seen.get("layers"))
 class TestGenerateTownDescription:
     @pytest.mark.asyncio
     async def test_returns_description(self):
