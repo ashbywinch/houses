@@ -19,3 +19,4 @@
 # comments-only list is REFUSED by the runner (zero migrations cannot be
 # reported as "0 applied+checked, 0 failed").
 scripts/backfill_person_ids.py scripts/backfill_person_ids.check.py
+scripts/split_node_results.py scripts/split_node_results.check.py
