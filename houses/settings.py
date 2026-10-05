@@ -53,7 +53,12 @@ class Settings(BaseSettings):
     ors_base_url: str = Field(default="https://api.heigit.org", alias="HOUSES_ORS_BASE_URL")
     google_maps_api_key: str = Field(default="", alias="PLACES_API_KEY")
     llm_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    llm_model: str = Field(default="deepseek/deepseek-chat", alias="HOUSES_LLM_MODEL")
+    # The account's OpenRouter guardrails exclude the older DeepSeek models
+    # (V3 "deepseek-chat" and the Pro line) — every town description came back
+    # 404 "Model blocked by guardrail". V4.1 Flash is the intended model; it
+    # reasons by default, so town_desc sends reasoning={"enabled": false}
+    # (without it the whole token budget goes to reasoning, content=None).
+    llm_model: str = Field(default="deepseek/deepseek-v4.1-flash", alias="HOUSES_LLM_MODEL")
     llm_temperature: float = 0.7
     llm_max_tokens: int = 150
     trace: bool = Field(default=False, alias="HOUSES_TRACE")

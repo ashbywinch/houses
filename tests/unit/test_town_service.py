@@ -7,6 +7,7 @@ with the reason preserved.
 """
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from houses.apis.ors import SETTLEMENT_LAYERS
@@ -193,3 +194,81 @@ class TestGenerateTownDescription:
 
         assert result.succeeded
         assert result.value_or_none() == "A leafy suburb."
+
+    @pytest.mark.asyncio
+    async def test_asks_for_no_reasoning_on_the_intended_model(self):
+        """The intended model reasons by default and spends the whole token
+        budget thinking (finish_reason=length, content=None) — the request
+        must switch reasoning off, or every description fails."""
+        from houses.town_desc import _reset
+
+        _reset()
+        sent: dict = {}
+
+        class _FakeCM:
+            async def __aenter__(self):
+                return _FakeClient()
+
+            async def __aexit__(self, *a):
+                return False
+        class _FakeClient:
+            async def post(self, url, json=None, headers=None):
+                sent.update(json or {})
+                return httpx.Response(
+                    200,
+                    json={"choices": [{"message": {"content": "A leafy suburb."}}]},
+                    request=httpx.Request("POST", url),
+                )
+
+        async def _fake_cache(method, url, *, body=None, fetch=None, **k):
+            assert fetch is not None
+            return await fetch()
+
+        await generate_town_description(
+            "Southall",
+            "UB2 4GN",
+            client_factory=lambda **k: _FakeCM(),
+            with_cache_fn=_fake_cache,
+        )
+
+        assert sent.get("reasoning") == {"enabled": False}
+        assert sent.get("model") == "deepseek/deepseek-v4.1-flash"
+
+    @pytest.mark.asyncio
+    async def test_no_content_is_an_impossible_attempt_not_a_crash(self):
+        """A reasoning model that ignored the switch returns content=None;
+        that is a failure with a readable reason, not an AttributeError."""
+        from houses.town_desc import _reset
+
+        _reset()
+
+        class _FakeCM:
+            async def __aenter__(self):
+                return _FakeClient()
+
+            async def __aexit__(self, *a):
+                return False
+        class _FakeClient:
+            async def post(self, url, json=None, headers=None):
+                return httpx.Response(
+                    200,
+                    json={
+                        "choices": [{"message": {"content": None}, "finish_reason": "length"}]
+                    },
+                    request=httpx.Request("POST", url),
+                )
+
+        async def _fake_cache(method, url, *, body=None, fetch=None, **k):
+            assert fetch is not None
+            return await fetch()
+
+        result = await generate_town_description(
+            "Southall",
+            "UB2 4GN",
+            client_factory=lambda **k: _FakeCM(),
+            with_cache_fn=_fake_cache,
+        )
+
+        assert not result.succeeded
+        assert "no content" in result.error
+        assert "length" in result.error
