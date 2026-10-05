@@ -87,7 +87,7 @@ async def test_reverse_geocode_asks_for_settlements_not_streets():
     client = _TransientClient()
     with pytest.raises(apigw.GatewayHttpError):
         await ORSApi().reverse_geocode(51.5, -0.1, _client_factory=lambda **k: client)
-
+    assert client.params, "no request params captured — the assertions below would be vacuous"
     assert client.params.get("layers") == SETTLEMENT_LAYERS
     assert "locality" in str(client.params.get("layers"))
     assert "street" not in str(client.params.get("layers"))
