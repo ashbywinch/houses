@@ -138,7 +138,7 @@ async def test_geocode_empty_address(_mock_http_requests):
         lambda request: Response(403),
     )
     _mock_http_requests.add_rule(
-        lambda url: "openrouteservice.org/geocode" in url,
+        lambda url: "/pelias/" in url,
         lambda request: Response(403),
     )
     _mock_http_requests.add_rule(

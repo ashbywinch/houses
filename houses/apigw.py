@@ -18,7 +18,7 @@ It gives you, for free:
 Using it is "pick a profile constant, one call":
 
     data = await api_fetch(
-        "POST", ORS_DIRECTIONS_URL, api=ORS,
+        "POST", ORS_DIRECTIONS, api=ORS,
         body=payload,
         headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
     )

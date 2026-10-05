@@ -36,7 +36,7 @@ pytestmark = pytest.mark.asyncio
 _LAT = 51.3458
 _LNG = -0.5011
 _DEST = GeoPoint(lat=51.5074, lon=-0.1276)
-_URL = "https://api.openrouteservice.org/v2/directions/foot-walking/whatever"
+_URL = "https://api.heigit.org/openrouteservice/v2/directions/foot-walking/whatever"
 
 
 def _status_response(status: int, url: str = _URL, headers: dict[str, str] | None = None) -> httpx.Response:

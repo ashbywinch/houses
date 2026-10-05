@@ -12,6 +12,7 @@ from pint import Quantity
 from houses import apigw
 from houses.apis.transport import BaseApi, FetchArgs
 from houses.geopoint import GeoPoint
+from houses.ors_endpoints import ORS_DIRECTIONS, PELIAS_REVERSE, PELIAS_SEARCH
 from houses.settings import settings
 from houses.web.json_utils import WirePayload
 
@@ -44,8 +45,8 @@ class ORSApi(BaseApi):
     """ORS directions + Pelias geocoding (share the key: one quota flag)."""
 
     profile = apigw.ORS
-    directions_url = "https://api.openrouteservice.org/v2/directions"
-    geocode_url = "https://api.openrouteservice.org/geocode/search"
+    directions_url = ORS_DIRECTIONS
+    geocode_url = PELIAS_SEARCH
 
     @staticmethod
     def _auth_headers() -> dict[str, str]:
@@ -72,9 +73,15 @@ class ORSApi(BaseApi):
 
     async def reverse_geocode(self, lat: float, lng: float, *, _client_factory=None) -> GeoPoint | None:
         """Nearest settlement centre from coordinates."""
-        url = self.geocode_url.replace("/search", "/reverse")
+        url = PELIAS_REVERSE
         params = OrsReverseParams(point_lat=lat, point_lon=lng, size=1, boundary_country="GBR")
-        req = FetchArgs("GET", url, params=params, _client_factory=_client_factory)
+        req = FetchArgs(
+            "GET",
+            url,
+            params=params,
+            headers=self._auth_headers(),
+            _client_factory=_client_factory,
+        )
         data = await self._fetch(req)
         if not data:
             return None
