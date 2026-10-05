@@ -6,12 +6,10 @@ completes the property and cancels the queue job), and Remove (deletes the
 job + the property's DAG rows + registry entry).
 """
 
-import json
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dag.persistence import decompress_result
 from houses.database import get_connection
 from houses.scrape_queue import MAX_ATTEMPTS
 from houses.server import app
@@ -159,17 +157,14 @@ class TestCommuteComputesAfterDetails:
         )
         assert resp.status_code == 200, resp.text
         flush_all()  # the PATCH queues the seeding; the test drains explicitly
-        conn = get_connection()
-        row = conn.execute(
-            "SELECT result_json FROM node_results WHERE node_id=? ORDER BY rowid DESC LIMIT 1",
-            (f"{RID}/1/Pimlico/computed_transit",),
-        ).fetchone()
-        assert row is not None, (
+        from dag.persistence import latest_node_result
+
+        record = latest_node_result(f"{RID}/1/Pimlico/computed_transit")
+        assert record is not None, (
             "the transit commute must be computed once the address arrives — "
             "the DAG must auto-recompute dependents of the new location"
         )
-        d = json.loads(decompress_result(row[0]))
-        assert d["status"] != "pending", "transit must have RUN, not stayed pending"
+        assert record["status"] != "pending", "transit must have RUN, not stayed pending"
 
     @staticmethod
     def test_no_route_error_is_user_facing():

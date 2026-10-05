@@ -50,13 +50,56 @@ class DagJSONEncoder(json.JSONEncoder):
 
 
 _ZLIB_LEVEL = 6
-"""zlib level for result_json compression.  Level 6 vs 9 trades ~2% ratio
-for ~4x faster compress — the money-cascade provenance blobs (the bulk of
-the table) compress ~25x either way."""
+"""zlib level for the provenance blob.  Level 6 vs 9 trades ~2% ratio for
+~4x faster compress — the money-cascade provenance trees (the bulk of a
+row's bytes) compress ~25x either way."""
+
+PROVENANCE_KEY = "provenance"
+"""The one record field that keeps compression.
+
+Every other part of a node record is plain text in its own column, so the hot
+readers (attempt load, staleness checks, the listing) parse only what they use
+and never inflate a provenance tree — those trees are the bulk of the table
+(1.53 GB live, mostly the money cascades' expansions) and only the provenance
+endpoint reads them.
+"""
+
+_SPLIT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("status", "TEXT"),
+    ("value_json", "TEXT"),
+    ("error", "TEXT"),
+    ("error_detail_json", "TEXT"),
+    ("source_url", "TEXT"),
+    ("source_label", "TEXT"),
+    ("provenance_z", "BLOB"),
+    ("extra_json", "TEXT"),
+)
+"""The per-field columns that replace the single ``result_json`` blob.
+
+``source_label`` is its own column because every user-input load reads it
+(``_load_persisted_label``); ``extra_json`` is the catch-all for any other
+node-specific record field, so the split can never drop one.
+"""
+
+_PLAIN_COLUMN_KEYS: tuple[str, ...] = ("status", "error", "source_url", "source_label")
+"""Record fields stored verbatim as their own TEXT column."""
+
+_columns_cache: dict[str, tuple[str, ...]] = {}
+_split_ensured: set[str] = set()
+
+def _reset_caches() -> None:
+    """Drop the per-database schema caches (test isolation).
+
+    A test can recreate a database under the same path with a different
+    schema (a pre-split table to prove legacy rows still read); the caches
+    are keyed by path, so they must be dropped with it.
+    """
+    _columns_cache.clear()
+    _split_ensured.clear()
 
 
 def compress_result(text: str) -> bytes:
-    """zlib-compress a result_json payload for storage."""
+    """zlib-compress a payload (the provenance blob) for storage."""
     return zlib.compress(text.encode("utf-8"), _ZLIB_LEVEL)
 
 
@@ -68,6 +111,110 @@ def decompress_result(raw: str | bytes) -> str:
         # starts with 0x78, so this only happens with a foreign write.
         return raw.decode("utf-8")
     return raw
+
+
+def _record_columns() -> tuple[str, ...]:
+    """The columns this database's node_results actually has (cached).
+
+    A migrated or fresh database has the split columns and no ``result_json``;
+    an older one still carries the legacy blob column (NOT NULL), so writes
+    mirror the provenance-free record there until the shipped migration
+    converts it.
+    """
+    key = str(DB_PATH)
+    cached = _columns_cache.get(key)
+    if cached is None:
+        cached = tuple(r[1] for r in _get_db().execute("PRAGMA table_info(node_results)"))
+        _columns_cache[key] = cached
+    return cached
+
+
+def _ensure_split_columns() -> None:
+    """Idempotently add the split columns to an older node_results.
+
+    Cheap ALTERs, cached per DB path — the same pattern as the code_version
+    column.  The one-time conversion (and the drop of the legacy blob) is the
+    shipped migration's job: scripts/split_node_results.py.
+    """
+    key = str(DB_PATH)
+    if key in _split_ensured:
+        return
+    conn = _get_db()
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(node_results)")}
+    for column, column_type in _SPLIT_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE node_results ADD COLUMN {column} {column_type}")
+    conn.commit()
+    _split_ensured.add(key)
+    _columns_cache.pop(key, None)
+
+
+def _split_values(record: dict[str, Any]) -> dict[str, Any]:
+    """The record's fields as storage column values — provenance compressed."""
+    provenance = record.get(PROVENANCE_KEY)
+    mapped = {*_PLAIN_COLUMN_KEYS, "value", "error_detail", PROVENANCE_KEY}
+    extra = {k: v for k, v in record.items() if k not in mapped}
+    values: dict[str, Any] = {
+        "value_json": json.dumps(record["value"], cls=DagJSONEncoder) if "value" in record else None,
+        "error_detail_json": (
+            json.dumps(record["error_detail"], cls=DagJSONEncoder)
+            if record.get("error_detail") is not None
+            else None
+        ),
+        "provenance_z": (
+            compress_result(json.dumps(provenance, cls=DagJSONEncoder)) if provenance is not None else None
+        ),
+        "extra_json": json.dumps(extra, cls=DagJSONEncoder) if extra else None,
+        # Legacy databases keep a NOT NULL result_json: mirror the record
+        # WITHOUT provenance there (small, and enough for a rollback to read).
+        "result_json": json.dumps(
+            {k: v for k, v in record.items() if k != PROVENANCE_KEY}, cls=DagJSONEncoder
+        ),
+    }
+    for key in _PLAIN_COLUMN_KEYS:
+        values[key] = record.get(key)
+    return values
+
+
+def _read_legacy_record(raw: str | bytes) -> dict[str, Any]:
+    """Parse a pre-split ``result_json`` value (whole-row zlib or plain JSON)."""
+    return cast(dict[str, Any], json.loads(decompress_result(raw)))
+
+
+def _record_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    """A row's record from the split columns (legacy blob for pre-split rows).
+
+    Never inflates provenance — that is ``latest_node_provenance``'s job.
+    """
+    keys = row.keys()
+    if "status" not in keys or (row["status"] is None and "result_json" in keys and row["result_json"]):
+        legacy = _read_legacy_record(row["result_json"])
+        legacy.pop(PROVENANCE_KEY, None)
+        return legacy
+    status = row["status"]
+    keys = row.keys()
+    record: dict[str, Any] = {
+        "status": status,
+        # The status vocabulary is exactly succeeded/pending/impossible, so
+        # the flags are derivable — they were carried, not computed.
+        "succeeded": status == "succeeded",
+        "pending": status == "pending",
+        "impossible": status == "impossible",
+    }
+    if row["value_json"] is not None:
+        record["value"] = json.loads(row["value_json"])
+    if row["error"] is not None:
+        record["error"] = row["error"]
+    if row["error_detail_json"] is not None:
+        record["error_detail"] = json.loads(row["error_detail_json"])
+    for column in ("source_url", "source_label"):
+        if column in keys and row[column] is not None:
+            record[column] = row[column]
+    if "extra_json" in keys and row["extra_json"] is not None:
+        extra = json.loads(row["extra_json"])
+        if isinstance(extra, dict):
+            record.update(extra)
+    return record
 
 
 def _get_db() -> sqlite3.Connection:
@@ -179,7 +326,14 @@ def init_db(db_path: str | None = None) -> None:
         """
         CREATE TABLE IF NOT EXISTS node_results (
             node_id TEXT NOT NULL,
-            result_json TEXT NOT NULL,
+            status TEXT,
+            value_json TEXT,
+            error TEXT,
+            error_detail_json TEXT,
+            source_url TEXT,
+            source_label TEXT,
+            provenance_z BLOB,
+            extra_json TEXT,
             dep_timestamps TEXT,
             created_at TEXT NOT NULL,
             code_version TEXT
@@ -192,6 +346,10 @@ def init_db(db_path: str | None = None) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);")
     conn.commit()
     _ensure_code_version_column()
+    # Older databases still carry the single result_json blob: add the split
+    # columns (cheap ALTERs) so the new write/read shape works before the
+    # shipped migration converts the rows and drops the blob.
+    _ensure_split_columns()
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -223,18 +381,20 @@ def save_node_result(
     if not _table_exists("node_results"):
         init_db()
     _ensure_code_version_column()
+    _ensure_split_columns()
     conn = _get_db()
     now = created_at or datetime.now(UTC).isoformat()
+    values = {
+        "node_id": node_id,
+        **_split_values(result_dict),
+        "dep_timestamps": json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
+        "created_at": now,
+        "code_version": code_version,
+    }
+    columns = [c for c in _record_columns() if c in values]
     cur = conn.execute(
-        "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at, code_version)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (
-            node_id,
-            compress_result(json.dumps(result_dict, cls=DagJSONEncoder)),
-            json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
-            now,
-            code_version,
-        ),
+        f"INSERT INTO node_results ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+        tuple(values[c] for c in columns),
     )
     conn.commit()
     rowid = cur.lastrowid
@@ -263,26 +423,73 @@ def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any]
         init_db()
         return None
     _ensure_code_version_column()
+    _ensure_split_columns()
     conn = _get_db()
+    # provenance_z is deliberately NOT selected: its blob is the bulk of the
+    # row and only latest_node_provenance inflates it.
+    wanted = (
+        *[c for c, _ in _SPLIT_COLUMNS if c != "provenance_z"],
+        # Pre-split databases only: the fallback for rows without columns.
+        "result_json",
+        "dep_timestamps",
+        "created_at",
+        "code_version",
+    )
+    selected = ", ".join(c for c in wanted if c in _record_columns())
     if before is None:
         row = conn.execute(
-            "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
+            f"SELECT {selected} FROM node_results"
             " WHERE node_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (node_id,),
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
+            f"SELECT {selected} FROM node_results"
             " WHERE node_id=? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
             (node_id, before),
         ).fetchone()
     if row is None:
         return None
-    result = json.loads(decompress_result(row["result_json"]))
+    result = _record_from_row(row)
     result["_dep_timestamps"] = json.loads(row["dep_timestamps"]) if row["dep_timestamps"] else {}
     result["_persisted_at"] = row["created_at"]
     result["_code_version"] = row["code_version"]
     return result
+
+
+def latest_node_provenance(node_id: str) -> dict[str, Any] | None:
+    """The node's recorded provenance tree, or None.
+
+    The ONLY read that inflates the compressed provenance blob — every other
+    reader skips the column entirely, which is the point of the split: the
+    trees are the bulk of the table and only the provenance endpoint wants
+    them.
+    """
+    if not _table_exists("node_results"):
+        init_db()
+        return None
+    _ensure_code_version_column()
+    _ensure_split_columns()
+    conn = _get_db()
+    columns = _record_columns()
+    wanted = [c for c in ("provenance_z", "result_json") if c in columns]
+    if not wanted:
+        return None
+    row = conn.execute(
+        f"SELECT {', '.join(wanted)} FROM node_results"
+        " WHERE node_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (node_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    keys = row.keys()
+    if "provenance_z" in keys and row["provenance_z"] is not None:
+        return cast(dict[str, Any], json.loads(decompress_result(row["provenance_z"])))
+    if "result_json" in keys and row["result_json"]:
+        # A pre-split row kept its tree inside the legacy blob.
+        legacy = _read_legacy_record(row["result_json"]).get(PROVENANCE_KEY)
+        return legacy if isinstance(legacy, dict) else None
+    return None
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary (same stored node payload as

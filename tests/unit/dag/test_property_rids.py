@@ -18,16 +18,16 @@ import dag.persistence as per
 def _seed_test_data(conn):
     """Insert node results with property RIDs and a settings RID."""
     conn.execute(
-        "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-        ("89306649/rightmove_price", '{"status":"succeeded","value":"GBP 500000"}', "2026-01-01T00:00:00"),
+        "INSERT INTO node_results (node_id, status, created_at) VALUES (?, ?, ?)",
+        ("89306649/rightmove_price", "succeeded", "2026-01-01T00:00:00"),
     )
     conn.execute(
-        "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-        ("89306649/postcode", '{"status":"succeeded"}', "2026-01-01T00:00:00"),
+        "INSERT INTO node_results (node_id, status, created_at) VALUES (?, ?, ?)",
+        ("89306649/postcode", "succeeded", "2026-01-01T00:00:00"),
     )
     conn.execute(
-        "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-        ("settings/mortgage_rate", '{"status":"succeeded"}', "2026-01-01T00:00:00"),
+        "INSERT INTO node_results (node_id, status, created_at) VALUES (?, ?, ?)",
+        ("settings/mortgage_rate", "succeeded", "2026-01-01T00:00:00"),
     )
     conn.commit()
 
@@ -61,12 +61,12 @@ class TestPollutionIsVisibleToTheLoader:
         per._get_db = lambda: conn
         per.init_db()
         conn.execute(
-            "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-            ("89306649/rightmove_price", '{"status":"succeeded","value":"GBP 500000"}', "2026-01-01T00:00:00"),
+            "INSERT INTO node_results (node_id, status, created_at) VALUES (?, ?, ?)",
+            ("89306649/rightmove_price", "succeeded", "2026-01-01T00:00:00"),
         )
         conn.execute(
-            "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-            ("test_shape/rightmove_price", '{"status":"succeeded"}', "2026-01-01T00:00:00"),
+            "INSERT INTO node_results (node_id, status, created_at) VALUES (?, ?, ?)",
+            ("test_shape/rightmove_price", "succeeded", "2026-01-01T00:00:00"),
         )
         conn.commit()
 
@@ -92,8 +92,8 @@ class TestPollutionIsVisibleToTheLoader:
         per._get_db = lambda: conn
         per.init_db()
         conn.execute(
-            "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-            ("test_shape/postcode", '{"status":"succeeded"}', "2026-01-01T00:00:00"),
+            "INSERT INTO node_results (node_id, status, created_at) VALUES (?, ?, ?)",
+            ("test_shape/postcode", "succeeded", "2026-01-01T00:00:00"),
         )
         conn.commit()
 

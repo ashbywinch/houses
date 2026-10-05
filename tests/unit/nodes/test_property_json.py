@@ -467,28 +467,22 @@ class TestStartupSchedulesStaleNodes:
         """PRD contract: the deploy/startup invalidates persisted
         fingerprints and SCHEDULES the recompute — the loader is the
         first thing that makes it necessary; reads never do."""
-        import json
 
         from dag.scheduler import flush_processor, get_scheduler
-        from houses.database import get_connection
         from houses.nodes.bootstrap import load_property_nodes_from_db
         from houses.services_provider import get_services
 
         rid = "98765432"
         # A persisted best_address stamped with an OLD code fingerprint:
         # computed by the previous deployment, stale under the new one.
-        conn = get_connection()
-        conn.execute(
-            "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at, code_version)"
-            " VALUES (?, ?, NULL, ?, ?)",
-            (
-                f"{rid}/best_address",
-                json.dumps({"status": "succeeded", "value": "10 High St, SW1P 1AA"}),
-                "2026-01-01T00:00:00+00:00",
-                "old-code-hash",
-            ),
+        from dag.persistence import save_node_result
+
+        save_node_result(
+            f"{rid}/best_address",
+            {"status": "succeeded", "value": "10 High St, SW1P 1AA"},
+            created_at="2026-01-01T00:00:00+00:00",
+            code_version="old-code-hash",
         )
-        conn.commit()
 
         sched = get_scheduler()
         calls: list[str] = []

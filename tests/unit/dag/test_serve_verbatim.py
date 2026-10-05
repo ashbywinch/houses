@@ -43,7 +43,7 @@ async def test_serve_returns_frozen_row_without_dep_walk():
 @pytest.mark.asyncio
 async def test_serve_returns_exact_persisted_tree():
     """Serve output equals the row's stored provenance field, byte for byte."""
-    from dag.persistence import latest_node_result
+    from dag.persistence import latest_node_provenance
 
     a = UserInputNode("sv3_a", int)
     s = _Single("sv3_s", int, (a,), dep_names=("value",))
@@ -51,5 +51,5 @@ async def test_serve_returns_exact_persisted_tree():
     await flush_processor()
 
     prov = await s.build_provenance()
-    stored = (latest_node_result("sv3_s") or {}).get("provenance", {})
+    stored = latest_node_provenance("sv3_s") or {}
     assert prov.to_dict() == stored, "serve must return the frozen row, not a rebuild"
