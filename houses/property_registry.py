@@ -42,7 +42,12 @@ class PropertyRegistry:
 
         status = getattr(prop, "comment_status", None)
         if status is not None:
-            current_home_node().add_status(status, self)
+            current_home_node().add_status(
+                status,
+                self,
+                cost_node=getattr(prop, "group_monthly_cost", None),
+                address_node=getattr(prop, "best_address", None),
+            )
 
     def get(self, rid: str) -> PropertyNodes | None:
         try:

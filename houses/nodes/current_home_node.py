@@ -121,12 +121,18 @@ class CurrentHomeNode(DerivedNode):
     """THE current home: exactly one current-status property with a
     computable couple figure, else None.
 
-    Deps: every registered property's status node (re-wired as properties
-    register — a status write signals this node and fans the re-derivation
-    out to every delta's consumer). The active set additionally includes
-    the winning property's ``group_monthly_cost`` and ``best_address``
-    nodes, so a re-price or an address edit of the baseline re-derives the
-    descriptor through the same edges.
+    Deps: every registered property's status node AND its
+    ``group_monthly_cost`` / ``best_address`` nodes — all wired as signal
+    edges (``_deps`` is the signal graph; ``set_deps`` connects one slot
+    per dep). Only the WINNER's cost and address join the active set, so an
+    impossible figure on any other property cannot fail the baseline.
+
+    Wiring the non-winner figures matters: a re-price or an address edit of
+    the property that IS the current home must re-derive this node, and an
+    active-set-only dependency gets no signal edge at all (2026-10-05: the
+    index showed no deltas for a whole session because the baseline had been
+    derived before its property's chain settled and nothing re-queued it —
+    the active deps were read, never wired).
     """
 
     def __init__(self, node_id: str = "settings/current_home"):
@@ -143,35 +149,54 @@ class CurrentHomeNode(DerivedNode):
         super().__init__(node_id, MonthlyBaseline | None, ())
 
     # -- dep wiring ------------------------------------------
-    def add_status(self, status_node: Node, registry: Any) -> None:
-        """Register one property's status node (called as properties are
-        registered); re-wires the signal edges so a status write fans out."""
+    def add_status(
+        self,
+        status_node: Node,
+        registry: Any,
+        *,
+        cost_node: Node | None = None,
+        address_node: Node | None = None,
+    ) -> None:
+        """Register one property's nodes (called as properties register).
+
+        The status node picks the winner; the cost and address nodes are
+        wired so their writes signal this node even while the property is
+        not the winner — the winner is chosen by status, so a figure that
+        settles late must still re-derive the baseline.
+        """
         self._registry = registry
-        self.set_deps((*self._deps, status_node))
+        extra = tuple(n for n in (cost_node, address_node) if n is not None)
+        self.set_deps((*self._deps, status_node, *extra))
+
+    def _status_deps(self) -> tuple:
+        """The wired status nodes — the candidates for 'the current home'."""
+        return tuple(n for n in self._deps if str(n._id).endswith("/status"))
 
     def _current_property(self) -> Any:
         if self._registry is None:
             return None
-        statuses = {str(n._id).split("/")[0]: n for n in self._deps}
-        for rid, node in statuses.items():
+        for node in self._status_deps():
             att = node.latest_attempt()
             if att is None or not att.succeeded:
                 continue
             if (att.value_or_none() or "").strip().lower() == CURRENT_STATUS:
-                prop = self._registry.get(rid)
+                prop = self._registry.get(str(node._id).split("/")[0])
                 return prop if prop is not None else None
         return None
 
     @override
     def _get_active_deps(self) -> tuple:
+        """The evaluation subset: every status (the winner is chosen among
+        them) plus the WINNER's cost and address. The other properties'
+        cost/address edges stay wired but out of this set."""
+        statuses = self._status_deps()
         prop = self._current_property()
-        if prop is not None:
-            extra = tuple(
-                n for n in (getattr(prop, "group_monthly_cost", None), getattr(prop, "best_address", None)) if n
-            )
-            if extra:
-                return (*self._deps, *extra)
-        return self._deps
+        if prop is None:
+            return statuses
+        extra = tuple(
+            n for n in (getattr(prop, "group_monthly_cost", None), getattr(prop, "best_address", None)) if n
+        )
+        return (*statuses, *extra)
 
     @override
     def compute(self, *attempts) -> Attempt[MonthlyBaseline | None]:

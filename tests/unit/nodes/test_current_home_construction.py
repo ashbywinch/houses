@@ -35,3 +35,59 @@ async def test_current_home_constructs_when_a_persisted_attempt_exists(_sqlite_m
     # _registry.
     reloaded = CurrentHomeNode()  # must not raise AttributeError
     assert reloaded._registry is None
+
+
+@pytest.mark.asyncio
+async def test_a_late_reprice_of_the_current_home_rederives_the_baseline(_sqlite_memory):
+    """The winner's cost and address nodes must be WIRED as signal edges, not
+    merely returned as active deps.
+
+    2026-10-05: the baseline had been derived before its property's chain
+    settled, and nothing re-queued it — ``_deps`` (the signal graph) held
+    only the status nodes, so a re-price of the current home wrote without
+    signalling. The index then showed monthly TOTALS instead of the change
+    vs your home for a whole session, even though the delta code was intact.
+    """
+    from houses.nodes.current_home_node import _reset
+
+    _reset()
+    status = UserInputNode[str]("p100/status", str)
+    cost = UserInputNode[dict]("p100/group_monthly_cost", dict)
+    address = UserInputNode[str]("p100/best_address", str)
+
+    class _Prop:
+        comment_status = status
+        group_monthly_cost = cost
+        best_address = address
+
+    class _Registry:
+        """The seam the node reads the winner's figures through (the real
+        registry is typed PropertyNodes, but the wiring under test is this
+        node's)."""
+
+        def get(self, rid: str) -> _Prop | None:
+            return _Prop() if rid == "p100" else None
+
+    node = CurrentHomeNode()
+    node.add_status(status, _Registry(), cost_node=cost, address_node=address)
+
+    status.push("current", "test")
+    await flush_processor()
+    assert (await node.attempt()).value_or_none() is None, (
+        "no figure yet — the baseline is legitimately empty"
+    )
+
+    # The current home's chain settles LATE (its own value was unavailable
+    # when the baseline was first derived).
+    cost.push(
+        {"couple": {"value": "1873.81", "stddev": 0}, "others": {"value": "652.92", "stddev": 0}},
+        "test",
+    )
+    address.push("31 Isambard Road, Southall", "test")
+    await flush_processor()
+
+    att = await node.attempt()
+    baseline = att.value_or_none()
+    assert baseline is not None, "a re-price of the current home must re-derive the baseline"
+    assert baseline.rid == "p100"
+    assert baseline.address == "31 Isambard Road, Southall"
