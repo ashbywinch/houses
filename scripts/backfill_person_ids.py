@@ -13,7 +13,7 @@ startup replan beyond what a normal deploy would do anyway:
 - ``node_results.node_id``: ``{rid}/Simon/Pimlico/walk`` →
   ``{rid}/p_simon/Pimlico/walk``
 - ``dep_timestamps`` JSON keys: same id remap
-- ``result_json`` VALUE dicts of ``*/works_estimates`` rows: the
+- the stored ``value`` dicts of ``*/works_estimates`` rows: the
   per-person estimate keys name → id (the persisted user-input money a
   rename would otherwise orphan)
 
@@ -36,11 +36,14 @@ import zlib
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
+from dag.persistence import read_node_record, record_select_columns, write_node_record
 from houses.model.domain import slugify
 
 DB_PATH = "data/houses.db"
 
 _NUMERIC_ID_RE = re.compile(r"^[0-9]+$")
+
+WORKS_ESTIMATES_SUFFIX = "/works_estimates"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,51 +76,44 @@ def _rekey_node_id(node_id: str, mapping) -> str:
     return node_id
 
 
-
-def remap_row(node_id: str, dep_timestamps: Mapping[str, str], result_json_blob: bytes, mapping) -> tuple | None:
+def remap_row(node_id: str, dep_timestamps: Mapping[str, str], record: dict | None, mapping) -> tuple | None:
     """Apply the name→id mapping to one row.
 
-    Returns the remapped (node_id, dep_timestamps_json, result_json_blob)
+    *record* is the row as ``dag.persistence.read_node_record`` decodes it, or
+    None for a row the transform does not need to read (only works_estimates
+    value dicts carry person keys). Returns the remapped (node_id,
+    dep_timestamps_json, record) — with record None when only the keys moved —
     or None when nothing changes. Pure — unit-testable without the DB.
     """
     new_node_id = _rekey_node_id(node_id, mapping)
 
     dep = {_rekey_node_id(k, mapping): v for k, v in dep_timestamps.items()}
 
-    payload = None
-    if node_id.endswith("/works_estimates") and result_json_blob:
+    remapped_record = None
+    if node_id.endswith(WORKS_ESTIMATES_SUFFIX) and record is not None:
         try:
-            payload = json.loads(zlib.decompress(result_json_blob).decode())
-            value = payload.get("value")
+            value = record.get("value")
             if isinstance(value, str):
                 # legacy sheet-migration rows store the dict as a JSON STRING
                 nested = json.loads(value)
                 if isinstance(nested, dict):
                     value = nested
-                    payload["value"] = nested
             if isinstance(value, dict):
                 # keys may be the display name (pre-migration) OR the slug
                 # fallback (writes between the code cutover and this run)
                 renamed = {_works_key(k, mapping): v for k, v in value.items()}
                 if renamed != value:
-                    payload["value"] = renamed
-                else:
-                    payload = None  # already remapped — nothing to write (idempotence)
-            else:
-                payload = None  # not a person-keyed dict — nothing to remap
+                    remapped_record = {**record, "value": renamed}
+            # else: not a person-keyed dict — nothing to remap
         except Exception as exc:
             raise RuntimeError(
                 f"backfill aborted: works_estimates row for {node_id!r} is not "
                 f"parseable ({exc.__class__.__name__}: {exc})"
             ) from exc
 
-    if node_id == new_node_id and dep == dict(dep_timestamps) and payload is None:
+    if node_id == new_node_id and dep == dict(dep_timestamps) and remapped_record is None:
         return None
-    return (
-        new_node_id,
-        json.dumps(dep),
-        zlib.compress(json.dumps(payload).encode()) if payload is not None else result_json_blob,
-    )
+    return (new_node_id, json.dumps(dep), remapped_record)
 
 
 def _works_key(key: str, mapping) -> str:
@@ -170,29 +166,55 @@ def rows_to_remap(conn, mapping, chunk_size: int = 10_000):
     row's re-serialized dep_timestamps — multi-GB on the 862k-row live
     DB — and the box OOM-killed the migration's dry-run (v1.5.0 release,
     2026-09-23). Callers count once and re-generate for the apply.
+
+    The record is read through ``dag.persistence.read_node_record`` for the
+    works_estimates rows that need it and for no others — every other row is
+    re-keyed from node_id/dep_timestamps alone.
     """
-    sel = conn.execute("SELECT id, node_id, dep_timestamps, result_json FROM node_results")
+    selected = ", ".join(("rowid AS rowid", "node_id", "dep_timestamps", *record_select_columns(conn)))
+    sel = conn.execute(f"SELECT {selected} FROM node_results")
     while True:
         rows = sel.fetchmany(chunk_size)
         if not rows:
             return
         for row in rows:
+            node_id = row["node_id"]
             dep = json.loads(row["dep_timestamps"] or "{}")
-            remapped = remap_row(row["node_id"], dep, row["result_json"], mapping)
+            remapped = remap_row(node_id, dep, _row_record(row, node_id), mapping)
             if remapped is None:
                 continue
-            yield (row["id"], *remapped)
+            yield (row["rowid"], *remapped)
+
+
+def _row_record(row: sqlite3.Row, node_id: str) -> dict | None:
+    """The row's record, but only when the transform needs to read one.
+
+    Only works_estimates rows carry person keys in their value, and only they
+    are decoded — matching the original scan, so a corrupt blob on an unrelated
+    row never aborts the migration. An unreadable works_estimates row DOES
+    abort it: silently leaving its name keys is the bug this migration fixes.
+    """
+    if not node_id.endswith(WORKS_ESTIMATES_SUFFIX):
+        return None
+    try:
+        return read_node_record(row)
+    except (ValueError, zlib.error) as exc:
+        raise RuntimeError(
+            f"backfill aborted: works_estimates row for {node_id!r} is not "
+            f"parseable ({exc.__class__.__name__}: {exc})"
+        ) from exc
 
 
 def _read_persons(conn):
-    """The latest persons row as (id, decoded dict); None when absent."""
+    """The latest persons row as (rowid, decoded record); None when absent."""
+    selected = ", ".join(("rowid AS rowid", *record_select_columns(conn)))
     persons = conn.execute(
-        "SELECT id, result_json FROM node_results WHERE node_id='persons'"
+        f"SELECT {selected} FROM node_results WHERE node_id='persons'"
         " ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     if persons is None:
         return None
-    return persons["id"], json.loads(zlib.decompress(persons["result_json"]).decode())
+    return persons["rowid"], read_node_record(persons)
 
 
 def backfill_persons(conn, persons_row_id: int, data, mapping) -> None:
@@ -206,17 +228,14 @@ def backfill_persons(conn, persons_row_id: int, data, mapping) -> None:
             pid = mapping.get(getattr(p, "name", ""), "")  # defensive: stored rows are dicts
             if pid and not getattr(p, "person_id", ""):
                 p.person_id = pid
-    conn.execute(
-        "UPDATE node_results SET result_json=? WHERE id=?",
-        (zlib.compress(json.dumps(data).encode()), persons_row_id),
-    )
+    write_node_record(conn, persons_row_id, data)
 
 
 def _mark_changed_sources(conn, persons_row_id: int) -> None:
     """Advance the freshness stamp (created_at) of the SOURCE rows whose
     content this migration rewrote: the persons row and every
     person-keyed works_estimates row. The persons bump targets the
-    CURRENT row by id — never the whole history: stamping every
+    CURRENT row by its rowid — never the whole history: stamping every
     version identically destroys the append-order the latest-row query
     relies on (and an old row can win the tie).
 
@@ -230,16 +249,17 @@ def _mark_changed_sources(conn, persons_row_id: int) -> None:
     stay untouched.
     """
     now = datetime.now(UTC).isoformat()
-    conn.execute("UPDATE node_results SET created_at=? WHERE id=?", (now, persons_row_id))
+    conn.execute("UPDATE node_results SET created_at=? WHERE rowid=?", (now, persons_row_id))
+    selected = ", ".join(("rowid AS rowid", *record_select_columns(conn)))
     for row in conn.execute(
-        "SELECT id, result_json FROM node_results WHERE node_id LIKE '%/works_estimates'"
+        f"SELECT {selected} FROM node_results WHERE node_id LIKE '%{WORKS_ESTIMATES_SUFFIX}'"
     ).fetchall():
         try:
-            value = json.loads(zlib.decompress(row["result_json"]).decode()).get("value")
-        except Exception:
+            value = read_node_record(row).get("value")
+        except (ValueError, zlib.error):
             continue
         if isinstance(value, dict) and value:
-            conn.execute("UPDATE node_results SET created_at=? WHERE id=?", (now, row["id"]))
+            conn.execute("UPDATE node_results SET created_at=? WHERE rowid=?", (now, row["rowid"]))
 
 
 # lucidlint: ignore long-param-list one-shot migration step — the signature IS its IO boundary;
@@ -255,12 +275,14 @@ def apply_migration(conn, persons_id: int, data, mapping, remaps, *, backup_path
         conn.backup(sqlite3.connect(backup_path))
         print(f"backup written: {backup_path}")
     applied = 0
-    for idx, (row_id, node_id, dep_json, blob) in enumerate(remaps):
+    for idx, (row_id, node_id, dep_json, record) in enumerate(remaps):
         applied += 1
         conn.execute(
-            "UPDATE node_results SET node_id=?, dep_timestamps=?, result_json=? WHERE id=?",
-            (node_id, dep_json, blob, row_id),
+            "UPDATE node_results SET node_id=?, dep_timestamps=? WHERE rowid=?",
+            (node_id, dep_json, row_id),
         )
+        if record is not None:
+            write_node_record(conn, row_id, record)
         if idx % 10000 == 9999:
             conn.commit()  # bound the journal: a single 860k-row transaction
             # needs a ~2.4 GB rollback journal — the original out-of-disk crash
@@ -286,7 +308,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="write the changes (dry-run default)")
     parser.add_argument("--backup", action="store_true", help="sqlite backup of the DB before writing (recommended)")
-    parser.add_argument("--backup-path", default=None, help="where --backup writes (default: <db>.pre-<this script's basename>)")
+    parser.add_argument(
+        "--backup-path",
+        default=None,
+        help="where --backup writes (default: <db>.pre-<this script's basename>)",
+    )
     parser.add_argument("--verify", action="store_true", help="re-scan after apply: must find zero remaps")
     parser.add_argument("--db", default=DB_PATH, help="sqlite path (default: data/houses.db)")
     args = parser.parse_args()

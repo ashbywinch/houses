@@ -149,7 +149,7 @@ def _ensure_split_columns() -> None:
     _columns_cache.pop(key, None)
 
 
-def _split_values(record: dict[str, Any]) -> dict[str, Any]:
+def record_columns(record: dict[str, Any]) -> dict[str, Any]:
     """The record's fields as storage column values — provenance compressed."""
     provenance = record.get(PROVENANCE_KEY)
     mapped = {*_PLAIN_COLUMN_KEYS, "value", "error_detail", PROVENANCE_KEY}
@@ -181,7 +181,7 @@ def _read_legacy_record(raw: str | bytes) -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(decompress_result(raw)))
 
 
-def _record_from_row(row: sqlite3.Row) -> dict[str, Any]:
+def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
     """A row's record from the split columns (legacy blob for pre-split rows).
 
     Never inflates provenance — that is ``latest_node_provenance``'s job.
@@ -215,6 +215,46 @@ def _record_from_row(row: sqlite3.Row) -> dict[str, Any]:
         if isinstance(extra, dict):
             record.update(extra)
     return record
+
+
+def _table_columns(conn: sqlite3.Connection) -> tuple[str, ...]:
+    """The columns this connection's node_results actually has."""
+    return tuple(row[1] for row in conn.execute("PRAGMA table_info(node_results)"))
+
+
+def record_select_columns(conn: sqlite3.Connection) -> tuple[str, ...]:
+    """The record columns to SELECT when decoding rows with :func:`read_node_record`.
+
+    Whichever shape the database has: the per-field columns (minus the
+    provenance blob, which the reader never inflates) plus the legacy
+    ``result_json`` while it is still there.
+    """
+    existing = _table_columns(conn)
+    wanted = (*(column for column, _ in _SPLIT_COLUMNS if column != "provenance_z"), "result_json")
+    return tuple(column for column in wanted if column in existing)
+
+
+def write_node_record(conn: sqlite3.Connection, row_id: int, record: dict[str, Any]) -> None:
+    """Rewrite one ``node_results`` row from *record*.
+
+    Writes the split columns when this database has them, and the legacy
+    ``result_json`` blob when it does not — the caller never names a storage
+    column.  The legacy blob keeps its zlib encoding and its role as the
+    source of truth until scripts/split_node_results.py converts the row, so a
+    re-key written only into the split columns is not undone at the split.
+    """
+    columns = _table_columns(conn)
+    values = record_columns(record)
+    if "result_json" in columns:
+        values["result_json"] = compress_result(
+            json.dumps({k: v for k, v in record.items() if k != PROVENANCE_KEY}, cls=DagJSONEncoder)
+        )
+    selected = [column for column in columns if column in values]
+    assignments = ", ".join(f"{column}=?" for column in selected)
+    conn.execute(
+        f"UPDATE node_results SET {assignments} WHERE rowid=?",
+        (*(values[column] for column in selected), row_id),
+    )
 
 
 def _get_db() -> sqlite3.Connection:
@@ -386,7 +426,7 @@ def save_node_result(
     now = created_at or datetime.now(UTC).isoformat()
     values = {
         "node_id": node_id,
-        **_split_values(result_dict),
+        **record_columns(result_dict),
         "dep_timestamps": json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
         "created_at": now,
         "code_version": code_version,
@@ -450,7 +490,7 @@ def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any]
         ).fetchone()
     if row is None:
         return None
-    result = _record_from_row(row)
+    result = read_node_record(row)
     result["_dep_timestamps"] = json.loads(row["dep_timestamps"]) if row["dep_timestamps"] else {}
     result["_persisted_at"] = row["created_at"]
     result["_code_version"] = row["code_version"]
