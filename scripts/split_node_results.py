@@ -115,13 +115,28 @@ def _split_values(record: dict) -> _SplitValues:
     )
 
 
+_COMMIT_EVERY = 10_000
+"""Bound the journal: 250k converted rows in one transaction means a huge WAL
+and a rollback that has to undo all of it (the 2026-09-24 lesson in the
+person-id migration: a single 860k-row transaction OOM-killed the box)."""
+
+
 def convert_all(conn: sqlite3.Connection, rows: list) -> int | None:
-    """Convert every row; the count converted, or None on the first unreadable row."""
+    """Convert every row; the count converted, or None on the first unreadable row.
+
+    Commits in bounded batches and reports progress — a 250k-row conversion on
+    a box disk takes minutes, and silence reads as a hang.
+    """
     applied = 0
     for row_id, raw in rows:
         if not convert_row(conn, row_id, raw):
+            conn.commit()
             return None
         applied += 1
+        if applied % _COMMIT_EVERY == 0:
+            conn.commit()
+            print(f"  converted {applied} rows…", flush=True)
+    conn.commit()
     return applied
 
 
