@@ -122,6 +122,39 @@ describe('properties store loadDetail', () => {
   })
 })
 
+describe('properties store loadAll — listing and what-if in parallel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('fires the what-if read alongside the listing, not after it', async () => {
+    // The listing never settles: the assertion is that /what-if/state is
+    // ALREADY in flight while the listing is still pending.
+    vi.mocked(api.fetchAllSummaries).mockReturnValue(
+      new Promise<Record<string, PropertySummary>>(() => {}),
+    )
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
+
+    const store = usePropertiesStore()
+    void store.loadAll()
+
+    expect(api.fetchAllSummaries).toHaveBeenCalledTimes(1)
+    expect(api.fetchWhatIfState).toHaveBeenCalledTimes(1)
+    expect(store.loading).toBe(true)  // the listing is still in flight
+    await vi.waitFor(() => expect(store.whatIfActive).toBe(true))
+  })
+
+  it('keeps the last known mode when the what-if read fails', async () => {
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue({})
+    vi.mocked(api.fetchWhatIfState).mockRejectedValue(new Error('offline'))
+    const store = usePropertiesStore()
+    store.setWhatIfActive(true)
+    await store.loadAll()
+    expect(store.whatIfActive).toBe(true)
+  })
+})
+
 describe('properties store triage state', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

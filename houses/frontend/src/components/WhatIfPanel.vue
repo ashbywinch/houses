@@ -58,12 +58,12 @@ watch(active, v => {
   }
 }, { immediate: true })
 
-// Unfurling always re-reads the server state: the panel is an editor of
-// LIVE family data, so a stale local copy (page open across changes made
-// elsewhere) must never be what a "Try" pushes.
-watch(collapsed, v => {
-  if (!v) void load()
-})
+// Unfurling always re-reads the LIVE family data: the panel is an
+// editor of the real persons, so a stale local copy (page open across
+// changes made elsewhere) must never be what a "Try" pushes. The
+// what-if MODE is not re-read here — the store owns it (it fetches the
+// state alongside the listing and the websocket settings push keeps it
+// fresh); the panel only reads store.whatIfActive.
 
 async function toggleCollapsed() {
   // Furling an applied what-if cancels it — the real numbers come back
@@ -111,11 +111,6 @@ async function load() {
       }))
   } catch {
     errorMsg.value = "Couldn't load the family settings."
-  }
-  try {
-    store.setWhatIfActive(await api.fetchWhatIfState())
-  } catch {
-    // best-effort — keep the last known mode
   }
 }
 

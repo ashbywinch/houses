@@ -108,6 +108,18 @@ export const usePropertiesStore = defineStore('properties', () => {
   async function loadAll() {
     loading.value = true
     error.value = null
+    // The what-if mode and the listing are independent reads — start
+    // them together so the index pays one round trip, not two in
+    // sequence. The store is the single owner of the mode: the panel
+    // reads whatIfActive instead of asking the server again.
+    const whatIf = (async () => {
+      try {
+        whatIfActive.value = await fetchWhatIfState()
+      } catch (e) {
+        // best-effort — keep the last known mode, never block the list
+        console.error('Failed to load what-if state:', e)
+      }
+    })()
     try {
       const data = await fetchAllSummaries()
       summaries.value = data
@@ -132,12 +144,10 @@ export const usePropertiesStore = defineStore('properties', () => {
     } finally {
       loading.value = false
     }
-    try {
-      whatIfActive.value = await fetchWhatIfState()
-    } catch (e) {
-      // best-effort — keep the last known mode, never block the list
-      console.error('Failed to load what-if state:', e)
-    }
+    // The listing is painted as soon as it lands (loading already
+    // false); loadAll's promise still settles once BOTH reads are in,
+    // so callers that await it see the fresh what-if flag too.
+    await whatIf
   }
 
   /** Applies a settings document to the store. One entry point for

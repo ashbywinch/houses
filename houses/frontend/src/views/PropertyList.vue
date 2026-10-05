@@ -2,12 +2,19 @@
 import { monthlyFigure } from '../formatters/money'
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
+import { useAuthStore } from '../stores/auth'
 import Header from '../components/Header.vue'
 import PropertyCard from '../components/PropertyCard.vue'
 import WhatIfPanel from '../components/WhatIfPanel.vue'
-import MapView, { type MapLayer, type MapMarker } from '../components/MapView.vue'
+import MapView, { type MapMarker } from '../components/MapView.vue'
 
 const store = usePropertiesStore()
+const auth = useAuthStore()
+
+// The router no longer blocks the route on /api/auth/me, so the gate
+// lives here: the shell paints immediately, property data waits until
+// the check has resolved (unauthenticated visitors are redirected).
+const authReady = computed(() => !auth.loading && auth.user !== null)
 
 // ── Add a Rightmove URL (bottom sheet + tab-bar FAB) ─────────────────
 const addSheetOpen = ref(false)
@@ -69,14 +76,12 @@ const maxPriceFilter = ref<number | null>(null)
 const minBedroomsFilter = ref<number | null>(null)
 const maxCommuteFilter = ref<number | null>(null)
 const mapFailed = ref(false)
-const isochroneLayers = ref<MapLayer[]>([])
 
 onMounted(async () => {
   // Returning from a detail page: restore where the list was (the store
   // resets on a full reload, so a fresh load starts at the top).
   const saved = store.listScrollY
   await store.loadAll()
-  fetchIsochrones()
   if (saved > 0) {
     await new Promise(resolve => requestAnimationFrame(resolve))
     window.scrollTo(0, saved)
@@ -90,20 +95,6 @@ onBeforeUnmount(() => {
   // tab bar; a reload never runs this.)
   store.listScrollY = window.scrollY
 })
-
-/** The isochrone polygons for the Map page — the committed toolchain
- *  artifacts (train shed, drive sheds, all-commutes intersection). */
-async function fetchIsochrones() {
-  try {
-    const r = await fetch('/api/map/isochrones')
-    if (r.ok) {
-      const data = await r.json()
-      isochroneLayers.value = data.layers ?? []
-    }
-  } catch (e) {
-    console.error('Failed to load isochrone layers:', e)
-  }
-}
 
 /** Property pins for the map: every house with a location. */
 const mapMarkers = computed<MapMarker[]>(() =>
@@ -311,12 +302,12 @@ const ceilingLimitText = computed(() => {
   <!-- Map tab -->
   <div v-if="activeTab === 'map'" class="map-full">
     <MapView
-      v-if="!mapFailed"
+      v-if="authReady && !mapFailed"
       :markers="mapMarkers"
-      :layers="isochroneLayers"
+      :isochrones="true"
       @error="mapFailed = true"
     />
-    <p v-if="mapFailed" class="map-fallback-note">
+    <p v-if="authReady && mapFailed" class="map-fallback-note">
       The map didn't load — your browser may block embedded maps. The pins are listed below.
     </p>
   </div>
@@ -388,7 +379,7 @@ const ceilingLimitText = computed(() => {
       Full totals and breakdowns live on each property's page.
     </p>
 
-    <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
+    <div v-if="store.loading || !authReady" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
     <div v-else-if="displayedRids.length === 0" class="empty-state">
       <p class="empty-state__text">

@@ -34,11 +34,29 @@ export interface MapLayer {
 
 const props = withDefaults(defineProps<{
   markers: MapMarker[]
-  layers?: MapLayer[]
   height?: number
+  /** Fetch the committed isochrone layers from /api/map/isochrones —
+   *  the map page's overlays, owned here beside the map that draws
+   *  them. Off for embeds (the detail-page mini map). */
+  isochrones?: boolean
 }>(), {
-  layers: () => [],
+  isochrones: false,
 })
+
+/** The isochrone overlays drawn on the map (the layer key reads this).
+ *  Loaded here so the list page never requests them. */
+const layers = ref<MapLayer[]>([])
+
+async function loadIsochrones() {
+  try {
+    const r = await fetch('/api/map/isochrones')
+    if (!r.ok) return
+    const data = await r.json()
+    layers.value = data.layers ?? []
+  } catch (e) {
+    console.error('Failed to load isochrone layers:', e)
+  }
+}
 
 const emit = defineEmits<{ error: [] }>()
 
@@ -55,7 +73,7 @@ function buildLayers() {
   for (const g of overlayGroups.values()) g.clearLayers()
   overlayGroups.clear()
 
-  for (const layer of props.layers) {
+  for (const layer of layers.value) {
     const group = L.layerGroup()
     for (const poly of layer.polygons) {
       if (!poly.coords?.length) continue
@@ -171,11 +189,12 @@ onMounted(() => {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map)
     // Default checkbox state: visibleByDefault layers on, the rest off.
-    layerVisible.value = Object.fromEntries(props.layers.map(l => [l.name, l.visibleByDefault ?? false]))
+    layerVisible.value = Object.fromEntries(layers.value.map(l => [l.name, l.visibleByDefault ?? false]))
     buildLayers()
     buildMarkers()
     fitBounds()
     map.invalidateSize()
+    if (props.isochrones) void loadIsochrones()
   } catch (e) {
     console.error('Map init failed:', e)
     emit('error')
@@ -183,12 +202,12 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.markers, props.layers],
+  () => [props.markers, layers.value],
   () => {
     if (!map) return
     // New layers arrive: keep the user's toggles by name, default new
     // names to their visibleByDefault flag.
-    for (const l of props.layers) {
+    for (const l of layers.value) {
       if (layerVisible.value[l.name] === undefined) {
         layerVisible.value[l.name] = l.visibleByDefault ?? false
       }
