@@ -46,7 +46,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import httpx
 from pint import Quantity
@@ -141,6 +141,21 @@ class LocatedDestination:
     destination: DriveDestination
     point: GeoPoint
 
+class DriveConfigEntry(TypedDict, total=False):
+    """One destinations entry of the drive config file — the wire shape."""
+
+    label: str
+    postcode: str
+    threshold_min: int
+
+
+class DriveConfig(TypedDict, total=False):
+    """The drive destinations config file — the wire shape."""
+
+    threshold_min: int
+    destinations: list[DriveConfigEntry]
+
+
 def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN) -> list[DriveDestination]:
     """Parse the destinations config file.
 
@@ -174,7 +189,7 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
 
 
 def apply_default_threshold(
-    destinations: list[DriveDestination], config_data: dict, threshold_min: Quantity
+    destinations: list[DriveDestination], config_data: DriveConfig, threshold_min: Quantity
 ) -> list[DriveDestination]:
     """Apply a CLI default threshold to every destination that lacks an
     explicit per-destination override in the config file — the documented

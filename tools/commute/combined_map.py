@@ -27,8 +27,10 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from tools.commute.drive_isochrone import MapAssets, js_safe_json, user_label
 from tools.commute.payload_checks import fail
@@ -94,12 +96,11 @@ def _data_uri(path: Path) -> str:
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def build_html(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
     union: dict,
     drive: dict,
     assets: MapAssets,
-    intersection: dict | None = None,
+    intersection: Mapping[str, Any] | None = None,
 ) -> str:
     """The combined map page — deterministic given the payloads and assets.
 
@@ -333,7 +334,9 @@ class _RenderedMap:
     html: str
 
 
-def _build_map(union_path: Path, drive_path: Path, vendor: Path, intersection: dict | None) -> _RenderedMap:
+def _build_map(
+    union_path: Path, drive_path: Path, vendor: Path, intersection: Mapping[str, Any] | None
+) -> _RenderedMap:
     """Load the payloads + vendor assets and render the page.
 
     build_html indexes the payloads unconditionally — a structurally wrong

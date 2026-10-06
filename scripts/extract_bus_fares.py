@@ -17,8 +17,9 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
+from dag.persistence import WireRecord
 from scripts.download_bus_fares import (
     CACHE_DIR,
     CHECKPOINT_DIR,
@@ -42,6 +43,39 @@ logger = logging.getLogger(__name__)
 OUTPUT_PATH = Path("data/bus_fares.json")
 COORD_ROUND_DIGITS = 4
 
+type NaptanStops = dict[str, tuple[float, float]]
+"""NaPTAN stop coordinates keyed by ATCO code.  A keyed lookup table, not a
+record: the keys are the country's stop codes, and ``parse_netex_fares``
+indexes it by the ATCO code on each stop."""
+
+type BodsDataset = dict[str, Any]
+"""One dataset listing from the BODS fares API: the API's own JSON payload,
+from which this script reads ``id`` and ``description``."""
+
+
+type ZoneFlags = dict[str, bool]
+"""Zone name → whether the stop is served by a zone that carries fares."""
+
+
+type ZonePairFares = dict[str, dict[str, float]]
+"""Zone-pair key (``"zone_a:zone_b"``) → fare product type → price."""
+
+
+class StopCoord(TypedDict, total=False):
+    """One stop's coordinates as the fare JSON states them."""
+
+    name: str
+    lat: float
+    lon: float
+
+
+class NetworkFare(TypedDict, total=False):
+    """One network fare product: the stops it covers and its price."""
+
+    covered_stops: set[str]
+    product_type: str
+    price: float
+
 
 @dataclass(frozen=True)
 class OperatorRef:
@@ -59,7 +93,7 @@ class FareExtractionOptions:
     stations: list[Station]
     api_key: str
     cached_only: bool = False
-    naptan: dict[str, tuple[float, float]] | None = None
+    naptan: NaptanStops | None = None
 
 
 OPERATORS: list[tuple[str, str]] = [
@@ -86,17 +120,24 @@ NOC_SUB_OPERATORS: dict[str, list[str]] = {
 
 
 @dataclass(frozen=True)
-class OperatorFares:
-    """The extraction result for one operator: zones, fares, stop coords."""
+class OperatorFares(WireRecord):
+    """The extraction result for one operator: zones, fares, stop coords.
+
+    Its fields ARE the per-operator shape the bus-fares JSON stores; the
+    writer projects the record with ``dict(...)``.
+    """
 
     stop_zones: dict[str, str]
-    zone_fares: dict[str, dict[str, float]]
-    stop_coords: list[dict]
+    zone_fares: ZonePairFares
+    stop_coords: list[StopCoord]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(stop_zones=self.stop_zones, zone_fares=self.zone_fares, stop_coords=self.stop_coords)
+
+@dataclass(frozen=True)
+class FareMeta(WireRecord):
+    """The bus-fares JSON's ``_meta`` block: the national single-fare cap."""
+
+    national_max_single_gbp: float
+    national_max_single_notes: str
 
 
 def extract_operator_fares(operator: OperatorRef, options: FareExtractionOptions) -> OperatorFares | None:
@@ -137,19 +178,19 @@ def extract_operator_fares(operator: OperatorRef, options: FareExtractionOptions
 class _MergeResults:
     """Accumulated BODS extraction results for one operator."""
 
-    fares: dict[str, dict[str, float]]
-    network_fares: list[dict]
-    stop_coords: list[dict]
-    zone_candidates: dict[str, dict[str, bool]]
+    fares: ZonePairFares
+    network_fares: list[NetworkFare]
+    stop_coords: list[StopCoord]
+    zone_candidates: dict[str, ZoneFlags]
     datasets_processed: int
 
 
-# lucidlint: ignore record-shape BODS API dataset payloads — wire format, serialization boundary owns the shape
-# lucidlint: ignore record-shape BODS API dataset payloads — wire format, serialization boundary owns the shape
-def _filter_datasets_by_sub_operators(noc: str, display_name: str, datasets: list[dict]) -> list[dict]:
+def _filter_datasets_by_sub_operators(
+    noc: str, display_name: str, datasets: list[BodsDataset]
+) -> list[BodsDataset]:
     sub_ops = NOC_SUB_OPERATORS.get(display_name, [])
     if sub_ops:
-        filtered: list[dict] = []
+        filtered: list[BodsDataset] = []
         for ds in datasets:
             desc = (ds.get("description", "") or "").strip()
             if any(dataset_description_matches(desc, sub_op) for sub_op in sub_ops):
@@ -171,19 +212,18 @@ def _filter_datasets_by_sub_operators(noc: str, display_name: str, datasets: lis
     return datasets
 
 
-# lucidlint: ignore record-shape keyed collection, not a record — naptan is a stop-name→coordinate lookup table over
 def _merge_dataset_results(
-    datasets: list[dict],
+    datasets: list[BodsDataset],
     stations: list[Station],
     api_key: str,
     cached_only: bool,
-    naptan: dict[str, tuple[float, float]] | None,
+    naptan: NaptanStops | None,
 ) -> _MergeResults:
-    combined_fares: dict[str, dict[str, float]] = {}
-    combined_network_fares: list[dict] = []
-    combined_stop_coords: list[dict] = []
+    combined_fares: ZonePairFares = {}
+    combined_network_fares: list[NetworkFare] = []
+    combined_stop_coords: list[StopCoord] = []
     datasets_processed = 0
-    zone_candidates: dict[str, dict[str, bool]] = {}
+    zone_candidates: dict[str, ZoneFlags] = {}
 
     for ds in datasets:
         ds_id = ds.get("id")
@@ -214,9 +254,9 @@ def _merge_dataset_results(
                 if key not in combined_fares:
                     combined_fares[key] = {}
                 combined_fares[key].update(fares)
-            file_network_fares: list[dict] = result.get("network_fares", [])
+            file_network_fares: list[NetworkFare] = result.get("network_fares", [])
             combined_network_fares.extend(nf for nf in file_network_fares if nf.get("covered_stops"))
-            file_coords: list[dict] = result.get("stop_coords", [])
+            file_coords: list[StopCoord] = result.get("stop_coords", [])
             combined_stop_coords.extend(file_coords)
         del result
         if not had_any:
@@ -231,11 +271,9 @@ def _merge_dataset_results(
     )
 
 
-# lucidlint: ignore record-shape stop-coord records — wire format, serialization boundary owns the shape
-# lucidlint: ignore record-shape stop-coord records — wire format, serialization boundary owns the shape
-def _dedupe_stop_coords(combined_stop_coords: list[dict]) -> list[dict]:
+def _dedupe_stop_coords(combined_stop_coords: list[StopCoord]) -> list[StopCoord]:
     seen: set[tuple[str, float, float]] = set()
-    deduped: list[dict] = []
+    deduped: list[StopCoord] = []
     for c in combined_stop_coords:
         k = (c.get("name", ""), round(c.get("lat", 0), COORD_ROUND_DIGITS), round(c.get("lon", 0), COORD_ROUND_DIGITS))
         if k not in seen:
@@ -244,11 +282,9 @@ def _dedupe_stop_coords(combined_stop_coords: list[dict]) -> list[dict]:
     return deduped
 
 
-# lucidlint: ignore record-shape zone-candidate map — keyed collection, not a record (coding-standards.md
-# lucidlint: ignore record-shape keyed collection, not a record — zone_candidates maps variable stop names to candidate
 def _resolve_stop_zones(
-    zone_candidates: dict[str, dict[str, bool]],
-    combined_fares: dict[str, dict[str, float]],
+    zone_candidates: dict[str, ZoneFlags],
+    combined_fares: ZonePairFares,
 ) -> dict[str, str]:
     fare_zones = set()
     for k in combined_fares:
@@ -264,12 +300,10 @@ def _resolve_stop_zones(
     return combined_zones
 
 
-# lucidlint: ignore record-shape network-fare records — wire format, serialization boundary owns the shape
-# lucidlint: ignore record-shape keyed collection, not a record — combined_fares maps variable zone-pair keys to
 def _apply_network_fares(
-    combined_network_fares: list[dict],
+    combined_network_fares: list[NetworkFare],
     combined_zones: dict[str, str],
-    combined_fares: dict[str, dict[str, float]],
+    combined_fares: ZonePairFares,
 ) -> None:
     for nf in combined_network_fares:
         covered_stops = nf.get("covered_stops", set())
@@ -314,11 +348,12 @@ def main():
     )
 
     all_operator_data: dict[str, Any] = {}
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    all_operator_data["_meta"] = {
-        "national_max_single_gbp": NATIONAL_MAX_SINGLE_GBP,
-        "national_max_single_notes": "UK Gov Bus Fare Cap Scheme — applies to all participating operators in England",
-    }
+    all_operator_data["_meta"] = dict(
+        FareMeta(
+            national_max_single_gbp=NATIONAL_MAX_SINGLE_GBP,
+            national_max_single_notes="UK Gov Bus Fare Cap Scheme — applies to all participating operators in England",
+        )
+    )
 
     for noc, display_name in OPERATORS:
         ckpt = checkpoint_path(display_name)
@@ -333,7 +368,7 @@ def main():
         try:
             fare_result = extract_operator_fares(OperatorRef(noc, display_name), fare_options)
             if fare_result:
-                op_data = fare_result.to_dict()
+                op_data = dict(fare_result)
                 all_operator_data[display_name] = op_data
                 with ckpt.open("w") as f:
                     json.dump(op_data, f, indent=2)

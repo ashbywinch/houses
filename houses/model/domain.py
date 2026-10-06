@@ -381,6 +381,32 @@ def joint_owner_names(persons: list) -> set[str]:
     return owners
 
 
+def _equity_for(
+    name: str,
+    person: Person,
+    pid: str,
+    gross: dict[str, Decimal],
+    owners: dict[str, Person],
+) -> Decimal:
+    """One adult's home-equity contribution: their own home's remainder
+    after co-owner shares, plus every co-owner share they hold in another
+    holder's home."""
+    mine = Decimal(0)
+    if pid in gross:
+        co_sum = Decimal(sum(co.share for co in person.home_co_owners))
+        mine += gross[pid] * (Decimal(PERCENT) - co_sum) / Decimal(PERCENT)
+    for holder_id, equity in gross.items():
+        if holder_id == pid:
+            continue
+        holder = owners.get(holder_id)
+        if holder is None:
+            continue
+        for co in holder.home_co_owners:
+            if co.name == name:
+                mine += equity * Decimal(co.share) / Decimal(PERCENT)
+    return mine
+
+
 def home_equity_contributions(persons: list) -> dict[str, Decimal]:
     """Each adult's deposit contribution from home equity, distributed by
     co-owner shares.
@@ -393,6 +419,9 @@ def home_equity_contributions(persons: list) -> dict[str, Decimal]:
     """
     by_name = {p.name: p for p in persons if isinstance(p, Person) and not p.is_child}
     id_of = {p.name: person_id_of(p) for p in by_name.values()}
+    owners: dict[str, Person] = {}
+    for person in by_name.values():
+        owners.setdefault(id_of[person.name], person)
     gross: dict[str, Decimal] = {}
     for p in by_name.values():
         if not effective_selling_home(p):
@@ -400,24 +429,7 @@ def home_equity_contributions(persons: list) -> dict[str, Decimal]:
         sale = p.home_sale_price.amount
         mortgage = p.outstanding_mortgage.amount
         gross[id_of[p.name]] = max(Decimal(0), sale - mortgage)
-    out: dict[str, Decimal] = {}
-    for name, p in by_name.items():
-        pid = id_of[name]
-        mine = Decimal(0)
-        if pid in gross:
-            co_sum = Decimal(sum(co.share for co in p.home_co_owners))
-            mine += gross[pid] * (Decimal(PERCENT) - co_sum) / Decimal(PERCENT)
-        for holder_id, equity in gross.items():
-            if holder_id == pid:
-                continue
-            holder = next((q for q in by_name.values() if id_of[q.name] == holder_id), None)
-            if holder is None:
-                continue
-            for co in holder.home_co_owners:
-                if co.name == name:
-                    mine += equity * Decimal(co.share) / Decimal(PERCENT)
-        out[pid] = mine
-    return out
+    return {id_of[name]: _equity_for(name, p, id_of[name], gross, owners) for name, p in by_name.items()}
 
 
 _PERSON_ID_SLUG_RE = re.compile(r"[^a-z0-9]+")

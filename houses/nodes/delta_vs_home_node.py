@@ -16,47 +16,51 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, override
+from typing import Any, TypedDict, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.nodes.current_home_node import MonthlyBaseline, as_figure
+from houses.nodes.current_home_node import MonthlyBaseline, MonthlySide, as_figure
 
 
-@dataclass(frozen=True)
-class DeltaFigure:
-    """One group's delta: a signed 2-dp amount and whether either side's
-    figure is an estimate (Part A)."""
+class DeltaVsHomeWire(TypedDict):
+    """The delta block as the wire states it: each side's figure, or null."""
 
-    value: str
-    approx: bool
+    couple: MonthlySide | None
+    others: MonthlySide | None
 
-    # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-    def to_dict(self) -> dict:
-        return {"value": self.value, "approx": self.approx}
+
+class DeltaVsHomeProvenanceValue(TypedDict):
+    """The delta block as the provenance tree states it: each side's figure text."""
+
+    couple: str | None
+    others: str | None
+
+
+def _side_text(figure: MonthlySide | None) -> str | None:
+    """One side's delta as the tree's human figure (None when uncomputable)."""
+    return f"{figure.value}/mo" if figure is not None else None
 
 
 @dataclass(frozen=True)
 class DeltaVsHomeValue:
     """The per-group delta block (wire shape owned at to_wire)."""
 
-    couple: DeltaFigure | None
-    others: DeltaFigure | None
+    couple: MonthlySide | None
+    others: MonthlySide | None
 
-    def to_wire(self) -> dict:
-        # lucidlint: ignore record-shape to_wire construction IS the serialization boundary (coding-standards.md)
-        return {
-            "couple": self.couple.to_dict() if self.couple is not None else None,
-            "others": self.others.to_dict() if self.others is not None else None,
-        }
+    def to_wire(self) -> DeltaVsHomeWire:
+        # The side shape is the shared {value, approx} contract (the frontend's
+        # MonthlyDeltaSide); DagJSONEncoder projects each MonthlySide to it.
+        return DeltaVsHomeWire(couple=self.couple, others=self.others)
 
-    def to_provenance_value(self) -> dict:
+    def to_provenance_value(self) -> DeltaVsHomeProvenanceValue:
         """The tree states the per-side deltas as human figures."""
-        return {
-            side: (f"{getattr(self, side).value}/mo" if getattr(self, side) is not None else None)
-            for side in ("couple", "others")
-        }
+        return DeltaVsHomeProvenanceValue(
+            couple=_side_text(self.couple),
+            others=_side_text(self.others),
+        )
 
 
 def _figure_number(figure: Any) -> Decimal | None:
@@ -98,7 +102,7 @@ class DeltaVsHomeNode(DerivedNode):
             return Attempt.succeeded(None)
 
         base_value = baseline.group_value
-        sides: dict[str, DeltaFigure | None] = {}
+        sides: dict[str, MonthlySide | None] = {}
         for side in ("couple", "others"):
             own_num = _figure_number(own.get(side))
             base_num = _figure_number(base_value.get(side))
@@ -109,7 +113,7 @@ class DeltaVsHomeNode(DerivedNode):
             base_fig = as_figure(base_value.get(side))
             approx = bool(own_fig and own_fig.stddev) or bool(base_fig and base_fig.stddev)
             delta = own_num - base_num
-            sides[side] = DeltaFigure(value=f"{delta:+.2f}", approx=approx)
+            sides[side] = MonthlySide(value=f"{delta:+.2f}", approx=approx)
         return Attempt.succeeded(
             DeltaVsHomeValue(couple=sides["couple"], others=sides["others"])
         )

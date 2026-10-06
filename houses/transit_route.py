@@ -4,12 +4,34 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from houses import apis
 from houses.web.json_utils import optional_parse
 
 logger = logging.getLogger(__name__)
+
+
+class _LegModeWire(TypedDict, total=False):
+    """A TfL journey leg's mode as the provider sends it: the ``{name}`` shape."""
+
+    name: str | None
+
+
+class _ArrivalPointWire(TypedDict, total=False):
+    """A TfL journey leg's arrival point as the provider sends it: the
+    ``{commonName}`` shape (the row keeps the provider's other keys)."""
+
+    commonName: str
+
+
+class _FirstLegWire(TypedDict, total=False):
+    """A TfL journey's first leg as the provider sends it: the
+    ``{mode, duration, arrivalPoint}`` shape."""
+
+    mode: _LegModeWire
+    duration: int
+    arrivalPoint: _ArrivalPointWire
 
 
 @dataclass(frozen=True)
@@ -23,7 +45,7 @@ class _LegModeJson:
         return dict(name=self.name)
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _LegModeJson:
+    def from_dict(cls, raw: _LegModeWire) -> _LegModeJson:
         return cls(name=raw.get("name"))
 
 
@@ -42,8 +64,8 @@ class _InstructionJson:
 class _ArrivalPointJson:
     """A TfL journey leg arrival point — the {commonName} wire shape.
 
-    Holds the provider's raw dict so the park-and-ride replacement leg
-    writes back the exact same object (no key loss on the wire).
+    Holds the provider's raw row so the park-and-ride replacement leg
+    writes it back verbatim (no key loss on the wire).
     """
 
     common_name: str
@@ -54,8 +76,8 @@ class _ArrivalPointJson:
         return self.raw
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _ArrivalPointJson:
-        return cls(common_name=raw.get("commonName", ""), raw=raw)
+    def from_dict(cls, raw: _ArrivalPointWire) -> _ArrivalPointJson:
+        return cls(common_name=raw.get("commonName", ""), raw=dict(raw))
 
 
 @dataclass(frozen=True)
@@ -68,7 +90,7 @@ class _FirstLegJson:
     arrival_point: _ArrivalPointJson | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _FirstLegJson:
+    def from_dict(cls, raw: _FirstLegWire) -> _FirstLegJson:
         return cls(
             mode=_LegModeJson.from_dict(raw.get("mode", {})),
             duration=raw.get("duration", 0),

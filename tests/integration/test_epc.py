@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from httpx import AsyncClient, MockTransport, Response
 
-from houses.epc import _match_cert, _should_lookup_epc, lookup_epc
+from houses.epc import _EpcCertificateRow, _match_cert, _should_lookup_epc, lookup_epc
 from houses.settings import settings
 
 
@@ -63,7 +63,7 @@ def test_should_lookup_epc(address, expected_proceed, expected_building_id):
 
 
 def test_match_cert_by_number():
-    certs = [
+    certs: list[_EpcCertificateRow] = [
         {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
@@ -76,7 +76,7 @@ def test_match_cert_by_name():
     a1 = "addressLine1"
     a2 = "registrationDate"
     a3 = "currentEnergyEfficiencyBand"
-    certs = [
+    certs: list[_EpcCertificateRow] = [
         {a1: "ROSE GARDEN HOUSE PANGBOURNE HILL", a2: "2022-01-01", a3: "F"},
         {a1: "BLUE DAWES PANGBOURNE HILL", a2: "2024-06-15", a3: "D"},
         {a1: "MAY COTTAGE PANGBOURNE HILL", a2: "2023-03-10", a3: "E"},
@@ -88,7 +88,7 @@ def test_match_cert_by_name():
 
 def test_match_cert_multiple_certs_same_building_returns_most_recent():
     """Multiple certs for the same building → most recent."""
-    certs = [
+    certs: list[_EpcCertificateRow] = [
         {"addressLine1": "7 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
@@ -99,7 +99,7 @@ def test_match_cert_multiple_certs_same_building_returns_most_recent():
 
 def test_match_cert_no_match_returns_impossible():
     """No certificate matches the given building_id."""
-    certs = [
+    certs: list[_EpcCertificateRow] = [
         {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
     ]
     result = _match_cert(certs, "7")
@@ -116,7 +116,7 @@ def test_match_cert_empty_certs_returns_impossible():
 
 def test_match_cert_empty_building_id_returns_most_recent():
     """With no building ID, returns the most recent certificate."""
-    certs = [
+    certs: list[_EpcCertificateRow] = [
         {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
@@ -127,7 +127,7 @@ def test_match_cert_empty_building_id_returns_most_recent():
 
 def test_match_cert_ambiguous_different_addresses_returns_impossible():
     """Multiple different addresses matching the same building_id → ambiguous."""
-    certs = [
+    certs: list[_EpcCertificateRow] = [
         {"addressLine1": "Rose Cottage", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
         {"addressLine1": "Rose Garden House", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]

@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from money import Money
 
@@ -88,6 +88,16 @@ class _StopPoint:
     lon: float
 
 
+class _StopCoordWire(TypedDict, total=False):
+    """A BODS stop-coordinate row as ``data/bus_fares.json`` states it: the
+    ``{lat, lon, zone}`` shape (the row also carries the stop name; ``zone``
+    is absent on unzoned stops)."""
+
+    lat: float
+    lon: float
+    zone: str
+
+
 @dataclass(frozen=True)
 class _StopCoord:
     """A BODS stop-coordinate row from ``data/bus_fares.json``."""
@@ -98,7 +108,7 @@ class _StopCoord:
 
     
     @classmethod
-    def from_dict(cls, sc: dict) -> _StopCoord:
+    def from_dict(cls, sc: _StopCoordWire) -> _StopCoord:
         return cls(lat=sc["lat"], lon=sc["lon"], zone=sc.get("zone"))
 
 

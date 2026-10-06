@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dag.persistence import WireRecord
 from houses.geopoint import GeoPoint
 from houses.location import geocode
 from houses.settings import settings
@@ -195,7 +196,7 @@ class Office:
 
 
 @dataclass(frozen=True)
-class ShedRecord:
+class ShedRecord(WireRecord):
     """The wire-format shed record for one station in station_shed.json."""
 
     name: str

@@ -21,7 +21,7 @@ from pint import Quantity
 
 from houses.geopoint import GeoPoint
 from tools.commute.rightmove_url import build_search_url
-from tools.commute.station_shed import BBox
+from tools.commute.station_shed import BBox, ShedRecord
 from tools.commute.tile import Grid, Rect, merge_rectangles, merge_rows, rasterize, rect_to_polygon
 from tools.commute.union import union_outline
 from tools.commute.units import KM
@@ -74,17 +74,16 @@ UnionPayload = dict[str, Any]
 SearchRecord = dict[str, Any]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def nearest_station_name(rect: Rect, kept_stations: list[dict]) -> str:
+def nearest_station_name(rect: Rect, kept_stations: list[ShedRecord]) -> str:
     """Human-readable name: the nearest kept station to the rectangle's centre."""
     centre = GeoPoint((rect.lat_min + rect.lat_max) / 2.0, (rect.lon_min + rect.lon_max) / 2.0)
-    best = min(kept_stations, key=lambda s: centre.distance_km_to(GeoPoint(s["lat"], s["lon"])))
-    return f"{best['name']} area"
+    best = min(kept_stations, key=lambda s: centre.distance_km_to(GeoPoint(s.lat, s.lon)))
+    return f"{best.name} area"
 
 
 def build_searches(
     rects: list[Rect],
-    kept_stations: list[dict],
+    kept_stations: list[ShedRecord],
     options: SearchOptions,
 ) -> SearchesPayload:
     """Turn rectangles into the searches payload (deterministic given inputs)."""
@@ -120,14 +119,14 @@ def build_searches(
 
 
 def shed_to_searches(
-    records: list[dict],
+    records: list[ShedRecord],
     bbox: BBox,
     options: SearchOptions,
 ) -> SearchesPayload:
     """Full pipeline: kept records → grid cells → rectangles → searches payload."""
-    kept = [r for r in records if r["kept"]]
+    kept = [r for r in records if r.kept]
     grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), options.cell_km)
-    cells = rasterize([GeoPoint(r["lat"], r["lon"]) for r in kept], options.buffer_km, grid)
+    cells = rasterize([GeoPoint(r.lat, r.lon) for r in kept], options.buffer_km, grid)
     rects = merge_rectangles(merge_rows(cells, grid))
     return build_searches(rects, kept, options)
 
@@ -143,30 +142,6 @@ def _existing_searches(path: Path) -> dict | None:
     except json.JSONDecodeError:
         logger.warning("%s unreadable (corrupt?) — will rewrite", path)
         return None
-
-
-def write_searches(payload: SearchesPayload, out_dir: str | Path) -> None:
-    """Write searches.json + .txt — but never churn an identical artifact.
-
-    ``commute-validate`` regenerates searches as part of its gate; if only
-    ``generated_at`` changed, rewriting would dirty the committed artifact on
-    every validation run. The file is written only when the searches (or any
-    metadata besides the timestamp) actually differ.
-    """
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "searches.json"
-    existing = _existing_searches(path)
-    if existing is not None and _same_searches(existing, payload):
-        # JSON is current — but the txt must mirror it too (it can be missing
-        # or stale from a partial write/checkout).
-        txt_path = out_dir / "searches.txt"
-        expected = _urls_text(payload)
-        if not txt_path.exists() or txt_path.read_text() != expected:
-            txt_path.write_text(expected)
-        return
-    path.write_text(json.dumps(payload, indent=2) + "\n")
-    (out_dir / "searches.txt").write_text(_urls_text(payload))
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary
@@ -187,57 +162,57 @@ def _same_searches(existing: SearchesPayload, new: SearchesPayload) -> bool:
     return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
 
-def union_payload(
-    kept_stations: list[dict],
-    bbox: BBox,
-    options: RasterOptions,
-) -> UnionPayload:
-    """The shed as ONE-polygon-per-component Rightmove searches.
+class SearchArtifacts:
+    """Writes the commute search set's artifacts into one output directory.
 
-    Rightmove drawn-area searches take a single polygon. The shed is not one
-    connected blob (station catchments around separate towns don't touch), so
-    the union decomposes into connected components — each gets an outline and
-    its own search URL covering that whole region.
+    ``searches.json``/``.txt``, ``union.json`` and ``searches.html`` all land in
+    the same directory — that destination is the one thing the three writers
+    shared, so it is the class's state and each artifact is a named method.
     """
 
-    grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), options.cell_km)
-    cells = rasterize([GeoPoint(r["lat"], r["lon"]) for r in kept_stations], options.buffer_km, grid)
-    components = [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        {
-            "outline": [[p.lat, p.lon] for p in loop],
-            "rightmove_url": build_search_url(
-                [(p.lat, p.lon) for p in loop],
-                min_beds=options.min_beds,
-                property_type=options.property_type,
-            ),
-        }
-        for loop in union_outline(cells, grid)
-    ]
-    return {"components": components}
+    def __init__(self, out_dir: str | Path) -> None:
+        self.out_dir = Path(out_dir)
 
+    def write_searches(self, payload: SearchesPayload) -> None:
+        """Write searches.json + .txt — but never churn an identical artifact.
 
-def write_union(payload: UnionPayload, out_dir: str | Path) -> None:
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "union.json").write_text(json.dumps(payload, indent=2) + "\n")
+        ``commute-validate`` regenerates searches as part of its gate; if only
+        ``generated_at`` changed, rewriting would dirty the committed artifact on
+        every validation run. The file is written only when the searches (or any
+        metadata besides the timestamp) actually differ.
+        """
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / "searches.json"
+        existing = _existing_searches(path)
+        if existing is not None and _same_searches(existing, payload):
+            # JSON is current — but the txt must mirror it too (it can be missing
+            # or stale from a partial write/checkout).
+            txt_path = self.out_dir / "searches.txt"
+            expected = _urls_text(payload)
+            if not txt_path.exists() or txt_path.read_text() != expected:
+                txt_path.write_text(expected)
+            return
+        path.write_text(json.dumps(payload, indent=2) + "\n")
+        (self.out_dir / "searches.txt").write_text(_urls_text(payload))
 
+    def write_union(self, payload: UnionPayload) -> None:
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        (self.out_dir / "union.json").write_text(json.dumps(payload, indent=2) + "\n")
 
-def write_map_html(payload: UnionPayload, searches: list[SearchRecord], out_dir: str | Path) -> None:
-    """Self-contained Leaflet map: every search rectangle + the component outlines.
+    def write_map_html(self, payload: UnionPayload, searches: list[SearchRecord]) -> None:
+        """Self-contained Leaflet map: every search rectangle + the component outlines.
 
-    Each rectangle is a layer whose popup links to its Rightmove search; the
-    outlines show each connected region's boundary. Tiles from OSM (internet).
-    """
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    rects_js = []
-    for s in searches:
-        coords = [[lat, lon] for lat, lon in s["polygon"]]
-        # lucidlint: ignore record-shape wire-format dict — popup record embedded in the map HTML (coding-standards.md)
-        rects_js.append(json.dumps({"name": s["name"], "url": s["rightmove_url"], "coords": coords}))
-    outlines_js = [[[lat, lon] for lat, lon in c["outline"]] for c in payload["components"]]
-    html = """<!DOCTYPE html>
+        Each rectangle is a layer whose popup links to its Rightmove search; the
+        outlines show each connected region's boundary. Tiles from OSM (internet).
+        """
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        rects_js = []
+        for s in searches:
+            coords = [[lat, lon] for lat, lon in s["polygon"]]
+            # lucidlint: ignore record-shape the popup record is embedded in the map HTML (coding-standards.md)
+            rects_js.append(json.dumps({"name": s["name"], "url": s["rightmove_url"], "coords": coords}))
+        outlines_js = [[[lat, lon] for lat, lon in c["outline"]] for c in payload["components"]]
+        html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Commute search coverage</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -259,8 +234,38 @@ for (const r of rects) {
 }
 </script></body></html>
 """
-    html = html.replace("__RECTS__", "[" + ",".join(rects_js) + "]").replace("__OUTLINES__", repr(outlines_js))
-    (out_dir / "searches.html").write_text(html)
+        html = html.replace("__RECTS__", "[" + ",".join(rects_js) + "]").replace("__OUTLINES__", repr(outlines_js))
+        (self.out_dir / "searches.html").write_text(html)
+
+
+def union_payload(
+    kept_stations: list[ShedRecord],
+    bbox: BBox,
+    options: RasterOptions,
+) -> UnionPayload:
+    """The shed as ONE-polygon-per-component Rightmove searches.
+
+    Rightmove drawn-area searches take a single polygon. The shed is not one
+    connected blob (station catchments around separate towns don't touch), so
+    the union decomposes into connected components — each gets an outline and
+    its own search URL covering that whole region.
+    """
+
+    grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), options.cell_km)
+    cells = rasterize([GeoPoint(r.lat, r.lon) for r in kept_stations], options.buffer_km, grid)
+    components = [
+# lucidlint: ignore record-shape wire-format dict — serialization boundary
+        {
+            "outline": [[p.lat, p.lon] for p in loop],
+            "rightmove_url": build_search_url(
+                [(p.lat, p.lon) for p in loop],
+                min_beds=options.min_beds,
+                property_type=options.property_type,
+            ),
+        }
+        for loop in union_outline(cells, grid)
+    ]
+    return {"components": components}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -295,9 +300,11 @@ def main(argv: list[str] | None = None) -> int:
         generated_at=datetime.now(UTC).isoformat(),
         engine_version=ENGINE_VERSION,
     )
-    payload = shed_to_searches(shed["stations"], BBox(**metadata["bbox"]), search_options)
-    write_searches(payload, args.out_dir)
-    kept = [r for r in shed["stations"] if r["kept"]]
+    stations = [ShedRecord(**r) for r in shed["stations"]]
+    payload = shed_to_searches(stations, BBox(**metadata["bbox"]), search_options)
+    artifacts = SearchArtifacts(args.out_dir)
+    artifacts.write_searches(payload)
+    kept = [r for r in stations if r.kept]
     union = union_payload(
         kept,
         BBox(**metadata["bbox"]),
@@ -308,8 +315,8 @@ def main(argv: list[str] | None = None) -> int:
             property_type=search_options.property_type,
         ),
     )
-    write_union(union, args.out_dir)
-    write_map_html(union, payload["searches"], args.out_dir)
+    artifacts.write_union(union)
+    artifacts.write_map_html(union, payload["searches"])
     print(f"{len(payload['searches'])} searches → {Path(args.out_dir) / 'searches.json'}")
     print(f"union: {len(union['components'])} component outline(s) → {Path(args.out_dir) / 'union.json'}")
     print(f"map → {Path(args.out_dir) / 'searches.html'}")

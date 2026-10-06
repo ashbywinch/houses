@@ -3,9 +3,11 @@
 import asyncio
 import logging
 import os
+import sqlite3
 import subprocess
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -21,7 +23,7 @@ import houses.services_provider as _sp
 import houses.town_desc as _town_desc
 import houses.web.api_router as _api_mod
 import houses.web.broadcaster as _broadcaster_mod
-from dag.persistence import delete_node_results_for_rid, property_rids
+from dag.persistence import WireRecord, delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
 from dag.scheduler import (
     flush_processor,
@@ -33,6 +35,7 @@ from dag.scheduler import (
 )
 from houses.admin_router import admin_router
 from houses.database import close_db as close_app_db
+from houses.database import get_connection
 from houses.database import init_db as init_app_db
 from houses.location import extract_postcode, upgrade_address
 from houses.nodes.bootstrap import load_property_nodes_from_db
@@ -546,7 +549,7 @@ async def claim_scrape(request: Request) -> JSONResponse:
 
 
 @app.post("/api/scrapes/report", response_model=None)
-async def report_scrape(request: Request, body: dict) -> JSONResponse:
+async def report_scrape(request: Request, body: Mapping[str, Any]) -> JSONResponse:
     """Worker outcome for a claimed job (superuser).
 
     ``{"job_id": N, "ok": true, "data": {...}}`` applies the scraped data
@@ -622,7 +625,7 @@ async def retry_scrape(rid: str) -> JSONResponse:
 
 
 @app.patch("/api/properties/{rid}/details", response_model=None)
-async def patch_property_details(rid: str, body: dict) -> JSONResponse:
+async def patch_property_details(rid: str, body: Mapping[str, Any]) -> JSONResponse:
     """'I know the details' — the user's own facts complete the property
     instantly (P3: fix facts, not symptoms) and cancel the scrape job."""
     prop = _sp.get_services().property_registry.get(rid)
@@ -685,6 +688,20 @@ async def remove_property(rid: str) -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
 
 
+@dataclass(frozen=True)
+class HealthProbeWire(WireRecord):
+    """The /health probe's wire payload: liveness plus DB-readiness."""
+
+    status: str
+    db: str
+    last_write: str
+
+
+def _health_response(db: str, last_write: str) -> JSONResponse:
+    """The probe's response for one outcome (``db`` is ``ok`` or ``error``)."""
+    return JSONResponse(content=asdict(HealthProbeWire(status="ok", db=db, last_write=last_write)))
+
+
 @app.get("/health")
 async def health() -> JSONResponse:
     """Liveness AND DB-readiness in one probe.
@@ -693,14 +710,13 @@ async def health() -> JSONResponse:
     locked (a release snapshot holds read locks on the live WAL) must not
     read "ok".  The probe is one indexed MAX on the cached connection —
     cheap enough for the health loop, and it makes a write-stall visible
-    at a glance (last_write goes stale).
+    at a glance (last_write goes stale).  Only DB and filesystem failures
+    degrade the probe; anything else propagates.
     """
-    db, last_write = "ok", ""
     try:
-        from houses.database import get_connection
-
         row = get_connection().execute("SELECT MAX(created_at) AS last_write FROM node_results").fetchone()
         last_write = row["last_write"] or "" if row is not None else ""
-    except Exception:  # lucidlint: ignore broad-except boundary — a health probe never takes the app down
-        db = "error"
-    return JSONResponse(content={"status": "ok", "db": db, "last_write": last_write})
+    except (sqlite3.Error, OSError) as e:
+        logger.warning("health probe DB read failed: %s", e)
+        return _health_response(db="error", last_write="")
+    return _health_response(db="ok", last_write=last_write)

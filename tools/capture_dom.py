@@ -391,6 +391,20 @@ async def login(state_file: Path) -> None:
     print(f"Session saved → {state_file} (localhost session cookie only)")
 
 
+class _PageErrors:
+    """Console + page errors observed during one capture (the accumulator)."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def on_console(self, msg) -> None:
+        if msg.type == "error":
+            self.messages.append(msg.text[:300])
+
+    def on_page_error(self, error) -> None:
+        self.messages.append(f"PAGE: {str(error)[:300]}")
+
+
 async def capture_page(url: str, output_dir: str | Path, label: str, state_file: Path):
     browser = await get_browser()
     context = await browser.new_context(
@@ -400,14 +414,9 @@ async def capture_page(url: str, output_dir: str | Path, label: str, state_file:
     )
     page = await context.new_page()
 
-    errors = []
-
-    def on_console(msg):
-        if msg.type == "error":
-            errors.append(msg.text[:300])
-
-    page.on("console", on_console)
-    page.on("pageerror", lambda e: errors.append(f"PAGE: {str(e)[:300]}"))
+    errors = _PageErrors()
+    page.on("console", errors.on_console)
+    page.on("pageerror", errors.on_page_error)
 
     await page.goto(url, wait_until="networkidle", timeout=30000)
     await page.wait_for_timeout(PAGE_SETTLE_DELAY_MS)
@@ -435,9 +444,9 @@ async def capture_page(url: str, output_dir: str | Path, label: str, state_file:
     await page.screenshot(path=str(screenshot_path), full_page=True)
     print(f"  Screenshot → {screenshot_path}")
 
-    if errors:
-        print(f"  Console errors ({len(errors)}):")
-        for e in errors[:5]:
+    if errors.messages:
+        print(f"  Console errors ({len(errors.messages)}):")
+        for e in errors.messages[:5]:
             print(f"    {e}")
 
     cards = await page.query_selector_all(".card")

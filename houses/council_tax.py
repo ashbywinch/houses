@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 import httpx
 from money import Money
@@ -134,15 +134,19 @@ def _normalise_keep_commas(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9,]", " ", text.upper())).strip()
 
 
+class CivAccountRatePayload(TypedDict):
+    """The CivAccount council API payload as it arrives on the wire."""
+
+    band_d_rate: float | None
+
 @dataclass(frozen=True)
 class _CivAccountRateJson:
     """The CivAccount council API payload — the Band-D rate it reports."""
 
     band_d_rate: float | None = None
 
-    
     @classmethod
-    def from_dict(cls, raw: dict) -> _CivAccountRateJson:
+    def from_dict(cls, raw: CivAccountRatePayload) -> _CivAccountRateJson:
         return cls(band_d_rate=raw.get("band_d_rate"))
 
 
@@ -286,6 +290,14 @@ def _lookup_yearly_cost(
 
     return None
 
+class VoaRowPayload(TypedDict):
+    """One VOA valuation row as it arrives on the wire (band, address, council)."""
+
+    band: str
+    address: str
+    postcode: NotRequired[str]
+    local_authority: NotRequired[str | None]
+
 
 @dataclass(frozen=True)
 class _VoaRow:
@@ -307,9 +319,8 @@ class _VoaRow:
             local_authority=self.local_authority,
         )
 
-    
     @classmethod
-    def from_dict(cls, raw: dict) -> _VoaRow:
+    def from_dict(cls, raw: VoaRowPayload) -> _VoaRow:
         raw.setdefault("postcode", "")
         raw.setdefault("local_authority", "")
         return cls(**raw)

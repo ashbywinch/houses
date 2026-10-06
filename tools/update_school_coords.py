@@ -24,7 +24,6 @@ import csv
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -44,8 +43,12 @@ PROGRESS_SAVE_INTERVAL = 100
 NOMINATIM_DELAY_S = 0.15
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _atomic_write(rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+type SchoolRow = dict[str, str]
+"""One GIAS school row: column name → cell text.  A plain string map because
+the CSV owns its own shape and every field this script touches is text."""
+
+
+def _atomic_write(rows: list[SchoolRow], fieldnames: list[str]) -> None:
     """Write CSV to a temp file then atomically replace the original."""
     tmp = CSV_PATH.with_suffix(".csv.tmp")
     with tmp.open("w", newline="", encoding="latin-1") as f:
@@ -55,8 +58,7 @@ def _atomic_write(rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     tmp.replace(CSV_PATH)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _build_full_address(row: dict[str, Any]) -> str:
+def _build_full_address(row: SchoolRow) -> str:
     name = (row.get("EstablishmentName") or "").strip()
     street = (row.get("Street") or "").strip()
     locality = (row.get("Locality") or "").strip()
@@ -67,7 +69,7 @@ def _build_full_address(row: dict[str, Any]) -> str:
     return ", ".join(p for p in (name, street, locality, town, postcode) if p)
 
 
-def _existing_coords(row: dict[str, Any]) -> GeoPoint | None:
+def _existing_coords(row: SchoolRow) -> GeoPoint | None:
     """Parse original GIAS Latitude/Longitude from a CSV row."""
     lat = (row.get("Latitude") or "").strip()
     lng = (row.get("Longitude") or "").strip()
@@ -79,23 +81,20 @@ def _existing_coords(row: dict[str, Any]) -> GeoPoint | None:
     return None
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _clear_coords(row: dict[str, Any]) -> None:
+def _clear_coords(row: SchoolRow) -> None:
     """Remove corrected coords from a row (mutates in place)."""
     row["CorrectedLatitude"] = ""
     row["CorrectedLongitude"] = ""
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _near_london(row: dict[str, Any]) -> bool:
+def _near_london(row: SchoolRow) -> bool:
     coords = _existing_coords(row)
     if coords is None:
         return True
     return coords.distance_km_to(LONDON) <= MAX_KM
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _already_done(row: dict[str, Any]) -> bool:
+def _already_done(row: SchoolRow) -> bool:
     """True when existing corrected coords are present AND pass the 100km sanity check.
 
     Invalid coords (e.g. UK centroid from failed ORS-Pelias lookups) are
@@ -117,7 +116,7 @@ def _already_done(row: dict[str, Any]) -> bool:
     return True
 
 
-async def _geocode_address_with_fallback(address: str, row: dict[str, Any]) -> GeoPoint | None:
+async def _geocode_address_with_fallback(address: str, row: SchoolRow) -> GeoPoint | None:
     """Geocode the full address; retry with name + postcode when it fails.
 
     Some schools have streets/locality in GIAS that don't match what geocoding
@@ -144,7 +143,7 @@ async def main() -> None:
     with CSV_PATH.open(newline="", encoding="latin-1") as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames or [])
-        rows: list[dict[str, Any]] = list(reader)
+        rows: list[SchoolRow] = list(reader)
 
     fieldnames.extend(col for col in ("CorrectedLatitude", "CorrectedLongitude") if col not in fieldnames)
 

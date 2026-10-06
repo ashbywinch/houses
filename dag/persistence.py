@@ -13,7 +13,7 @@ import logging
 import sqlite3
 import threading
 import zlib
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
 from enum import Enum
@@ -32,6 +32,38 @@ testing: bool = False
 _connection_cache = threading.local()
 
 
+@dataclasses.dataclass(frozen=True)
+class WireRecord(Mapping[str, object]):
+    """A record whose fields ARE its wire shape.
+
+    The node value dicts were already records — a fixed set of keys and no
+    behaviour — but the shape only existed in the literal that built it, so
+    nothing could name it, type it or check it. A class gives the shape a name
+    and its fields types.
+
+    It still reads like the dict it replaces (``value["rid"]`` as well as
+    ``value.rid``): the readers of a node value are all over the codebase and
+    changing them to attribute access would be a second, needless migration.
+    ``DagJSONEncoder`` writes ``dataclasses.asdict``, so what reaches the
+    database and the frontend is byte-identical to the literal's JSON.
+    """
+
+    @override
+    def __getitem__(self, key: str) -> object:
+        try:
+            return getattr(self, key)
+        except AttributeError as exc:
+            raise KeyError(key) from exc
+
+    @override
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.__dataclass_fields__)
+
+    @override
+    def __len__(self) -> int:
+        return len(self.__dataclass_fields__)
+
+
 class DagJSONEncoder(json.JSONEncoder):
     """Handles enums, Decimal, Money, Quantity, and other non-serializable types in DAG node results."""
 
@@ -48,6 +80,10 @@ class DagJSONEncoder(json.JSONEncoder):
             m = float(o.magnitude)
             # lucidlint: ignore record-shape wire-format dict — serialization boundary
             return {"value": int(m) if m == int(m) else m, "unit": str(o.units)}
+        if isinstance(o, WireRecord):
+            # A wire record's JSON is its fields (recursively), so storing one
+            # writes exactly what the dict literal it replaced wrote.
+            return dataclasses.asdict(o)
         return super().default(o)
 
 

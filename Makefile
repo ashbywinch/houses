@@ -5,7 +5,7 @@
 # bash, everywhere.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
-.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check check-architecture lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve lucidlint lucidlint-update-baseline
+.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check check-architecture lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve lucidlint
 
 # Variables
 PYTHON := .venv/bin/python
@@ -202,21 +202,19 @@ typecheck-update-baseline: deps
 
 # lucidlint (github.com/ashbywinch/lucidlint) — the deterministic code-health
 # gate. Installed as a dev extra (pyproject.toml) via uv sync; the gate scans
-# the repo and fails only on NEW actions above the acknowledged baseline.
+# the repo and fails on ANY action, with no baseline: every finding is either
+# fixed or the finding is wrong (docs/lucidlint-review-log.md records what we
+# learned doing that, and why there is no acknowledged-debt list any more).
 # Warnings never fail. Findings carry the exact fix command — see
-# skill://lucidlint-workflow before acting on a finding.
-.PHONY: lucidlint lucidlint-update-baseline
+# skill://lucidlint-workflow before acting on a finding, and never run
+# `lucidlint fix` unconfirmed: it writes the file, and its seam has broken a
+# module docstring.
+.PHONY: lucidlint
 LUCIDLINT := .venv/bin/lucidlint
 
 lucidlint: deps
 	@echo "== lucidlint gate =="
-	@$(LUCIDLINT) --repo . --baseline lucidlint.json
-
-# Lock today's acknowledged debt so the gate fails only on NEW findings.
-# Run only after deliberately accepting remaining actions (see
-# docs/lucidlint-review-log.md for the reasoning behind every accepted item).
-lucidlint-update-baseline: deps
-	@$(LUCIDLINT) --repo . --update-baseline --baseline lucidlint.json
+	@$(LUCIDLINT) --repo .
 
 format: setup
 	@$(RUFF) check --fix houses/ tests/ dag/

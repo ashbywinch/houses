@@ -41,6 +41,12 @@ if TYPE_CHECKING:
     from houses.services import Services
 
 
+# A node's provenance tree as the serve path returns it (Provenance.to_dict):
+# label/value/sources, recursive and mostly optional, so it is named here
+# rather than modelled field by field.
+ProvenanceTree = dict[str, Any]
+
+
 @dataclass(frozen=True)
 class PropertyJson:
     """Wire shape of PropertyNodes.to_json."""
@@ -655,13 +661,13 @@ class PropertyNodes:
             if (q.trips_per_week or 0) > 0 and (q.weeks_per_year or 0) > 0
         }
 
-    def _commute_wire_key(self, key: str, name_by_id: dict) -> str:
+    def _commute_wire_key(self, key: str, name_by_id: dict[str, str]) -> str:
         """Selector keys are id/label; the WIRE keys stay name/label —
         names are display, ids never leak to the frontend."""
         pid, _, label = key.partition("/")
         return f"{name_by_id.get(pid, pid)}/{label}"
 
-    def _commute_wire_map(self) -> dict:
+    def _commute_wire_map(self) -> dict[str, str]:
         """pid → display name for the serialization key projection."""
         return {
             person_id_of(p): getattr(p, "name", "?")
@@ -781,7 +787,7 @@ class PropertyNodes:
         return rec.to_dict()
 
 
-    async def to_provenance_map(self) -> dict[str, dict]:
+    async def to_provenance_map(self) -> dict[str, ProvenanceTree]:
         """Provenance for every detail-surface node, keyed by dotted path.
 
         The detail wire carries no provenance (P8: a derivation is
@@ -790,7 +796,7 @@ class PropertyNodes:
         Dotted paths mirror the detail payload's node layout, and are the
         contract the frontend's ProvenanceToggle looks up.
         """
-        async def _prov(node) -> dict:
+        async def _prov(node) -> ProvenanceTree:
             return (await node.build_provenance()).to_dict()
 
         pairs: list[tuple[str, Any]] = [
@@ -823,7 +829,7 @@ class PropertyNodes:
             ("epc", self.epc),
             ("settings.persons", self._svc.persons_source),
         ]
-        result: dict[str, dict] = {}
+        result: dict[str, ProvenanceTree] = {}
         for path, node in pairs:
             result[path] = await _prov(node)
         for key, selector in self.commute_selectors.items():

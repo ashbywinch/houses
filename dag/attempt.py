@@ -145,7 +145,7 @@ class AttemptError:
         )
 
     @classmethod
-    def from_dict(cls, d: dict) -> AttemptError:
+    def from_dict(cls, d: Mapping[str, Any]) -> AttemptError:
         """Reconstruct an AttemptError from its JSON-safe projection.
 
         Used when loading a persisted node result: the structured error

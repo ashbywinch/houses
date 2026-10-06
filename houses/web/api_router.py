@@ -6,7 +6,7 @@ import gc
 import logging
 import typing
 from collections import Counter
-from collections.abc import Iterable, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field, field_validator
 import dag.scheduler
 from dag.persistence import node_result_before
 from dag.scheduler import AsyncQueueScheduler, run_on_processor
-from dag.user_input_node import UserInputNode
 from houses.comments import add_comment, get_comments
 from houses.geopoint import GeoPoint
 from houses.map_layers import DRIVE_PATH, INTERSECTION_PATH, UNION_PATH, isochrone_layers
@@ -202,90 +201,101 @@ class _WhatIfApplyJson:
     persons: list
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _WhatIfApplyJson:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _WhatIfApplyJson:
         people = raw.get("persons")
         return cls(persons=people if isinstance(people, list) else [])
 
 
-@api_router.post("/what-if/apply")
-# lucidlint: ignore record-shape the FastAPI request body IS the wire boundary — _WhatIfApplyJson.from_dict ingests it
-# at the network edge; the same shape tolerates any person-update subset inside the list (coding-standards.md)
-async def what_if_apply(body: dict, request: Request):
-    """Apply what-if person values THROUGH THE DAG.
+class _WhatIfRoutes:
+    """The household's numbers as a reversible DAG scenario: apply merges the
+    person updates through the normal settings push, restore re-appends the
+    attempt the started-at marker points before, and accept clears the marker
+    (the scenario becomes the real numbers).
 
-    The merged persons are written via the normal settings push, so the
-    DAG recomputes everything downstream (totals, commute breakdown,
-    deltas) and the broadcaster pushes every surface — there is no side
-    evaluation to keep in sync.
+    The handlers take no instance state; the class is the routes' name."""
 
-    On the inactive->active transition the whatif_started_at marker is
-    set: node_results is append-only history, so the pre-what-if persons
-    attempt stays in the DAG and restore simply re-appends the attempt
-    the marker points before. No numbers are copied anywhere.
-    """
-    _require_family_member(request)
-    updates = _WhatIfApplyJson.from_dict(body).persons
-    if not isinstance(updates, list) or not updates:
-        raise HTTPException(status_code=422, detail="persons required")
-    svc = get_services()
-    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
-    if not started:
-        # Mark the boundary BEFORE the scenario push: the persons attempt
-        # latest before this instant is the restore reference.
-        started = datetime.now(UTC).isoformat()
-        svc.whatif_started_at.push(started, "what-if")
+    @staticmethod
+    # lucidlint: ignore record-shape the FastAPI request body IS the wire boundary — _WhatIfApplyJson ingests it
+    # at the network edge; the same shape tolerates any person-update subset inside the list (coding-standards.md)
+    async def what_if_apply(body: dict, request: Request):
+        """Apply what-if person values THROUGH THE DAG.
 
-    current = list(svc.persons_source.latest_attempt().value_or_none() or [])
-    merged = _merge_what_if_persons(updates, current)
-    svc.persons_source.push(merged, "what-if")
-    return {"active": True}
+        The merged persons are written via the normal settings push, so the
+        DAG recomputes everything downstream (totals, commute breakdown,
+        deltas) and the broadcaster pushes every surface — there is no side
+        evaluation to keep in sync.
+
+        On the inactive->active transition the whatif_started_at marker is
+        set: node_results is append-only history, so the pre-what-if persons
+        attempt stays in the DAG and restore simply re-appends the attempt
+        the marker points before. No numbers are copied anywhere.
+        """
+        _require_family_member(request)
+        updates = _WhatIfApplyJson.from_dict(body).persons
+        if not isinstance(updates, list) or not updates:
+            raise HTTPException(status_code=422, detail="persons required")
+        svc = get_services()
+        started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+        if not started:
+            # Mark the boundary BEFORE the scenario push: the persons attempt
+            # latest before this instant is the restore reference.
+            started = datetime.now(UTC).isoformat()
+            svc.whatif_started_at.push(started, "what-if")
+
+        current = list(svc.persons_source.latest_attempt().value_or_none() or [])
+        merged = _merge_what_if_persons(updates, current)
+        svc.persons_source.push(merged, "what-if")
+        return {"active": True}
+
+    @staticmethod
+    async def what_if_restore(request: Request):
+        """End the what-if: re-append the pre-what-if persons attempt (the
+        one the started-at marker points before) through the normal settings
+        write, and clear the marker."""
+        _require_family_member(request)
+        svc = get_services()
+        started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+        if not started:
+            raise HTTPException(status_code=409, detail="No what-if is active")
+
+        row = node_result_before(svc.persons_source._id, started)
+        if row is None or not isinstance(row.get("value"), list):
+            raise HTTPException(status_code=409, detail="No pre-what-if persons attempt found to restore")
+
+        persons = svc.persons_source._adapter.validate_python(row["value"])
+
+        def _restore() -> None:
+            svc.persons_source.push(persons, "what-if-restore")
+            svc.whatif_started_at.push("", "what-if-restore")
+
+        _restore()
+        return {"active": False}
+
+    @staticmethod
+    async def what_if_state():
+        """Whether what-if numbers are currently live (the started-at marker
+        is set)."""
+        started = (get_services().whatif_started_at.latest_attempt().value_or_none() or "").strip()
+        return {"active": bool(started)}
+
+    @staticmethod
+    async def what_if_accept(request: Request):
+        """Accept the what-if: the scenario becomes the real numbers. The
+        marker clears and the snapshot is discarded — restore can no longer
+        reach the pre-what-if values."""
+        _require_family_member(request)
+        svc = get_services()
+        started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+        if not started:
+            raise HTTPException(status_code=409, detail="No what-if is active")
+        svc.whatif_started_at.push("", "what-if-accept")
+        return {"active": False}
 
 
-@api_router.post("/what-if/restore")
-async def what_if_restore(request: Request):
-    """End the what-if: re-append the pre-what-if persons attempt (the
-    one the started-at marker points before) through the normal settings
-    write, and clear the marker."""
-    _require_family_member(request)
-    svc = get_services()
-    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
-    if not started:
-        raise HTTPException(status_code=409, detail="No what-if is active")
-
-    row = node_result_before(svc.persons_source._id, started)
-    if row is None or not isinstance(row.get("value"), list):
-        raise HTTPException(status_code=409, detail="No pre-what-if persons attempt found to restore")
-
-    persons = svc.persons_source._adapter.validate_python(row["value"])
-
-    def _restore() -> None:
-        svc.persons_source.push(persons, "what-if-restore")
-        svc.whatif_started_at.push("", "what-if-restore")
-
-    _restore()
-    return {"active": False}
-
-
-@api_router.get("/what-if/state")
-async def what_if_state():
-    """Whether what-if numbers are currently live (the started-at marker
-    is set)."""
-    started = (get_services().whatif_started_at.latest_attempt().value_or_none() or "").strip()
-    return {"active": bool(started)}
-
-
-@api_router.post("/what-if/accept")
-async def what_if_accept(request: Request):
-    """Accept the what-if: the scenario becomes the real numbers. The
-    marker clears and the snapshot is discarded — restore can no longer
-    reach the pre-what-if values."""
-    _require_family_member(request)
-    svc = get_services()
-    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
-    if not started:
-        raise HTTPException(status_code=409, detail="No what-if is active")
-    svc.whatif_started_at.push("", "what-if-accept")
-    return {"active": False}
+api_router.post("/what-if/apply")(_WhatIfRoutes.what_if_apply)
+api_router.post("/what-if/restore")(_WhatIfRoutes.what_if_restore)
+api_router.get("/what-if/state")(_WhatIfRoutes.what_if_state)
+api_router.post("/what-if/accept")(_WhatIfRoutes.what_if_accept)
 
 
 @api_router.get("/what-if/state")
@@ -502,97 +512,156 @@ async def get_property_provenance(rid: str):
 
 
 
-@api_router.patch("/properties/{rid}/address")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_address(rid: str, body: dict):
-    prop = _require_property(rid)
-
-    prop.corrected_address.push(body.get("address", ""), "user")
-    # Recompute before responding — the frontend refetches the detail
-    # immediately; the processor drains the cascade in order.
-    return {"status": "ok"}
+def _council_tax_payers(value) -> list[str]:
+    """Validate one council-tax payer list — a 422 when it is not a list of
+    person names."""
+    if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
+        raise HTTPException(status_code=422, detail="payers must be a list of person names")
+    return value
 
 
-@api_router.patch("/properties/{rid}/location")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_location(rid: str, body: dict):
-    prop = _require_property(rid)
-    lat = body.get("lat")
-    lon = body.get("lon")
-    if lat is None or lon is None:
-        raise HTTPException(status_code=422, detail="lat and lon are required")
-    gp = GeoPoint(lat=lat, lon=lon)
-    prop.precise_location.push(gp, "user")
-    # Recompute before responding — same race as the address PATCH.
-    return {"status": "ok"}
+class _PropertyPatches:
+    """The property PATCH endpoints — each validates one wire body, pushes the
+    property's nodes, and reports {"status": "ok"}.  The frontend refetches the
+    detail as soon as the response lands, so the push happens before it.
 
+    The handlers take no instance state; the class is the routes' name."""
 
-@api_router.patch("/properties/{rid}/council-tax")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_council_tax(rid: str, body: dict):
-    """Set the council-tax apportionment for a property.
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    @staticmethod
+    async def patch_address(rid: str, body: dict):
+        prop = _require_property(rid)
 
-    ``main_payers`` — who pays a share of the MAIN house's council tax
-    (they split it equally; empty = all adults, the default headcount
-    split).  ``annexe_payers`` — who pays the ANNEXE's council tax.
-    ``ignored`` — the detected second dwelling is unrelated; hide it and
-    exclude its costs.
-    """
-    prop = _require_property(rid)
+        prop.corrected_address.push(body.get("address", ""), "user")
+        # Recompute before responding — the frontend refetches the detail
+        # immediately; the processor drains the cascade in order.
+        return {"status": "ok"}
 
-    def _names(value) -> list[str]:
-        if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
-            raise HTTPException(status_code=422, detail="payers must be a list of person names")
-        return value
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    @staticmethod
+    async def patch_location(rid: str, body: dict):
+        prop = _require_property(rid)
+        lat = body.get("lat")
+        lon = body.get("lon")
+        if lat is None or lon is None:
+            raise HTTPException(status_code=422, detail="lat and lon are required")
+        gp = GeoPoint(lat=lat, lon=lon)
+        prop.precise_location.push(gp, "user")
+        # Recompute before responding — same race as the address PATCH.
+        return {"status": "ok"}
 
-    # Validate the ENTIRE body before pushing anything — a partial write
-    # on a 422 leaves the property in a half-updated state (review).
-    main_payers = _names(body["main_payers"]) if "main_payers" in body else None
-    annexe_payers = _names(body["annexe_payers"]) if "annexe_payers" in body else None
-    if "ignored" in body and not isinstance(body["ignored"], bool):
-        raise HTTPException(status_code=422, detail="ignored must be a boolean")
-    ignored = body.get("ignored")
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    @staticmethod
+    async def patch_council_tax(rid: str, body: dict):
+        """Set the council-tax apportionment for a property.
 
-    def _apply_payers() -> None:
+        ``main_payers`` — who pays a share of the MAIN house's council tax
+        (they split it equally; empty = all adults, the default headcount
+        split).  ``annexe_payers`` — who pays the ANNEXE's council tax.
+        ``ignored`` — the detected second dwelling is unrelated; hide it and
+        exclude its costs.
+        """
+        prop = _require_property(rid)
+
+        # Validate the ENTIRE body before pushing anything — a partial write
+        # on a 422 leaves the property in a half-updated state (review).
+        main_payers = _council_tax_payers(body["main_payers"]) if "main_payers" in body else None
+        annexe_payers = _council_tax_payers(body["annexe_payers"]) if "annexe_payers" in body else None
+        if "ignored" in body and not isinstance(body["ignored"], bool):
+            raise HTTPException(status_code=422, detail="ignored must be a boolean")
+        ignored = body.get("ignored")
+
         if main_payers is not None:
             prop.council_tax_payers.push(main_payers, "user")
         if annexe_payers is not None:
             prop.annexe_payers.push(annexe_payers, "user")
         if ignored is not None:
             prop.annexe_ignored.push(ignored, "user")
+        return {"status": "ok"}
 
-    _apply_payers()
-    return {"status": "ok"}
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    @staticmethod
+    async def patch_triage(rid: str, body: dict):
+        prop = _require_property(rid)
+
+        def _apply_triage() -> None:
+            # lucidlint: ignore record-shape field-name → coercer keyed dispatch table — variable subsets of the body,
+            # never a wire dict of its own (coding-standards.md)
+            coercers = {
+                "favourite": bool,
+                "dismissed": bool,
+                "is_viewed": bool,
+                "user_notes": str,
+                "triage_status": str,
+            }
+            for key, convert in coercers.items():
+                if key in body:
+                    getattr(prop, key).push(convert(body[key]), "user")
+
+        _apply_triage()
+        return {"status": "ok"}
+
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    @staticmethod
+    async def patch_rental_income(rid: str, body: dict):
+        """Update the monthly rental income for a property.
+
+        Body: {"value": 1200} or {"value": null} to clear.
+        """
+        prop = _require_property(rid)
+
+        value = body.get("value")
+        if value is not None and not isinstance(value, (int, float)):
+            raise HTTPException(
+                status_code=400,
+                detail="value must be a number",
+            )
+
+        await run_on_processor(
+            lambda: prop.rental_income.push(
+                Money(str(value), "GBP") if value is not None else Money(amount="0", currency="GBP"),
+                "user",
+            )
+        )
+        return {"status": "ok"}
+
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary
+    @staticmethod
+    async def patch_works_estimate(rid: str, body: dict):
+        """Update the works estimate for a person on this property.
+
+        Body: {"person": "p_ashby", "value": 15000} — the key is the
+        canonical person_id (legacy names resolve); the estimate is stored
+        under the id so a rename never orphans it.
+        """
+        prop = _require_property(rid)
+
+        target = _validate_works_person(body.get("person", ""))
+        person_id = person_id_of(target)
+        value = body.get("value")
+        _validate_works_value(value)
+
+        def _apply() -> None:
+            estimates = dict(prop.works_estimates.latest_attempt().value_or_none() or {})
+            if value is None:
+                estimates.pop(person_id, None)  # emptied field: drop the estimate
+            else:
+                estimates[person_id] = Money(str(value), "GBP")
+            prop.works_estimates.push(estimates, "user")
+
+        # Thread rule 7, no exceptions: enqueue and return. The drain runs in
+        # the background; this page's update lands via the summary broadcast.
+        await run_on_processor(_apply)
+
+        return {"status": "ok"}
 
 
-@api_router.patch("/properties/{rid}/triage")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_triage(rid: str, body: dict):
-    prop = _require_property(rid)
-
-    def _apply_triage() -> None:
-        # lucidlint: ignore record-shape field-name → coercer keyed dispatch table — variable subsets of the body,
-        # never a wire dict of its own (coding-standards.md)
-        coercers = {
-            "favourite": bool,
-            "dismissed": bool,
-            "is_viewed": bool,
-            "user_notes": str,
-            "triage_status": str,
-        }
-        nodes: dict[str, UserInputNode[Any]] = {
-            "favourite": prop.favourite,
-            "dismissed": prop.dismissed,
-            "is_viewed": prop.is_viewed,
-            "user_notes": prop.user_notes,
-            "triage_status": prop.triage_status,
-        }
-        for key, convert in coercers.items():
-            if key in body:
-                nodes[key].push(convert(body[key]), "user")
-
-    _apply_triage()
-    return {"status": "ok"}
+api_router.patch("/properties/{rid}/address")(_PropertyPatches.patch_address)
+api_router.patch("/properties/{rid}/location")(_PropertyPatches.patch_location)
+api_router.patch("/properties/{rid}/council-tax")(_PropertyPatches.patch_council_tax)
+api_router.patch("/properties/{rid}/triage")(_PropertyPatches.patch_triage)
+api_router.patch("/properties/{rid}/rental-income")(_PropertyPatches.patch_rental_income)
+api_router.patch("/properties/{rid}/works-estimate")(_PropertyPatches.patch_works_estimate)
 
 
 @api_router.get("/properties/{rid}/comments")
@@ -819,7 +888,7 @@ def _coerce_person_updates(
     return updates
 
 
-def _person_from_dict(d: dict, target: Person, *, merge_destinations: bool = False) -> Person:
+def _person_from_dict(d: Mapping[str, Any], target: Person, *, merge_destinations: bool = False) -> Person:
     """MERGE an API dict into an existing Person — never replace.
 
     Only the fields present in the body change; every unmentioned field
@@ -938,34 +1007,6 @@ async def patch_financial(body: dict):
     return {"status": "ok"}
 
 
-@api_router.patch("/properties/{rid}/rental-income")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_rental_income(
-    rid: str,
-    body: dict,
-):
-    """Update the monthly rental income for a property.
-
-    Body: {"value": 1200} or {"value": null} to clear.
-    """
-    prop = _require_property(rid)
-
-    value = body.get("value")
-    if value is not None and not isinstance(value, (int, float)):
-        raise HTTPException(
-            status_code=400,
-            detail="value must be a number",
-        )
-
-    await run_on_processor(
-        lambda: prop.rental_income.push(
-            Money(str(value), "GBP") if value is not None else Money(amount="0", currency="GBP"),
-            "user",
-        )
-    )
-    return {"status": "ok"}
-
-
 def _validate_works_person(person_ref: str):
     """400 guard + resolution: the person must exist; returns the
     canonical Person so the estimate is stored under its id."""
@@ -999,40 +1040,6 @@ def _validate_works_value(value: object) -> None:
         raise HTTPException(status_code=400, detail="value must be a number")
     if value is not None and value != int(value):
         raise HTTPException(status_code=400, detail="value must be a whole number of pounds — no pence")
-
-
-@api_router.patch("/properties/{rid}/works-estimate")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_works_estimate(
-    rid: str,
-    body: dict,
-):
-    """Update the works estimate for a person on this property.
-
-    Body: {"person": "p_ashby", "value": 15000} — the key is the
-    canonical person_id (legacy names resolve); the estimate is stored
-    under the id so a rename never orphans it.
-    """
-    prop = _require_property(rid)
-
-    target = _validate_works_person(body.get("person", ""))
-    person_id = person_id_of(target)
-    value = body.get("value")
-    _validate_works_value(value)
-
-    def _apply() -> None:
-        estimates = dict(prop.works_estimates.latest_attempt().value_or_none() or {})
-        if value is None:
-            estimates.pop(person_id, None)  # emptied field: drop the estimate
-        else:
-            estimates[person_id] = Money(str(value), "GBP")
-        prop.works_estimates.push(estimates, "user")
-
-    # Thread rule 7, no exceptions: enqueue and return. The drain runs in
-    # the background; this page's update lands via the summary broadcast.
-    await run_on_processor(_apply)
-
-    return {"status": "ok"}
 
 
 @dataclass(frozen=True)

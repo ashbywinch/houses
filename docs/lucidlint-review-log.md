@@ -401,3 +401,77 @@ against the tool:
   `to_dict`'s line and its long-accepted record-shape finding reappeared as an
   action. When a sweep reports findings in code you did not write, check
   whether you moved it before fixing it.
+
+## The baseline is gone (2026-10-06)
+
+`lucidlint.json` was a list of 95 acknowledged actions. It is deleted, the make
+target no longer passes `--baseline`, and the gate reports zero failing
+actions. What made that possible without touching what we store:
+
+### `dag.persistence.WireRecord` — the record the wire already had
+
+Every `record-shape` finding was a dict with constant keys: a record whose
+shape only existed in the literal that built it. A plain class is not a fix —
+`json.dumps` raises `TypeError: Object of type MonthlySide is not JSON
+serializable` through the DAG's own encoder, so storing one would have changed
+what reaches the database and the frontend.
+
+`WireRecord` is a frozen dataclass that ALSO implements `Mapping`, so
+`value["key"]`, `.get()`, iteration and `len()` keep working for every existing
+reader (found the hard way: `TypeError: 'BaselineWire' object is not
+subscriptable` in `tests/unit/test_monthly_delta.py` when records were not
+Mapping). `DagJSONEncoder` projects it with `dataclasses.asdict`, so the stored
+JSON is byte-identical to the literal's — verified for nested records.
+
+### Parsed JSON takes an annotation, not a class
+
+A `from_dict(raw: dict)` parameter is parsed data, so the fix is the narrowest
+honest annotation: `Mapping[str, Any]`, or a precise `dict[str, str]` when the
+value is a map (node id → timestamp) rather than a record. Both clear the
+finding and accept every existing caller. A `TypedDict` works only where the
+caller can supply one (an opaque `json()` result); where a value typed
+`dict[str, Any]` flows in, pyrefly rejects the TypedDict parameter
+(`bad-argument-type`) and rejects a TypedDict flowing into a `dict`
+(`bad-assignment`) — measured, not assumed.
+
+### Tool behaviours that cost time here
+
+- **`lucidlint fix` writes the file even without `--confirm`.** Run it only
+  when you intend the change.
+- **Its `extract-record-class` seam was unsafe for wire payloads**: it inserted
+  the class above the module docstring (demoting the docstring to a bare
+  expression) and made `to_provenance_value` return the object rather than the
+  dict the provenance tree stores. Preview, judge, and reject when the seam is
+  wrong — do not hand a `to_wire`/`to_provenance_value` boundary to it.
+- **A scratch file in the repo root is linted as a repo file** — one probe
+  script became the top failing action during the sweep. Probes belong in
+  `/tmp`.
+
+### Corrections from doing it at scale (14 files, ~90 sites)
+
+The rules above held, but three refinements came out of the sweep and two traps
+came with them:
+
+- **Collections need a named alias.** `list[dict]` and `list[Mapping[str, Any]]`
+  are both flagged; a `type X = dict[str, Any]` alias (PEP 695) clears it with
+  no casts and no caller changes. The same alias avoids the follow-on
+  `latent-class`/"strewing" finding that several free functions sharing a
+  `TypedDict` row type triggers.
+- **Return types are stricter than parameters.** A map-shaped return
+  (`dict[str, str]`, `dict[str, float]`) is exempt, but `-> dict[str, Any]` and
+  `-> dict[str, object]` are not. For a wire record's `to_dict` the clean route
+  is to drop the method and project at the writer (`dict(record)`), which is
+  byte-identical under `json.dumps`.
+- **A `TypedDict` constructed with keywords** (`Wire(couple=..., others=...)`)
+  clears a constant-key literal without being a class at all — a plain dict at
+  runtime. Useful where a `WireRecord` would be wrong.
+- **TRAP: `WireRecord` is a `Mapping`, not a `dict`.** Any consumer doing
+  `isinstance(value, dict)`, or any function annotated `-> dict`, rejects it —
+  it broke `dag.attempt.project_value` for the provenance shape, which is why
+  the provenance side uses annotations rather than records. Reach for
+  `WireRecord` only where the value is *served*, and prefer the keyword-TypedDict
+  or the alias when a `dict` type is expected downstream.
+- **TRAP: `Mapping` in a parametrised position breaks invariance.** A caller
+  passing `list[dict]` to a `list[Mapping[str, Any]]` parameter is a pyrefly
+  error, so widen signatures only where the caller's type actually matches.
+

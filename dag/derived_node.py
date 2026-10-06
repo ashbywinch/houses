@@ -884,7 +884,7 @@ class DerivedNode(Node[T], Generic[T]):
         result: Attempt,
         dep_attempts: list[Attempt],
         active_deps: tuple[Node, ...],
-        dep_timestamps: dict,
+        dep_timestamps: dict[str, str],
     ) -> None:
         """Store the attempt, stamp its inputs, persist — the shared tail.
 

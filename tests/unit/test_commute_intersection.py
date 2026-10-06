@@ -6,6 +6,8 @@ import pytest
 
 from houses.geopoint import GeoPoint
 from tools.commute.intersection import (
+    DriveRawPayload,
+    DriveSearchesPayload,
     IntersectionOptions,
     build_payload,
     common_grid,
@@ -27,7 +29,7 @@ SHED = {
         {"name": "Out", "crs": "OUT", "lat": 52.0, "lon": -2.0, "kept": False},
     ],
 }
-DRIVE_RAW = {
+DRIVE_RAW: DriveRawPayload = {
     "metadata": {"region_km": 50.0, "cell_km": 4.0},
     "destinations": [
         {"label": "Dad", "postcode": "OX7 1AA", "lat": 51.0, "lon": -1.0, "threshold_min": 90,
@@ -37,7 +39,7 @@ DRIVE_RAW = {
     ],
 }
 # Dad's shed: lat 50.8-51.4, lon -1.2..-0.6; Bracknell's: lat 50.8-51.3, lon -1.2..-0.7
-DRIVE_SEARCHES: dict = {
+DRIVE_SEARCHES: DriveSearchesPayload = {
     "metadata": {"destinations": ["Dad", "Bracknell"]},
     "searches": [
         {

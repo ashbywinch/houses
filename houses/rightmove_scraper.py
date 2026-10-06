@@ -277,10 +277,11 @@ def _parse_page_model(html: str) -> _PropertyExtractJson:
         return _PropertyExtractJson()
 
     extracted = _PropertyExtractJson()
+    model = _PageModel(data, prop)
 
     # Address
     try:
-        address = _page_model_address(data, prop)
+        address = model.address()
         if address is not None:
             extracted = replace(extracted, address=address[0], postcode=address[1])
     except _PageModelError as e:
@@ -288,7 +289,7 @@ def _parse_page_model(html: str) -> _PropertyExtractJson:
 
     # Price
     try:
-        price = _page_model_price(data, prop)
+        price = model.price()
         if price is not None:
             extracted = replace(extracted, price=price)
     except _PageModelError as e:
@@ -296,7 +297,7 @@ def _parse_page_model(html: str) -> _PropertyExtractJson:
 
     # Bedrooms
     try:
-        bedrooms = _page_model_bedrooms(data, prop)
+        bedrooms = model.bedrooms()
         if bedrooms is not None:
             extracted = replace(extracted, bedrooms=bedrooms)
     except _PageModelError as e:
@@ -304,7 +305,7 @@ def _parse_page_model(html: str) -> _PropertyExtractJson:
 
     # Location (lat/lng)
     try:
-        location = _page_model_location(data, prop)
+        location = model.location()
         if location is not None:
             extracted = replace(extracted, latitude=location[0], longitude=location[1])
     except _PageModelError as e:
@@ -317,60 +318,67 @@ _PageModelAddress = tuple[str, str]  # (address, postcode)
 _PageModelLocation = tuple[float, float]  # (lat, lng)
 
 
-def _page_model_address(data: Any, prop: Any) -> _PageModelAddress | None:
-    """(address, postcode) from the page model.
+class _PageModel:
+    """The window.__PAGE_MODEL array paired with the property entry that
+    indexes into it — the two values every page-model field resolves
+    through, so the clump lives here rather than in each helper's signature.
 
     A structure the parser cannot traverse is a typed _PageModelError
     (Rightmove changed the page); None means the page genuinely carries
-    no such field."""
-    try:
-        addr_schema = data[prop["address"]]
-        addr_parts = [data[addr_schema["displayAddress"]]]
-        outcode = data[addr_schema["outcode"]]
-        incode = data[addr_schema["incode"]]
-        return addr_parts[0], f"{outcode} {incode}"
-    except (IndexError, KeyError, TypeError) as e:
-        raise _PageModelError(f"address schema missing ({e})") from e
+    no such field.
+    """
 
+    def __init__(self, data: Any, prop: Any) -> None:
+        self.data = data
+        self.prop = prop
 
-def _page_model_price(data: Any, prop: Any) -> float | None:
-    """Price from the page model.
+    def address(self) -> _PageModelAddress | None:
+        """(address, postcode) from the page model."""
+        try:
+            addr_schema = self.data[self.prop["address"]]
+            addr_parts = [self.data[addr_schema["displayAddress"]]]
+            outcode = self.data[addr_schema["outcode"]]
+            incode = self.data[addr_schema["incode"]]
+            return addr_parts[0], f"{outcode} {incode}"
+        except (IndexError, KeyError, TypeError) as e:
+            raise _PageModelError(f"address schema missing ({e})") from e
 
-    Structure mismatch → _PageModelError; a present but unparseable
-    value (e.g. 'POA') is genuine absence → None."""
-    try:
-        price_schema = data[prop["prices"]]
-    except (IndexError, KeyError, TypeError) as e:
-        raise _PageModelError(f"price schema missing ({e})") from e
-    return _extract_price(data[price_schema["primaryPrice"]], field="price")
+    def price(self) -> float | None:
+        """Price from the page model.
 
+        Structure mismatch → _PageModelError; a present but unparseable
+        value (e.g. 'POA') is genuine absence → None."""
+        try:
+            price_schema = self.data[self.prop["prices"]]
+        except (IndexError, KeyError, TypeError) as e:
+            raise _PageModelError(f"price schema missing ({e})") from e
+        return _extract_price(self.data[price_schema["primaryPrice"]], field="price")
 
-def _page_model_bedrooms(data: Any, prop: Any) -> int | None:
-    """Bedroom count from the page model.
+    def bedrooms(self) -> int | None:
+        """Bedroom count from the page model.
 
-    Structure mismatch → _PageModelError; a non-integer value is
-    genuine absence → None."""
-    try:
-        beds = data[prop["bedrooms"]]
-    except (IndexError, KeyError, TypeError) as e:
-        raise _PageModelError(f"bedrooms schema missing ({e})") from e
-    return beds if isinstance(beds, int) else None
+        Structure mismatch → _PageModelError; a non-integer value is
+        genuine absence → None."""
+        try:
+            beds = self.data[self.prop["bedrooms"]]
+        except (IndexError, KeyError, TypeError) as e:
+            raise _PageModelError(f"bedrooms schema missing ({e})") from e
+        return beds if isinstance(beds, int) else None
 
+    def location(self) -> _PageModelLocation | None:
+        """(lat, lng) from the page model.
 
-def _page_model_location(data: Any, prop: Any) -> _PageModelLocation | None:
-    """(lat, lng) from the page model.
-
-    Structure mismatch → _PageModelError; non-numeric coordinates are
-    genuine absence → None."""
-    try:
-        loc_schema = data[prop["location"]]
-        lat = data[loc_schema["latitude"]]
-        lng = data[loc_schema["longitude"]]
-    except (IndexError, KeyError, TypeError) as e:
-        raise _PageModelError(f"location schema missing ({e})") from e
-    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-        return float(lat), float(lng)
-    return None
+        Structure mismatch → _PageModelError; non-numeric coordinates are
+        genuine absence → None."""
+        try:
+            loc_schema = self.data[self.prop["location"]]
+            lat = self.data[loc_schema["latitude"]]
+            lng = self.data[loc_schema["longitude"]]
+        except (IndexError, KeyError, TypeError) as e:
+            raise _PageModelError(f"location schema missing ({e})") from e
+        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+            return float(lat), float(lng)
+        return None
 
 
 def _merge_missing(result: _PropertyExtractJson, source: _PropertyExtractJson) -> _PropertyExtractJson:

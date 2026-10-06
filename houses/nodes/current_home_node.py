@@ -16,23 +16,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, TypedDict, override
+from typing import Any, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from dag.persistence import WireRecord
 
 CURRENT_STATUS = "current"
 
 
-class GroupFigureWire(TypedDict):
+@dataclass(frozen=True)
+class GroupFigureWire(WireRecord):
     """A raw group figure on the wire: the amount and its uncertainty."""
 
     value: str | None
     stddev: float
 
 
-class MonthlySide(TypedDict):
+@dataclass(frozen=True)
+class MonthlySide(WireRecord):
     """One side of the monthly cost as the frontend's MonthlyDeltaSide reads
     it: the human figure, and whether it carries an uncertainty."""
 
@@ -40,7 +43,8 @@ class MonthlySide(TypedDict):
     approx: bool
 
 
-class BaselineProvenanceValue(TypedDict):
+@dataclass(frozen=True)
+class BaselineProvenanceValue(WireRecord):
     """The baseline as the provenance tree states it."""
 
     rid: str
@@ -49,7 +53,8 @@ class BaselineProvenanceValue(TypedDict):
     others: str | None
 
 
-class BaselineWire(TypedDict):
+@dataclass(frozen=True)
+class BaselineWire(WireRecord):
     """The baseline as the wire states it (the contract the frontend reads)."""
 
     rid: str
@@ -61,7 +66,7 @@ class BaselineWire(TypedDict):
 
 def _monthly_side(figure: GroupFigure) -> MonthlySide:
     """Project an ingested figure onto the frontend's side shape."""
-    return {"value": figure.value, "approx": bool(figure.stddev)}
+    return MonthlySide(value=figure.value, approx=bool(figure.stddev))
 
 
 def _figure_text(raw: Any) -> str | None:
@@ -93,7 +98,7 @@ class GroupFigure:
     stddev: float
 
     def to_dict(self) -> GroupFigureWire:
-        return {"value": self.value, "stddev": self.stddev}
+        return GroupFigureWire(value=self.value, stddev=self.stddev)
 
 
 def as_figure(raw: object) -> GroupFigure | None:
@@ -131,12 +136,12 @@ class MonthlyBaseline:
 
     def to_provenance_value(self) -> BaselineProvenanceValue:
         """The tree states the baseline as identity + human figures."""
-        return {
-            "rid": self.rid,
-            "address": self.address,
-            "couple": _figure_text(self.group_value.get("couple")),
-            "others": _figure_text(self.group_value.get("others")),
-        }
+        return BaselineProvenanceValue(
+            rid=self.rid,
+            address=self.address,
+            couple=_figure_text(self.group_value.get("couple")),
+            others=_figure_text(self.group_value.get("others")),
+        )
 
     def to_wire(self) -> BaselineWire:
         # The contract shape is {value, approx} (see the frontend's
@@ -144,13 +149,13 @@ class MonthlyBaseline:
         # stddev itself is the GROUP's wire, not the baseline's.
         couple = _figure_or_empty(self.group_value.get("couple"))
         others = as_figure(self.group_value.get("others"))
-        return {
-            "rid": self.rid,
-            "address": self.address,
-            "couple": _monthly_side(couple),
-            "others": _monthly_side(others) if others is not None else None,
-            "others_rent_paid": self.others_rent_paid,
-        }
+        return BaselineWire(
+            rid=self.rid,
+            address=self.address,
+            couple=_monthly_side(couple),
+            others=_monthly_side(others) if others is not None else None,
+            others_rent_paid=self.others_rent_paid,
+        )
 
 
 class CurrentHomeNode(DerivedNode):
