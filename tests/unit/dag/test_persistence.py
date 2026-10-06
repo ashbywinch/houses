@@ -164,6 +164,23 @@ class TestStorageColumns:
 
         assert "value_json" in per.record_select_columns(conn)
 
+    def test_a_write_that_omits_a_field_clears_it(self):
+        """The app's writer means "absent = clear", and that must stay true.
+
+        `StoredColumns.filled` exists for the MIGRATION, which merges a blob
+        into a row that may already hold more (the provenance tree) — there,
+        absent means "leave alone". A writer must not adopt that: an error that
+        is no longer set has to disappear from the column. This pins the
+        divergence so nobody "fixes" write_node_record by switching it to
+        filled_columns.
+        """
+        save_node_result(f"{RID}/clear", {"status": "impossible", "error": "no route"})
+        assert self._row(f"{RID}/clear")["error"] == "no route"
+
+        save_node_result(f"{RID}/clear", {"status": "succeeded"})
+
+        assert self._row(f"{RID}/clear")["error"] is None, "the stale error is gone"
+
     def test_values_are_plain_text_and_provenance_is_not_in_them(self):
         save_node_result(
             f"{RID}/plain",
