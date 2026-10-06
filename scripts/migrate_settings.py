@@ -44,6 +44,7 @@ def _write_persons(conn: sqlite3.Connection, persons: list[dict]) -> int:
     """Write persons data, return new row id."""
     row_id = per.save_node_result(
         "persons",
+        # lucidlint: ignore record-shape this IS the stored node record (serialization boundary)
         {"status": "succeeded", "value": persons},
         created_at="2026-07-30T23:00:00",
     )
@@ -99,17 +100,16 @@ def _migrate_persons(conn: sqlite3.Connection) -> bool:
 def _cleanup_corrupted_rows(conn: sqlite3.Connection) -> None:
     """Delete rows that have deposit_equity (old format) to prevent accidental load."""
     columns = ", ".join(per.record_select_columns(conn))
-    stale = []
+    deleted = 0
     for row in conn.execute(
         f"SELECT rowid AS rowid, {columns} FROM node_results WHERE node_id = 'persons'"
     ).fetchall():
         value = per.read_node_record(row).get("value")
         if isinstance(value, list) and value and isinstance(value[0], dict) and "deposit_equity" in value[0]:
-            stale.append(row["rowid"])
-    for row_id in stale:
-        conn.execute("DELETE FROM node_results WHERE rowid = ?", (row_id,))
-    if stale:
-        print(f"  Deleted {len(stale)} old-format persons row(s).")
+            conn.execute("DELETE FROM node_results WHERE rowid = ?", (row["rowid"],))
+            deleted += 1
+    if deleted:
+        print(f"  Deleted {deleted} old-format persons row(s).")
     conn.commit()
 
 

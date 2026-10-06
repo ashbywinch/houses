@@ -134,6 +134,7 @@ def _unwrapped_value(value):
     return json.loads(value) if isinstance(value, str) else value
 
 
+# lucidlint: ignore record-shape the record IS the stored wire shape (keys vary per node type)
 def _works_leftovers(record: dict, keys: set[str]) -> Leftovers:
     """What one ``works_estimates`` record still keys by person name."""
     try:
@@ -158,6 +159,8 @@ def _row_leftovers(row: sqlite3.Row, keys: set[str]) -> Leftovers:
     if node_id.endswith(WORKS_ESTIMATES_SUFFIX):
         try:
             works = _works_leftovers(read_node_record(row), keys)
+        # lucidlint: ignore swallow this surfaces by RETURN — an unreadable row is counted and makes the
+        # check report INCOMPLETE, which is the whole point of not trusting the scan's own silence
         except UNREADABLE:
             works = Leftovers(unreadable=1)
     return works + Leftovers(

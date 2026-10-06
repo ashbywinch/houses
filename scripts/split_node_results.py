@@ -53,6 +53,7 @@ them all at once (or holding one transaction over them) is an OOM, not a
 slow path — the person-id migration learned this the hard way on 2026-09-23."""
 
 
+# hoisting "what one item contributes" would put the whole table back in memory, the exact OOM this avoids
 def convert_all(conn: sqlite3.Connection, pending_sql: str) -> int | None:
     """Convert every pending row; the count, or None on the first unreadable row.
 
@@ -68,10 +69,13 @@ def convert_all(conn: sqlite3.Connection, pending_sql: str) -> int | None:
     # list here to drift.
     present = _columns(conn)
     cursor = conn.execute(pending_sql)
+    # lucidlint: ignore loop-hoist the loop IS the streaming step (read a chunk, convert, commit) —
+    # hoisting "what one item contributes" would put the table back in memory, the OOM this avoids
     while True:
         chunk = cursor.fetchmany(_CHUNK_ROWS)
         if not chunk:
             break
+        # lucidlint: ignore loop-hoist per-row work IS the conversion; there is no collection to build
         for row_id, raw in chunk:
             if not convert_row(conn, row_id, raw, present):
                 conn.commit()
@@ -112,15 +116,14 @@ def convert_row(conn: sqlite3.Connection, row_id: int, raw: bytes | str, present
         print(f"row {row_id}: unreadable record ({exc}) — left for a human", file=sys.stderr)
         return False
     values = per.record_columns(record)
-    # The blob column is deliberately left untouched: it is the legacy
-    # original, intact until the drop, so a half-converted database still
-    # reads correctly with the previous artifact.
-    values.pop("result_json", None)
-    columns = [column for column in values if column in present]
+    # the blob column is deliberately excluded: it holds the legacy original,
+    # intact until the drop, so a half-converted database still reads with the
+    # previous artifact.
+    columns = values.writable_columns(present, include_blob=False)
     assignments = ", ".join(f"{column}=?" for column in columns)
     conn.execute(
         f"UPDATE node_results SET {assignments} WHERE id=?",
-        (*[values[column] for column in columns], row_id),
+        (*values.for_columns(columns), row_id),
     )
     return True
 

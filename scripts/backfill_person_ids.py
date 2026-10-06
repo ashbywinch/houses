@@ -76,6 +76,7 @@ def _rekey_node_id(node_id: str, mapping) -> str:
     return node_id
 
 
+# lucidlint: ignore record-shape the record IS the stored wire shape (keys vary per node type)
 def remap_row(node_id: str, dep_timestamps: Mapping[str, str], record: dict | None, mapping) -> tuple | None:
     """Apply the name→id mapping to one row.
 
@@ -186,6 +187,7 @@ def rows_to_remap(conn, mapping, chunk_size: int = 10_000):
             yield (row["rowid"], *remapped)
 
 
+# lucidlint: ignore record-shape the record IS the stored wire shape (keys vary per node type)
 def _row_record(row: sqlite3.Row, node_id: str) -> dict | None:
     """The row's record, but only when the transform needs to read one.
 

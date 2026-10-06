@@ -6,17 +6,19 @@ Serialises complex types via TypeAdapter with ``_type``/``_module`` markers.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import json
 import logging
 import sqlite3
 import threading
 import zlib
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Any, cast, override
+from typing import Any, ClassVar, cast, override
 
 from money import Money as _Money
 from pint import Quantity
@@ -87,6 +89,8 @@ _PLAIN_COLUMN_KEYS: tuple[str, ...] = ("status", "error", "source_url", "source_
 _columns_cache: dict[str, tuple[str, ...]] = {}
 _split_ensured: set[str] = set()
 
+# lucidlint: ignore unused deliberate test seam — the unit DB-isolation fixture recreates an in-memory database
+# under the same path with a different schema, so the per-path column cache must be droppable between tests
 def _reset_caches() -> None:
     """Drop the per-database schema caches (test isolation).
 
@@ -156,41 +160,96 @@ def _ensure_split_columns() -> None:
     _columns_cache.pop(key, None)
 
 
-def record_columns(record: dict[str, Any]) -> dict[str, Any]:
+@dataclasses.dataclass(frozen=True)
+class StoredColumns:
+    """One record's fields as the storage columns take them.
+
+    A named record rather than a dict: the column names ARE the storage
+    contract, and every writer (the app's persist, the shipped migration)
+    asks this object for its values in the database's own column order, so
+    none of them can name a column the schema does not have.
+    """
+
+    status: str | None
+    value_json: str | None
+    error: str | None
+    error_detail_json: str | None
+    source_url: str | None
+    source_label: str | None
+    provenance_z: bytes | None
+    extra_json: str | None
+    result_json: bytes
+
+    ORDER: ClassVar[tuple[str, ...]] = (
+        "status",
+        "value_json",
+        "error",
+        "error_detail_json",
+        "source_url",
+        "source_label",
+        "provenance_z",
+        "extra_json",
+        "result_json",
+    )
+
+    def for_columns(self, columns: Sequence[str]) -> tuple[object, ...]:
+        """The values in the caller's column order."""
+        return tuple(getattr(self, column) for column in columns)
+
+    def writable_columns(self, present: Collection[str], *, include_blob: bool = True) -> tuple[str, ...]:
+        """The columns of this record's shape that *present* has, in order.
+
+        ``include_blob=False`` leaves ``result_json`` alone: it holds the
+        legacy original until the migration drops it, so a half-converted
+        database still reads with the previous artifact.
+        """
+        return tuple(
+            column
+            for column in self.ORDER
+            if column in present and (include_blob or column != "result_json")
+        )
+
+
+# lucidlint: ignore record-shape the record's keys vary per node type (stored wire shape)
+def record_columns(record: dict[str, Any]) -> StoredColumns:
     """The record's fields as storage column values — provenance compressed."""
     provenance = record.get(PROVENANCE_KEY)
     mapped = {*_PLAIN_COLUMN_KEYS, "value", "error_detail", PROVENANCE_KEY}
     extra = {k: v for k, v in record.items() if k not in mapped}
-    values: dict[str, Any] = {
-        "value_json": json.dumps(record["value"], cls=DagJSONEncoder) if "value" in record else None,
-        "error_detail_json": (
+    plain = {key: record.get(key) for key in _PLAIN_COLUMN_KEYS}
+    return StoredColumns(
+        status=plain["status"],
+        value_json=json.dumps(record["value"], cls=DagJSONEncoder) if "value" in record else None,
+        error=plain["error"],
+        error_detail_json=(
             json.dumps(record["error_detail"], cls=DagJSONEncoder)
             if record.get("error_detail") is not None
             else None
         ),
-        "provenance_z": (
+        source_url=plain["source_url"],
+        source_label=plain["source_label"],
+        provenance_z=(
             compress_result(json.dumps(provenance, cls=DagJSONEncoder)) if provenance is not None else None
         ),
-        "extra_json": json.dumps(extra, cls=DagJSONEncoder) if extra else None,
+        extra_json=json.dumps(extra, cls=DagJSONEncoder) if extra else None,
         # Legacy databases keep a NOT NULL result_json: mirror the record
         # WITHOUT provenance there (small, and enough for a rollback to read).
         # zlib, like every legacy row: the previous artifact's reader calls
         # zlib.decompress on this column, so a plain-JSON mirror would make a
         # rollback crash on every row the new code wrote.
-        "result_json": compress_result(
+        result_json=compress_result(
             json.dumps({k: v for k, v in record.items() if k != PROVENANCE_KEY}, cls=DagJSONEncoder)
         ),
-    }
-    for key in _PLAIN_COLUMN_KEYS:
-        values[key] = record.get(key)
-    return values
+    )
 
 
+# lucidlint: ignore record-shape the legacy record IS the stored wire shape (keys vary per node)
 def _read_legacy_record(raw: str | bytes) -> dict[str, Any]:
     """Parse a pre-split ``result_json`` value (whole-row zlib or plain JSON)."""
     return cast(dict[str, Any], json.loads(decompress_result(raw)))
 
 
+# lucidlint: ignore record-shape the record's keys vary per node type (stored wire shape)
 def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
     """A row's record from the split columns (legacy blob for pre-split rows).
 
@@ -214,9 +273,13 @@ def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
         record["error"] = row["error"]
     if row["error_detail_json"] is not None:
         record["error_detail"] = json.loads(row["error_detail_json"])
-    for column in ("source_url", "source_label"):
-        if column in keys and row[column] is not None:
-            record[column] = row[column]
+    record.update(
+        {
+            column: row[column]
+            for column in ("source_url", "source_label")
+            if column in keys and row[column] is not None
+        }
+    )
     if "extra_json" in keys and row["extra_json"] is not None:
         extra = json.loads(row["extra_json"])
         if isinstance(extra, dict):
@@ -241,6 +304,7 @@ def record_select_columns(conn: sqlite3.Connection) -> tuple[str, ...]:
     return tuple(column for column in wanted if column in existing)
 
 
+# lucidlint: ignore record-shape the record's keys vary per node type (stored wire shape)
 def write_node_record(conn: sqlite3.Connection, row_id: int, record: dict[str, Any]) -> None:
     """Rewrite one ``node_results`` row from *record*.
 
@@ -250,17 +314,13 @@ def write_node_record(conn: sqlite3.Connection, row_id: int, record: dict[str, A
     source of truth until scripts/split_node_results.py converts the row, so a
     re-key written only into the split columns is not undone at the split.
     """
-    columns = _table_columns(conn)
+    present = _table_columns(conn)
     values = record_columns(record)
-    if "result_json" in columns:
-        values["result_json"] = compress_result(
-            json.dumps({k: v for k, v in record.items() if k != PROVENANCE_KEY}, cls=DagJSONEncoder)
-        )
-    selected = [column for column in columns if column in values]
-    assignments = ", ".join(f"{column}=?" for column in selected)
+    columns = values.writable_columns(set(present), include_blob="result_json" in present)
+    assignments = ", ".join(f"{column}=?" for column in columns)
     conn.execute(
         f"UPDATE node_results SET {assignments} WHERE rowid=?",
-        (*(values[column] for column in selected), row_id),
+        (*values.for_columns(columns), row_id),
     )
 
 
@@ -431,14 +491,16 @@ def save_node_result(
     _ensure_split_columns()
     conn = _get_db()
     now = created_at or datetime.now(UTC).isoformat()
+    stored = record_columns(result_dict)
+    writable = stored.writable_columns(set(_record_columns()))
     values = {
         "node_id": node_id,
-        **record_columns(result_dict),
+        **dict(zip(writable, stored.for_columns(writable), strict=True)),
         "dep_timestamps": json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
         "created_at": now,
         "code_version": code_version,
     }
-    columns = [c for c in _record_columns() if c in values]
+    columns = [c for c in ("node_id", *writable, "dep_timestamps", "created_at", "code_version") if c in values]
     cur = conn.execute(
         f"INSERT INTO node_results ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
         tuple(values[c] for c in columns),
@@ -504,6 +566,7 @@ def _fetch_latest_row(node_id: str, before: str | None = None) -> dict[str, Any]
     return result
 
 
+# lucidlint: ignore record-shape the tree IS the stored wire shape (serialization boundary)
 def latest_node_provenance(node_id: str) -> dict[str, Any] | None:
     """The node's recorded provenance tree, or None.
 

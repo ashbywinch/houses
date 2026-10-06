@@ -100,9 +100,11 @@ def _insert(conn, node_id: str, payload, dep=None, created: str = _CREATED, vers
             (node_id, zlib.compress(json.dumps(payload).encode()), json.dumps(dep or {}), created, version),
         )
         return
+    stored = persistence.record_columns(payload)
+    writable = stored.writable_columns(set(_columns(conn)))
     values = {
         "node_id": node_id,
-        **persistence.record_columns(payload),
+        **dict(zip(writable, stored.for_columns(writable), strict=True)),
         "dep_timestamps": json.dumps(dep or {}),
         "created_at": created,
         "code_version": version,

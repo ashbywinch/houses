@@ -385,3 +385,19 @@ The 0.2.0-era census above is historical.
 `make lucidlint`: **GATE PASS — 0 fail-severity actions, 1 accepted census
 warning.** `make test`: **1571 passed.** ruff + pyrefly: clean. lucidlint
 0.4.0 (`f8cbbc8`) pinned in pyproject.toml.
+
+## Tool behaviours worth knowing (2026-10-06)
+
+Two things cost real time while landing the `node_results` split, both verified
+against the tool:
+
+- **A suppression binds within the 3 lines ending at the finding.** A marker
+  one line above a `def` covers the *function* findings, but a finding on a
+  signature or on a literal INSIDE the body needs its own marker within three
+  lines above it — otherwise the marker is itself reported as a stale
+  suppression ("markers bind within the 3 lines ending at it").
+- **The baseline keys findings by file:line, so moving lines re-surfaces
+  otherwise-untouched findings.** Editing `current_home_node.py` shifted
+  `to_dict`'s line and its long-accepted record-shape finding reappeared as an
+  action. When a sweep reports findings in code you did not write, check
+  whether you moved it before fixing it.
