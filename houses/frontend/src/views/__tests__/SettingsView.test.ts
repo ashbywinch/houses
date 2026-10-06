@@ -189,6 +189,42 @@ async function showCommutes(wrapper: VueWrapper) {
   await wrapper.vm.$nextTick()
 }
 
+describe('SettingsView — the session settles before the settings fetch', () => {
+  it('does not fetch settings until /api/auth/me answers', async () => {
+    // The guard deliberately lets the route through before the auth check
+    // resolves (the first paint must not wait on it). Without the await in
+    // load(), this fetch would arrive unauthenticated and paint the error
+    // state over a 401 — then redirect.
+    setActivePinia(createPinia())
+    let answerAuth: (value: unknown) => void = () => {}
+    const fetchMock = vi.fn().mockReturnValue(
+      new Promise(resolve => {
+        answerAuth = resolve
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    ;(api.fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue(makeSettings())
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/settings', component: SettingsView }],
+    })
+    await router.push('/settings')
+    await router.isReady()
+
+    const wrapper = mount(SettingsView, { global: { plugins: [router] } })
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/me')
+    expect(api.fetchSettings).not.toHaveBeenCalled()
+
+    answerAuth({ ok: true, json: async () => ({ authenticated: true, is_superuser: true }) })
+    await flushPromises()
+
+    expect(api.fetchSettings).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
 describe('SettingsView — family sections', () => {
   beforeEach(() => {
     vi.clearAllMocks()

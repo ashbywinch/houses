@@ -27,10 +27,11 @@ router.beforeEach((to) => {
   if (!auth.loading) return '/login'
 
   // /api/auth/me must not gate the first paint: start the check, let
-  // the route through now — the views hold their property data back
-  // until it resolves — and send an unauthenticated visitor to /login
-  // the moment the answer lands. (App.vue starts the same check on
-  // mount; the store de-dupes it into one request.)
+  // the route through now — views that need the answer await the same
+  // check before fetching (SettingsView does) — and send an
+  // unauthenticated visitor to /login the moment it lands. (App.vue
+  // starts the same check on mount; the store settles it once per app
+  // load and shares the answer, so neither caller re-requests it.)
   void auth.checkAuth().then(() => {
     if (!auth.user) return router.replace('/login')
   })

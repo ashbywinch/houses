@@ -181,15 +181,22 @@ def ensure_split_columns(conn: sqlite3.Connection) -> None:
     columns under either entry point.
     """
     existing = {row[1] for row in conn.execute("PRAGMA table_info(node_results)")}
-    for column, column_type in _SPLIT_COLUMNS:
-        if column not in existing:
-            conn.execute(f"ALTER TABLE node_results ADD COLUMN {column} {column_type}")
+    added = [
+        (column, column_type)
+        for column, column_type in _SPLIT_COLUMNS
+        if column not in existing
+    ]
+    for column, column_type in added:
+        conn.execute(f"ALTER TABLE node_results ADD COLUMN {column} {column_type}")
     conn.commit()
-    # The DDL owns its own invalidation: a caller that read the columns BEFORE
-    # this call must not keep answering with the old shape (the review found
-    # this; the shipped migration happens to call us first, the class did not go
-    # away — tests/unit/dag/test_persistence.py pins it).
-    _invalidate_column_cache()
+    if added:
+        # The DDL owns its own invalidation: a caller that read the columns
+        # BEFORE this call must not keep answering with the old shape (the
+        # review found this; the shipped migration happens to call us first,
+        # the class did not go away — tests/unit/dag/test_persistence.py pins
+        # it). Only when something was ALTERed: no ALTER, same shape, same
+        # answer, and the cache stays valid.
+        _invalidate_column_cache()
 
 
 def _ensure_split_columns() -> None:

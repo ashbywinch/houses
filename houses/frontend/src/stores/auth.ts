@@ -35,9 +35,18 @@ export const useAuthStore = defineStore('auth', () => {
   const isImpersonating = computed(() => superuserMode.value && impersonating.value !== null)
 
   let _pendingCheck: Promise<void> | null = null
+  /** Set once the server has ANSWERED the check — authenticated or not. */
+  let _checked = false
 
   async function checkAuth() {
+    // One check per app load. The router guard and App.vue both settle the
+    // session on start, and a view that must not paint before the answer
+    // (SettingsView) awaits the same one — sequential callers share the
+    // answer rather than asking /api/auth/me again. A known session (a login
+    // already put a user in) needs no re-check; a failure leaves _checked
+    // false, so the next caller retries instead of inheriting it.
     if (_pendingCheck) return _pendingCheck
+    if (_checked || user.value) return
     _pendingCheck = _doCheck()
     try {
       return await _pendingCheck
@@ -55,6 +64,7 @@ export const useAuthStore = defineStore('auth', () => {
         return  // keep current user state on transient errors
       }
       const data = await r.json()
+      _checked = true  // the server answered; authenticated or not
       if (data.authenticated) {
         user.value = data
         if (!data.is_superuser) {

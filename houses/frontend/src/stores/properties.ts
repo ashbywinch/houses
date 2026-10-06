@@ -116,7 +116,10 @@ export const usePropertiesStore = defineStore('properties', () => {
       try {
         whatIfActive.value = await fetchWhatIfState()
       } catch (e) {
-        // best-effort — keep the last known mode, never block the list
+        // best-effort — keep the last known mode, never block the list. On the
+        // first load there is no last mode, so whatIfActive keeps its initial
+        // false: "nothing active", the safe default, to be corrected by the
+        // next listing or the settings push.
         console.error('Failed to load what-if state:', e)
       }
     })()
