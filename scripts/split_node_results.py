@@ -26,6 +26,13 @@ import zlib
 
 import dag.persistence as per
 
+NO_WRITE_MARKER = "no-write:"
+"""Printed when this migration has nothing to write (tools/deploy/migrations.list).
+
+The runner's rule is "an --apply run leaves a backup behind"; a database that is
+already split writes nothing, so it states that instead of leaving a 600 MB copy
+to prove a no-op."""
+
 DB_PATH = "data/houses.db"
 
 
@@ -190,7 +197,9 @@ def _report(conn: sqlite3.Connection, options: RunOptions) -> _Outcome:
     """The dry-run path, or the applied result; the int is the process exit code."""
     pending = count_pending(conn)
     if pending == 0 and "result_json" not in _columns(conn):
-        print("already split: no legacy column, no legacy rows")
+        # The runner requires a pre-write backup unless the apply says it wrote
+        # nothing: this is that statement (contract in tools/deploy/migrations.list).
+        print(f"{NO_WRITE_MARKER} already split: no legacy column, no legacy rows")
         return _Outcome(result=None, exit_code=0)
     if pending == 0:
         print("no rows to convert; the legacy column is empty (drop it with --apply)")

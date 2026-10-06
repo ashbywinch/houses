@@ -63,6 +63,32 @@ if args.apply and args.backup:
     shutil.copy(args.db, args.backup_path)
 print("stub apply: nothing migrated")
 """
+STUB_NO_WRITE = """import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--db")
+parser.add_argument("--backup-path")
+parser.add_argument("--apply", action="store_true")
+parser.add_argument("--backup", action="store_true")
+parser.add_argument("--verify", action="store_true")
+parser.parse_args()
+print("no-write: already split (stub)")
+"""
+STUB_SILENT_NO_WRITE = """import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--db")
+parser.add_argument("--backup-path")
+parser.add_argument("--apply", action="store_true")
+parser.add_argument("--backup", action="store_true")
+parser.add_argument("--verify", action="store_true")
+parser.parse_args()
+print("stub apply: fine, nothing to report")
+"""
+STUB_CHECK_OK = """import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--db")
+parser.parse_args()
+print("stub check: verified")
+"""
 STUB_APPLY_FAILS = """import argparse, sys
 parser = argparse.ArgumentParser()
 parser.add_argument("--db")
@@ -286,6 +312,43 @@ def test_a_migration_that_skips_its_work_fails_the_check(tmp_path):
     assert "check FAILED:" in result.stdout
     assert _summary(result.stdout) == "migrations: 0 applied+checked, 1 failed"
     assert "111/Simon/Pimlico/walk" in _node_ids(db), "the skipped migration left the DB unmigrated"
+
+
+def test_an_apply_that_states_it_wrote_nothing_needs_no_backup(tmp_path):
+    """The idempotent no-op: a database already split writes nothing, so there
+    is nothing to protect. The apply says so in its own output and the run is
+    still applied+checked — without this the rollout fails on an already-split
+    source (the current seed), which is what a fresh box restores."""
+    db = tmp_path / "smoke.db"
+    _seed_db(db)
+    checkout = _checkout(tmp_path, ["stub_no_write.py stub_check_ok.py"])
+    (checkout.root / "stub_no_write.py").write_text(STUB_NO_WRITE)
+    (checkout.root / "stub_check_ok.py").write_text(STUB_CHECK_OK)
+
+    result = checkout.run(db)
+
+    assert result.returncode == 0, result.stdout
+    assert "nothing to write (no-write stated); check ok" in result.stdout
+    assert "backup ok" not in result.stdout, "a no-op must not claim a backup it did not take"
+    assert _summary(result.stdout) == "migrations: 1 applied+checked, 0 failed"
+    assert not (tmp_path / "smoke.db.pre-stub_no_write.py").exists(), "a no-op must not leave a backup"
+
+
+def test_an_apply_that_writes_nothing_silently_still_fails(tmp_path):
+    """The negative control for the line above: the runner believes a STATEMENT,
+    not a silence. An apply that skipped the backup without saying anything is
+    still a failed apply."""
+    db = tmp_path / "smoke.db"
+    _seed_db(db)
+    checkout = _checkout(tmp_path, ["stub_silent.py stub_check_ok.py"])
+    (checkout.root / "stub_silent.py").write_text(STUB_SILENT_NO_WRITE)
+    (checkout.root / "stub_check_ok.py").write_text(STUB_CHECK_OK)
+
+    result = checkout.run(db)
+
+    assert result.returncode != 0
+    assert "apply FAILED: no backup written" in result.stdout
+    assert _summary(result.stdout) == "migrations: 0 applied+checked, 1 failed"
 
 
 def test_a_failed_migration_stops_the_chain(tmp_path):

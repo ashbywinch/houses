@@ -148,6 +148,9 @@ class CurrentHomeNode(DerivedNode):
         # `add_status` registered, never "whatever ends with /status" (a
         # future node id shaped like one would otherwise be mistaken for a
         # property and its attempt read as a status).
+        # Nothing removes an entry: `add_status` is the only mutation (a
+        # property is never deregistered today), so the tuple cannot go stale in
+        # the way a live lookup of the registry could.
         self._status_nodes: tuple[Node, ...] = ()
         # dep_names=None: the dep set grows with registrations (set_deps);
         # compute receives attempts positionally in active-dep order.

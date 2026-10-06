@@ -300,9 +300,13 @@ _last_columns: tuple[str, ...] = ()
 
 ``_table_columns`` runs on the write path, and a migration calls it once per
 row (the person-id backfill writes tens of thousands of rows through
-``write_node_record``): a PRAGMA per row is measurable.  Keyed by connection
-IDENTITY (never ``id()``, which the interpreter reuses after a connection is
-collected) and invalidated by ``_reset_caches``.
+``write_node_record``): a PRAGMA per row is measurable.  Keyed by the
+connection OBJECT (never ``id()``, which the interpreter reuses after a
+connection is collected): holding the reference is what makes the ``is``
+comparison sound — a cached connection cannot be collected, so no other object
+can ever sit at a recycled address and pass the check.  Invalidated by
+``_reset_caches``, by ``init_db`` on a path change, and by the DDL that changes
+the answer (``ensure_split_columns``).
 """
 
 
