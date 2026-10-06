@@ -6,6 +6,7 @@ Uses SQLite in-memory database (no filesystem dependencies).
 from __future__ import annotations
 
 import json
+import zlib
 from dataclasses import dataclass
 
 from dag import persistence as per
@@ -148,6 +149,29 @@ class TestStorageColumns:
 
         assert json.loads(row["value_json"]) == {"m": "VALUE_MARKER"}
         assert "PROV_MARKER" not in str(row["value_json"])
+
+    def test_the_legacy_mirror_stays_zlib_so_a_rollback_can_read_it(self):
+        """A database that still has ``result_json`` gets a mirror of every
+        write, and the PREVIOUS artifact reads that column with
+        zlib.decompress — a plain-JSON mirror would make a rollback crash on
+        every row the new code wrote."""
+        conn = per._get_db()
+        conn.execute("DROP TABLE node_results")
+        conn.execute(
+            "CREATE TABLE node_results (id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL,"
+            " result_json TEXT NOT NULL, dep_timestamps TEXT, created_at TEXT NOT NULL, code_version TEXT,"
+            " status TEXT, value_json TEXT, error TEXT, error_detail_json TEXT, source_url TEXT,"
+            " source_label TEXT, provenance_z BLOB, extra_json TEXT)"
+        )
+        conn.commit()
+        per._reset_caches()
+
+        save_node_result(f"{RID}/mirror", {"status": "succeeded", "value": {"a": 1}})
+        raw = conn.execute(
+            "SELECT result_json FROM node_results WHERE node_id=?", (f"{RID}/mirror",)
+        ).fetchone()[0]
+        assert isinstance(raw, bytes) and raw[:1] == b"\x78", "the mirror must be zlib"
+        assert json.loads(zlib.decompress(raw))["value"] == {"a": 1}
 
     def test_flags_are_not_synthesised_for_rows_that_never_carried_them(self):
         """A user-input push stores no succeeded/pending/impossible. The read

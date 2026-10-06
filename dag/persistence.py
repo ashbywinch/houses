@@ -129,22 +129,29 @@ def _record_columns() -> tuple[str, ...]:
     return cached
 
 
-def _ensure_split_columns() -> None:
-    """Idempotently add the split columns to an older node_results.
+def ensure_split_columns(conn: sqlite3.Connection) -> None:
+    """Idempotently add the split columns to an older ``node_results``.
 
-    Cheap ALTERs, cached per DB path — the same pattern as the code_version
-    column.  The one-time conversion (and the drop of the legacy blob) is the
-    shipped migration's job: scripts/split_node_results.py.
+    Cheap ALTERs.  ``init_db`` calls this for the app's own connection, and the
+    shipped migration calls it with the connection it is working on — one
+    implementation of the DDL, so a database cannot end up with half the
+    columns under either entry point.
     """
-    key = str(DB_PATH)
-    if key in _split_ensured:
-        return
-    conn = _get_db()
-    existing = {r[1] for r in conn.execute("PRAGMA table_info(node_results)")}
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(node_results)")}
     for column, column_type in _SPLIT_COLUMNS:
         if column not in existing:
             conn.execute(f"ALTER TABLE node_results ADD COLUMN {column} {column_type}")
     conn.commit()
+
+
+def _ensure_split_columns() -> None:
+    """``ensure_split_columns`` for the app's connection, cached per DB path
+    (the same pattern as the code_version column) — the hottest read path must
+    not PRAGMA on every call."""
+    key = str(DB_PATH)
+    if key in _split_ensured:
+        return
+    ensure_split_columns(_get_db())
     _split_ensured.add(key)
     _columns_cache.pop(key, None)
 
@@ -167,8 +174,11 @@ def record_columns(record: dict[str, Any]) -> dict[str, Any]:
         "extra_json": json.dumps(extra, cls=DagJSONEncoder) if extra else None,
         # Legacy databases keep a NOT NULL result_json: mirror the record
         # WITHOUT provenance there (small, and enough for a rollback to read).
-        "result_json": json.dumps(
-            {k: v for k, v in record.items() if k != PROVENANCE_KEY}, cls=DagJSONEncoder
+        # zlib, like every legacy row: the previous artifact's reader calls
+        # zlib.decompress on this column, so a plain-JSON mirror would make a
+        # rollback crash on every row the new code wrote.
+        "result_json": compress_result(
+            json.dumps({k: v for k, v in record.items() if k != PROVENANCE_KEY}, cls=DagJSONEncoder)
         ),
     }
     for key in _PLAIN_COLUMN_KEYS:

@@ -24,27 +24,10 @@ import sqlite3
 import sys
 import zlib
 
+import dag.persistence as per
+
 DB_PATH = "data/houses.db"
 
-_ZLIB_LEVEL = 6
-"""Matches dag.persistence._ZLIB_LEVEL: 6 vs 9 trades ~2% ratio for ~4x
-faster compress, and the provenance trees compress ~25x either way."""
-
-_SPLIT_COLUMN_SQL: tuple[tuple[str, str], ...] = (
-    ("status", "TEXT"),
-    ("value_json", "TEXT"),
-    ("error", "TEXT"),
-    ("error_detail_json", "TEXT"),
-    ("source_url", "TEXT"),
-    ("source_label", "TEXT"),
-    ("provenance_z", "BLOB"),
-    ("extra_json", "TEXT"),
-)
-
-_SPLIT_COLUMNS: tuple[str, ...] = tuple(column for column, _ in _SPLIT_COLUMN_SQL)
-
-_PLAIN_KEYS: tuple[str, ...] = ("status", "error", "source_url", "source_label")
-_MAPPED_KEYS: frozenset[str] = frozenset({*_PLAIN_KEYS, "value", "error_detail", "provenance"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,58 +44,6 @@ def _columns(conn: sqlite3.Connection) -> set[str]:
     return {row[1] for row in conn.execute("PRAGMA table_info(node_results)")}
 
 
-# lucidlint: ignore record-shape the legacy record IS the stored wire shape (keys vary per node type); this
-# migration reads it as data and writes the split columns — coding-standards.md
-def _decode(raw: object) -> dict:
-    """A legacy ``result_json`` value as the record it holds (zlib or plain)."""
-    if isinstance(raw, (bytes, memoryview)):
-        data = bytes(raw)
-        if data[:1] == b"\x78":
-            return json.loads(zlib.decompress(data).decode("utf-8"))
-        return json.loads(data.decode("utf-8"))
-    return json.loads(str(raw))
-
-
-@dataclasses.dataclass(frozen=True)
-class _SplitValues:
-    """One record's fields as the split columns take them."""
-
-    status: str | None
-    value_json: str | None
-    error: str | None
-    error_detail_json: str | None
-    source_url: str | None
-    source_label: str | None
-    provenance_z: bytes | None
-    extra_json: str | None
-
-    def for_columns(self, columns: tuple[str, ...]) -> tuple[object, ...]:
-        """The values in the caller's column order."""
-        return tuple(getattr(self, column) for column in columns)
-
-
-# lucidlint: ignore record-shape the legacy record IS the stored wire shape (keys vary per node type); it is
-# read as data and written back as columns — coding-standards.md
-def _split_values(record: dict) -> _SplitValues:
-    """The record's fields as the split column values (provenance compresses)."""
-    provenance = record.get("provenance")
-    extra = {key: value for key, value in record.items() if key not in _MAPPED_KEYS}
-    return _SplitValues(
-        status=record.get("status"),
-        value_json=json.dumps(record["value"]) if "value" in record else None,
-        error=record.get("error"),
-        error_detail_json=(
-            json.dumps(record["error_detail"]) if record.get("error_detail") is not None else None
-        ),
-        source_url=record.get("source_url"),
-        source_label=record.get("source_label"),
-        provenance_z=(
-            zlib.compress(json.dumps(provenance).encode("utf-8"), _ZLIB_LEVEL)
-            if provenance is not None
-            else None
-        ),
-        extra_json=json.dumps(extra) if extra else None,
-    )
 
 
 _CHUNK_ROWS = 2_000
@@ -132,13 +63,17 @@ def convert_all(conn: sqlite3.Connection, pending_sql: str) -> int | None:
     transaction's journal is worse.
     """
     applied = 0
+    # The columns this database has, hoisted: the per-row write derives its
+    # column list from the shape owner's own mapping (below), so there is no
+    # list here to drift.
+    present = _columns(conn)
     cursor = conn.execute(pending_sql)
     while True:
         chunk = cursor.fetchmany(_CHUNK_ROWS)
         if not chunk:
             break
         for row_id, raw in chunk:
-            if not convert_row(conn, row_id, raw):
+            if not convert_row(conn, row_id, raw, present):
                 conn.commit()
                 return None
             applied += 1
@@ -159,26 +94,33 @@ def count_pending(conn: sqlite3.Connection) -> int:
 
 
 def ensure_split_columns(conn: sqlite3.Connection) -> None:
-    """Add any missing split column (idempotent ALTERs)."""
-    existing = _columns(conn)
-    for column, column_type in _SPLIT_COLUMN_SQL:
-        if column not in existing:
-            conn.execute(f"ALTER TABLE node_results ADD COLUMN {column} {column_type}")
-    conn.commit()
+    """Add any missing split column — the schema owner's own DDL, so the
+    migration and the app cannot disagree about the columns."""
+    per.ensure_split_columns(conn)
 
 
-def convert_row(conn: sqlite3.Connection, row_id: int, raw: object) -> bool:
-    """Convert one legacy row into its split columns; False if unreadable."""
+def convert_row(conn: sqlite3.Connection, row_id: int, raw: bytes | str, present: set[str]) -> bool:
+    """Convert one legacy row into its split columns; False if unreadable.
+
+    The record is decoded with the storage shape's own reader and written with
+    its own column mapping (``dag.persistence``) — one owner, so the migration
+    cannot drift from what the app stores and reads.
+    """
     try:
-        record = _decode(raw)
+        record = json.loads(per.decompress_result(raw))
     except (ValueError, zlib.error) as exc:
         print(f"row {row_id}: unreadable record ({exc}) — left for a human", file=sys.stderr)
         return False
-    values = _split_values(record)
-    assignments = ", ".join(f"{column}=?" for column in _SPLIT_COLUMNS)
+    values = per.record_columns(record)
+    # The blob column is deliberately left untouched: it is the legacy
+    # original, intact until the drop, so a half-converted database still
+    # reads correctly with the previous artifact.
+    values.pop("result_json", None)
+    columns = [column for column in values if column in present]
+    assignments = ", ".join(f"{column}=?" for column in columns)
     conn.execute(
         f"UPDATE node_results SET {assignments} WHERE id=?",
-        (*values.for_columns(_SPLIT_COLUMNS), row_id),
+        (*[values[column] for column in columns], row_id),
     )
     return True
 
