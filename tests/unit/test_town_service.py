@@ -247,6 +247,43 @@ class TestGenerateTownDescription:
         assert sent.get("reasoning") == {"enabled": False}
 
     @pytest.mark.asyncio
+    async def test_a_response_without_choices_is_a_named_failure(self):
+        """A gateway/model misroute answers without a choices array — the shape
+        is named, not left to raise IndexError into the boundary catch."""
+        from houses.town_desc import _reset
+
+        _reset()
+
+        class _FakeCM:
+            async def __aenter__(self):
+                return _FakeClient()
+
+            async def __aexit__(self, *a):
+                return False
+
+        class _FakeClient:
+            async def post(self, url, json=None, headers=None):
+                return httpx.Response(
+                    200,
+                    json={"error": {"message": "model not found"}},
+                    request=httpx.Request("POST", url),
+                )
+
+        async def _fake_cache(method, url, *, body=None, fetch=None, **k):
+            assert fetch is not None
+            return await fetch()
+
+        result = await generate_town_description(
+            "Southall",
+            "UB2 4GN",
+            client_factory=lambda **k: _FakeCM(),
+            with_cache_fn=_fake_cache,
+        )
+
+        assert not result.succeeded
+        assert "no choices" in result.error
+
+    @pytest.mark.asyncio
     async def test_no_content_is_an_impossible_attempt_not_a_crash(self):
         """A reasoning model that ignored the switch returns content=None;
         that is a failure with a readable reason, not an AttributeError."""

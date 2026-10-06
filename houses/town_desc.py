@@ -147,13 +147,19 @@ async def generate_town_description(
             return resp.json()
 
         result = await with_cache_fn("POST", url, body=body, fetch=_fetch)
-        raw = (result["choices"][0]["message"].get("content") or "").strip()
+        choices = result.get("choices") or []
+        if not choices:
+            # A gateway/model misroute answers without a choices array: name the
+            # shape instead of letting [0] raise IndexError (the boundary catch
+            # below would report "list index out of range" and nothing else).
+            return Attempt.impossible(f"{settings.llm_model} returned no choices")
+        raw = (choices[0]["message"].get("content") or "").strip()
         if not raw:
             # A reasoning model that ignored the switch spends the budget
             # thinking and returns nothing — say so, don't crash on .strip().
             return Attempt.impossible(
                 f"{settings.llm_model} returned no content "
-                f"(finish_reason={result['choices'][0].get('finish_reason')})"
+                f"(finish_reason={choices[0].get('finish_reason')})"
             )
         description = raw.split(".")[0].strip() + "."
         _town_cache[key] = description
