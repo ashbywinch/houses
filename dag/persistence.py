@@ -89,8 +89,6 @@ _PLAIN_COLUMN_KEYS: tuple[str, ...] = ("status", "error", "source_url", "source_
 _columns_cache: dict[str, tuple[str, ...]] = {}
 _split_ensured: set[str] = set()
 
-# lucidlint: ignore unused deliberate test seam — the unit DB-isolation fixture recreates an in-memory database
-# under the same path with a different schema, so the per-path column cache must be droppable between tests
 def _reset_caches() -> None:
     """Drop the per-database schema caches (test isolation).
 
@@ -100,6 +98,9 @@ def _reset_caches() -> None:
     """
     _columns_cache.clear()
     _split_ensured.clear()
+    global _last_columns_conn, _last_columns
+    _last_columns_conn = None
+    _last_columns = ()
 
 
 def compress_result(text: str) -> bytes:
@@ -287,9 +288,26 @@ def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
     return record
 
 
+_last_columns_conn: sqlite3.Connection | None = None
+_last_columns: tuple[str, ...] = ()
+"""The most recent connection's column list.
+
+``_table_columns`` runs on the write path, and a migration calls it once per
+row (the person-id backfill writes tens of thousands of rows through
+``write_node_record``): a PRAGMA per row is measurable.  Keyed by connection
+IDENTITY (never ``id()``, which the interpreter reuses after a connection is
+collected) and invalidated by ``_reset_caches``.
+"""
+
+
 def _table_columns(conn: sqlite3.Connection) -> tuple[str, ...]:
-    """The columns this connection's node_results actually has."""
-    return tuple(row[1] for row in conn.execute("PRAGMA table_info(node_results)"))
+    global _last_columns_conn, _last_columns
+    if conn is _last_columns_conn:
+        return _last_columns
+    _last_columns_conn = conn
+    _last_columns = tuple(row[1] for row in conn.execute("PRAGMA table_info(node_results)"))
+    return _last_columns
+
 
 
 def record_select_columns(conn: sqlite3.Connection) -> tuple[str, ...]:

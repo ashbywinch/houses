@@ -144,6 +144,11 @@ class CurrentHomeNode(DerivedNode):
         # app crashed at startup: 'CurrentHomeNode' object has no attribute
         # '_registry'.)
         self._registry: Any = None
+        # The status nodes BY IDENTITY: the candidate set is what
+        # `add_status` registered, never "whatever ends with /status" (a
+        # future node id shaped like one would otherwise be mistaken for a
+        # property and its attempt read as a status).
+        self._status_nodes: tuple[Node, ...] = ()
         # dep_names=None: the dep set grows with registrations (set_deps);
         # compute receives attempts positionally in active-dep order.
         super().__init__(node_id, MonthlyBaseline | None, ())
@@ -165,12 +170,14 @@ class CurrentHomeNode(DerivedNode):
         settles late must still re-derive the baseline.
         """
         self._registry = registry
+        self._status_nodes = (*self._status_nodes, status_node)
         extra = tuple(n for n in (cost_node, address_node) if n is not None)
         self.set_deps((*self._deps, status_node, *extra))
 
     def _status_deps(self) -> tuple:
-        """The wired status nodes — the candidates for 'the current home'."""
-        return tuple(n for n in self._deps if str(n._id).endswith("/status"))
+        """The registered status nodes — the candidates for 'the current
+        home', by identity (see ``__init__``)."""
+        return self._status_nodes
 
     def _current_property(self) -> Any:
         if self._registry is None:
@@ -205,10 +212,11 @@ class CurrentHomeNode(DerivedNode):
             raise ValueError(f"{self._id}: {len(active)} active deps but {len(attempts)} attempts")
         by_node = dict(zip(active, attempts, strict=True))
 
+        status_ids = {id(node) for node in self._status_nodes}
         winners = [
             str(node._id).split("/")[0]
             for node, att in by_node.items()
-            if str(node._id).endswith("/status")
+            if id(node) in status_ids
             and att is not None
             and att.succeeded
             and (att.value_or_none() or "").strip().lower() == CURRENT_STATUS
