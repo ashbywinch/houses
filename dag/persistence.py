@@ -202,7 +202,6 @@ def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
         legacy.pop(PROVENANCE_KEY, None)
         return legacy
     status = row["status"]
-    keys = row.keys()
     # Exactly the fields the record carried: the succeeded/pending/impossible
     # flags are NOT synthesised from status — rows that never carried them
     # (user-input pushes) must read back without them, or the split would be a

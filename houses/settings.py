@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     _parse_school_radius = field_validator("school_search_radius", mode="before")(lambda v: _parse_quantity(v, "km"))
     _parse_max_walk = field_validator("max_walk_to_station", mode="before")(lambda v: _parse_quantity(v, "minute"))
     _parse_bus_penalty = field_validator("bus_walk_penalty", mode="before")(lambda v: _parse_quantity(v, "minute"))
+    # Both base URLs are joined with a leading-slash path ("/chat/completions",
+    # "/openrouteservice/v2/..."), so a configured trailing slash would produce
+    # a double slash. Normalised HERE, where the value enters the app — every
+    # caller then just concatenates.
+    _strip_url_slash = field_validator("ors_base_url", "llm_base_url")(
+        lambda value: value.rstrip("/")
+    )
 
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"

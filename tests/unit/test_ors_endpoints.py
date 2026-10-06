@@ -92,3 +92,21 @@ async def test_reverse_geocode_asks_for_settlements_not_streets():
     assert "locality" in str(client.params.get("layers"))
     assert "street" not in str(client.params.get("layers"))
     assert "address" not in str(client.params.get("layers"))
+
+
+def test_a_trailing_slash_on_the_base_urls_is_normalised():
+    """Both bases are joined with a leading-slash path, so a configured
+    trailing slash would build a double slash (the gateway and ORS both 404
+    on one). Normalised at the setting, so callers just concatenate."""
+    from houses import ors_endpoints
+    from houses.settings import Settings
+
+    configured = Settings(
+        _env_file=None,
+        ors_base_url="https://api.heigit.org/",
+        llm_base_url="https://gateway.example/v1/acct/gw/compat/",
+    )
+    assert configured.ors_base_url == "https://api.heigit.org"
+    assert configured.llm_base_url == "https://gateway.example/v1/acct/gw/compat"
+    assert "//openrouteservice" not in f"{configured.ors_base_url}/openrouteservice"
+    assert ors_endpoints.ORS_DIRECTIONS.startswith("https://api.heigit.org/openrouteservice")
