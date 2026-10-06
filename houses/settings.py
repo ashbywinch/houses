@@ -94,9 +94,8 @@ class Settings(BaseSettings):
     # "/openrouteservice/v2/..."), so a configured trailing slash would produce
     # a double slash. Normalised HERE, where the value enters the app — every
     # caller then just concatenates.
-    _strip_url_slash = field_validator("ors_base_url", "llm_base_url")(
-        lambda value: value.rstrip("/")
-    )
+    _strip_ors_url_slash = field_validator("ors_base_url")(lambda value: value.rstrip("/"))
+    _strip_llm_url_slash = field_validator("llm_base_url")(lambda value: value.rstrip("/"))
 
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"
