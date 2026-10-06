@@ -19,6 +19,8 @@ from houses.model.domain import person_id_of
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.commute_pipeline_builder import build_commute_pipeline
+from houses.nodes.current_home_node import current_home_node
+from houses.nodes.delta_vs_home_node import DeltaVsHomeNode
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.equity_total_node import EquityTotalNode
 from houses.nodes.geocode_node import GeocodeNode
@@ -491,9 +493,6 @@ class PropertyNodes:
         # other calculation (docs/dag-library.md → Design Rules): deps are
         # own group cost + the global current-home node; the subtraction,
         # its wire value and its provenance are all the DAG's own record.
-        from houses.nodes.current_home_node import current_home_node
-        from houses.nodes.delta_vs_home_node import DeltaVsHomeNode
-
         self.delta_vs_home: DeltaVsHomeNode = DeltaVsHomeNode(
             f"{rid}/delta_vs_home",
             group_node=self.group_monthly_cost,

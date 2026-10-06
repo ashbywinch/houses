@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from houses.nodes.current_home_node import current_home_node
 from houses.nodes.property_nodes import PropertyNodes
 from houses.services_provider import get_services
 
@@ -38,8 +39,6 @@ class PropertyRegistry:
         # status write fans the re-derivation out through signals. Auth
         # tests register minimal property stand-ins without status nodes
         # — those are not candidates either way.
-        from houses.nodes.current_home_node import current_home_node
-
         status = getattr(prop, "comment_status", None)
         if status is not None:
             current_home_node().add_status(

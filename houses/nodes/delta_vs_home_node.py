@@ -21,7 +21,7 @@ from typing import Any, override
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.nodes.current_home_node import MonthlyBaseline, _as_figure
+from houses.nodes.current_home_node import MonthlyBaseline, as_figure
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ class DeltaVsHomeValue:
 
 
 def _figure_number(figure: Any) -> Decimal | None:
-    as_fig = _as_figure(figure)
+    as_fig = as_figure(figure)
     if as_fig is None or as_fig.value is None:
         return None
     try:
@@ -105,8 +105,8 @@ class DeltaVsHomeNode(DerivedNode):
             if own_num is None or base_num is None:
                 sides[side] = None
                 continue
-            own_fig = _as_figure(own.get(side))
-            base_fig = _as_figure(base_value.get(side))
+            own_fig = as_figure(own.get(side))
+            base_fig = as_figure(base_value.get(side))
             approx = bool(own_fig and own_fig.stddev) or bool(base_fig and base_fig.stddev)
             delta = own_num - base_num
             sides[side] = DeltaFigure(value=f"{delta:+.2f}", approx=approx)

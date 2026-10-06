@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, override
+from typing import Any, TypedDict, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -25,8 +25,47 @@ from dag.node import Node
 CURRENT_STATUS = "current"
 
 
+class GroupFigureWire(TypedDict):
+    """A raw group figure on the wire: the amount and its uncertainty."""
+
+    value: str | None
+    stddev: float
+
+
+class MonthlySide(TypedDict):
+    """One side of the monthly cost as the frontend's MonthlyDeltaSide reads
+    it: the human figure, and whether it carries an uncertainty."""
+
+    value: str | None
+    approx: bool
+
+
+class BaselineProvenanceValue(TypedDict):
+    """The baseline as the provenance tree states it."""
+
+    rid: str
+    address: str
+    couple: str | None
+    others: str | None
+
+
+class BaselineWire(TypedDict):
+    """The baseline as the wire states it (the contract the frontend reads)."""
+
+    rid: str
+    address: str
+    couple: MonthlySide
+    others: MonthlySide | None
+    others_rent_paid: float
+
+
+def _monthly_side(figure: GroupFigure) -> MonthlySide:
+    """Project an ingested figure onto the frontend's side shape."""
+    return {"value": figure.value, "approx": bool(figure.stddev)}
+
+
 def _figure_text(raw: Any) -> str | None:
-    figure = _as_figure(raw)
+    figure = as_figure(raw)
     if figure is None or figure.value is None:
         return None
     return _money_text(figure.value)
@@ -43,7 +82,7 @@ def _money_text(value: str) -> str:
 
 
 @dataclass(frozen=True)
-class _RawFigure:
+class GroupFigure:
     """A group figure ingested from the group value dict.
 
     ``value`` is the string amount, ``stddev`` its uncertainty (Part A:
@@ -53,28 +92,27 @@ class _RawFigure:
     value: str | None
     stddev: float
 
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
+    def to_dict(self) -> GroupFigureWire:
         return {"value": self.value, "stddev": self.stddev}
 
 
-def _as_figure(raw: object) -> _RawFigure | None:
+def as_figure(raw: object) -> GroupFigure | None:
     if isinstance(raw, dict):
         value = raw.get("value")
         if value is not None:
             try:
-                return _RawFigure(value=str(value), stddev=float(raw.get("stddev") or 0))
+                return GroupFigure(value=str(value), stddev=float(raw.get("stddev") or 0))
             except (TypeError, ValueError):
                 return None
     return None
 
 
-def _figure_or_empty(raw: object) -> _RawFigure:
+def _figure_or_empty(raw: object) -> GroupFigure:
     """The ingested figure — an empty one when *raw* is absent (mirrors
     the historical ``or {}``: a missing couple figure serializes as
     "None")."""
-    figure = _as_figure(raw)
-    return figure if figure is not None else _RawFigure(value=None, stddev=0.0)
+    figure = as_figure(raw)
+    return figure if figure is not None else GroupFigure(value=None, stddev=0.0)
 
 
 @dataclass(frozen=True)
@@ -91,7 +129,7 @@ class MonthlyBaseline:
     group_value: dict
     others_rent_paid: float
 
-    def to_provenance_value(self) -> dict:
+    def to_provenance_value(self) -> BaselineProvenanceValue:
         """The tree states the baseline as identity + human figures."""
         return {
             "rid": self.rid,
@@ -100,19 +138,17 @@ class MonthlyBaseline:
             "others": _figure_text(self.group_value.get("others")),
         }
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_wire(self) -> dict:
+    def to_wire(self) -> BaselineWire:
         # The contract shape is {value, approx} (see the frontend's
         # MonthlyDeltaSide): the stddev feeds the approx flag; the raw
         # stddev itself is the GROUP's wire, not the baseline's.
         couple = _figure_or_empty(self.group_value.get("couple"))
-        others = _as_figure(self.group_value.get("others"))
-        # lucidlint: ignore record-shape to_wire construction IS the serialization boundary (coding-standards.md)
+        others = as_figure(self.group_value.get("others"))
         return {
             "rid": self.rid,
             "address": self.address,
-            "couple": {"value": couple.value, "approx": bool(couple.stddev)},
-            "others": {"value": others.value, "approx": bool(others.stddev)} if others is not None else None,
+            "couple": _monthly_side(couple),
+            "others": _monthly_side(others) if others is not None else None,
             "others_rent_paid": self.others_rent_paid,
         }
 
@@ -240,7 +276,7 @@ class CurrentHomeNode(DerivedNode):
         if group_att is None or not group_att.succeeded:
             return Attempt.succeeded(None)
         value = group_att.value_or_none()
-        if not isinstance(value, dict) or _as_figure(value.get("couple")) is None:
+        if not isinstance(value, dict) or as_figure(value.get("couple")) is None:
             return Attempt.succeeded(None)
 
         address_node = getattr(prop, "best_address", None)
@@ -270,7 +306,7 @@ class CurrentHomeNode(DerivedNode):
             return "No current home" if v is None else str(v)
         parts = [f"Your home ({v.address})" if v.address else "Your home"]
         for side in ("couple", "others"):
-            figure = _as_figure(v.group_value.get(side))
+            figure = as_figure(v.group_value.get(side))
             if figure is not None and figure.value is not None:
                 parts.append(f"{side} {_money_text(figure.value)}")
         return " · ".join(parts)
