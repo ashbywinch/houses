@@ -86,7 +86,6 @@ node-specific record field, so the split can never drop one.
 _PLAIN_COLUMN_KEYS: tuple[str, ...] = ("status", "error", "source_url", "source_label")
 """Record fields stored verbatim as their own TEXT column."""
 
-_columns_cache: dict[str, tuple[str, ...]] = {}
 _split_ensured: set[str] = set()
 
 def _reset_caches() -> None:
@@ -96,7 +95,6 @@ def _reset_caches() -> None:
     schema (a pre-split table to prove legacy rows still read); the caches
     are keyed by path, so they must be dropped with it.
     """
-    _columns_cache.clear()
     _split_ensured.clear()
     global _last_columns_conn, _last_columns
     _last_columns_conn = None
@@ -110,7 +108,15 @@ def compress_result(text: str) -> bytes:
 
 def decompress_result(raw: str | bytes) -> str:
     if isinstance(raw, bytes) and raw[:1] == b"\x78":
-        return zlib.decompress(raw).decode("utf-8")
+        try:
+            return zlib.decompress(raw).decode("utf-8")
+        except (zlib.error, UnicodeDecodeError) as exc:
+            # A blob that starts like zlib but is not (a truncated write, a
+            # foreign write). Report it as data damage: zlib's own message
+            # ("incorrect header check") names neither the field nor the fix.
+            raise ValueError(
+                f"provenance blob is not readable as zlib-compressed JSON: {exc}"
+            ) from exc
     if isinstance(raw, bytes):
         # Degenerate: a BLOB that is not a zlib stream.  JSON text never
         # starts with 0x78, so this only happens with a foreign write.
@@ -126,11 +132,7 @@ def _record_columns() -> tuple[str, ...]:
     mirror the provenance-free record there until the shipped migration
     converts it.
     """
-    key = str(DB_PATH)
-    cached = _columns_cache.get(key)
-    if cached is None:
-        cached = tuple(r[1] for r in _get_db().execute("PRAGMA table_info(node_results)"))
-        _columns_cache[key] = cached
+    cached = _table_columns(_get_db())
     return cached
 
 
@@ -147,6 +149,11 @@ def ensure_split_columns(conn: sqlite3.Connection) -> None:
         if column not in existing:
             conn.execute(f"ALTER TABLE node_results ADD COLUMN {column} {column_type}")
     conn.commit()
+    # The DDL owns its own invalidation: a caller that read the columns BEFORE
+    # this call must not keep answering with the old shape (the review found
+    # this; the shipped migration happens to call us first, the class did not go
+    # away — tests/unit/dag/test_persistence.py pins it).
+    _invalidate_column_cache()
 
 
 def _ensure_split_columns() -> None:
@@ -156,9 +163,8 @@ def _ensure_split_columns() -> None:
     key = str(DB_PATH)
     if key in _split_ensured:
         return
-    ensure_split_columns(_get_db())
+    ensure_split_columns(_get_db())  # invalidates the column cache itself
     _split_ensured.add(key)
-    _columns_cache.pop(key, None)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -298,6 +304,13 @@ row (the person-id backfill writes tens of thousands of rows through
 IDENTITY (never ``id()``, which the interpreter reuses after a connection is
 collected) and invalidated by ``_reset_caches``.
 """
+
+
+def _invalidate_column_cache() -> None:
+    """Drop the cached column list — call after ANY DDL on node_results."""
+    global _last_columns_conn, _last_columns
+    _last_columns_conn = None
+    _last_columns = ()
 
 
 def _table_columns(conn: sqlite3.Connection) -> tuple[str, ...]:

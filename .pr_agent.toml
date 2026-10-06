@@ -16,7 +16,32 @@ model = "openai/dynamic/fallback2"
 ai_timeout = 1800 # reviews on large diffs take minutes; the upstream default is too low
 custom_model_max_tokens = 128000
 max_model_tokens = 128000
-fallback_models = []
+# The route's models reason by default, and reasoning tokens come OUT of the
+# completion budget. On the 2026-10-06 review of fix/pelias-settlement-layers
+# the model spent 10,386 of its 11,121 output tokens reasoning and returned no
+# parseable mapping — a 200 OK, so nothing looked like an error (gateway log,
+# log id 01M48M4E7SY1XST1H7E27SXGTX): the run hard-fails with "model response
+# did not contain a non-empty review mapping". Measured on this route the same
+# day: 752/814 output tokens were reasoning without the switch, 0/109 with it.
+# The app answers the same wall the same way (houses/settings.py:65 sends
+# reasoning={"enabled": false} for town descriptions); this is that switch for
+# the bot. `additional_reasoning_effort_models` is required because litellm's
+# metadata has never heard of a Cloudflare dynamic route, so it would otherwise
+# never whitelist reasoning_effort for it (pr_agent/algo/ai_handlers/
+# litellm_ai_handler.py, the escape-hatch match at the pinned SHA).
+# Tradeoff, accepted: reviews reason less, so an opinion is thinner than a
+# reasoner's — but a thin review beats a run that fails.
+reasoning_effort = "none"
+additional_reasoning_effort_models = ["dynamic/fallback2", "deepseek/deepseek-v4-flash"]
+# The client owns retries (skill://cloudflare-ai-gateway — gateway retries stay
+# off, cf-aig-max-attempts: 0 in [litellm] below). The gateway could not have
+# retried this failure anyway: the upstream answered 200, and cf-aig-max-attempts
+# covers provider errors, not empty content. So this chain IS the retry policy —
+# and `[]` meant `retry_with_fallback_models` looped over exactly one model
+# (pr_agent/algo/pr_processing.py: one attempt per model, no same-model retry),
+# which is why a single bad completion ended the run. One more member gives a
+# transient 429/5xx somewhere to go.
+fallback_models = ["openai/deepseek/deepseek-v4-flash"]
 # Sampling temperature — raised from the 0.2 default to 0.8 (2026-10-02).
 # The /improve (suggestions) run looped in thought for 25 minutes at 0.2:
 # 124,972 of 131,072 completion tokens were repetition, finish_reason=length,

@@ -9,6 +9,8 @@ import json
 import zlib
 from dataclasses import dataclass
 
+import pytest
+
 from dag import persistence as per
 from dag.persistence import (
     _deserialize_value,
@@ -139,6 +141,28 @@ class TestStorageColumns:
         blob = row["provenance_z"]
         assert isinstance(blob, bytes) and blob[:1] == b"\x78", "provenance stays zlib"
         assert per.decompress_result(blob).startswith('{"label": "P"'), "and is the tree"
+
+
+    def test_a_corrupt_provenance_blob_is_named_not_a_zlib_error(self):
+        """A blob that starts like zlib but is not (a truncated or foreign
+        write) must read as data damage, not as zlib's own "incorrect header
+        check" with no field name."""
+        with pytest.raises(ValueError, match="provenance blob"):
+            per.decompress_result(b"\x78\x9c" + b"\x00" * 8)
+
+    def test_columns_added_by_ensure_split_columns_are_visible_immediately(self):
+        """The cached column list must not outlive the ALTERs that change it —
+        this is the review's stale-cache question, asserted on behaviour."""
+        conn = per._get_db()
+        per._invalidate_column_cache()
+        conn.execute("DROP TABLE IF EXISTS node_results")
+        conn.execute("CREATE TABLE node_results (node_id TEXT, result_json TEXT)")
+        conn.commit()
+        assert "value_json" not in per.record_select_columns(conn)
+
+        per.ensure_split_columns(conn)
+
+        assert "value_json" in per.record_select_columns(conn)
 
     def test_values_are_plain_text_and_provenance_is_not_in_them(self):
         save_node_result(
