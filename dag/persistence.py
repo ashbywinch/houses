@@ -445,7 +445,12 @@ def init_db(db_path: str | None = None) -> None:
     """Initialise the SQLite database schema, migrating older databases."""
     global DB_PATH
     if db_path:
-        DB_PATH = Path(db_path)
+        new_path = Path(db_path)
+        if new_path != DB_PATH:
+            # A schema cache belongs to ONE database; pointing at another
+            # (standby switch, --restore) must not serve the old shape.
+            _reset_caches()
+        DB_PATH = new_path
     conn = _get_db()
     conn.execute(
         """
