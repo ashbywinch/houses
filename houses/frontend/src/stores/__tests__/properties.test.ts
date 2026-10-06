@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import type { MonthlyBaseline, PropertyDetail, PropertySummary } from '../../types'
 import { usePropertiesStore } from '../properties'
+import { useAuthStore } from '../auth'
 
 vi.mock('../../services/api', () => ({
   fetchPropertyDetail: vi.fn(),
@@ -129,6 +130,9 @@ describe('properties store loadAll — listing and what-if in parallel', () => {
   })
 
   it('fires the what-if read alongside the listing, not after it', async () => {
+    // loadAll waits for the session to settle first (the guard lets the route
+    // through before /api/auth/me answers); a known session returns at once.
+    useAuthStore().user = { name: 'Ashby', person: 'Ashby' } as never
     // The listing never settles: the assertion is that /what-if/state is
     // ALREADY in flight while the listing is still pending.
     vi.mocked(api.fetchAllSummaries).mockReturnValue(
@@ -139,7 +143,9 @@ describe('properties store loadAll — listing and what-if in parallel', () => {
     const store = usePropertiesStore()
     void store.loadAll()
 
-    expect(api.fetchAllSummaries).toHaveBeenCalledTimes(1)
+    // loadAll waits for the session to settle (a microtask even when the
+    // session is known), so the reads start one tick later.
+    await vi.waitFor(() => expect(api.fetchAllSummaries).toHaveBeenCalledTimes(1))
     expect(api.fetchWhatIfState).toHaveBeenCalledTimes(1)
     expect(store.loading).toBe(true)  // the listing is still in flight
     await vi.waitFor(() => expect(store.whatIfActive).toBe(true))

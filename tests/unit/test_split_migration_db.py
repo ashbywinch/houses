@@ -135,6 +135,31 @@ def test_rows_that_are_not_json_are_reported_not_dropped(tmp_path):
     conn.close()
 
 
+def test_a_blob_that_parses_but_is_not_a_record_is_reported(tmp_path):
+    """JSON that is not an object (a bare string, array, number) cannot be
+    read as a record — `"value" in "some value"` is a substring test, not a
+    key lookup — so it must be reported like the unreadable case, not misread
+    or crashed on."""
+    db = _legacy_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
+        (
+            "p3/not-a-record",
+            zlib.compress(json.dumps(["a value", "b"]).encode()),
+            "2026-10-01T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+
+    result = migration.apply_migration(conn, backup_path=None, verify=False)
+
+    assert not result.ok
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(node_results)")}
+    assert "result_json" in columns, "the legacy column stays while a row is unconverted"
+    conn.close()
+
+
 def test_a_database_without_node_results_is_a_no_op(tmp_path):
     path = tmp_path / "empty.db"
     conn = sqlite3.connect(path)

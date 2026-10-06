@@ -237,6 +237,7 @@ describe('PropertyList filtering', () => {
     const store = initStore()
     store.rids = ['prop-a', 'prop-d']
     const wrapper = mount(PropertyList)
+    await flushPromises() // the listing waits for the session to settle first
     await wrapper.find('.search-input').setValue('school')
     expect(wrapper.text()).toContain('40 School Ln')
     expect(wrapper.text()).not.toContain('10 Cheap St')

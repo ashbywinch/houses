@@ -122,6 +122,16 @@ def convert_row(conn: sqlite3.Connection, row_id: int, raw: bytes | str, present
     except (ValueError, zlib.error) as exc:
         print(f"row {row_id}: unreadable record ({exc}) — left for a human", file=sys.stderr)
         return False
+    if not isinstance(record, dict):
+        # JSON that parses but is not a record (a bare string, array or
+        # number). The column mapping reads keys, and `"value" in "some value"`
+        # is a substring test, not a lookup — so report it like the unreadable
+        # case rather than misreading or crashing on it.
+        print(
+            f"row {row_id}: blob is {type(record).__name__}, not a record — left for a human",
+            file=sys.stderr,
+        )
+        return False
     values = per.record_columns(record)
     # the blob column is deliberately excluded: it holds the legacy original,
     # intact until the drop, so a half-converted database still reads with the

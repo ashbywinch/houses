@@ -12,6 +12,7 @@ import {
   removeProperty,
   retryScrape,
 } from '../services/api'
+import { useAuthStore } from './auth'
 
 interface PersonEntry {
   name: string
@@ -108,6 +109,12 @@ export const usePropertiesStore = defineStore('properties', () => {
   async function loadAll() {
     loading.value = true
     error.value = null
+    // The guard deliberately lets the route through before /api/auth/me
+    // answers (the first paint must not wait on it), so without this the
+    // listing could race the session and paint an error over the 401s, then
+    // redirect. Awaiting the same check costs nothing: it settles once per
+    // app load and a known session returns immediately.
+    await useAuthStore().checkAuth()
     // The what-if mode and the listing are independent reads — start
     // them together so the index pays one round trip, not two in
     // sequence. The store is the single owner of the mode: the panel
