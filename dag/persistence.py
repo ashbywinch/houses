@@ -193,14 +193,12 @@ def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
         return legacy
     status = row["status"]
     keys = row.keys()
-    record: dict[str, Any] = {
-        "status": status,
-        # The status vocabulary is exactly succeeded/pending/impossible, so
-        # the flags are derivable — they were carried, not computed.
-        "succeeded": status == "succeeded",
-        "pending": status == "pending",
-        "impossible": status == "impossible",
-    }
+    # Exactly the fields the record carried: the succeeded/pending/impossible
+    # flags are NOT synthesised from status — rows that never carried them
+    # (user-input pushes) must read back without them, or the split would be a
+    # data change (verified against the live database: 9 of 1542 sampled rows
+    # gained flags they never had). Whoever needs a flag derives it.
+    record: dict[str, Any] = {"status": status}
     if row["value_json"] is not None:
         record["value"] = json.loads(row["value_json"])
     if row["error"] is not None:

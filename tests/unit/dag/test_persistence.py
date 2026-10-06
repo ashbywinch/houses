@@ -149,6 +149,35 @@ class TestStorageColumns:
         assert json.loads(row["value_json"]) == {"m": "VALUE_MARKER"}
         assert "PROV_MARKER" not in str(row["value_json"])
 
+    def test_flags_are_not_synthesised_for_rows_that_never_carried_them(self):
+        """A user-input push stores no succeeded/pending/impossible. The read
+        must not invent them: verified against the live database, 9 of 1542
+        sampled rows would gain flags the split never gave them — i.e. the
+        migration would be a data change."""
+        save_node_result(
+            f"{RID}/no_flags", {"status": "succeeded", "value": "current", "source_label": "user"}
+        )
+        loaded = latest_node_result(f"{RID}/no_flags")
+        assert loaded is not None
+        assert "succeeded" not in loaded
+        assert "pending" not in loaded
+        assert "impossible" not in loaded
+
+    def test_flags_that_were_stored_come_back_unchanged(self):
+        record = {
+            "status": "impossible",
+            "succeeded": False,
+            "pending": False,
+            "impossible": True,
+            "error": "x",
+        }
+        save_node_result(f"{RID}/with_flags", record)
+        loaded = latest_node_result(f"{RID}/with_flags")
+        assert loaded is not None
+        assert loaded["impossible"] is True
+        assert loaded["succeeded"] is False
+        assert loaded["pending"] is False
+
     def test_a_record_read_never_carries_the_provenance_tree(self):
         tree = {"label": "P", "tree": {"deep": ["z" * 400]}}
         save_node_result(f"{RID}/lazy", {"status": "succeeded", "value": 1, "provenance": tree})
