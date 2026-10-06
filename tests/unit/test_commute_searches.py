@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 from tools.commute.rightmove_url import parse_search_url
 from tools.commute.searches import (
     SearchArtifacts,
     SearchOptions,
+    _js_embed,
     build_searches,
     nearest_station_name,
     shed_to_searches,
@@ -227,3 +230,15 @@ def test_shed_to_searches_excludes_non_kept_station_cells():
         ),
     )
     assert payload["searches"] == []
+
+
+def test_a_hostile_search_name_cannot_close_the_script_block():
+    """The map HTML embeds the searches as JSON inside a <script>. json.dumps
+    escapes quotes but not "</script>", so the embed escapes the three
+    characters that can break out — and the value still round-trips."""
+    hostile = "</script><script>alert(1)</script>"
+    embedded = _js_embed({"name": hostile, "url": "https://x.test/?a=1&b=2"})
+
+    assert "<" not in embedded, "no raw angle bracket may reach the script block"
+    assert embedded.count("\\u003c") == hostile.count("<"), "every < became the escape"
+    assert json.loads(embedded)["name"] == hostile, "and the value still round-trips"

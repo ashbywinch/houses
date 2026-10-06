@@ -162,6 +162,23 @@ def _same_searches(existing: SearchesPayload, new: SearchesPayload) -> bool:
     return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
 
+def _js_embed(value: object) -> str:
+    """JSON for embedding inside a <script> in the generated map HTML.
+
+    `json.dumps` escapes quotes but NOT the characters that close a script
+    element, so a search name carrying "</script><script>…" (a Rightmove
+    payload, a hand-edited config) would break out of the block and execute in
+    the page a developer opens. Escape the three that can: the result is still
+    valid JSON and parses back to the same value.
+    """
+    return (
+        json.dumps(value)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
 class SearchArtifacts:
     """Writes the commute search set's artifacts into one output directory.
 
@@ -210,7 +227,9 @@ class SearchArtifacts:
         for s in searches:
             coords = [[lat, lon] for lat, lon in s["polygon"]]
             # lucidlint: ignore record-shape the popup record is embedded in the map HTML (coding-standards.md)
-            rects_js.append(json.dumps({"name": s["name"], "url": s["rightmove_url"], "coords": coords}))
+            rects_js.append(
+                _js_embed({"name": s["name"], "url": s["rightmove_url"], "coords": coords})
+            )
         outlines_js = [[[lat, lon] for lat, lon in c["outline"]] for c in payload["components"]]
         html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Commute search coverage</title>
@@ -234,7 +253,9 @@ for (const r of rects) {
 }
 </script></body></html>
 """
-        html = html.replace("__RECTS__", "[" + ",".join(rects_js) + "]").replace("__OUTLINES__", repr(outlines_js))
+        html = html.replace("__RECTS__", "[" + ",".join(rects_js) + "]").replace(
+            "__OUTLINES__", _js_embed(outlines_js)
+        )
         (self.out_dir / "searches.html").write_text(html)
 
 

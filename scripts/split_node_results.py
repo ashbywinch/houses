@@ -136,7 +136,11 @@ def convert_row(conn: sqlite3.Connection, row_id: int, raw: bytes | str, present
     # the blob column is deliberately excluded: it holds the legacy original,
     # intact until the drop, so a half-converted database still reads with the
     # previous artifact.
-    columns = values.writable_columns(present, include_blob=False)
+    # FILLED columns, not merely writable ones: a row the new app wrote while
+    # this column still existed keeps its provenance tree in provenance_z and a
+    # mirror blob that deliberately has no provenance — writing every writable
+    # column would put NULL over the only copy of the tree.
+    columns = values.filled_columns(present, include_blob=False)
     assignments = ", ".join(f"{column}=?" for column in columns)
     conn.execute(
         f"UPDATE node_results SET {assignments} WHERE id=?",

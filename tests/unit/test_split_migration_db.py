@@ -135,6 +135,49 @@ def test_rows_that_are_not_json_are_reported_not_dropped(tmp_path):
     conn.close()
 
 
+def test_a_mid_schema_row_keeps_the_provenance_it_already_has(tmp_path):
+    """The data-loss case: the app writes while the legacy column still exists.
+
+    Such a row has its tree in ``provenance_z`` and a ``result_json`` mirror
+    that deliberately has NO provenance. Converting it from the blob must not
+    write NULL over the only copy of the tree — so the migration writes only
+    the columns the blob actually carries.
+    """
+    from dag import persistence as per
+
+    db = tmp_path / "mid-schema.db"
+    conn = sqlite3.connect(db)
+    conn.execute(SCHEMA)  # the legacy table keeps its `id`
+    migration.ensure_split_columns(conn)  # …and the app has since added the split columns
+    tree = {"label": "the only copy", "tree": {"couple": {"value": "1308.06"}}}
+    mirror = {"status": "succeeded", "value": {"couple": {"value": "1308.06", "approx": False}}}
+    conn.execute(
+        "INSERT INTO node_results (node_id, status, value_json, provenance_z, result_json,"
+        " dep_timestamps, created_at, code_version) VALUES (?,?,?,?,?,?,?,?)",
+        (
+            "p1/delta",
+            "succeeded",
+            json.dumps(mirror["value"]),
+            per.compress_result(json.dumps(tree)),
+            per.compress_result(json.dumps(mirror)),
+            "{}",
+            "2026-10-01T00:00:00+00:00",
+            "v1",
+        ),
+    )
+    conn.commit()
+
+    result = migration.apply_migration(conn, backup_path=None, verify=False)
+
+    assert result.ok, "the row converts cleanly"
+    stored = conn.execute(
+        "SELECT provenance_z FROM node_results WHERE node_id='p1/delta'"
+    ).fetchone()[0]
+    assert stored is not None, "the tree the app wrote must survive the migration"
+    assert json.loads(per.decompress_result(stored)) == tree
+    conn.close()
+
+
 def test_a_blob_that_parses_but_is_not_a_record_is_reported(tmp_path):
     """JSON that is not an object (a bare string, array, number) cannot be
     read as a record — `"value" in "some value"` is a substring test, not a

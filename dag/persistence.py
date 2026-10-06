@@ -230,6 +230,14 @@ class StoredColumns:
     extra_json: str | None
     result_json: bytes
 
+    filled: frozenset[str] = frozenset()
+    """The columns THIS record's keys populated.
+
+    Not the same as "writable": a writer that deliberately clears a field
+    (an error that no longer applies) passes None and means it. The migration
+    needs the distinction — see ``filled_columns``.
+    """
+
     ORDER: ClassVar[tuple[str, ...]] = (
         "status",
         "value_json",
@@ -245,6 +253,23 @@ class StoredColumns:
     def for_columns(self, columns: Sequence[str]) -> tuple[object, ...]:
         """The values in the caller's column order."""
         return tuple(getattr(self, column) for column in columns)
+
+    def filled_columns(self, present: Collection[str], *, include_blob: bool = True) -> tuple[str, ...]:
+        """The writable columns this record actually POPULATES.
+
+        The migration needs this and nothing else does. A row the new code
+        wrote while the legacy column still existed keeps its provenance tree
+        in ``provenance_z`` and a mirror blob WITHOUT ``provenance`` (the
+        mirror is deliberately provenance-free); converting that row from its
+        blob would otherwise write NULL over the only copy of the tree. For a
+        pre-split row the blob carries everything, so this writes the same
+        columns as before.
+        """
+        return tuple(
+            column
+            for column in self.writable_columns(present, include_blob=include_blob)
+            if column in self.filled
+        )
 
     def writable_columns(self, present: Collection[str], *, include_blob: bool = True) -> tuple[str, ...]:
         """The columns of this record's shape that *present* has, in order.
@@ -267,7 +292,23 @@ def record_columns(record: dict[str, Any]) -> StoredColumns:
     mapped = {*_PLAIN_COLUMN_KEYS, "value", "error_detail", PROVENANCE_KEY}
     extra = {k: v for k, v in record.items() if k not in mapped}
     plain = {key: record.get(key) for key in _PLAIN_COLUMN_KEYS}
+    filled = frozenset(
+        column
+        for column, present in (
+            ("status", "status" in record),
+            ("value_json", "value" in record),
+            ("error", "error" in record),
+            ("error_detail_json", "error_detail" in record),
+            ("source_url", "source_url" in record),
+            ("source_label", "source_label" in record),
+            ("provenance_z", provenance is not None),
+            ("extra_json", bool(extra)),
+            ("result_json", True),
+        )
+        if present
+    )
     return StoredColumns(
+        filled=filled,
         status=plain["status"],
         value_json=json.dumps(record["value"], cls=DagJSONEncoder) if "value" in record else None,
         error=plain["error"],
@@ -337,6 +378,11 @@ def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
     return record
 
 
+_column_cache_lock = threading.Lock()
+"""`_get_db` hands each thread its own connection, so the column cache (and the
+split-ensured set) is touched concurrently: the connection and its column list
+are written as a PAIR and must not tear."""
+
 _last_columns_conn: sqlite3.Connection | None = None
 _last_columns: tuple[str, ...] = ()
 """The most recent connection's column list.
@@ -356,17 +402,20 @@ the answer (``ensure_split_columns``).
 def _invalidate_column_cache() -> None:
     """Drop the cached column list — call after ANY DDL on node_results."""
     global _last_columns_conn, _last_columns
-    _last_columns_conn = None
-    _last_columns = ()
+    with _column_cache_lock:
+        _last_columns_conn = None
+        _last_columns = ()
 
 
 def _table_columns(conn: sqlite3.Connection) -> tuple[str, ...]:
     global _last_columns_conn, _last_columns
-    if conn is _last_columns_conn:
-        return _last_columns
-    _last_columns_conn = conn
-    _last_columns = tuple(row[1] for row in conn.execute("PRAGMA table_info(node_results)"))
-    return _last_columns
+    with _column_cache_lock:
+        if conn is _last_columns_conn:
+            return _last_columns
+        columns = tuple(row[1] for row in conn.execute("PRAGMA table_info(node_results)"))
+        _last_columns_conn = conn
+        _last_columns = columns
+        return columns
 
 
 
@@ -505,12 +554,12 @@ def init_db(db_path: str | None = None) -> None:
     """Initialise the SQLite database schema, migrating older databases."""
     global DB_PATH
     if db_path:
-        new_path = Path(db_path)
-        if new_path != DB_PATH:
-            # A schema cache belongs to ONE database; pointing at another
-            # (standby switch, --restore) must not serve the old shape.
-            _reset_caches()
-        DB_PATH = new_path
+        DB_PATH = Path(db_path)
+    # Startup is the one moment the caches can be dropped for free, and the
+    # file at a path can have been REPLACED (a restore in place) — a cache
+    # keyed by path alone would then serve the previous database's shape and
+    # skip re-ensuring the split columns.
+    _reset_caches()
     conn = _get_db()
     conn.execute(
         """
