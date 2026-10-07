@@ -131,10 +131,11 @@ def _reset_caches() -> None:
     schema (a pre-split table to prove legacy rows still read); the caches
     are keyed by path, so they must be dropped with it.
     """
-    _split_ensured.clear()
-    global _last_columns_conn, _last_columns
-    _last_columns_conn = None
-    _last_columns = ()
+    with _column_cache_lock:
+        _split_ensured.clear()
+        global _last_columns_conn, _last_columns
+        _last_columns_conn = None
+        _last_columns = ()
 
 
 def compress_result(text: str) -> bytes:
@@ -204,10 +205,15 @@ def _ensure_split_columns() -> None:
     (the same pattern as the code_version column) — the hottest read path must
     not PRAGMA on every call."""
     key = str(DB_PATH)
-    if key in _split_ensured:
-        return
-    ensure_split_columns(_get_db())  # invalidates the column cache itself
-    _split_ensured.add(key)
+    # The check-and-add is a unit: two threads passing the check would both
+    # run ensure_split_columns and the second ALTER would fail on a duplicate
+    # column name. The DDL sits in the same lock; a few milliseconds at
+    # startup, on the once-per-process path.
+    with _column_cache_lock:
+        if key in _split_ensured:
+            return
+        ensure_split_columns(_get_db())  # invalidates the column cache itself
+        _split_ensured.add(key)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -378,7 +384,7 @@ def read_node_record(row: sqlite3.Row) -> dict[str, Any]:
     return record
 
 
-_column_cache_lock = threading.Lock()
+_column_cache_lock = threading.RLock()
 """`_get_db` hands each thread its own connection, so the column cache (and the
 split-ensured set) is touched concurrently: the connection and its column list
 are written as a PAIR and must not tear."""
