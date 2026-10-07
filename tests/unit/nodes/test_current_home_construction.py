@@ -91,3 +91,26 @@ async def test_a_late_reprice_of_the_current_home_rederives_the_baseline(_sqlite
     assert baseline is not None, "a re-price of the current home must re-derive the baseline"
     assert baseline.rid == "p100"
     assert baseline.address == "31 Isambard Road, Southall"
+
+def test_the_baseline_provenance_value_projects_to_a_tree():
+    """The DAG's projector walks a projected value BY TYPE (dag/attempt.py):
+    dict recurses; a record class must expose to_provenance_value() — a
+    Mapping satisfies neither. This is the regression the smoke box found:
+    settings/current_home went impossible with "value of type
+    BaselineProvenanceValue has no provenance projection"."""
+    from dag.attempt import project_value
+    from houses.nodes.current_home_node import MonthlyBaseline
+
+    baseline = MonthlyBaseline(
+        rid="111",
+        address="1 Test St",
+        group_value={},
+        others_rent_paid=0.0,
+    )
+
+    assert project_value(baseline.to_provenance_value()) == {
+        "rid": "111",
+        "address": "1 Test St",
+        "couple": None,
+        "others": None,
+    }

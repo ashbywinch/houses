@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, override
+from typing import Any, TypedDict, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -43,9 +43,18 @@ class MonthlySide(WireRecord):
     approx: bool
 
 
-@dataclass(frozen=True)
-class BaselineProvenanceValue(WireRecord):
-    """The baseline as the provenance tree states it."""
+class BaselineProvenanceValue(TypedDict):
+    """The baseline as the provenance TREE states it.
+
+    A plain dict, deliberately — not a WireRecord. The DAG's provenance
+    projector (``dag.attempt.project_value``) walks a projected value BY TYPE:
+    a dict recurses, a list/tuple recurses, anything else must expose
+    ``to_provenance_value()``. A record class is a Mapping, so it satisfies
+    neither and the projection raises "value of type X has no provenance
+    projection" — found on the smoke box: settings/current_home went
+    impossible with exactly that message. Wire values (the frontend contract)
+    keep their records; provenance values stay dicts.
+    """
 
     rid: str
     address: str
