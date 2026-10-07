@@ -16,6 +16,44 @@ model = "openai/dynamic/fallback2"
 ai_timeout = 1800 # reviews on large diffs take minutes; the upstream default is too low
 custom_model_max_tokens = 128000
 max_model_tokens = 128000
+# The route's models reason by default, and reasoning tokens come OUT of the
+# completion budget. On the 2026-10-06 review of fix/pelias-settlement-layers
+# the model spent 10,386 of its 11,121 output tokens reasoning and returned no
+# parseable mapping — a 200 OK, so nothing looked like an error (gateway log,
+# log id 01M48M4E7SY1XST1H7E27SXGTX): the run hard-fails with "model response
+# did not contain a non-empty review mapping". Measured on this route the same
+# day: 752/814 output tokens were reasoning without the switch, 0/109 with it.
+# The app answers the same wall the same way (houses/settings.py:65 sends
+# reasoning={"enabled": false} for town descriptions); this is that switch for
+# the bot. `additional_reasoning_effort_models` is what makes the parameter
+# reach the wire, measured as an A/B on 2026-10-06 (same config otherwise,
+# PR-Agent's own log line, litellm_ai_handler.py:2550): with ["dynamic/fallback2"]
+# present it logs "Adding reasoning_effort with value none to model
+# openai/dynamic/fallback2" and the review call's gateway row shows reasoning
+# tokens 0; with the list empty the line does not appear and the parameter is
+# never sent. The entry is needed because litellm has no metadata for a
+# Cloudflare dynamic route, so PR-Agent's `_litellm_supports_reasoning` probe
+# fails for this id (only the entry list — matched by exact id or path suffix —
+# or litellm's own metadata can open that branch).
+# Tradeoff, accepted: reviews reason less, so an opinion is thinner than a
+# reasoner's — but a thin review beats a run that fails.
+reasoning_effort = "none"
+additional_reasoning_effort_models = ["dynamic/fallback2"]
+# Retries: the gateway's are off by design (skill://cloudflare-ai-gateway) and
+# this chain is the client's — `retry_with_fallback_models` tries one model per
+# entry and never repeats a model (pr_processing.py at the pinned SHA), so an
+# empty list means the run has exactly one attempt. It stays empty because a
+# second member has to be a model that actually answers, and none of the
+# obvious candidates can be named from here (measured 2026-10-06, all against
+# this gateway): `dynamic/fallback2` is 200, but the model it resolves to
+# (`deepseek/deepseek-v4-flash`) returns 402 Insufficient Balance when
+# addressed directly, and `z-ai/glm-4.6v` returns 400 Model not found — the
+# route's provider keys and funding do not carry over to the model id. The
+# routes API returns an empty result for this token, so a second route name
+# cannot be read from here either.
+# Known gap, unchanged by this file: a transient 429/5xx on the single route
+# still fails the review run. Fill this list only with an id verified to answer
+# (a one-token call through the gateway is enough to prove it).
 fallback_models = []
 # Sampling temperature — raised from the 0.2 default to 0.8 (2026-10-02).
 # The /improve (suggestions) run looped in thought for 25 minutes at 0.2:

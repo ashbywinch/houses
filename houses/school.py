@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -80,7 +81,7 @@ class School:
             return None
 
     @classmethod
-    def from_GIAS_row(cls, row: dict) -> School:  # noqa: N802  # from_GIAS_row deliberately mirrors the GIAS acronym from the source dataset
+    def from_GIAS_row(cls, row: Mapping[str, str]) -> School:  # noqa: N802  # from_GIAS_row deliberately mirrors the GIAS acronym from the source dataset
         """Parse a GIAS CSV row into a School.
 
         ``coords`` is set to the corrected (building-level) coordinates

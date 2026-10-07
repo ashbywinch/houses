@@ -9,8 +9,9 @@ household finances.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import override
+from typing import Any, override
 
 from money import Money
 from pint import Quantity
@@ -78,7 +79,7 @@ class _PetrolAugmentJson:
     """The serialized petrol-augment payload: the base node record with
     the entry-level ``is_child`` flag appended last."""
 
-    base: dict
+    base: Mapping[str, Any]
     is_child: bool
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
@@ -203,7 +204,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         )
         return Attempt.succeeded(new_commute)
 
-    async def _attach_is_child(self, base: dict) -> _PetrolAugmentJson:
+    async def _attach_is_child(self, base: Mapping[str, Any]) -> _PetrolAugmentJson:
         """Annotate a serialized payload with the entry-level ``is_child`` flag."""
         attempt = await self.attempt()
         value = attempt.value_or_none() if attempt.succeeded else None

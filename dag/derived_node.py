@@ -19,7 +19,7 @@ from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, 
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
 from dag.node import Node, NodeJson
-from dag.persistence import latest_node_result
+from dag.persistence import latest_node_provenance
 from dag.scheduler import assert_mutation_allowed, get_scheduler
 from dag.signals import Connection, Slot
 
@@ -884,7 +884,7 @@ class DerivedNode(Node[T], Generic[T]):
         result: Attempt,
         dep_attempts: list[Attempt],
         active_deps: tuple[Node, ...],
-        dep_timestamps: dict,
+        dep_timestamps: dict[str, str],
     ) -> None:
         """Store the attempt, stamp its inputs, persist — the shared tail.
 
@@ -956,7 +956,7 @@ class DerivedNode(Node[T], Generic[T]):
         the node and the reason, and the read still answers (the live
         leaf) rather than failing the whole tree.
         """
-        prov_dict = (latest_node_result(node_id) or {}).get("provenance")
+        prov_dict = latest_node_provenance(node_id)
         if not (isinstance(prov_dict, dict) and prov_dict.get("label")):
             return None
         try:

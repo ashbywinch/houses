@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyList from '../PropertyList.vue'
+import { useAuthStore } from '../../stores/auth'
 import type { MonthlyBaseline, PropertySummary } from '../../types'
 
 vi.mock('../../services/api', () => ({
@@ -23,6 +24,7 @@ const mockMap = {
   invalidateSize: vi.fn(),
   on: vi.fn(),
   removeLayer: vi.fn(),
+  hasLayer: vi.fn(() => false),
 }
 vi.mock('leaflet', () => ({
   default: {
@@ -40,6 +42,7 @@ vi.mock('leaflet', () => ({
 vi.mock('leaflet/dist/leaflet.css', () => ({}))
 
 import * as api from '../../services/api'
+import L from 'leaflet'
 
 const mockData: Record<string, PropertySummary> = {
   'prop-a': {
@@ -108,8 +111,31 @@ const mockData: Record<string, PropertySummary> = {
   },
 }
 
+/** A resolved signed-in session — what /api/auth/me returns before the
+ *  index is allowed to paint property data. */
+function resolveAuth() {
+  const auth = useAuthStore()
+  auth.user = {
+    email: 'ashby@example.com', name: 'Ashby', picture: '',
+    person: 'Ashby', person_id: '1', is_superuser: false,
+  }
+  auth.loading = false
+}
+
+/** Mount the index the way the router now does: the auth check has
+ *  already answered (the gate is asserted in the router test). */
+async function mountIndex() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  resolveAuth()
+  const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
+  await flushPromises()
+  return wrapper
+}
+
 function initStore() {
   setActivePinia(createPinia())
+  resolveAuth()
   const store = usePropertiesStore()
   store.rids = ['prop-a', 'prop-b', 'prop-c']
   store.summaries = mockData as any
@@ -211,6 +237,7 @@ describe('PropertyList filtering', () => {
     const store = initStore()
     store.rids = ['prop-a', 'prop-d']
     const wrapper = mount(PropertyList)
+    await flushPromises() // the listing waits for the session to settle first
     await wrapper.find('.search-input').setValue('school')
     expect(wrapper.text()).toContain('40 School Ln')
     expect(wrapper.text()).not.toContain('10 Cheap St')
@@ -335,6 +362,7 @@ describe('PropertyList sort and filter sheets', () => {
   async function mountList() {
     const pinia = createPinia()
     setActivePinia(pinia)
+    resolveAuth()
     const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
     await flushPromises()
     return wrapper
@@ -387,6 +415,7 @@ describe('PropertyList weekly commute sort', () => {  beforeEach(() => {
   async function mountWithCommutes(commutes: Record<string, Record<string, ReturnType<typeof commute>>>) {
     const pinia = createPinia()
     setActivePinia(pinia)
+    resolveAuth()
     const store = usePropertiesStore()
     const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
     await flushPromises() // let onMounted's loadAll settle, then take over
@@ -442,6 +471,7 @@ describe('PropertyList map tab markers', () => {
   it('passes a marker to the map for each property with location data', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    resolveAuth()
     const store = usePropertiesStore()
     store.rids = ['prop-a', 'prop-b']
     store.summaries = {
@@ -490,6 +520,7 @@ describe('PropertyList map tab markers', () => {
 
     const pinia = createPinia()
     setActivePinia(pinia)
+    resolveAuth()
     const wrapper = mount(PropertyList, {
       global: { plugins: [pinia] },
     })
@@ -516,6 +547,7 @@ describe('PropertyList map pins are interactive', () => {
   it('each marker links to the property detail page', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    resolveAuth()
     const wrapper = mount(PropertyList, {
       global: { plugins: [pinia] },
     })
@@ -538,6 +570,7 @@ describe('PropertyList map pins are interactive', () => {
   it('marker labels show the property price', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    resolveAuth()
     const wrapper = mount(PropertyList, {
       global: { plugins: [pinia] },
     })
@@ -605,6 +638,7 @@ async function mountWithBaseline(summaries: Record<string, PropertySummary>) {
   vi.mocked(api.fetchAllSummaries).mockResolvedValue(summaries)
   const pinia = createPinia()
   setActivePinia(pinia)
+  resolveAuth()
   const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
   await flushPromises()
   // loadSettings (async, mocked empty settings) has settled by now —
@@ -711,8 +745,10 @@ describe('PropertyList — controls row never clips on narrow screens (defect 2)
   })
 
   async function mountList() {
-    setActivePinia(createPinia())
-    const wrapper = mount(PropertyList, { global: { plugins: [createPinia()] } })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    resolveAuth()
+    const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
     await flushPromises()
     return wrapper
   }
@@ -743,3 +779,70 @@ describe('PropertyList — controls row never clips on narrow screens (defect 2)
 // The narrow-screen contract lives in CSS, which jsdom cannot lay out —
 // bundle the co-located stylesheet as text and assert against it.
 import NarrowStylesCss from '../PropertyList.vue?raw'
+
+// ── One owner per fetch (the index load) ────────────────────────────
+
+function isochroneResponse(layers: unknown[] = []) {
+  return { ok: true, json: async () => ({ layers }) } as Response
+}
+
+describe('PropertyList — the index load fetches what-if exactly once', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData)
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
+  })
+
+  it('issues one /api/what-if/state request, and opening the panel adds none', async () => {
+    const wrapper = await mountIndex()
+    expect(api.fetchWhatIfState).toHaveBeenCalledTimes(1)
+
+    // The panel reads store.whatIfActive — unfurling it (which re-reads
+    // the family settings) must not ask for the mode again.
+    await wrapper.find('.whatif__toggle').trigger('click')
+    await flushPromises()
+    expect(api.fetchWhatIfState).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('PropertyList — isochrones belong to the map, not the index', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData)
+    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
+  })
+
+  it('requests no /api/map/isochrones on index load', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(isochroneResponse())
+    try {
+      await mountIndex()
+      expect(fetchSpy.mock.calls.some(c => String(c[0]).includes('/api/map/isochrones'))).toBe(false)
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
+  it('gives the map its layers when the map tab opens', async () => {
+    const coords = [[51.5, -0.1], [51.6, -0.2]]
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      isochroneResponse([
+        { name: 'Train shed', color: '#e11d48', visibleByDefault: true, polygons: [{ coords }] },
+      ]),
+    )
+    try {
+      const wrapper = await mountIndex()
+      expect(fetchSpy.mock.calls.some(c => String(c[0]).includes('/api/map/isochrones'))).toBe(false)
+
+      await wrapper.setData({ activeTab: 'map' })
+      await flushPromises()
+
+      expect(fetchSpy.mock.calls.some(c => String(c[0]).includes('/api/map/isochrones'))).toBe(true)
+      // The fetched layers reached the map: keyed, and drawn as polygons.
+      expect(wrapper.find('.mapview-key__name').text()).toBe('Train shed')
+      const polygon = L.polygon as unknown as { mock: { calls: unknown[][] } }
+      expect(polygon.mock.calls.some(c => JSON.stringify(c[0]) === JSON.stringify(coords))).toBe(true)
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+})

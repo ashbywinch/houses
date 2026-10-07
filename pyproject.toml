@@ -70,7 +70,8 @@ addopts = ["-m", "not e2e"]
 asyncio_mode = "auto"
 
 [tool.uv.sources]
-uk-property-apis = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git", subdirectory = "packages/apis" }
+# Vendored 2026-10-07 — the upstream git repo vanished (see vendored/PROVENANCE.md).
+uk-property-apis = { path = "vendored/uk_property_apis-0.1.0-py3-none-any.whl" }
 
 
 

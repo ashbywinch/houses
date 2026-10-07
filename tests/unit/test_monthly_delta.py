@@ -165,8 +165,13 @@ class TestDeltaVsHomeNode:
         registry = get_services().property_registry
         own = registry.get("880002").group_monthly_cost.latest_attempt().value_or_none()
         base = registry.get("880001").group_monthly_cost.latest_attempt().value_or_none()
-        expected = Decimal(str(own["couple"]["value"])) - Decimal(str(base["couple"]["value"]))
-        assert Decimal(value.couple.value) == expected
+        own_value = own["couple"]["value"]
+        base_value = base["couple"]["value"]
+        assert own_value is not None and base_value is not None
+        expected = Decimal(own_value) - Decimal(base_value)
+        delta_value = value.couple.value
+        assert delta_value is not None
+        assert Decimal(delta_value) == expected
         assert value.couple.approx is False
 
     def test_self_is_current_home_has_no_delta(self):
@@ -216,6 +221,7 @@ class TestDeltaVsHomeNode:
         before = _delta_value("880002")
         assert before is not None and before.couple is not None
         before_couple = before.couple.value
+        assert before_couple is not None
 
         base.rightmove_price.push(Money("400000", "GBP"), "test")
         flush_all()  # the price chain lands (stamp + signal)
@@ -227,8 +233,10 @@ class TestDeltaVsHomeNode:
 
         after = _delta_value("880002")
         assert after is not None and after.couple is not None
+        after_value = after.couple.value
+        assert after_value is not None
         prev = Decimal(before_couple)
-        now = Decimal(after.couple.value)
+        now = Decimal(after_value)
         assert now != prev, f"a baseline re-price must re-derive every delta ({prev} -> {now})"
 
 

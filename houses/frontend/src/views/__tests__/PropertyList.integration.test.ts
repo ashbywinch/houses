@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { usePropertiesStore } from '../../stores/properties'
+import { useAuthStore } from '../../stores/auth'
 import PropertyList from '../PropertyList.vue'
 import type { PropertySummary } from '../../types'
 
@@ -9,6 +10,7 @@ vi.mock('../../services/api', () => ({
   fetchAllSummaries: vi.fn(),
   fetchPropertyDetail: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue({}),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
   patchTriage: vi.fn(),
 }))
 
@@ -89,6 +91,10 @@ function makeRealisticData(): Record<string, PropertySummary> {
 
 function setupStore(data: Record<string, PropertySummary>) {
   setActivePinia(createPinia())
+  // The index paints property data only once /api/auth/me has resolved.
+  const auth = useAuthStore()
+  auth.user = { email: 'a@b.c', name: 'A', picture: '', person: null, person_id: null, is_superuser: false }
+  auth.loading = false
   const store = usePropertiesStore()
   store.rids = Object.keys(data)
   store.summaries = data

@@ -14,8 +14,12 @@ path, fails here instead of in production.
 
 from __future__ import annotations
 
+import httpx
+import pytest
+
+from houses import apigw
 from houses import ors_endpoints as endpoints
-from houses.apis.ors import ORSApi
+from houses.apis.ors import SETTLEMENT_LAYERS, ORSApi
 from houses.settings import settings
 
 # https://ask.openrouteservice.org/t/deprecating-api-openrouteservice-org-in-favour-of-api-heigit-org/7912
@@ -49,3 +53,60 @@ def test_nothing_points_at_the_deprecated_host():
         endpoints.PELIAS_REVERSE,
     ):
         assert DEPRECATED_HOST not in url
+
+
+class _TransientClient:
+    """httpx-shaped fake: a 429 (never cached — the unit cache stays clean)
+    that records the request params it was handed."""
+
+    def __init__(self) -> None:
+        self.params: dict[str, object] = {}
+
+    async def __aenter__(self) -> _TransientClient:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def request(
+        self, method: str, url: str, *args: object, **kwargs: object
+    ) -> httpx.Response:
+        sent = kwargs.get("params")
+        if isinstance(sent, dict):
+            self.params.update(sent)
+        return httpx.Response(429, request=httpx.Request(method, url))
+
+
+@pytest.mark.asyncio
+async def test_reverse_geocode_asks_for_settlements_not_streets():
+    """Unconstrained, Pelias reverse answers with the closest feature of any
+    kind — a house's own street, i.e. a 0-minute walk, which walkability's
+    plausibility gate rejects: houses whose address-derived town is a district
+    name (London, South Oxfordshire) silently lost walk_to_town. Ask for
+    settlements."""
+    client = _TransientClient()
+    with pytest.raises(apigw.GatewayHttpError):
+        await ORSApi().reverse_geocode(51.5, -0.1, _client_factory=lambda **k: client)
+    assert client.params, "no request params captured — the assertions below would be vacuous"
+    assert client.params.get("layers") == SETTLEMENT_LAYERS
+    assert "locality" in str(client.params.get("layers"))
+    assert "street" not in str(client.params.get("layers"))
+    assert "address" not in str(client.params.get("layers"))
+
+
+def test_a_trailing_slash_on_the_base_urls_is_normalised():
+    """Both bases are joined with a leading-slash path, so a configured
+    trailing slash would build a double slash (the gateway and ORS both 404
+    on one). Normalised at the setting, so callers just concatenate."""
+    from houses import ors_endpoints
+    from houses.settings import Settings
+
+    configured = Settings(
+        _env_file=None,
+        ors_base_url="https://api.heigit.org/",
+        llm_base_url="https://gateway.example/v1/acct/gw/compat/",
+    )
+    assert configured.ors_base_url == "https://api.heigit.org"
+    assert configured.llm_base_url == "https://gateway.example/v1/acct/gw/compat"
+    assert "//openrouteservice" not in f"{configured.ors_base_url}/openrouteservice"
+    assert ors_endpoints.ORS_DIRECTIONS.startswith("https://api.heigit.org/openrouteservice")

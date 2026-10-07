@@ -4,11 +4,15 @@ Gardens (the same hardening as the council-tax lookup). Regression:
 "address matched multiple properties" for a plain numbered house."""
 from __future__ import annotations
 
-from houses.epc import _match_cert
+from houses.epc import _EpcCertificateRow, _match_cert
 
 
-def _cert(address: str, band: str = "C") -> dict:
-    return {"addressLine1": address, "currentEnergyEfficiencyBand": band, "registrationDate": "2025-01-01"}
+def _cert(address: str, band: str = "C", registration: str = "2025-01-01") -> _EpcCertificateRow:
+    return {
+        "addressLine1": address,
+        "currentEnergyEfficiencyBand": band,
+        "registrationDate": registration,
+    }
 
 
 def test_numbered_building_matches_only_that_number():
@@ -92,8 +96,8 @@ def test_exact_prefix_locality_variants_collapse_newest_wins():
     ambiguous.  The newest registration wins (mirrors the council-tax
     band-collapse)."""
     certs = [
-        {**_cert("2 WILLOWMEAD GARDENS", band="B"), "registrationDate": "2023-06-01"},
-        {**_cert("2 WILLOWMEAD GARDENS, MARLOW", band="C"), "registrationDate": "2025-01-01"},
+        _cert("2 WILLOWMEAD GARDENS", band="B", registration="2023-06-01"),
+        _cert("2 WILLOWMEAD GARDENS, MARLOW", band="C", registration="2025-01-01"),
     ]
     a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
     assert a.succeeded, f"locality variants are the same building, got: {a.status}: {a.error}"

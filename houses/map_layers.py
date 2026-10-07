@@ -19,7 +19,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, cast
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,12 @@ class _LayerJson:
         return d
 
 
+class _UnionComponentWire(TypedDict, total=False):
+    """One union.json component as parsed — the wire shape."""
+
+    outline: Any
+
+
 @dataclass(frozen=True)
 class _UnionComponentJson:
     """One transit-shed component of union.json — the {outline} map shape."""
@@ -84,8 +90,14 @@ class _UnionComponentJson:
     outline: Any | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _UnionComponentJson:
+    def from_dict(cls, raw: _UnionComponentWire) -> _UnionComponentJson:
         return cls(outline=raw.get("outline"))
+
+
+class _UnionArtifactWire(TypedDict, total=False):
+    """union.json as parsed — the wire shape."""
+
+    components: list[_UnionComponentWire]
 
 
 @dataclass(frozen=True)
@@ -95,8 +107,14 @@ class _UnionArtifactJson:
     components: list[_UnionComponentJson]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _UnionArtifactJson:
+    def from_dict(cls, raw: _UnionArtifactWire) -> _UnionArtifactJson:
         return cls(components=[_UnionComponentJson.from_dict(c) for c in raw.get("components") or []])
+
+
+class _DriveDestinationWire(TypedDict, total=False):
+    """The {label} destination block of a drive search as parsed."""
+
+    label: str
 
 
 @dataclass(frozen=True)
@@ -106,8 +124,17 @@ class _DriveDestinationJson:
     label: str
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _DriveDestinationJson:
+    def from_dict(cls, raw: _DriveDestinationWire) -> _DriveDestinationJson:
         return cls(label=raw.get("label", ""))
+
+
+class _DriveSearchWire(TypedDict, total=False):
+    """One drive-searches entry as parsed — the wire shape."""
+
+    destination: _DriveDestinationWire
+    polygon: Any
+    name: str
+    rightmove_url: str
 
 
 @dataclass(frozen=True)
@@ -120,7 +147,7 @@ class _DriveSearchJson:
     rightmove_url: str
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _DriveSearchJson:
+    def from_dict(cls, raw: _DriveSearchWire) -> _DriveSearchJson:
         destination = raw.get("destination")
         return cls(
             destination=_DriveDestinationJson.from_dict(destination) if destination else None,
@@ -130,6 +157,12 @@ class _DriveSearchJson:
         )
 
 
+class _DriveSearchesWire(TypedDict, total=False):
+    """drive_searches.json as parsed — the wire shape."""
+
+    searches: list[_DriveSearchWire]
+
+
 @dataclass(frozen=True)
 class _DriveSearchesJson:
     """The drive_searches.json artifact root — the {searches} shape."""
@@ -137,8 +170,16 @@ class _DriveSearchesJson:
     searches: list[_DriveSearchJson]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _DriveSearchesJson:
+    def from_dict(cls, raw: _DriveSearchesWire) -> _DriveSearchesJson:
         return cls(searches=[_DriveSearchJson.from_dict(s) for s in raw.get("searches", [])])
+
+
+class _IntersectionSearchWire(TypedDict, total=False):
+    """One intersection search as parsed — the wire shape."""
+
+    polygon: Any
+    name: str
+    rightmove_url: str
 
 
 @dataclass(frozen=True)
@@ -150,12 +191,18 @@ class _IntersectionSearchJson:
     rightmove_url: str
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _IntersectionSearchJson:
+    def from_dict(cls, raw: _IntersectionSearchWire) -> _IntersectionSearchJson:
         return cls(
             polygon=raw["polygon"],
             name=raw.get("name", ""),
             rightmove_url=raw.get("rightmove_url", ""),
         )
+
+
+class _IntersectionArtifactWire(TypedDict, total=False):
+    """intersection.json as parsed — the wire shape."""
+
+    searches: list[_IntersectionSearchWire]
 
 
 @dataclass(frozen=True)
@@ -165,7 +212,7 @@ class _IntersectionArtifactJson:
     searches: list[_IntersectionSearchJson]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _IntersectionArtifactJson:
+    def from_dict(cls, raw: _IntersectionArtifactWire) -> _IntersectionArtifactJson:
         return cls(searches=[_IntersectionSearchJson.from_dict(s) for s in raw.get("searches") or []])
 
 
@@ -186,7 +233,7 @@ def _union_layer(union_path: Path) -> list[_LayerJson]:
     layers = []
     if not union:
         return layers
-    artifact = _UnionArtifactJson.from_dict(union)
+    artifact = _UnionArtifactJson.from_dict(cast(_UnionArtifactWire, union))
     if artifact.components:
         layers.append(
             _LayerJson(
@@ -208,7 +255,7 @@ def _drive_layers(drive_path: Path) -> list[_LayerJson]:
     layers = []
     if not drive:
         return layers
-    artifact = _DriveSearchesJson.from_dict(drive)
+    artifact = _DriveSearchesJson.from_dict(cast(_DriveSearchesWire, drive))
     drive_by_label = {}
     for search in artifact.searches:
         label = search.destination.label if search.destination else ""
@@ -234,7 +281,7 @@ def _intersection_layer(intersection_path: Path) -> list[_LayerJson]:
     layers = []
     if not intersection:
         return layers
-    artifact = _IntersectionArtifactJson.from_dict(intersection)
+    artifact = _IntersectionArtifactJson.from_dict(cast(_IntersectionArtifactWire, intersection))
     if artifact.searches:
         layers.append(
             _LayerJson(

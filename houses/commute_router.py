@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """Commute routing — unified interface for walking, transit, and driving.
 
 The caller describes the traveler; ``CommuteRouter.get_commute`` handles the rest.
@@ -9,9 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, TypedDict, runtime_checkable
 
 import httpx
 import uk_postcodes_parsing as _ukp
@@ -91,6 +90,52 @@ class _RoutesBody:
         )
 
 
+class _RouteAgencyWire(TypedDict, total=False):
+    """A Google Routes transit agency as the API sends it: the ``{name}`` shape."""
+
+    name: str | None
+
+
+class _RouteTransitLineWire(TypedDict, total=False):
+    """A Google Routes transit line as the API sends it: the
+    ``{nameShort, name, agencies}`` shape."""
+
+    nameShort: str | None
+    name: str | None
+    agencies: list[_RouteAgencyWire]
+
+
+class _RouteTransitDetailsWire(TypedDict, total=False):
+    """A Google Routes step's transitDetails as the API sends it: the
+    ``{transitLine}`` shape."""
+
+    transitLine: _RouteTransitLineWire
+
+
+class _RouteStepWire(TypedDict, total=False):
+    """A Google Routes route step as the API sends it: the
+    ``{travelMode, staticDuration, transitDetails}`` shape."""
+
+    travelMode: str | None
+    staticDuration: str
+    transitDetails: _RouteTransitDetailsWire
+
+
+class _RouteLegWire(TypedDict, total=False):
+    """A Google Routes route leg as the API sends it: the ``{steps}`` shape."""
+
+    steps: list[_RouteStepWire]
+
+
+class _RouteWire(TypedDict, total=False):
+    """A Google Routes route as the API sends it: the
+    ``{duration, distanceMeters, legs}`` shape."""
+
+    duration: str
+    distanceMeters: int
+    legs: list[_RouteLegWire]
+
+
 @dataclass(frozen=True)
 class _RoutesResponseJson:
     """The Google Routes directions response root — the {routes} wire shape."""
@@ -98,7 +143,9 @@ class _RoutesResponseJson:
     routes: list[_RouteJson]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RoutesResponseJson:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _RoutesResponseJson:
+        # The transport seam hands back raw JSON, so the root arrives untyped;
+        # every nested record below names its own wire shape.
         return cls(routes=[_RouteJson.from_dict(route) for route in raw.get("routes") or []])
 
 
@@ -111,7 +158,7 @@ class _RouteJson:
     legs: list[_RouteLegJson]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RouteJson:
+    def from_dict(cls, raw: _RouteWire) -> _RouteJson:
         return cls(
             duration=raw.get("duration", "0s"),
             distance_meters=raw.get("distanceMeters", 0),
@@ -126,7 +173,7 @@ class _RouteLegJson:
     steps: list[_RouteStepJson]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RouteLegJson:
+    def from_dict(cls, raw: _RouteLegWire) -> _RouteLegJson:
         return cls(steps=[_RouteStepJson.from_dict(step) for step in raw.get("steps") or []])
 
 
@@ -139,7 +186,7 @@ class _RouteStepJson:
     transit_details: _RouteTransitDetailsJson | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RouteStepJson:
+    def from_dict(cls, raw: _RouteStepWire) -> _RouteStepJson:
         return cls(
             travel_mode=raw.get("travelMode"),
             static_duration=raw.get("staticDuration", "0s"),
@@ -154,7 +201,7 @@ class _RouteTransitDetailsJson:
     transit_line: _RouteTransitLineJson | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RouteTransitDetailsJson:
+    def from_dict(cls, raw: _RouteTransitDetailsWire) -> _RouteTransitDetailsJson:
         line = raw.get("transitLine")
         return cls(transit_line=_RouteTransitLineJson.from_dict(line) if line else None)
 
@@ -168,7 +215,7 @@ class _RouteTransitLineJson:
     agencies: list[_RouteAgencyJson]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RouteTransitLineJson:
+    def from_dict(cls, raw: _RouteTransitLineWire) -> _RouteTransitLineJson:
         return cls(
             name_short=raw.get("nameShort"),
             name=raw.get("name"),
@@ -183,7 +230,7 @@ class _RouteAgencyJson:
     name: str | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _RouteAgencyJson:
+    def from_dict(cls, raw: _RouteAgencyWire) -> _RouteAgencyJson:
         return cls(name=raw.get("name"))
 
 

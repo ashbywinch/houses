@@ -44,7 +44,7 @@ class SessionClaims:
     @classmethod
 
     # (coding-standards.md)
-    def from_dict(cls, data: dict) -> SessionClaims:
+    def from_dict(cls, data: Mapping[str, Any]) -> SessionClaims:
         return cls(
             email=data["email"],
             name=data["name"],
@@ -121,7 +121,7 @@ class _ImpersonateRequest:
     @classmethod
 
     # (coding-standards.md)
-    def from_dict(cls, body: dict) -> _ImpersonateRequest:
+    def from_dict(cls, body: Mapping[str, Any]) -> _ImpersonateRequest:
         return cls(person=body.get("person"))
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)

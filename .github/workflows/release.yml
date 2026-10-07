@@ -481,7 +481,11 @@ jobs:
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}"
           # The GCS copy is now the archive; the runner's own <db>.pre-<basename>
           # backups live on the standby/owner box. Nothing further is deleted.
-        timeout-minutes: 45
+        # Restore + the migration pair. The node_results split migration is a
+        # one-off mass rewrite (measured ~70 min for a 246k-row database: every
+        # row's provenance is decompressed and recompressed individually), so
+        # this window must hold it until every box has been through it once.
+        timeout-minutes: 120
       - name: Flip the L4 rules to the new owner
         run: |
           set -euo pipefail
@@ -723,7 +727,9 @@ jobs:
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --restore $SOURCE"
-        timeout-minutes: 45
+        # Restore + the migration pair — the same one-off split migration as
+        # the cutover's rebase (see the window above).
+        timeout-minutes: 120
       - name: Record the surface the reviewer will look at
         run: |
           echo "REVIEW SURFACE: the approved box is FINAL (production role URL)."
@@ -889,7 +895,9 @@ jobs:
           PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
           ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
           IP=""
-          for attempt in $(seq 1 180); do
+          # 90 min, not 30: a fresh box's bootstrap restores the seed and then
+          # migrates it (243k legacy rows measured ~42 min on the box's copy).
+          for attempt in $(seq 1 540); do
             [ -n "$IP" ] || IP=$(gcloud compute instances describe "$REBUILD" --zone "$ZONE" --project "$PROJECT" \
               --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || true)
             OUT=$(ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
@@ -900,7 +908,7 @@ jobs:
             esac
             sleep 10
           done
-          echo "::error::the bootstrap did not complete in 30m — check the GCP console (serial output)"
+          echo "::error::the bootstrap did not complete in 90m — check the GCP console (serial output)"
           exit 1
         env:
           BOX_USER: ${{ secrets.BOX_USER }}

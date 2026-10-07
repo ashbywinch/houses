@@ -645,7 +645,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11.0" },
     { name = "setuptools", specifier = ">=82.0.1" },
     { name = "uk-postcodes-parsing", specifier = ">=2.1.0" },
-    { name = "uk-property-apis", git = "https://github.com/kubilay-yavuz/uk-property-intel.git?subdirectory=packages%2Fapis" },
+    { name = "uk-property-apis", path = "vendored/uk_property_apis-0.1.0-py3-none-any.whl" },
     { name = "uncertainties", specifier = ">=3.2.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
@@ -1435,12 +1435,23 @@ wheels = [
 [[package]]
 name = "uk-property-apis"
 version = "0.1.0"
-source = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git?subdirectory=packages%2Fapis#8a18d9209216ef2144eef64ef80de7c80194468e" }
+source = { path = "vendored/uk_property_apis-0.1.0-py3-none-any.whl" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "selectolax" },
     { name = "tenacity" },
+]
+wheels = [
+    { filename = "uk_property_apis-0.1.0-py3-none-any.whl", hash = "sha256:750b3d597d87b57130c061787ee1bd5cc0e0167cb0fcb74d98ba122d7f4cabf5" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "selectolax", specifier = ">=0.3.27" },
+    { name = "tenacity", specifier = ">=9.0" },
 ]
 
 [[package]]

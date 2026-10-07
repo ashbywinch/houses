@@ -21,12 +21,56 @@ from typing import Any, override
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from dag.persistence import WireRecord
 
 CURRENT_STATUS = "current"
 
 
+@dataclass(frozen=True)
+class GroupFigureWire(WireRecord):
+    """A raw group figure on the wire: the amount and its uncertainty."""
+
+    value: str | None
+    stddev: float
+
+
+@dataclass(frozen=True)
+class MonthlySide(WireRecord):
+    """One side of the monthly cost as the frontend's MonthlyDeltaSide reads
+    it: the human figure, and whether it carries an uncertainty."""
+
+    value: str | None
+    approx: bool
+
+
+@dataclass(frozen=True)
+class BaselineProvenanceValue(WireRecord):
+    """The baseline as the provenance tree states it."""
+
+    rid: str
+    address: str
+    couple: str | None
+    others: str | None
+
+
+@dataclass(frozen=True)
+class BaselineWire(WireRecord):
+    """The baseline as the wire states it (the contract the frontend reads)."""
+
+    rid: str
+    address: str
+    couple: MonthlySide
+    others: MonthlySide | None
+    others_rent_paid: float
+
+
+def _monthly_side(figure: GroupFigure) -> MonthlySide:
+    """Project an ingested figure onto the frontend's side shape."""
+    return MonthlySide(value=figure.value, approx=bool(figure.stddev))
+
+
 def _figure_text(raw: Any) -> str | None:
-    figure = _as_figure(raw)
+    figure = as_figure(raw)
     if figure is None or figure.value is None:
         return None
     return _money_text(figure.value)
@@ -43,7 +87,7 @@ def _money_text(value: str) -> str:
 
 
 @dataclass(frozen=True)
-class _RawFigure:
+class GroupFigure:
     """A group figure ingested from the group value dict.
 
     ``value`` is the string amount, ``stddev`` its uncertainty (Part A:
@@ -53,28 +97,27 @@ class _RawFigure:
     value: str | None
     stddev: float
 
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {"value": self.value, "stddev": self.stddev}
+    def to_dict(self) -> GroupFigureWire:
+        return GroupFigureWire(value=self.value, stddev=self.stddev)
 
 
-def _as_figure(raw: object) -> _RawFigure | None:
+def as_figure(raw: object) -> GroupFigure | None:
     if isinstance(raw, dict):
         value = raw.get("value")
         if value is not None:
             try:
-                return _RawFigure(value=str(value), stddev=float(raw.get("stddev") or 0))
+                return GroupFigure(value=str(value), stddev=float(raw.get("stddev") or 0))
             except (TypeError, ValueError):
                 return None
     return None
 
 
-def _figure_or_empty(raw: object) -> _RawFigure:
+def _figure_or_empty(raw: object) -> GroupFigure:
     """The ingested figure — an empty one when *raw* is absent (mirrors
     the historical ``or {}``: a missing couple figure serializes as
     "None")."""
-    figure = _as_figure(raw)
-    return figure if figure is not None else _RawFigure(value=None, stddev=0.0)
+    figure = as_figure(raw)
+    return figure if figure is not None else GroupFigure(value=None, stddev=0.0)
 
 
 @dataclass(frozen=True)
@@ -91,42 +134,46 @@ class MonthlyBaseline:
     group_value: dict
     others_rent_paid: float
 
-    def to_provenance_value(self) -> dict:
+    def to_provenance_value(self) -> BaselineProvenanceValue:
         """The tree states the baseline as identity + human figures."""
-        return {
-            "rid": self.rid,
-            "address": self.address,
-            "couple": _figure_text(self.group_value.get("couple")),
-            "others": _figure_text(self.group_value.get("others")),
-        }
+        return BaselineProvenanceValue(
+            rid=self.rid,
+            address=self.address,
+            couple=_figure_text(self.group_value.get("couple")),
+            others=_figure_text(self.group_value.get("others")),
+        )
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_wire(self) -> dict:
+    def to_wire(self) -> BaselineWire:
         # The contract shape is {value, approx} (see the frontend's
         # MonthlyDeltaSide): the stddev feeds the approx flag; the raw
         # stddev itself is the GROUP's wire, not the baseline's.
         couple = _figure_or_empty(self.group_value.get("couple"))
-        others = _as_figure(self.group_value.get("others"))
-        # lucidlint: ignore record-shape to_wire construction IS the serialization boundary (coding-standards.md)
-        return {
-            "rid": self.rid,
-            "address": self.address,
-            "couple": {"value": couple.value, "approx": bool(couple.stddev)},
-            "others": {"value": others.value, "approx": bool(others.stddev)} if others is not None else None,
-            "others_rent_paid": self.others_rent_paid,
-        }
+        others = as_figure(self.group_value.get("others"))
+        return BaselineWire(
+            rid=self.rid,
+            address=self.address,
+            couple=_monthly_side(couple),
+            others=_monthly_side(others) if others is not None else None,
+            others_rent_paid=self.others_rent_paid,
+        )
 
 
 class CurrentHomeNode(DerivedNode):
     """THE current home: exactly one current-status property with a
     computable couple figure, else None.
 
-    Deps: every registered property's status node (re-wired as properties
-    register — a status write signals this node and fans the re-derivation
-    out to every delta's consumer). The active set additionally includes
-    the winning property's ``group_monthly_cost`` and ``best_address``
-    nodes, so a re-price or an address edit of the baseline re-derives the
-    descriptor through the same edges.
+    Deps: every registered property's status node AND its
+    ``group_monthly_cost`` / ``best_address`` nodes — all wired as signal
+    edges (``_deps`` is the signal graph; ``set_deps`` connects one slot
+    per dep). Only the WINNER's cost and address join the active set, so an
+    impossible figure on any other property cannot fail the baseline.
+
+    Wiring the non-winner figures matters: a re-price or an address edit of
+    the property that IS the current home must re-derive this node, and an
+    active-set-only dependency gets no signal edge at all (2026-10-05: the
+    index showed no deltas for a whole session because the baseline had been
+    derived before its property's chain settled and nothing re-queued it —
+    the active deps were read, never wired).
     """
 
     def __init__(self, node_id: str = "settings/current_home"):
@@ -138,40 +185,69 @@ class CurrentHomeNode(DerivedNode):
         # app crashed at startup: 'CurrentHomeNode' object has no attribute
         # '_registry'.)
         self._registry: Any = None
+        # The status nodes BY IDENTITY: the candidate set is what
+        # `add_status` registered, never "whatever ends with /status" (a
+        # future node id shaped like one would otherwise be mistaken for a
+        # property and its attempt read as a status).
+        # Nothing removes an entry: `add_status` is the only mutation (a
+        # property is never deregistered today), so the tuple cannot go stale in
+        # the way a live lookup of the registry could.
+        self._status_nodes: tuple[Node, ...] = ()
         # dep_names=None: the dep set grows with registrations (set_deps);
         # compute receives attempts positionally in active-dep order.
         super().__init__(node_id, MonthlyBaseline | None, ())
 
     # -- dep wiring ------------------------------------------
-    def add_status(self, status_node: Node, registry: Any) -> None:
-        """Register one property's status node (called as properties are
-        registered); re-wires the signal edges so a status write fans out."""
+    def add_status(
+        self,
+        status_node: Node,
+        registry: Any,
+        *,
+        cost_node: Node | None = None,
+        address_node: Node | None = None,
+    ) -> None:
+        """Register one property's nodes (called as properties register).
+
+        The status node picks the winner; the cost and address nodes are
+        wired so their writes signal this node even while the property is
+        not the winner — the winner is chosen by status, so a figure that
+        settles late must still re-derive the baseline.
+        """
         self._registry = registry
-        self.set_deps((*self._deps, status_node))
+        self._status_nodes = (*self._status_nodes, status_node)
+        extra = tuple(n for n in (cost_node, address_node) if n is not None)
+        self.set_deps((*self._deps, status_node, *extra))
+
+    def _status_deps(self) -> tuple:
+        """The registered status nodes — the candidates for 'the current
+        home', by identity (see ``__init__``)."""
+        return self._status_nodes
 
     def _current_property(self) -> Any:
         if self._registry is None:
             return None
-        statuses = {str(n._id).split("/")[0]: n for n in self._deps}
-        for rid, node in statuses.items():
+        for node in self._status_deps():
             att = node.latest_attempt()
             if att is None or not att.succeeded:
                 continue
             if (att.value_or_none() or "").strip().lower() == CURRENT_STATUS:
-                prop = self._registry.get(rid)
+                prop = self._registry.get(str(node._id).split("/")[0])
                 return prop if prop is not None else None
         return None
 
     @override
     def _get_active_deps(self) -> tuple:
+        """The evaluation subset: every status (the winner is chosen among
+        them) plus the WINNER's cost and address. The other properties'
+        cost/address edges stay wired but out of this set."""
+        statuses = self._status_deps()
         prop = self._current_property()
-        if prop is not None:
-            extra = tuple(
-                n for n in (getattr(prop, "group_monthly_cost", None), getattr(prop, "best_address", None)) if n
-            )
-            if extra:
-                return (*self._deps, *extra)
-        return self._deps
+        if prop is None:
+            return statuses
+        extra = tuple(
+            n for n in (getattr(prop, "group_monthly_cost", None), getattr(prop, "best_address", None)) if n
+        )
+        return (*statuses, *extra)
 
     @override
     def compute(self, *attempts) -> Attempt[MonthlyBaseline | None]:
@@ -180,10 +256,11 @@ class CurrentHomeNode(DerivedNode):
             raise ValueError(f"{self._id}: {len(active)} active deps but {len(attempts)} attempts")
         by_node = dict(zip(active, attempts, strict=True))
 
+        status_ids = {id(node) for node in self._status_nodes}
         winners = [
             str(node._id).split("/")[0]
             for node, att in by_node.items()
-            if str(node._id).endswith("/status")
+            if id(node) in status_ids
             and att is not None
             and att.succeeded
             and (att.value_or_none() or "").strip().lower() == CURRENT_STATUS
@@ -204,7 +281,7 @@ class CurrentHomeNode(DerivedNode):
         if group_att is None or not group_att.succeeded:
             return Attempt.succeeded(None)
         value = group_att.value_or_none()
-        if not isinstance(value, dict) or _as_figure(value.get("couple")) is None:
+        if not isinstance(value, dict) or as_figure(value.get("couple")) is None:
             return Attempt.succeeded(None)
 
         address_node = getattr(prop, "best_address", None)
@@ -234,7 +311,7 @@ class CurrentHomeNode(DerivedNode):
             return "No current home" if v is None else str(v)
         parts = [f"Your home ({v.address})" if v.address else "Your home"]
         for side in ("couple", "others"):
-            figure = _as_figure(v.group_value.get(side))
+            figure = as_figure(v.group_value.get(side))
             if figure is not None and figure.value is not None:
                 parts.append(f"{side} {_money_text(figure.value)}")
         return " · ".join(parts)

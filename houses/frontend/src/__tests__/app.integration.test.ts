@@ -10,6 +10,7 @@ vi.mock('../services/api', () => ({
   fetchAllSummaries: vi.fn().mockResolvedValue({}),
   fetchPropertyDetail: vi.fn().mockResolvedValue(null),
   fetchSettings: vi.fn().mockResolvedValue({}),
+  fetchWhatIfState: vi.fn().mockResolvedValue(false),
   patchTriage: vi.fn(),
 }))
 

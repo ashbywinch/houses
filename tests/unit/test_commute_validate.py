@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from houses.geopoint import GeoPoint
 from tools.commute.searches import SearchOptions, build_searches, shed_to_searches
-from tools.commute.station_shed import BBox
+from tools.commute.station_shed import BBox, ShedRecord
 from tools.commute.tile import Rect
 from tools.commute.validate import StationControl, ValidationOptions, validate
 
@@ -13,14 +13,24 @@ NOW = "2026-08-02T09:00:00+00:00"
 BBOX = BBox(lat_min=50.1, lat_max=53.6, lon_min=-4.0, lon_max=2.0)
 
 SHED_RECORDS = [
-    {"name": "Reading", "crs": "Rea", "lat": 51.4599, "lon": -0.9705,
-     "duration_pimlico": 55, "duration_aldgate": 60, "kept": True},
-    {"name": "Guildford", "crs": "Gui", "lat": 51.2367, "lon": -0.5808,
-     "duration_pimlico": 70, "duration_aldgate": 75, "kept": True},
-    {"name": "Woking", "crs": "Wok", "lat": 51.3173, "lon": -0.5571,
-     "duration_pimlico": 60, "duration_aldgate": 65, "kept": True},
-    {"name": "Exeter St Davids", "crs": "Exe", "lat": 50.7292, "lon": -3.5435,
-     "duration_pimlico": 150, "duration_aldgate": 155, "kept": False},
+    ShedRecord(
+        name="Reading", crs="Rea", lat=51.4599, lon=-0.9705, duration_pimlico=55, duration_aldgate=60, kept=True
+    ),
+    ShedRecord(
+        name="Guildford", crs="Gui", lat=51.2367, lon=-0.5808, duration_pimlico=70, duration_aldgate=75, kept=True
+    ),
+    ShedRecord(
+        name="Woking", crs="Wok", lat=51.3173, lon=-0.5571, duration_pimlico=60, duration_aldgate=65, kept=True
+    ),
+    ShedRecord(
+        name="Exeter St Davids",
+        crs="Exe",
+        lat=50.7292,
+        lon=-3.5435,
+        duration_pimlico=150,
+        duration_aldgate=155,
+        kept=False,
+    ),
 ]
 
 
@@ -41,7 +51,7 @@ def _payload():
     )
 
 
-KEPT = [r for r in SHED_RECORDS if r["kept"]]
+KEPT = [r.to_dict() for r in SHED_RECORDS if r.kept]
 
 
 def test_validate_clean_payload_passes():
@@ -114,7 +124,17 @@ def test_validate_geometry_bbox_failure():
 
 def test_validate_kept_station_coverage_failure():
     # A search set built from rects that omit one kept station.
-    kept = [{"name": "Reading", "crs": "RDG", "lat": 51.4599, "lon": -0.9705, "kept": True}]
+    kept = [
+        ShedRecord(
+            name="Reading",
+            crs="RDG",
+            lat=51.4599,
+            lon=-0.9705,
+            duration_pimlico=None,
+            duration_aldgate=None,
+            kept=True,
+        )
+    ]
     rect = Rect(lat_min=51.4, lat_max=51.5, lon_min=-1.0, lon_max=-0.9)  # near Reading — covered
     payload = build_searches(
         [rect],

@@ -28,6 +28,52 @@ function stubMe(payload: Record<string, unknown>) {
 
 /** The acting identity is owned HERE, in the store — these cases pin
  * the precedence every view relies on when it reads auth.actingAs. */
+describe('auth checkAuth', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('asks /api/auth/me once, however many callers await it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ authenticated: false }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+
+    await auth.checkAuth()
+    await auth.checkAuth()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries after a failed check instead of caching the failure', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValue({ ok: true, json: async () => ({ authenticated: false }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+
+    await auth.checkAuth() // 500 — not an answer, so not remembered
+    await auth.checkAuth()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not ask again once the session is known', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+    auth.user = makeUser('Ashby')
+
+    await auth.checkAuth()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('auth actingAs', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

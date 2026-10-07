@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -111,7 +111,7 @@ class _TflFareEntry:
     cost: int | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflFareEntry:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflFareEntry:
         return cls(mode=raw.get("mode"), cost=raw.get("cost"))
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
@@ -129,7 +129,7 @@ class _TflFare:
     fares: tuple[_TflFareEntry, ...]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflFare:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflFare:
         return cls(
             total_cost=raw.get("totalCost"),
             fares=tuple(_TflFareEntry.from_dict(f) for f in raw.get("fares") or []),
@@ -153,7 +153,7 @@ class _TflLeg:
     instruction_summary: str
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflLeg:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflLeg:
         return cls(
             mode_name=(raw.get("mode") or {}).get("name"),
             duration=int(raw.get("duration", "0")),
@@ -185,7 +185,7 @@ class _TflJourney:
     fare: _TflFare | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflJourney:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflJourney:
         return cls(
             duration=raw.get("duration"),
             legs=tuple(_TflLeg.from_dict(leg) for leg in raw.get("legs") or []),
@@ -209,7 +209,7 @@ class _TflPlace:
     modes: tuple[str, ...]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflPlace:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflPlace:
         return cls(place_type=raw.get("placeType"), modes=tuple(raw.get("modes") or ()))
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
@@ -226,7 +226,7 @@ class _TflDisambiguationOption:
     place: _TflPlace
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflDisambiguationOption:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflDisambiguationOption:
         return cls(
             parameter_value=raw.get("parameterValue"),
             place=_TflPlace.from_dict(raw.get("place") or {}),
@@ -245,7 +245,7 @@ class _TflDisambiguation:
     options: tuple[_TflDisambiguationOption, ...]
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflDisambiguation:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflDisambiguation:
         return cls(options=tuple(_TflDisambiguationOption.from_dict(o) for o in raw.get("disambiguationOptions", [])))
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
@@ -265,7 +265,7 @@ class _TflJourneyResponse:
     from_location_disambiguation: _TflDisambiguation | None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> _TflJourneyResponse:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _TflJourneyResponse:
         return cls(
             type_name=str(raw.get("$type", "")),
             journeys=tuple(_TflJourney.from_dict(j) for j in raw.get("journeys") or []),
@@ -297,7 +297,7 @@ class _TflApiError:
     http_status_code: int | None
 
     @classmethod
-    def from_dict(cls, data: dict) -> _TflApiError:
+    def from_dict(cls, data: Mapping[str, Any]) -> _TflApiError:
         return cls(http_status_code=data.get("httpStatusCode"))
 
 
@@ -331,8 +331,6 @@ def _friendly_tfl_message(status: int) -> str:
     return "TfL couldn't plan this route"
 
 
-# lucidlint: ignore data-clump the arrival text and leg minutes travel together through every formatter by
-# lucidlint: ignore data-clump (clean_arr, duration, instr) is the dispatch-table formatter signature shared by seven
 def _tube_leg_label(clean_arr: str, duration: int, instr: str) -> str:  # lucidlint: ignore data-clump (duration,
     """Label for a tube leg — the line name comes from the instruction summary."""
     line_from_instr = instr.split(" to ")[0] if " to " in instr else ""
@@ -549,7 +547,7 @@ class TflClient:
     async def get_tube_leg_fare(
         from_station: Station,
         to_postcode: str,
-        _data: _TflJourneyResponse | dict | None = None,
+        _data: _TflJourneyResponse | Mapping[str, Any] | None = None,
         *,
         _client_factory: Callable | None = None,
     ) -> Money | None:
@@ -583,7 +581,7 @@ class TflClient:
         return TflClient._parse_tube_fare(data)
 
     @staticmethod
-    def _parse_tube_fare(data: _TflJourneyResponse | dict) -> Money | None:
+    def _parse_tube_fare(data: _TflJourneyResponse | Mapping[str, Any]) -> Money | None:
         """Extract the peak single fare from a TfL journey response.
 
         TfL returns ``totalCost`` in pence (integer).  Divides by 100 to
@@ -660,7 +658,7 @@ class TflClient:
         return " \u2192 ".join(parts)
 
     @staticmethod
-    def _pick_best_journey(data: _TflJourneyResponse | dict | None) -> JourneySummary:
+    def _pick_best_journey(data: _TflJourneyResponse | Mapping[str, Any] | None) -> JourneySummary:
         if data is None:
             return JourneySummary(None, None, "")
         if not isinstance(data, _TflJourneyResponse):
@@ -1014,7 +1012,7 @@ class TflClient:
 
     @staticmethod
     async def _add_parking_cost(
-        data: _TflJourneyResponse | dict,
+        data: _TflJourneyResponse | Mapping[str, Any],
         current_cost: Money | None = None,
         _registry: CarParkRegistry | None = None,
     ) -> ParkingCostResult:
@@ -1072,7 +1070,7 @@ class TflClient:
         return ParkingCostResult(parking_cost, new_cost, [parking_group])
 
     @staticmethod
-    def _build_cost_groups(data: _TflJourneyResponse | dict) -> list[CostGroup]:
+    def _build_cost_groups(data: _TflJourneyResponse | Mapping[str, Any]) -> list[CostGroup]:
         """Parse TfL response legs into CostGroup objects.
 
         Walking legs before/after transit and between transit lines

@@ -15,6 +15,7 @@ import httpx
 from dag.attempt import Attempt
 from houses import apis
 from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.apis.ors import SETTLEMENT_LAYERS
 from houses.geopoint import GeoPoint
 from houses.ors_endpoints import PELIAS_REVERSE
 from houses.services_provider import get_services
@@ -45,6 +46,7 @@ class _OrsReverseParams:
     point_lon: float
     size: int
     boundary_country: str
+    layers: str
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
@@ -54,6 +56,7 @@ class _OrsReverseParams:
             "point.lon": self.point_lon,
             "size": self.size,
             "boundary.country": self.boundary_country,
+            "layers": self.layers,
         }
 
 # ── Regex patterns ───────────────────────────────────────────────
@@ -362,7 +365,13 @@ async def find_nearest_town_name(
     """
     options = options or ReverseGeocodeOptions()
     rev_url = PELIAS_REVERSE
-    params = _OrsReverseParams(point_lat=lat, point_lon=lon, size=1, boundary_country="GBR")
+    params = _OrsReverseParams(
+        point_lat=lat,
+        point_lon=lon,
+        size=1,
+        boundary_country="GBR",
+        layers=SETTLEMENT_LAYERS,
+    )
     headers = {}
     api_key = options.api_key
     if api_key is None:

@@ -130,16 +130,11 @@ class TestGeoPointPersistence:
         import dag.persistence as per
 
         per.init_db()
-        conn = per._get_db()
-        conn.execute(
-            "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
-            (
-                f"{RID}/best_location",
-                json.dumps({"value": "None", "status": "succeeded"}),
-                datetime.now(UTC).isoformat(),
-            ),
+        save_node_result(
+            f"{RID}/best_location",
+            {"value": "None", "status": "succeeded"},
+            created_at=datetime.now(UTC).isoformat(),
         )
-        conn.commit()
         loaded = latest_node_result(f"{RID}/best_location")
         assert loaded is not None
         assert loaded["value"] == "None"
@@ -180,12 +175,16 @@ class TestGeoPointPersistence:
         assert reconstructed == GeoPoint(lat=3.0, lon=4.0)
 
 class TestCompressedStorage:
-    """result_json is zlib-compressed on disk; readers never see it."""
+    """Each field has its own column; only provenance is compressed.
 
-    def test_stored_result_json_is_compressed_and_roundtrips(self):
-        """A persisted row stores zlib bytes (magic 0x78), meaningfully
-        smaller than the raw JSON; latest_node_result returns the identical
-        dict — compression is invisible to readers."""
+    2026-10-05: the whole record used to be zlib'd in one column, so every
+    node read inflated a payload that is mostly provenance (the listing build
+    inflated ~1000 of them per request).  Values are plain text; the
+    provenance trees keep their ~25x in their own blob column, read only when
+    a consumer asks for them.
+    """
+
+    def test_only_provenance_is_compressed_and_roundtrips(self):
         from dag import persistence as p
 
         big = {
@@ -195,41 +194,59 @@ class TestCompressedStorage:
         }
         node_id = f"{RID}/compressed"
         save_node_result(node_id, big)
-        conn = p._get_db()
-        raw = conn.execute(
-            "SELECT result_json FROM node_results WHERE node_id=?", (node_id,)
-        ).fetchone()[0]
-        assert isinstance(raw, bytes), f"expected zlib bytes on disk, got {type(raw).__name__}"
-        assert raw[:1] == b"\x78", "expected zlib magic prefix"
-        assert len(raw) < len(json.dumps(big)) // 2, "compression must be meaningful"
+        row = p._get_db().execute(
+            "SELECT value_json, provenance_z FROM node_results WHERE node_id=?", (node_id,)
+        ).fetchone()
+
+        assert "y" * 500 in row["value_json"], "the value is readable without inflation"
+        blob = row["provenance_z"]
+        assert isinstance(blob, bytes), f"provenance is a zlib BLOB, got {type(blob).__name__}"
+        assert blob[:1] == b"\x78" and "z" * 500 not in blob.decode("latin-1"), (
+            "the provenance subtree is the compressed part"
+        )
+        assert len(blob) < len(json.dumps(big["provenance"])) // 2, "compression stays meaningful"
+
         loaded = latest_node_result(node_id)
         assert loaded is not None
         assert loaded["status"] == "succeeded"
         assert loaded["value"] == big["value"]
-        assert loaded["provenance"] == big["provenance"]
+        assert "provenance" not in loaded, "reading a record must not inflate the tree"
+        assert p.latest_node_provenance(node_id) == big["provenance"]
 
-    def test_legacy_uncompressed_rows_still_load(self):
-        """Rows written before compression (plain JSON text) still read —
-        the migration must not break the existing 200k-row database."""
+    def test_legacy_rows_of_both_old_shapes_still_load(self):
+        """A pre-split database reads unchanged: both the plain-JSON rows and
+        the whole-row zlib blobs — the migration converts them, and until then
+        every reader must cope."""
         from dag import persistence as p
 
         node_id = f"{RID}/legacy"
         conn = p._get_db()
+        conn.execute("DROP TABLE node_results")
         conn.execute(
-            "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at, code_version)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "CREATE TABLE node_results (id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL,"
+            " result_json TEXT NOT NULL, dep_timestamps TEXT, created_at TEXT NOT NULL, code_version TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
+            (node_id, json.dumps({"status": "succeeded", "value": {"legacy": True}}), "2026-01-01T00:00:00+00:00"),
+        )
+        conn.execute(
+            "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
             (
-                node_id,
-                json.dumps({"status": "succeeded", "value": {"legacy": True}}),
-                None,
+                f"{node_id}_z",
+                p.compress_result(json.dumps({"status": "succeeded", "value": {"zlibbed": True}})),
                 "2026-01-01T00:00:00+00:00",
-                None,
             ),
         )
         conn.commit()
+        p._reset_caches()
+
         loaded = latest_node_result(node_id)
         assert loaded is not None
         assert loaded["value"] == {"legacy": True}
+        zlibbed = latest_node_result(f"{node_id}_z")
+        assert zlibbed is not None
+        assert zlibbed["value"] == {"zlibbed": True}
 
 
 class TestDeleteNodeResultsForRid:

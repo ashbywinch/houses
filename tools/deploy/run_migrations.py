@@ -170,6 +170,20 @@ class Report:
         self._handle.close()
 
 
+NO_WRITE_MARKER = "no-write:"
+"""What an apply script prints when it had nothing to write (migrations.list).
+
+The backup exists to protect a write, so an apply that wrote nothing needs no
+backup — but only the MIGRATION knows that. It says so, and the runner believes
+it, rather than the runner guessing from rows or schema."""
+
+
+def _announced_no_write(proc: subprocess.CompletedProcess[str]) -> bool:
+    """True when the apply script stated, in its own output, that it wrote nothing."""
+    text = (proc.stdout or "") + (proc.stderr or "")
+    return any(line.lstrip().startswith(NO_WRITE_MARKER) for line in text.splitlines())
+
+
 def _last_line(text: str) -> str:
     for line in reversed(text.splitlines()):
         if line.strip():
@@ -195,6 +209,9 @@ class Run:
     python: Path
     scripts_dir: Path
     report: Report
+    # Migrations that stated they wrote nothing this run: the per-migration
+    # clause must not claim a backup that deliberately was not taken.
+    no_write: set[str] = dataclasses.field(default_factory=set)
 
     def _invoke(
         self, script: Path, *, extra: list[str], may_write: bool
@@ -258,6 +275,12 @@ class Run:
         if reason := _stage_verdict("apply FAILED", proc):
             return reason
         if not backup.is_file() or backup.stat().st_size == 0:
+            if _announced_no_write(proc):
+                # Nothing was written, so there is nothing to protect. A no-op
+                # apply is still "applied+checked": the independent check below
+                # is what proves the migration's effect holds.
+                self.no_write.add(migration.name)
+                return _stage_verdict("check FAILED", self._independent_check(migration))
             return f"apply FAILED: no backup written at {backup}"
         return _stage_verdict("check FAILED", self._independent_check(migration))
 
@@ -287,7 +310,10 @@ class Run:
         """Per migration: dry-run report, apply + backup, independent check."""
         verdicts = list(self._verdicts(entries))
         for name, reason in verdicts:
-            self.report.say(f"migration {name}: {reason or 'apply ok; backup ok; check ok'}")
+            if reason is None and name in self.no_write:
+                self.report.say(f"migration {name}: nothing to write (no-write stated); check ok")
+            else:
+                self.report.say(f"migration {name}: {reason or 'apply ok; backup ok; check ok'}")
         failures = sum(reason is not None for _, reason in verdicts)
         self.report.say(f"migrations: {len(entries) - failures} applied+checked, {failures} failed")
         return failures

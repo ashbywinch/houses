@@ -266,6 +266,11 @@ onMounted(load)
 async function load() {
   loading.value = true
   error.value = ''
+  // The guard deliberately does not block the route on /api/auth/me, so this
+  // fetch could otherwise arrive before the session is settled and paint
+  // "Could not load the family settings." over a 401 — then redirect. Awaiting
+  // the same check costs nothing: the store settles it once per app load.
+  await auth.checkAuth()
   try {
     const data = (await api.fetchSettings()) as {
       persons?: { value?: PersonSettings[] }

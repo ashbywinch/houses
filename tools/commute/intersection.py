@@ -29,7 +29,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from pint import Quantity
 
@@ -65,14 +65,67 @@ ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
 DEFAULT_CELL_KM_Q = DEFAULT_CELL_KM * KM
 DEFAULT_BUFFER_KM_Q = TRANSIT_BUFFER_KM * KM
 
-# Committed-payload wire shapes (coding-standards.md: serialized payloads use
-# bare dicts by design) — named so signatures say which payload flows where.
-DriveRawPayload = dict[str, Any]
+# Committed-payload wire shapes (coding-standards.md) — named so signatures say
+# which payload flows where; the consumed fields are records, the rest mappings.
 ShedPayload = dict[str, Any]
-DriveSearchesPayload = dict[str, Any]
 PolygonsByLabel = dict[str, list[list[GeoPoint]]]
 SearchRecord = dict[str, Any]
 IntersectionPayload = dict[str, Any]
+
+
+class DriveRegionPayload(TypedDict, total=False):
+    """The drive artifact's region block — the wire shape."""
+
+    region_km: float
+    cell_km: float
+
+
+class DriveDestinationPayload(TypedDict, total=False):
+    """One drive artifact destination — the wire shape."""
+
+    label: str
+    postcode: str
+    lat: float
+    lon: float
+    threshold_min: int
+    cell_km: float
+    slack_min: float
+    grid: dict[str, Any]
+    cells: list[Any]
+
+
+class DriveRawPayload(TypedDict, total=False):
+    """drive_isochrone.json — the wire shape."""
+
+    metadata: DriveRegionPayload
+    destinations: list[DriveDestinationPayload]
+
+
+class DriveSearchDestinationPayload(TypedDict, total=False):
+    """The destination block of a drive-searches entry — the wire shape."""
+
+    label: str
+    postcode: str
+    lat: float
+    lon: float
+
+
+class DriveSearchPayload(TypedDict, total=False):
+    """One drive_searches.json entry — the wire shape."""
+
+    id: str
+    name: str
+    polygon: list[list[float]]
+    rightmove_url: str
+    destination: DriveSearchDestinationPayload
+    threshold_min: int
+
+
+class DriveSearchesPayload(TypedDict, total=False):
+    """drive_searches.json — the wire shape."""
+
+    metadata: dict[str, Any]
+    searches: list[DriveSearchPayload]
 
 @dataclass(frozen=True)
 class _SearchFilters:
@@ -152,7 +205,7 @@ class _IntersectionPayload:
         return dict(metadata=self.metadata.to_dict(), searches=[s.to_dict() for s in self.searches])
 
 
-def common_grid(drive_raw: dict, cell_km: Quantity = DEFAULT_CELL_KM_Q) -> Grid:
+def common_grid(drive_raw: DriveRawPayload, cell_km: Quantity = DEFAULT_CELL_KM_Q) -> Grid:
     """One grid over the overlap of the driving regions.
 
     The intersection is a subset of every drive region, so cells outside the
@@ -196,7 +249,7 @@ def drive_cells(polygons: list[list[GeoPoint]], grid: Grid) -> set[GridCell]:
     return {cell for cell in cells if any(point_in_polygon(cell.lat, cell.lon, p) for p in polygons)}
 
 
-def _group_drive_polygons(drive_searches: dict) -> PolygonsByLabel:
+def _group_drive_polygons(drive_searches: DriveSearchesPayload) -> PolygonsByLabel:
     """Shed polygons per drive destination (a shed may be several loops)."""
     by_label: dict[str, list[list[GeoPoint]]] = {}
     # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
@@ -319,7 +372,6 @@ def _valid_polygon(poly) -> bool:
     )
 
 
-# lucidlint: ignore duplicate geometry checks mirror drive_isochrone _search_geometry_issues by design — unifying would
 def _search_issues(s: SearchRecord, max_vertices: int) -> list[str]:
     """Polygon geometry, GB-bbox, and URL round-trip issues for one search."""
     issues: list[str] = []
@@ -373,7 +425,6 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
 
 
 
-# lucidlint: ignore duplicate validate flow differs per payload type — filenames, regenerate hints and OK message are
 def _validate_committed(out_path: Path) -> int:
     """--validate: check the committed intersection payload and report."""
     if not out_path.exists():

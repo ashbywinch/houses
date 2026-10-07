@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar, override
@@ -63,7 +64,7 @@ class CacheEnvelope:
         return dict(_cached_status=self.status, _cached_body=self.body)
 
     @classmethod
-    def from_dict(cls, data: dict) -> CacheEnvelope:
+    def from_dict(cls, data: Mapping[str, Any]) -> CacheEnvelope:
         """The cache-file envelope, read at the cache edge."""
         return cls(status=data["_cached_status"], body=data["_cached_body"])
 

@@ -10,7 +10,13 @@
 # newline, and a shell loop cannot refuse an empty list.
 #
 # apply-script contract: `<python> <apply> --db <db>` is a READ-ONLY dry-run
-#   report; `--apply --backup --backup-path <p> --verify` writes.
+#   report; `--apply --backup --backup-path <p> --verify` writes. An apply that
+#   had NOTHING to write prints `no-write: <why>` and exits 0: the runner then
+#   requires no backup (nothing was written to protect) and still runs the check.
+#   The statement is required, not implied — an apply that leaves no backup and
+#   says nothing is a FAILED apply. Without it, an idempotent no-op (the
+#   already-split database a fresh box restores from the seed) fails a rollout
+#   that has nothing to migrate.
 # check-script contract: `<python> <check> --db <db>` opens the DB read-only and
 #   exits 0 iff the migration's effect is complete. A separate program from the
 #   apply, so it cannot vouch for the code that just wrote.
@@ -18,4 +24,11 @@
 # Adding a migration = shipping both scripts + one line here. A blank or
 # comments-only list is REFUSED by the runner (zero migrations cannot be
 # reported as "0 applied+checked, 0 failed").
+# ORDER IS PART OF THE CONTRACT. backfill_person_ids first, split_node_results
+# second. The backfill rewrites the record and writes it through
+# dag/persistence.py, which mirrors the legacy `result_json` blob while that
+# column exists; the split reads that blob to fill the per-field columns and
+# then DROPS the column. Reversed, the backfill's changes would land in the
+# split columns only, and the split would overwrite them from the stale blob.
 scripts/backfill_person_ids.py scripts/backfill_person_ids.check.py
+scripts/split_node_results.py scripts/split_node_results.check.py

@@ -18,6 +18,17 @@ from houses.web.json_utils import WirePayload
 
 logger = logging.getLogger(__name__)
 
+# Which Pelias layers count as "a town" for a reverse lookup. Unconstrained,
+# Pelias answers with the closest feature of ANY kind — for a house that is
+# its own street (or a school), i.e. a 0-minute walk, which walkability's
+# plausibility gate rejects: houses whose address-derived town is a district
+# name (London, South Oxfordshire, "Maidenhead Station Area") then silently
+# lost walk_to_town. Settlement layers only — locality (town), borough
+# (London boroughs), neighbourhood (suburbs). Pelias sorts by distance, so an
+# SW20 house resolves to West Barnes (10 min walk) rather than the London
+# centroid (210 min).
+SETTLEMENT_LAYERS = "locality,borough,neighbourhood"
+
 
 @dataclass(frozen=True)
 class OrsSearchParams(WirePayload):
@@ -31,6 +42,7 @@ class OrsReverseParams(WirePayload):
     point_lon: float
     size: int
     boundary_country: str
+    layers: str
     # the Pelias reverse endpoint wants dotted keys
     wire_key_rewrites: ClassVar[dict[str, str]] = {"point_lat": "point.lat", "point_lon": "point.lon"}
 
@@ -74,7 +86,13 @@ class ORSApi(BaseApi):
     async def reverse_geocode(self, lat: float, lng: float, *, _client_factory=None) -> GeoPoint | None:
         """Nearest settlement centre from coordinates."""
         url = PELIAS_REVERSE
-        params = OrsReverseParams(point_lat=lat, point_lon=lng, size=1, boundary_country="GBR")
+        params = OrsReverseParams(
+            point_lat=lat,
+            point_lon=lng,
+            size=1,
+            boundary_country="GBR",
+            layers=SETTLEMENT_LAYERS,
+        )
         req = FetchArgs(
             "GET",
             url,

@@ -20,7 +20,18 @@ def _reset():
     _town_cache.clear()
 
 
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# ALL LLM access goes through Cloudflare AI Gateway (skill://cloudflare-ai-gateway):
+# the gateway owns the provider keys (BYOK), the text route (`dynamic/fallback2`)
+# and per-repo analytics. The app authenticates with the gateway token and never
+# holds a provider key. The endpoint URL comes from settings.llm_base_url.
+CHAT_COMPLETIONS_PATH = "/chat/completions"
+
+# Gateway request headers: tag the traffic so Cloudflare's analytics attribute it
+# to this app (the local agent proxy does the same for OMP), and keep retries on
+# the client — the DAG re-raises transient failures, and a gateway retry would
+# pay for the same generation twice (skill://cloudflare-ai-gateway → Retries).
+GATEWAY_HEADERS = {"cf-aig-metadata": '{"source":"app","repo":"houses"}', "cf-aig-max-attempts": "0"}
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,24 @@ class _ChatMessage:
 
 
 @dataclass(frozen=True)
+class _Reasoning:
+    """OpenRouter's reasoning control.
+
+    The intended model (``deepseek/deepseek-v4.1-flash``) reasons by default
+    and spends the ENTIRE token budget thinking: with this prompt, 150 and
+    even 400 max_tokens came back ``finish_reason="length"`` with
+    ``content=None`` — i.e. no description at all. Asking for no reasoning
+    answers in ~1.5 s with the sentence (measured 2026-10-05).
+    """
+
+    enabled: bool
+
+    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
+    def to_dict(self) -> dict:
+        return {"enabled": self.enabled}
+
+
+@dataclass(frozen=True)
 class _ChatBody:
     """Wire shape of the OpenRouter chat-completions request body."""
 
@@ -44,6 +73,7 @@ class _ChatBody:
     messages: list[_ChatMessage]
     max_tokens: int
     temperature: float
+    reasoning: _Reasoning
 
     # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
@@ -53,6 +83,7 @@ class _ChatBody:
             "messages": [m.to_dict() for m in self.messages],
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            "reasoning": self.reasoning.to_dict(),
         }
 
 
@@ -96,21 +127,40 @@ async def generate_town_description(
             ],
             max_tokens=settings.llm_max_tokens,
             temperature=settings.llm_temperature,
+            reasoning=_Reasoning(enabled=False),
         )
+
+        url = f"{settings.llm_base_url}{CHAT_COMPLETIONS_PATH}"
 
         async def _fetch():
             async with client_factory(timeout=15.0) as client:
                 resp = await client.post(
-                    API_URL,
+                    url,
                     json=body.to_dict(),
-                    headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+                    headers={
+                        "Authorization": f"Bearer {settings.llm_api_key}",
+                        **GATEWAY_HEADERS,
+                    },
                 )
             assert isinstance(resp, httpx.Response)
             resp.raise_for_status()
             return resp.json()
 
-        result = await with_cache_fn("POST", API_URL, body=body, fetch=_fetch)
-        raw = result["choices"][0]["message"]["content"].strip()
+        result = await with_cache_fn("POST", url, body=body, fetch=_fetch)
+        choices = result.get("choices") or []
+        if not choices:
+            # A gateway/model misroute answers without a choices array: name the
+            # shape instead of letting [0] raise IndexError (the boundary catch
+            # below would report "list index out of range" and nothing else).
+            return Attempt.impossible(f"{settings.llm_model} returned no choices")
+        raw = (choices[0]["message"].get("content") or "").strip()
+        if not raw:
+            # A reasoning model that ignored the switch spends the budget
+            # thinking and returns nothing — say so, don't crash on .strip().
+            return Attempt.impossible(
+                f"{settings.llm_model} returned no content "
+                f"(finish_reason={choices[0].get('finish_reason')})"
+            )
         description = raw.split(".")[0].strip() + "."
         _town_cache[key] = description
         return Attempt.succeeded(description)

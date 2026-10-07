@@ -31,6 +31,11 @@ class _OEIFRating(NamedTuple):
     grades: list[tuple[str, str]]
 
 
+type OfstedRow = dict[str, str]
+"""One Ofsted inspections CSV row: column name → cell text.  A plain string
+map because the row is read by column-name tables (OEIF_DIMS/S5_DIMS) as well
+as by literal column names."""
+
 ENRICHED_CSV = Path("data/edubaseall_enriched.csv")
 OFSTED_CSV = Path("data/ofsted_inspections.csv")
 
@@ -89,8 +94,7 @@ def _extract_year(date_str: str) -> str:
     return ""
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _best_inspection_year(row: dict) -> str:
+def _best_inspection_year(row: OfstedRow) -> str:
     """Find the most relevant inspection year from available date fields."""
     # Priority: OEIF graded inspection > old full inspection > ungraded
     for date_field in [
@@ -114,7 +118,7 @@ def _s5_score(grade: str) -> int:
     return {"Strong standard": 4, "Expected standard": 3, "Needs attention": 2, "Cause for concern": 1}.get(grade, 0)
 
 
-def _determine_effective_rating(row: dict) -> _EffectiveRating:
+def _determine_effective_rating(row: OfstedRow) -> _EffectiveRating:
     """Determine the most accurate rating and a highlights string.
 
     Returns (rating, highlights) where rating is the best estimate of the
@@ -143,7 +147,7 @@ def _determine_effective_rating(row: dict) -> _EffectiveRating:
     return _EffectiveRating(rating="", highlights="")
 
 
-def _collect_oeif_rating(row: dict) -> _OEIFRating:
+def _collect_oeif_rating(row: OfstedRow) -> _OEIFRating:
     oeif_raw = (row.get("Latest OEIF overall effectiveness") or "").strip()
     oeif_rating = OEIF_RATING_MAP.get(oeif_raw, "") if oeif_raw and oeif_raw != "NULL" else ""
 
@@ -162,8 +166,7 @@ def _collect_oeif_rating(row: dict) -> _OEIFRating:
     return _OEIFRating(oeif_rating, oeif_grades)
 
 
-# lucidlint: ignore record-shape row dict — CSV boundary owns the shape
-def _collect_s5_data(row: dict) -> dict[str, str]:
+def _collect_s5_data(row: OfstedRow) -> dict[str, str]:
     s5_data = {label: (row.get(col) or "").strip() for label, col in S5_DIMS}
     return {k: v for k, v in s5_data.items() if v and v != "NULL"}
 
@@ -187,8 +190,7 @@ def _s5_rating_and_worst(s5_data: dict[str, str]) -> _EffectiveRating:
     return _EffectiveRating(rating, f"{worst} {s5_data[worst]}")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _generate_ofsted_cell(row: dict) -> str:
+def _generate_ofsted_cell(row: OfstedRow) -> str:
     """Build a single-column Ofsted rating that's scannable and jargon-free.
 
     Format examples:
@@ -238,7 +240,7 @@ def main():
             sys.exit(1)
 
     # Load all Ofsted rows into a dict by URN
-    ofsted_by_urn: dict[str, dict] = {}
+    ofsted_by_urn: dict[str, OfstedRow] = {}
     with OFSTED_CSV.open(newline="", encoding="latin-1") as f:
         reader = csv.DictReader(f)
         for row in reader:

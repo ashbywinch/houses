@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from typing import TypedDict
 
 import httpx
 
@@ -87,6 +88,14 @@ class _EpcSearchParams:
         return {"postcode": self.postcode, "page_size": self.page_size}
 
 
+class _EpcCertificateRow(TypedDict, total=False):
+    """One certificate row of the EPC search API's ``data`` array."""
+
+    addressLine1: str
+    registrationDate: str
+    currentEnergyEfficiencyBand: str
+
+
 @dataclass(frozen=True)
 class _EpcCertificate:
     """A certificate row from the EPC search API response."""
@@ -97,7 +106,7 @@ class _EpcCertificate:
 
     
     @classmethod
-    def from_dict(cls, cert: dict) -> _EpcCertificate:
+    def from_dict(cls, cert: _EpcCertificateRow) -> _EpcCertificate:
         return cls(
             address_line1=cert.get("addressLine1", ""),
             registration_date=cert.get("registrationDate", ""),
@@ -197,7 +206,6 @@ def _street_after_token(tokens: list[str], token: str) -> str:
 
 
 
-# lucidlint: ignore data-clump (certs, building_id, address) is _match_cert's public signature — ~20 test call sites in
 # lucidlint: ignore data-clump (address, certs) travel
 def _filter_candidates(certs: list[_EpcCertificate], building_id: str, address: str):
     """Certificates whose address matches the building identifier.
@@ -274,8 +282,7 @@ def _newest_band(candidates: list[_EpcCertificate]) -> Attempt[str]:
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attempt[str]:
+def _match_cert(certs: list[_EpcCertificateRow], building_id: str, address: str = "") -> Attempt[str]:
     """Find the most recent certificate, optionally matching the building identifier.
 
     When *building_id* is provided, returns the band from the most recent

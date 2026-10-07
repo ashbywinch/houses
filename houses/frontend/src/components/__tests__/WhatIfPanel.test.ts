@@ -64,6 +64,18 @@ function mountPanel() {
   return { wrapper, store: usePropertiesStore() }
 }
 
+/** Mount the panel with a what-if already active IN THE STORE — the
+ *  store owns the mode; the panel only reads it (no /what-if/state
+ *  fetch of its own anymore). */
+function mountActivePanel() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const store = usePropertiesStore()
+  store.setWhatIfActive(true)
+  const wrapper = mount(WhatIfPanel, { global: { plugins: [pinia] } })
+  return { wrapper, store }
+}
+
 
 /** Mount + flush the onMounted persons/state load. */
 async function mountOpenPanel() {
@@ -142,13 +154,7 @@ describe('WhatIfPanel', () => {
   })
 
   it('furling an active what-if cancels it — the real numbers come back', async () => {
-    // active at mount (two loads: the pin-open watch + onMounted); after the
-    // furl-restore the state endpoint says inactive, so the unfurl re-syncs
-    vi.mocked(api.fetchWhatIfState)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValue(false)
-    const { wrapper, store } = mountPanel()
+    const { wrapper, store } = mountActivePanel()
     await flushPromises()
     expect(store.whatIfActive).toBe(true)
     expect(wrapper.find('.whatif--collapsed').exists()).toBe(false)
@@ -169,12 +175,21 @@ describe('WhatIfPanel', () => {
     expect(wrapper.text()).toContain('Try scenario')
   })
 
+  it('never fetches the what-if state itself — the store owns it', async () => {
+    const { wrapper, store } = mountActivePanel()
+    await flushPromises()
+    // The pinned-open watch and the unfurl re-read both ran; the mode
+    // still came from the store, never from /api/what-if/state.
+    expect(api.fetchWhatIfState).not.toHaveBeenCalled()
+    expect(store.whatIfActive).toBe(true)
+    expect(wrapper.find('.whatif--collapsed').exists()).toBe(false)
+  })
+
   it('keeps the scenario fields editable while active and shows exactly two exits', async () => {
     // An active what-if is EDITABLE — tweaking numbers mid-scenario and
     // re-trying is the whole point. Only an in-flight write disables the
     // fields (the fieldset binds :disabled="busy").
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
-    const { wrapper } = await mountPanel()
+    const { wrapper } = mountActivePanel()
     await flushPromises()
 
     const buttons = wrapper.findAll('.whatif__footer button')
@@ -201,13 +216,9 @@ describe('WhatIfPanel', () => {
   })
 
   it('restores the real numbers from "Back to real numbers" and clears the flag', async () => {
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
-    const { wrapper, store } = mountPanel()
+    const { wrapper, store } = mountActivePanel()
     await flushPromises()
 
-    // Restoring clears the server marker: the state endpoint now
-    // reports false, and the panel reloads the real numbers.
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
     await findButton(wrapper, 'Back to real numbers').trigger('click')
     await flushPromises()
 
@@ -216,12 +227,9 @@ describe('WhatIfPanel', () => {
   })
 
   it('keeps the scenario from "Keep these numbers" without restoring', async () => {
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(true)
-    const { wrapper, store } = mountPanel()
+    const { wrapper, store } = mountActivePanel()
     await flushPromises()
 
-    // Accepting also clears the server marker.
-    vi.mocked(api.fetchWhatIfState).mockResolvedValue(false)
     await findButton(wrapper, 'Keep these numbers').trigger('click')
     await flushPromises()
 

@@ -8,7 +8,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
-from dag.persistence import latest_node_result
+from dag.persistence import latest_node_provenance, latest_node_result
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 
@@ -145,7 +145,9 @@ class TestDerivedNode:
 
         stored = latest_node_result("crash_test")
         assert stored is not None
-        prov = stored.get("provenance", {})
+        # The tree lives compressed in its own column: reading it is an
+        # explicit ask, never a side effect of reading the record.
+        prov = latest_node_provenance("crash_test") or {}
         assert prov.get("label") == "crash_test"
 
     @pytest.mark.asyncio

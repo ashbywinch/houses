@@ -9,6 +9,7 @@ push it without importing the router — a top-level import from
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal as _Decimal
 from typing import Any
@@ -163,7 +164,7 @@ class SessionPersons:
     settings endpoints share for session-aware ownership decisions."""
 
     persons: list
-    session_user: dict | None
+    session_user: Mapping[str, Any] | None
 
     def session_name(self) -> str:
         """The session user's Person name (email match), or "" when unlinked."""
@@ -214,7 +215,7 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
             item["home_property_address"] = addr
 
 
-async def settings_payload(session_user: dict | None = None) -> SettingsPayloadJson:
+async def settings_payload(session_user: Mapping[str, Any] | None = None) -> SettingsPayloadJson:
     """The settings document: persons, financial aggregates, commute
     thresholds, the household deposit, and the what-if flag. Shared by
     the GET endpoint and the settings_updated websocket push, so both

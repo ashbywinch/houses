@@ -52,8 +52,20 @@ class Settings(BaseSettings):
     # the account dashboard. Paths live in houses/ors_endpoints.py.
     ors_base_url: str = Field(default="https://api.heigit.org", alias="HOUSES_ORS_BASE_URL")
     google_maps_api_key: str = Field(default="", alias="PLACES_API_KEY")
-    llm_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    llm_model: str = Field(default="deepseek/deepseek-chat", alias="HOUSES_LLM_MODEL")
+    # ALL LLM access goes through Cloudflare AI Gateway (skill://cloudflare-ai-gateway):
+    # the gateway holds the provider keys (BYOK), picks the model via its text
+    # route, and reports per-repo analytics. The credential is the GATEWAY token
+    # (same secret PR-Agent uses) — the app never holds an OpenRouter key.
+    llm_base_url: str = Field(
+        default="https://gateway.ai.cloudflare.com/v1/e21a5be58ac1e8f7d5619539feb2dc3d/default/compat",
+        alias="HOUSES_LLM_BASE_URL",
+    )
+    llm_api_key: str = Field(default="", alias="CLOUDFLARE_AIGATEWAY_TOKEN")
+    # The model name selects Cloudflare's dynamic route, not a provider model:
+    # `fallback2` is the text chain. The route's model reasons by default, so
+    # town_desc sends reasoning={"enabled": false} — without it the whole token
+    # budget goes to reasoning and the response carries content=None.
+    llm_model: str = Field(default="dynamic/fallback2", alias="HOUSES_LLM_MODEL")
     llm_temperature: float = 0.7
     llm_max_tokens: int = 150
     trace: bool = Field(default=False, alias="HOUSES_TRACE")
@@ -78,6 +90,12 @@ class Settings(BaseSettings):
     _parse_school_radius = field_validator("school_search_radius", mode="before")(lambda v: _parse_quantity(v, "km"))
     _parse_max_walk = field_validator("max_walk_to_station", mode="before")(lambda v: _parse_quantity(v, "minute"))
     _parse_bus_penalty = field_validator("bus_walk_penalty", mode="before")(lambda v: _parse_quantity(v, "minute"))
+    # Both base URLs are joined with a leading-slash path ("/chat/completions",
+    # "/openrouteservice/v2/..."), so a configured trailing slash would produce
+    # a double slash. Normalised HERE, where the value enters the app — every
+    # caller then just concatenates.
+    _strip_ors_url_slash = field_validator("ors_base_url")(lambda value: value.rstrip("/"))
+    _strip_llm_url_slash = field_validator("llm_base_url")(lambda value: value.rstrip("/"))
 
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"

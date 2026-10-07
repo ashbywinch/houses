@@ -35,6 +35,7 @@ import sys
 import zlib
 from pathlib import Path
 
+from dag.persistence import read_node_record, record_select_columns
 from houses.model.domain import slugify
 
 DESCRIPTION = "Verify the person-id migration completed (read-only paired check)."
@@ -128,19 +129,16 @@ def _has_person_segment(node_id: str, keys: set[str]) -> bool:
     return parts[PERSON_SEGMENT_INDEX] in keys
 
 
-def _unwrapped_value(blob: bytes):
+def _unwrapped_value(value):
     """A row's stored ``value``, with the legacy JSON-string shape unwrapped."""
-    payload = json.loads(zlib.decompress(blob).decode())
-    value = payload.get("value")
     return json.loads(value) if isinstance(value, str) else value
 
 
-def _works_leftovers(blob: bytes, keys: set[str]) -> Leftovers:
-    """What one ``works_estimates`` payload still keys by person name."""
-    if not blob:
-        return Leftovers()
+# lucidlint: ignore record-shape the record IS the stored wire shape (keys vary per node type)
+def _works_leftovers(record: dict, keys: set[str]) -> Leftovers:
+    """What one ``works_estimates`` record still keys by person name."""
     try:
-        value = _unwrapped_value(blob)
+        value = _unwrapped_value(record.get("value"))
     except UNREADABLE:
         return Leftovers(unreadable=1)
     if not isinstance(value, dict):
@@ -157,11 +155,14 @@ def _row_leftovers(row: sqlite3.Row, keys: set[str]) -> Leftovers:
         )
     except json.JSONDecodeError:
         return Leftovers(node_ids=1 if _has_person_segment(node_id, keys) else 0, unreadable=1)
-    works = (
-        _works_leftovers(row["result_json"], keys)
-        if node_id.endswith(WORKS_ESTIMATES_SUFFIX)
-        else Leftovers()
-    )
+    works = Leftovers()
+    if node_id.endswith(WORKS_ESTIMATES_SUFFIX):
+        try:
+            works = _works_leftovers(read_node_record(row), keys)
+        # lucidlint: ignore swallow this surfaces by RETURN — an unreadable row is counted and makes the
+        # check report INCOMPLETE, which is the whole point of not trusting the scan's own silence
+        except UNREADABLE:
+            works = Leftovers(unreadable=1)
     return works + Leftovers(
         node_ids=1 if _has_person_segment(node_id, keys) else 0,
         dep_keys=dep_keys,
@@ -170,20 +171,22 @@ def _row_leftovers(row: sqlite3.Row, keys: set[str]) -> Leftovers:
 
 def _latest_persons(conn: sqlite3.Connection) -> Persons | None:
     """The newest persons row, decoded; None when the DB has none."""
+    selected = ", ".join(record_select_columns(conn))
     row = conn.execute(
-        "SELECT result_json FROM node_results WHERE node_id=?"
+        f"SELECT {selected} FROM node_results WHERE node_id=?"
         " ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (PERSONS_NODE_ID,),
     ).fetchone()
     if row is None:
         return None
-    return Persons(json.loads(zlib.decompress(row["result_json"]).decode()))
+    return Persons(read_node_record(row))
 
 
 def _scan(conn: sqlite3.Connection, keys: set[str]) -> Leftovers:
     """Fold every row's leftovers — streaming, never materializing the table."""
     totals = Leftovers()
-    for row in conn.execute("SELECT node_id, dep_timestamps, result_json FROM node_results"):
+    selected = ", ".join(("node_id", "dep_timestamps", *record_select_columns(conn)))
+    for row in conn.execute(f"SELECT {selected} FROM node_results"):
         totals = totals + _row_leftovers(row, keys)
     return totals
 

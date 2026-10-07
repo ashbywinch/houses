@@ -73,4 +73,9 @@ def _reset_global_state():
     _reset_town_desc()
     _reset_council_tax()
     _reset_current_home()
+    # The persistence schema caches are keyed by DB path, and every test gets
+    # a fresh in-memory database under the same path — a cached column set
+    # from the previous test's table would be applied to this one's.
+    per._reset_caches()
     yield
+    per._reset_caches()

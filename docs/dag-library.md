@@ -135,16 +135,31 @@ Expression-based nodes **do not override `build_provenance()`** — the base def
 
 ### Provenance serves the frozen row, never a re-read
 
-Each derived row stores its provenance tree inside the same
-zlib-compressed `result_json` blob (`dag/persistence.py:compress_result`),
-frozen at persist time:
+Each row stores its record in per-field columns (`dag/persistence.py`):
+`status`, `value_json`, `error`, `error_detail_json`, `source_url`,
+`source_label`, `extra_json` — plain text — and `provenance_z`, the ONE
+compressed field:
 
 ```python
-# result_json (decompressed) — what a row carries
+# provenance_z (inflated on demand) — the frozen tree for the value beside it
 {
     "provenance": {...},  # full tree, frozen at persist time
 }
 ```
+
+The split is why a read never pays for a tree it does not want: the hot
+readers (attempt load, staleness checks, the listing build) select the plain
+columns and never touch `provenance_z`, and `latest_node_provenance(node_id)`
+is the one accessor that inflates it (`_stored_provenance` uses it). The
+trees are the bulk of the table's bytes — the money cascades' full
+expansions — so keeping only them compressed keeps the table small without
+making every read inflate.
+
+Rows written before the split still read: their record sits in a single
+`result_json` blob (whole-row zlib or plain JSON) and the reader accepts that
+shape until `scripts/split_node_results.py` converts the database (it splits
+each row and drops the column — the rollout runs it through
+`tools/deploy/migrations.list`).
 
 The row carries ONLY that tree — no parallel flat map. `refresh()`
 (`dag/derived_node.py`) binds the exact attempts the value was
