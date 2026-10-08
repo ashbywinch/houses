@@ -14,9 +14,9 @@ recalculation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from decimal import Decimal
-from typing import Any, TypedDict, override
+from typing import Any, TypedDict, cast, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -31,11 +31,22 @@ class DeltaVsHomeWire(TypedDict):
     others: MonthlySide | None
 
 
-class DeltaVsHomeProvenanceValue(TypedDict):
-    """The delta block as the provenance tree states it: each side's figure text."""
+@dataclass(frozen=True)
+class DeltaVsHomeProvenanceValue:
+    """The delta block as it appears in the provenance tree.
+
+    A value object, like BaselineProvenanceValue: the DAG's projector takes
+    any non-dict value object's own ``to_provenance_value()`` and walks its
+    result, which must be plain JSON. The wire block (DeltaVsHomeWire) is a
+    separate, wire-format shape.
+    """
 
     couple: str | None
     others: str | None
+
+    def to_provenance_value(self) -> dict[str, str | None]:
+        """The tree entry: plain JSON, one key per side."""
+        return cast(dict[str, str | None], asdict(self))
 
 
 def _side_text(figure: MonthlySide | None) -> str | None:
