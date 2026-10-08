@@ -605,15 +605,6 @@ jobs:
           H=$(curl -sS -m 15 https://houses-smoke.blueumbrella.net/health)
           printf '%s' "$H" | grep -E '"status":"ok"' >/dev/null || { echo "::error::the approved surface is not serving: $H"; exit 1; }
           echo "preflight ok: approved surface is serving"
-      - name: Darken — retire the smoke relay (the only owner op)
-        run: |
-          set -euo pipefail
-          # The old owner's Caddy stops relaying houses-smoke (the review
-          # surface ends at approval). Nothing else touches the owner — no
-          # install, no stop verb, no data change (docs/rollout-prd.md, R5).
-          # The abandoned box keeps running until a later cleanup; its files
-          # and DB stay exactly as they were (the pre-flip archive).
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay off"
       - name: Flip the L4 rules to the approved box
         run: |
           set -euo pipefail
@@ -627,6 +618,15 @@ jobs:
               --target-instance-zone "$ZONE"
           done
           echo "flipped houses-l4-http + houses-l4-https -> $TARGET"
+      - name: Darken — retire the smoke relay (the only owner op)
+        run: |
+          set -euo pipefail
+          # The old owner's Caddy stops relaying houses-smoke (the review
+          # surface ends at approval). Nothing else touches the owner — no
+          # install, no stop verb, no data change (docs/rollout-prd.md, R5).
+          # The abandoned box keeps running until a later cleanup; its files
+          # and DB stay exactly as they were (the pre-flip archive).
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay off"
       - name: Continuity probe — public health responds (not acceptance)
         if: success()
         run: |
