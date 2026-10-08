@@ -495,7 +495,8 @@ jobs:
           TARGET="${{ needs.resolve.outputs.standby }}-target"
           for rule in houses-l4-http houses-l4-https; do
             gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
-              --target-instance "$TARGET"
+              --target-instance "$TARGET" \
+              --target-instance-zone "$ZONE"
           done
           echo "flipped houses-l4-http + houses-l4-https -> $TARGET"
       - name: Unfreeze — put production back on the owner if anything above failed
@@ -622,7 +623,8 @@ jobs:
           TARGET="${{ needs.resolve.outputs.standby }}-target"
           for rule in houses-l4-http houses-l4-https; do
             gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
-              --target-instance "$TARGET"
+              --target-instance "$TARGET" \
+              --target-instance-zone "$ZONE"
           done
           echo "flipped houses-l4-http + houses-l4-https -> $TARGET"
       - name: Continuity probe — public health responds (not acceptance)
@@ -794,7 +796,8 @@ jobs:
           fi
           for rule in houses-l4-http houses-l4-https; do
             gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
-              --target-instance "$TARGET"
+              --target-instance "$TARGET" \
+              --target-instance-zone "$ZONE"
           done
           echo "$MESSAGE"
           # No DATABASE restore: the rollout never wrote the owner's database, so
