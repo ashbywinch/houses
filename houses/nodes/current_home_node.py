@@ -14,9 +14,9 @@ read").
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from decimal import Decimal
-from typing import Any, TypedDict, override
+from typing import Any, cast, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -43,23 +43,32 @@ class MonthlySide(WireRecord):
     approx: bool
 
 
-class BaselineProvenanceValue(TypedDict):
-    """The baseline as the provenance TREE states it.
+@dataclass(frozen=True)
+class BaselineProvenanceValue:
+    """The baseline as it appears in the provenance TREE.
 
-    A plain dict, deliberately — not a WireRecord. The DAG's provenance
-    projector (``dag.attempt.project_value``) walks a projected value BY TYPE:
-    a dict recurses, a list/tuple recurses, anything else must expose
-    ``to_provenance_value()``. A record class is a Mapping, so it satisfies
-    neither and the projection raises "value of type X has no provenance
-    projection" — found on the smoke box: settings/current_home went
-    impossible with exactly that message. Wire values (the frontend contract)
-    keep their records; provenance values stay dicts.
+    A proper value object, not a dict. The DAG's provenance projector
+    (``dag.attempt.project_value``) must handle ANY node value without knowing
+    its type, so its contract is: a dict recurses, a list/tuple recurses, and
+    any other object must carry ``to_provenance_value()`` — the object
+    declares how it appears. That is the designed path ("add
+    to_provenance_value()" is literally the projector's error text). The
+    returned dict is the plain-JSON, one-key-per-field tree entry the tree is
+    stored and served as; the VALUE stays an object.
+
+    The smoke box found the gap when this method was missing:
+    settings/current_home went impossible with "value of type
+    BaselineProvenanceValue has no provenance projection".
     """
 
     rid: str
     address: str
     couple: str | None
     others: str | None
+
+    def to_provenance_value(self) -> dict[str, str | None]:
+        """The tree entry: plain JSON, one key per field."""
+        return cast(dict[str, str | None], asdict(self))
 
 
 @dataclass(frozen=True)

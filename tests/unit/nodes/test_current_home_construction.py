@@ -92,12 +92,14 @@ async def test_a_late_reprice_of_the_current_home_rederives_the_baseline(_sqlite
     assert baseline.rid == "p100"
     assert baseline.address == "31 Isambard Road, Southall"
 
-def test_the_baseline_provenance_value_projects_to_a_tree():
-    """The DAG's projector walks a projected value BY TYPE (dag/attempt.py):
-    dict recurses; a record class must expose to_provenance_value() — a
-    Mapping satisfies neither. This is the regression the smoke box found:
-    settings/current_home went impossible with "value of type
-    BaselineProvenanceValue has no provenance projection"."""
+def test_the_baseline_provenance_value_is_an_object_that_projects_to_a_tree():
+    """The DAG's projector must handle ANY node value without knowing its type,
+    so its contract is: a dict recurses, and any other VALUE OBJECT carries
+    to_provenance_value() declaring its tree form. This pins both halves — the
+    provenance value stays a proper object, and the projection works. The
+    smoke box found the gap when the method was missing: settings/current_home
+    went impossible with "value of type BaselineProvenanceValue has no
+    provenance projection"."""
     from dag.attempt import project_value
     from houses.nodes.current_home_node import MonthlyBaseline
 
@@ -107,8 +109,11 @@ def test_the_baseline_provenance_value_projects_to_a_tree():
         group_value={},
         others_rent_paid=0.0,
     )
+    value = baseline.to_provenance_value()
 
-    assert project_value(baseline.to_provenance_value()) == {
+    assert type(value).__name__ == "BaselineProvenanceValue", "a provenance value is an object"
+    assert not isinstance(value, dict)
+    assert project_value(value) == {
         "rid": "111",
         "address": "1 Test St",
         "couple": None,
