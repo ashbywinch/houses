@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from typing import Any
 
 import pytest
 
@@ -372,7 +373,6 @@ def test_drive_map_html_escapes_user_labels():
 
     evil = "</script><script>alert(1)</script>"
     searches = {
-        "metadata": {},
         "searches": [
             {
                 "id": "x",
@@ -394,7 +394,6 @@ def test_drive_map_html_one_marker_per_destination_label():
     from tools.commute.drive_isochrone import _map_html
 
     searches = {
-        "metadata": {},
         "searches": [
             {
                 "id": "drive-dad-ox71aa-090",
@@ -898,7 +897,7 @@ def test_validate_payload_passes_valid_payload():
 
 
 def test_validate_payload_catches_too_many_vertices():
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     poly = payload["searches"][0]["polygon"]
     payload["searches"][0]["polygon"] = poly + [(51.0 + i * 1e-4, -1.9 + i * 1e-4) for i in range(600)]
     issues = validate_payload(payload)
@@ -906,7 +905,7 @@ def test_validate_payload_catches_too_many_vertices():
 
 
 def test_validate_payload_catches_out_of_bbox_vertex():
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["polygon"][0] = (57.0, -1.9)  # Sheffield's latitude — outside GB_BBOX
     assert any("bounding box" in i for i in validate_payload(payload))
 
@@ -914,7 +913,7 @@ def test_validate_payload_catches_out_of_bbox_vertex():
 def test_validate_payload_catches_url_polygon_mismatch():
     import tools.commute.rightmove_url as rmu
 
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     poly = payload["searches"][0]["polygon"]
     shifted = [(lat + 0.1, lon) for lat, lon in poly]
     payload["searches"][0]["rightmove_url"] = rmu.build_search_url(shifted, min_beds=2, property_type="houses")
@@ -936,7 +935,7 @@ def test_validate_payload_catches_destination_lost():
 def test_validate_payload_flags_malformed_polygon_without_crashing():
     """A non-list polygon (hand-edited or partial artifact) must be flagged,
     not crash the validator with a TypeError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["polygon"] = "not a polygon"
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)
@@ -945,7 +944,7 @@ def test_validate_payload_flags_malformed_polygon_without_crashing():
 def test_validate_payload_flags_missing_destination_without_crashing():
     """A search record without a destination dict must be flagged, not crash
     the destination-centre check with a KeyError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["destination"] = None
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)
@@ -954,7 +953,7 @@ def test_validate_payload_flags_missing_destination_without_crashing():
 def test_validate_payload_flags_string_vertices_without_crashing():
     """Vertices with quoted numbers (e.g. hand-edited "51.0") must be
     flagged, not crash the GB-bbox check with a TypeError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["polygon"][0] = ["51.0", "-1.0"]
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)
@@ -963,7 +962,7 @@ def test_validate_payload_flags_string_vertices_without_crashing():
 def test_validate_payload_flags_non_dict_destination_without_crashing():
     """A non-dict destination (e.g. "destination": "corrupt") must be
     flagged, not crash the label/grouping steps with an AttributeError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["destination"] = "corrupt"
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)

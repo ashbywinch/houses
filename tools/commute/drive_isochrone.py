@@ -1000,7 +1000,7 @@ def _urls_text(payload: SearchesPayload) -> str:
     return "\n".join(s["rightmove_url"] for s in payload["searches"]) + "\n"
 
 
-def _map_html(searches: SearchesPayload) -> str:
+def _map_html(searches: Mapping[str, Any]) -> str:
     """Leaflet map (Leaflet + CSS from CDN): destination markers + shed
     outlines. The combined map (combined_map.py) is the self-contained one;
     this page is the per-destination quick view."""

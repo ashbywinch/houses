@@ -10,7 +10,7 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ from tools.commute.rightmove_url import parse_search_url
 from tools.commute.station_shed import BBox, ShedPayload, ShedRecord
 from tools.commute.tile import Grid, Rect, point_to_rect_distance_km, rasterize
 
-type SearchRow = dict[str, Any]  # one searches.json record — the wire shape
+type SearchRow = Mapping[str, Any]  # one searches.json record — read-only at this seam
 type CellIndex = tuple[int, int]  # a grid (row, col) index
 type Vertex = tuple[float, float]  # a polyline [lat, lon] vertex pair
 
@@ -96,7 +96,7 @@ def _point_in_rect(point: GeoPoint, rect: Rect) -> bool:
 
 
 def uncovered_cells(
-    searches: list[SearchRow],
+    searches: Sequence[SearchRow],
     kept_stations: list[ShedRecord],
     bbox: BBox,
     *,
