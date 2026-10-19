@@ -21,12 +21,10 @@ from typing import Any, cast, override
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from dag.persistence import WireRecord
 from serialization import SerializableAsDict
 
 
-@dataclass(frozen=True)
-class MonthlySide(WireRecord):
+class MonthlySide(SerializableAsDict):
     """One side of the monthly cost as the frontend's MonthlyDeltaSide reads
     it: the human figure, and whether it carries an uncertainty."""
 
@@ -62,8 +60,7 @@ class BaselineProvenanceValue:
         return cast(dict[str, str | None], asdict(self))
 
 
-@dataclass(frozen=True)
-class Baseline(WireRecord):
+class Baseline(SerializableAsDict):
     """The baseline as the wire states it (the contract the frontend reads)."""
 
     rid: str

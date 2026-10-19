@@ -58,7 +58,7 @@ async def attach(summary: MutableMapping[str, Any], rid: str) -> MutableMapping[
     att = home.latest_attempt()
     descriptor = att.value_or_none() if att is not None and att.succeeded else None
     summary["is_current_home"] = descriptor is not None and descriptor.rid == rid
-    summary["monthly_baseline"] = descriptor.to_wire() if descriptor is not None else None
+    summary["monthly_baseline"] = descriptor.to_wire().to_dict() if descriptor is not None else None
 
     prop = pr.get_property(rid)
     delta = getattr(prop, "delta_vs_home", None) if prop is not None else None

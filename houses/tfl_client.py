@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
@@ -741,7 +741,7 @@ class TflClient:
         return JourneySummary(duration, cost, route_summary)
 
     @staticmethod
-    def _parse_tfl_legs(tfl_legs: Sequence[_TflLeg]) -> list[_ParsedLeg]:
+    def _parse_tfl_legs(tfl_legs: list[_TflLeg]) -> list[_ParsedLeg]:
         """Parse TfL API legs into (JourneyLeg, mode_name) pairs.
 
         Every leg returned has ``start_station``, ``end_station``,
