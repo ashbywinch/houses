@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 import httpx
 from money import Money
 from pint import Quantity
-from pydantic import Field
+from pydantic import Field, field_serializer
 
 from dag.attempt import Attempt
 from dag.http_error import HttpError
@@ -27,7 +27,7 @@ from houses.settings import settings
 from houses.stations import Station
 from houses.stations import find as find_station
 from houses.transit_route import apply_park_and_ride_to_journeys
-from serialization import SerializableAsDict, omit_when_empty
+from serialization import SerializableAsDict, omit_when_empty, omit_when_none
 
 logger = logging.getLogger(__name__)
 
@@ -137,16 +137,17 @@ class _Summary(TypedDict):
     summary: str
 
 
-@dataclass(frozen=True)
-class _TflLeg:
-    """One leg of a TfL journey — only the fields our parsers read."""
+class _TflLeg(SerializableAsDict):
+    """One leg of a TfL journey — only the fields our parsers read. The wire
+    nests each one in a block (``{"mode": {"name": …}}``), so the fields keep
+    the parsed names and the serialisers write the blocks."""
 
-    mode_name: str | None
+    mode_name: str | None = Field(default=None, alias="mode")
     duration: int
-    departure_point: str
-    arrival_point: str
-    route_name: str
-    instruction_summary: str
+    departure_point: str = Field(default="", alias="departurePoint")
+    arrival_point: str = Field(default="", alias="arrivalPoint")
+    route_name: str = Field(default="", alias="route")
+    instruction_summary: str = Field(default="", alias="instruction")
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> _TflLeg:
@@ -159,41 +160,57 @@ class _TflLeg:
             instruction_summary=(raw.get("instruction") or {}).get("summary", ""),
         )
 
-    def to_dict(self) -> dict:
-        return dict(
-            mode=_Name(name=self.mode_name),
-            duration=self.duration,
-            departurePoint=_CommonName(commonName=self.departure_point),
-            arrivalPoint=_CommonName(commonName=self.arrival_point),
-            route=_Name(name=self.route_name),
-            instruction=_Summary(summary=self.instruction_summary),
-        )
+    @field_serializer("mode_name")
+    @staticmethod
+    def _mode_block(mode_name: str | None) -> _Name:
+        return _Name(name=mode_name)
+
+    @field_serializer("departure_point")
+    @staticmethod
+    def _departure_block(point: str) -> _CommonName:
+        return _CommonName(commonName=point)
+
+    @field_serializer("arrival_point")
+    @staticmethod
+    def _arrival_block(point: str) -> _CommonName:
+        return _CommonName(commonName=point)
+
+    @field_serializer("route_name")
+    @staticmethod
+    def _route_block(route_name: str) -> _Name:
+        return _Name(name=route_name)
+
+    @field_serializer("instruction_summary")
+    @staticmethod
+    def _instruction_block(summary: str) -> _Summary:
+        return _Summary(summary=summary)
 
 
-@dataclass(frozen=True)
-class _TflJourney:
+class _TflJourney(SerializableAsDict):
     """One journey of a TfL response — parsed fields only."""
 
     duration: int | None
-    legs: tuple[_TflLeg, ...]
-    fare: _TflFare | None
+    legs: list[_TflLeg]
+    fare: _TflFare | None = Field(default=None, exclude_if=omit_when_none)
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> _TflJourney:
         return cls(
             duration=raw.get("duration"),
-            legs=tuple(_TflLeg.from_dict(leg) for leg in raw.get("legs") or []),
+            legs=[_TflLeg.from_dict(leg) for leg in raw.get("legs") or []],
             fare=_TflFare.from_dict(raw["fare"]) if raw.get("fare") else None,
         )
 
-    def to_dict(self) -> dict:
-        journey: dict[str, Any] = dict(duration=self.duration, legs=[leg.to_dict() for leg in self.legs])
-        if self.fare is not None:
-            journey["fare"] = _Fare(
-                totalCost=self.fare.total_cost,
-                fares=[_FareEntry(mode=f.mode, cost=f.cost) for f in self.fare.fares],
-            )
-        return journey
+    @field_serializer("fare")
+    @staticmethod
+    def _fare_wire(fare: _TflFare | None) -> _Fare | None:
+        """The parsed fare projects to the wire block the parser reads back."""
+        if fare is None:
+            return None
+        return _Fare(
+            totalCost=fare.total_cost,
+            fares=[_FareEntry(mode=f.mode, cost=f.cost) for f in fare.fares],
+        )
 
 
 @dataclass(frozen=True)
@@ -724,7 +741,7 @@ class TflClient:
         return JourneySummary(duration, cost, route_summary)
 
     @staticmethod
-    def _parse_tfl_legs(tfl_legs: tuple[_TflLeg, ...]) -> list[_ParsedLeg]:
+    def _parse_tfl_legs(tfl_legs: Sequence[_TflLeg]) -> list[_ParsedLeg]:
         """Parse TfL API legs into (JourneyLeg, mode_name) pairs.
 
         Every leg returned has ``start_station``, ``end_station``,
