@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from pydantic import Field
 
 from houses import apis
-from serialization import optional_parse
+from serialization import SerializableAsDict, optional_parse
 
 logger = logging.getLogger(__name__)
 
@@ -74,22 +75,13 @@ class _FirstLeg:
         )
 
 
-@dataclass(frozen=True)
-class _DrivingLeg:
+class _DrivingLeg(SerializableAsDict):
     """The park-and-ride driving leg written into the TfL journeys payload."""
 
     mode: _LegMode
     duration: int
     instruction: _Instruction
-    arrival_point: Any
-
-    def to_dict(self) -> dict:
-        return dict(
-            mode=dict(name=self.mode.name),
-            duration=self.duration,
-            instruction=dict(summary=self.instruction.summary),
-            arrivalPoint=self.arrival_point,
-        )
+    arrival_point: Mapping[str, Any] | None = Field(default=None, alias="arrivalPoint")
 
 
 async def _get_drive_minutes(
