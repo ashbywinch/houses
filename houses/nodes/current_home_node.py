@@ -22,6 +22,7 @@ from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from dag.persistence import WireRecord
+from serialization import SerializableAsDict
 
 
 @dataclass(frozen=True)
@@ -94,8 +95,7 @@ def _money_text(value: str) -> str:
         return value
 
 
-@dataclass(frozen=True)
-class GroupFigure:
+class GroupFigure(SerializableAsDict):
     """A group figure ingested from the group value dict.
 
     ``value`` is the string amount, ``stddev`` its uncertainty (Part A:
@@ -104,9 +104,6 @@ class GroupFigure:
 
     value: str | None
     stddev: float
-
-    def to_dict(self) -> dict:
-        return dict(value=self.value, stddev=self.stddev)
 
 
 def as_figure(raw: object) -> GroupFigure | None:

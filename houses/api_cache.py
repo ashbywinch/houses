@@ -23,12 +23,12 @@ import json
 import logging
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, override
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
+from pydantic import Field
 
 from houses.settings import settings
 from serialization import SerializableAsDict
@@ -64,21 +64,17 @@ def set_cache_dir(path: str | Path) -> None:
     _CacheRuntime.CACHE_DIR = Path(path)
 
 
-@dataclass(frozen=True)
-class CacheEnvelope:
+class CacheEnvelope(SerializableAsDict):
     """The wrapped-error envelope stored in the cache file: a
     deterministic non-2xx response with its status preserved."""
 
-    status: int
-    body: object
-
-    def to_dict(self) -> dict:
-        return dict(_cached_status=self.status, _cached_body=self.body)
+    status: int = Field(alias="_cached_status")
+    body: object = Field(alias="_cached_body")
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> CacheEnvelope:
         """The cache-file envelope, read at the cache edge."""
-        return cls(status=data["_cached_status"], body=data["_cached_body"])
+        return cls.model_validate(data)
 
 
 def _wire_params(params: SerializableAsDict | Mapping[str, Any] | None) -> _WireFragment | None:
