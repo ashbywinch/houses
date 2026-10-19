@@ -9,7 +9,7 @@ from pydantic import Field
 import dag.derived_node as _dag_derived
 import dag.persistence as _dag_per
 from dag.derived_node import DerivedNode
-from dag.node import Node
+from dag.node import Node, NodeValue
 from dag.persistence import property_created_at
 from dag.regenerate import schedule_code_stale_nodes
 from dag.scheduler import get_scheduler
@@ -60,12 +60,12 @@ class PropertyView(SerializableAsDict):
     """The property document the API reports: one node-map projection."""
 
     rid: str
-    best_address: Any
-    best_location: Any
-    rightmove_url: Any
-    rightmove_price: Any
-    rightmove_bedrooms: Any
-    postcode: Any
+    best_address: NodeValue
+    best_location: NodeValue
+    rightmove_url: NodeValue
+    rightmove_price: NodeValue
+    rightmove_bedrooms: NodeValue
+    postcode: NodeValue
 
 
 class _SchoolEntry(TypedDict, total=False):
