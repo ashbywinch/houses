@@ -104,7 +104,7 @@ class TestNodeBase:
     async def test_provenance_description_in_json(self):
         node = _ConcreteNode("desc_test", str)
         node._test_attempt = Attempt.succeeded("val")
-        node._test_provenance = Provenance("test", description="TfL transit route")
+        node._test_provenance = Provenance(label="test", description="TfL transit route")
         j = await node.to_json()
         assert j["provenance"]["description"] == "TfL transit route"
 

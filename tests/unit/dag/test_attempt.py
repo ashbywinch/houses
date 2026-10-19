@@ -126,7 +126,7 @@ class TestProvenance:
     def test_label_only(self):
         from dag.attempt import Provenance
 
-        p = Provenance("TfL API")
+        p = Provenance(label="TfL API")
         assert p.label == "TfL API"
 
     def test_from_label(self):
@@ -138,7 +138,7 @@ class TestProvenance:
     def test_composite(self):
         from dag.attempt import Provenance
 
-        inner = Provenance("inner")
+        inner = Provenance(label="inner")
         outer = Provenance.composite("outer", {"dep": inner})
         assert outer.label == "outer"
         assert outer.sources["dep"].label == "inner"
@@ -146,21 +146,21 @@ class TestProvenance:
     def test_to_dict_flat(self):
         from dag.attempt import Provenance
 
-        p = Provenance("test")
+        p = Provenance(label="test")
         d = p.to_dict()
         assert d == {"label": "test"}
 
     def test_to_dict_with_description(self):
         from dag.attempt import Provenance
 
-        p = Provenance("test", description="hello")
+        p = Provenance(label="test", description="hello")
         d = p.to_dict()
         assert d == {"label": "test", "description": "hello"}
 
     def test_to_dict_with_sources(self):
         from dag.attempt import Provenance
 
-        inner = Provenance("inner")
+        inner = Provenance(label="inner")
         outer = Provenance.composite("outer", {"dep": inner})
         d = outer.to_dict()
         assert d == {"label": "outer", "sources": {"dep": {"label": "inner"}}}

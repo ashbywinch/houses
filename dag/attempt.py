@@ -17,13 +17,16 @@ import logging
 import sys
 import traceback as _traceback
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
 from enum import Enum, StrEnum, auto
 from typing import Any, TypeVar
 
 from money import Money as _Money
+from pydantic import Field, field_serializer
+
+from serialization import SerializableAsDict, omit_when_empty, omit_when_none
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -50,20 +53,21 @@ class SourceType(StrEnum):
     DB = "db"
 
 
-@dataclass
-class FormulaLine:
+class FormulaLine(SerializableAsDict):
+    """One line of a provenance formula."""
+
     label: str
     value: str
 
 
-@dataclass
-class Formula:
+class Formula(SerializableAsDict):
+    """A provenance formula: its lines and the computed result."""
+
     lines: list[FormulaLine]
     result: str
 
 
-@dataclass
-class AttemptError:
+class AttemptError(SerializableAsDict):
     """Structured error attached to an impossible Attempt.
 
     Holds the **actual exception object** in memory (``exc``) so code can
@@ -88,9 +92,11 @@ class AttemptError:
     user_message: str = ""  # friendly, UI-safe; defaults to message
     retryable: bool = False
     source: str = ""  # node id or service that produced the error
-    exc: BaseException | None = None  # the actual exception object (in-memory only)
+    # The exception object is in-memory only: the wire carries its type name.
+    exc: BaseException | None = Field(default=None, exclude=True)
+    exc_type: str = ""  # derived at dump time from exc — see the serializer below
     traceback: str = ""
-    causes: tuple[AttemptError, ...] = ()
+    causes: list[AttemptError] = Field(default_factory=list)
 
     @property
     def display_message(self) -> str:
@@ -107,19 +113,17 @@ class AttemptError:
             return self.causes[0].display_message
         return self.message
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {
-            "code": self.code,
-            "message": self.message,
-            "user_message": self.display_message,
-            "retryable": self.retryable,
-            "source": self.source,
-            "exc_type": type(self.exc).__name__ if self.exc is not None else "",
-            "traceback": self.traceback,
-            "causes": [c.to_dict() for c in self.causes],
-        }
+    @field_serializer("exc_type")
+    def _exc_type(self, _stored: str) -> str:
+        """The wire's ``exc_type`` is the exception's class name, derived at
+        dump time: a computed field would serialise last, and the wire order is
+        part of the contract."""
+        return type(self.exc).__name__ if self.exc is not None else ""
+
+    @field_serializer("user_message")
+    def _display_message(self, _stored: str) -> str:
+        """The wire's ``user_message`` is the UI-safe text, not the raw field."""
+        return self.display_message
 
     @classmethod
     def from_exception(cls, message: str, exc: BaseException | None, *, source: str = "") -> AttemptError:
@@ -553,9 +557,7 @@ def project_value(v: Any) -> Any:
         )
         return _project_non_json(v)
 
-
-@dataclass
-class Provenance:
+class Provenance(SerializableAsDict):
     """Tracks where a value came from.
 
     Built dynamically by walking the DAG — not stored on Attempt objects.
@@ -567,63 +569,45 @@ class Provenance:
     """
 
     label: str = ""
-    description: str | None = None
-    value: Any = None
-    url: str = ""
-    source_type: SourceType | None = None
-    freshness: datetime | None = None
-    formula: Formula | None = None
-    status: str = ""
-    error: str = ""
-    sources: dict[str, Provenance] = field(default_factory=dict)
+    description: str | None = Field(default=None, exclude_if=omit_when_empty)
+    url: str = Field(default="", exclude_if=omit_when_empty)
+    value: Any = Field(default=None, exclude_if=omit_when_none)
+    source_type: SourceType | None = Field(default=None, alias="sourceType", exclude_if=omit_when_none)
+    status: str = Field(default="", exclude_if=omit_when_empty)
+    error: str = Field(default="", exclude_if=omit_when_empty)
+    freshness: datetime | None = Field(default=None, exclude_if=omit_when_none)
+    formula: Formula | None = Field(default=None, exclude_if=omit_when_none)
+    sources: dict[str, Provenance] = Field(default_factory=dict, exclude_if=omit_when_empty)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    def to_dict(self) -> dict:
-        """Serialise to a JSON-safe dict."""
-        result: dict = {"label": self.label}
-        if self.description:
-            result["description"] = self.description
-        if self.url:
-            result["url"] = self.url
-        if self.value is not None:
-            # Values are projected to JSON-safe form at build time via
-            # project_value(). Anything that still fails serialization
-            # here is a contract violation — fail fast so the emitting
-            # node is fixed, never silently drop or repr-dump the value.
-            # Money is the one canonical value-type exception: it has a
-            # well-defined string form.
-            try:
-                _json.dumps(self.value)
-            except (TypeError, ValueError, OverflowError):
-                if isinstance(self.value, _Money):
-                    result["value"] = str(self.value)
-                else:
-                    raise TypeError(
-                        f"Provenance value of type {type(self.value).__name__} is not "
-                        "JSON-serializable; add to_provenance_value() to that type or "
-                        "project it in build_provenance"
-                    ) from None
-            else:
-                result["value"] = self.value
-        if self.source_type is not None:
-            result["sourceType"] = self.source_type.value
-        # lucidlint: ignore duplicate-block field-mapping table — each guard+assign pair serialises a distinct
-        if self.status:
-            result["status"] = self.status
-        if self.error:
-            result["error"] = self.error
-        if self.freshness is not None:
-            result["freshness"] = self.freshness.isoformat()
-        if self.formula is not None:
-            # lucidlint: ignore record-shape wire-format dict — serialization boundary
-            result["formula"] = {
-                # lucidlint: ignore record-shape wire-format dict — serialization boundary
-                "lines": [{"label": line.label, "value": line.value} for line in self.formula.lines],
-                "result": self.formula.result,
-            }
-        if self.sources:
-            result["sources"] = {k: v.to_dict() for k, v in self.sources.items()}
-        return result
+    @field_serializer("value")
+    @staticmethod
+    def _json_safe_value(value: Any) -> Any:
+        """Values are projected to JSON-safe form at build time via
+        ``project_value()``. Anything that still fails serialization here is a
+        contract violation — fail fast so the emitting node is fixed, never
+        silently drop or repr-dump the value. Money is the one canonical
+        value-type exception: it has a well-defined string form."""
+        try:
+            _json.dumps(value)
+        except (TypeError, ValueError, OverflowError):
+            if isinstance(value, _Money):
+                return str(value)
+            raise TypeError(
+                f"Provenance value of type {type(value).__name__} is not "
+                "JSON-serializable; add to_provenance_value() to that type or "
+                "project it in build_provenance"
+            ) from None
+        return value
+
+    @field_serializer("source_type")
+    @staticmethod
+    def _source_type(source_type: SourceType | None) -> str | None:
+        return source_type.value if source_type is not None else None
+
+    @field_serializer("freshness")
+    @staticmethod
+    def _freshness(freshness: datetime | None) -> str | None:
+        return freshness.isoformat() if freshness is not None else None
 
     @classmethod
     def from_label(cls, label: str, url: str = "") -> Provenance:
