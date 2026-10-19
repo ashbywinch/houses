@@ -7,7 +7,7 @@ import sqlite3
 import subprocess
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, Any, TypedDict
 
@@ -25,7 +25,7 @@ import houses.town_desc as _town_desc
 import houses.web.api_router as _api_mod
 import houses.web.broadcaster as _broadcaster_mod
 from dag.guard import capture
-from dag.persistence import WireRecord, delete_node_results_for_rid, property_rids
+from dag.persistence import delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
 from dag.scheduler import (
     flush_processor,
@@ -51,7 +51,7 @@ from houses.services import Services
 from houses.settings import settings
 from houses.web.api_router import api_router
 from houses.web.auth import auth_router, effective_session_user, get_session_user
-from serialization import asdict_serializable
+from serialization import SerializableAsDict, asdict_serializable
 
 logger = logging.getLogger(__name__)
 
@@ -696,8 +696,7 @@ async def remove_property(rid: str) -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
 
 
-@dataclass(frozen=True)
-class HealthProbe(WireRecord):
+class HealthProbe(SerializableAsDict):
     """The /health probe's wire payload: liveness plus DB-readiness."""
 
     status: str
@@ -707,7 +706,7 @@ class HealthProbe(WireRecord):
 
 def _health_response(db: str, last_write: str) -> JSONResponse:
     """The probe's response for one outcome (``db`` is ``ok`` or ``error``)."""
-    return JSONResponse(content=asdict(HealthProbe(status="ok", db=db, last_write=last_write)))
+    return JSONResponse(content=HealthProbe(status="ok", db=db, last_write=last_write).to_dict())
 
 
 @app.get("/health")
