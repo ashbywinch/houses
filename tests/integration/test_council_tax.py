@@ -447,9 +447,9 @@ class TestLookupCouncilTax:
 class TestLookupYearlyCost:
     @pytest.mark.asyncio
     async def test_ratio_computation(self):
-        from houses.council_tax import BAND_RATIOS
+        from houses.council_tax import _TaxRates
 
-        assert BAND_RATIOS["F"] == 13 / 9
+        assert _TaxRates.BAND_RATIOS["F"] == 13 / 9
         result = round(307.0 * 13 / 9, 2)
         assert result == 443.44
 

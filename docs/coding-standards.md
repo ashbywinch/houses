@@ -20,7 +20,7 @@ Project-specific rules supplementing the shared coding standards. Read both. If 
 | `str` for a point in time | `datetime.datetime` | Timezone-aware arithmetic, no parsing errors |
 | `float` for a price | `money.Money` | Currency part of the value; no silent £/$ mix-ups |
 | `int` for a duration | `pint.Quantity` | Unit part of the value; metres ≠ kilometres |
-| `dict` for structured data | `dataclass`/`TypedDict` | Field names, types, required/optional explicit |
+| `dict` for structured data | a record class (`SerializableAsDict`) | Field names, types, required/optional explicit — see *Boundary records* |
 | `str` for enumerated value | `enum` | Valid values known at compile time |
 
 **All monetary values use `money.Money`; all durations/distances use `pint.Quantity`** — never bare `float`/`int`. `Money`/`Quantity` encapsulate the unit, so field names don't repeat it (`price`, not `price_gbp`).
@@ -41,6 +41,58 @@ The constants are **one unit expressed as a Quantity** (`1.0 * ureg.km`), not a 
 Before reaching for a `dict`/list/primitive: "Is there a type that makes this impossible to misuse?"
 
 **Wire formats are the exception, explicitly:** serialized payloads, config files, and external-API request bodies use unit-named bare numbers by design (`threshold_min`, `cell_km`, `duration_min`) — pint has no JSON representation, and the consumers (scrapers, URLs, the map) read numbers. `Quantity` governs all in-memory computation and function signatures; conversion happens only at the (de)serialization boundary. The batch toolchain (`tools/commute/`) follows this: `Quantity` signatures internally, bare unit-named numbers in `data/commute/*.json` and the config file.
+
+### Boundary records
+
+A record that crosses a boundary — an HTTP response, a websocket message, an
+outbound request to another service, a persisted DAG row, a committed artifact
+— **is a class that carries its own serialization**, not a dict and not a
+parallel class beside the domain type. Inherit
+`houses.web.json_utils.SerializableAsDict`, declare the fields, and delete any
+`to_dict` you were about to write: the base supplies it
+(`model_dump(by_alias=True)`), plus the config these records need
+(`arbitrary_types_allowed` for `Money`/`Quantity`, `populate_by_name` for
+aliases).
+
+```python
+class OrsReverseParams(SerializableAsDict):
+    """The Pelias reverse-geocode query — the dotted keys are Pelias's."""
+
+    point_lat: float = Field(alias="point.lat")
+    point_lon: float = Field(alias="point.lon")
+    size: int
+    boundary_country: str = Field(alias="boundary.country")
+    layers: str
+```
+
+| Situation | Rule |
+|---|---|
+| Wire key is not a python name (camelCase, dotted) | `Field(alias="theWireKey")` — never a rename map keyed by field name, which fails silently when it drifts |
+| Field carries `money.Money` / `pint.Quantity` | annotate it `MoneyValue` / `QuantityValue` — never a hand-rolled `{amount, currency}` record |
+| The type is a third party's (`Money`, `Quantity`, `httpx.Response`) | put the serializer on the field that carries it; never a class beside it |
+| A dict is handed to a client, a cache key, or `json.dumps` | `record.to_dict()` at that edge — never a hand-built dict threaded through |
+| The code produces the JSON text itself (websocket message, artifact) | a `to_json()` on the record |
+
+**A key that is present only sometimes states its condition on the field it
+governs:**
+
+```python
+# ✓ present only when there is an error — the reader sees the rule where it applies
+error: str | None = Field(default=None, exclude_if=omit_when_none)
+```
+
+`omit_when_none` / `omit_when_empty` (both in `houses/web/json_utils.py`) are
+the two conditions in use. Reach for a whole-record
+`@model_serializer(mode="wrap")` **only when the structure itself changes**, not
+just which keys appear — a Google Routes waypoint is either
+`{"location": {"latLng": …}}` or `{"address": …}`, which no per-field rule can
+express. A per-field condition is also the one a reviewer can check at a
+glance; the wrap serializer is a method returning a dict, so it costs a
+suppression every time it is used where a field rule would have done.
+
+The full doctrine, with the byte-identity evidence for each migration step, is
+in [lucidlint-review-log.md](lucidlint-review-log.md) → *Serialisation
+migration*.
 
 ### Each class in its own module
 

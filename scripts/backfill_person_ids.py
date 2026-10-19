@@ -33,17 +33,27 @@ import re
 import sqlite3
 import sys
 import zlib
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping, Sequence
 from datetime import UTC, datetime
+from typing import Any
 
 from dag.persistence import read_node_record, record_select_columns, write_node_record
 from houses.model.domain import slugify
 
-DB_PATH = "data/houses.db"
-
 _NUMERIC_ID_RE = re.compile(r"^[0-9]+$")
 
-WORKS_ESTIMATES_SUFFIX = "/works_estimates"
+
+class _PersonIdBackfill:
+    """The person-id backfill's DB target and batch policy."""
+
+    DB_PATH = "data/houses.db"
+    WORKS_ESTIMATES_SUFFIX = "/works_estimates"
+
+    # Commit every batch: bounds the rollback journal — a single 860k-row
+    # transaction needs a ~2.4 GB journal (2026-09-18 out-of-disk crash).
+    # Batched commits keep it bounded and the migration resumable.
+    COMMIT_BATCH_SIZE = 10_000
+
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,7 +65,7 @@ class MigrationResult:
     applied: int
 
 
-def _rekey_node_id(node_id: str, mapping) -> str:
+def _rekey_node_id(node_id: str, mapping: Mapping[str, str]) -> str:
     """Re-key the PERSON segment of a node id — position 2, the only
     name-bearing slot in the format ``{rid}/{person}/{label}/{step}``.
 
@@ -76,8 +86,12 @@ def _rekey_node_id(node_id: str, mapping) -> str:
     return node_id
 
 
-# lucidlint: ignore record-shape the record IS the stored wire shape (keys vary per node type)
-def remap_row(node_id: str, dep_timestamps: Mapping[str, str], record: dict | None, mapping) -> tuple | None:
+def remap_row(
+    node_id: str,
+    dep_timestamps: Mapping[str, str],
+    record: Mapping[str, Any] | None,
+    mapping: Mapping[str, str],
+) -> tuple | None:
     """Apply the name→id mapping to one row.
 
     *record* is the row as ``dag.persistence.read_node_record`` decodes it, or
@@ -91,7 +105,7 @@ def remap_row(node_id: str, dep_timestamps: Mapping[str, str], record: dict | No
     dep = {_rekey_node_id(k, mapping): v for k, v in dep_timestamps.items()}
 
     remapped_record = None
-    if node_id.endswith(WORKS_ESTIMATES_SUFFIX) and record is not None:
+    if node_id.endswith(_PersonIdBackfill.WORKS_ESTIMATES_SUFFIX) and record is not None:
         try:
             value = record.get("value")
             if isinstance(value, str):
@@ -105,8 +119,7 @@ def remap_row(node_id: str, dep_timestamps: Mapping[str, str], record: dict | No
                 renamed = {_works_key(k, mapping): v for k, v in value.items()}
                 if renamed != value:
                     remapped_record = {**record, "value": renamed}
-            # else: not a person-keyed dict — nothing to remap
-        except Exception as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"backfill aborted: works_estimates row for {node_id!r} is not "
                 f"parseable ({exc.__class__.__name__}: {exc})"
@@ -117,7 +130,7 @@ def remap_row(node_id: str, dep_timestamps: Mapping[str, str], record: dict | No
     return (new_node_id, json.dumps(dep), remapped_record)
 
 
-def _works_key(key: str, mapping) -> str:
+def _works_key(key: str, mapping: Mapping[str, str]) -> str:
     """Works-estimate key → person id: the display name or its slug both
     resolve (writes between the code cutover and this migration store
     the slug fallback — a rename must not orphan them)."""
@@ -127,9 +140,17 @@ def _works_key(key: str, mapping) -> str:
         if slugify(name) == key:
             return pid
     return key
-# lucidlint: ignore record-shape the mapping is a derived rename table feeding a pure
-# string transform — not a wire record
-def collect_mapping(persons_value) -> dict:
+
+
+def _remember_person(mapping: MutableMapping[str, str], existing: list[int], name: str | None, pid: str) -> None:
+    """Record one person's id (if named) and any numeric id for the next-id sweep."""
+    if name:
+        mapping[name] = pid
+        if _NUMERIC_ID_RE.match(pid):
+            existing.append(int(pid))
+
+
+def collect_mapping(persons_value: Sequence[Any] | None) -> Mapping[str, str]:
     """{display name → person_id}: existing ids are kept; everyone still
     missing one gets max(existing numeric ids)+1, assigned in list order —
     deterministic and collision-free (numeric ids never collide)."""
@@ -137,19 +158,9 @@ def collect_mapping(persons_value) -> dict:
     existing = []
     for p in persons_value or []:
         if isinstance(p, dict):
-            name = p.get("name")
-            pid = p.get("person_id") or ""
-            if name:
-                mapping[name] = pid
-                if _NUMERIC_ID_RE.match(pid):
-                    existing.append(int(pid))
+            _remember_person(mapping, existing, p.get("name"), p.get("person_id") or "")
         else:
-            name = getattr(p, "name", None)
-            pid = getattr(p, "person_id", "") or ""
-            if name:
-                mapping[name] = pid
-                if _NUMERIC_ID_RE.match(pid):
-                    existing.append(int(pid))
+            _remember_person(mapping, existing, getattr(p, "name", None), getattr(p, "person_id", "") or "")
     next_id = max(existing, default=0) + 1
     for name, pid in mapping.items():
         if not pid:
@@ -158,37 +169,7 @@ def collect_mapping(persons_value) -> dict:
     return mapping
 
 
-# lucidlint: ignore latent-class one-shot migration threads one connection through IO steps by design —
-# a class wrapper adds ceremony without a reuse axis; tests pin the transform
-def rows_to_remap(conn, mapping, chunk_size: int = 10_000):
-    """Stream every row in batches, yielding the remapped entries.
-
-    Never materializes the table: the fetchall() + list build held every
-    row's re-serialized dep_timestamps — multi-GB on the 862k-row live
-    DB — and the box OOM-killed the migration's dry-run (v1.5.0 release,
-    2026-09-23). Callers count once and re-generate for the apply.
-
-    The record is read through ``dag.persistence.read_node_record`` for the
-    works_estimates rows that need it and for no others — every other row is
-    re-keyed from node_id/dep_timestamps alone.
-    """
-    selected = ", ".join(("rowid AS rowid", "node_id", "dep_timestamps", *record_select_columns(conn)))
-    sel = conn.execute(f"SELECT {selected} FROM node_results")
-    while True:
-        rows = sel.fetchmany(chunk_size)
-        if not rows:
-            return
-        for row in rows:
-            node_id = row["node_id"]
-            dep = json.loads(row["dep_timestamps"] or "{}")
-            remapped = remap_row(node_id, dep, _row_record(row, node_id), mapping)
-            if remapped is None:
-                continue
-            yield (row["rowid"], *remapped)
-
-
-# lucidlint: ignore record-shape the record IS the stored wire shape (keys vary per node type)
-def _row_record(row: sqlite3.Row, node_id: str) -> dict | None:
+def _row_record(row: sqlite3.Row, node_id: str) -> Mapping[str, Any] | None:
     """The row's record, but only when the transform needs to read one.
 
     Only works_estimates rows carry person keys in their value, and only they
@@ -196,7 +177,7 @@ def _row_record(row: sqlite3.Row, node_id: str) -> dict | None:
     row never aborts the migration. An unreadable works_estimates row DOES
     abort it: silently leaving its name keys is the bug this migration fixes.
     """
-    if not node_id.endswith(WORKS_ESTIMATES_SUFFIX):
+    if not node_id.endswith(_PersonIdBackfill.WORKS_ESTIMATES_SUFFIX):
         return None
     try:
         return read_node_record(row)
@@ -219,93 +200,130 @@ def _read_persons(conn):
     return persons["rowid"], read_node_record(persons)
 
 
-def backfill_persons(conn, persons_row_id: int, data, mapping) -> None:
-    """Write the stable person_id onto every person in the persons row."""
-    for p in data.get("value", []):
-        if isinstance(p, dict):
-            name = p.get("name")
-            if name and not p.get("person_id"):
-                p["person_id"] = mapping[name]
-        else:
-            pid = mapping.get(getattr(p, "name", ""), "")  # defensive: stored rows are dicts
-            if pid and not getattr(p, "person_id", ""):
-                p.person_id = pid
-    write_node_record(conn, persons_row_id, data)
+class PersonIdMigration:
+    """One person-id backfill run: the open DB and the name→id rename table.
 
-
-def _mark_changed_sources(conn, persons_row_id: int) -> None:
-    """Advance the freshness stamp (created_at) of the SOURCE rows whose
-    content this migration rewrote: the persons row and every
-    person-keyed works_estimates row. The persons bump targets the
-    CURRENT row by its rowid — never the whole history: stamping every
-    version identically destroys the append-order the latest-row query
-    relies on (and an old row can win the tie).
-
-    created_at IS the DAG's data-staleness contract (derived_node._is_stale
-    compares each dep row's _db_created_at against the stored
-    dep_timestamps). Rewriting source content without advancing the stamp
-    leaves consumers looking fresh while their inputs changed — exactly
-    the boot-sweep blind spot this migration hit. Derived rows are NOT
-    marked: their values didn't change; the sweep will re-price them
-    through the sources' new stamps, and route planners (address-keyed)
-    stay untouched.
+    ``conn`` and ``mapping`` are one thing in this migration — every row is
+    re-keyed against the rename table on that connection — so the steps take
+    them as one object instead of two parameters.
     """
-    now = datetime.now(UTC).isoformat()
-    conn.execute("UPDATE node_results SET created_at=? WHERE rowid=?", (now, persons_row_id))
-    selected = ", ".join(("rowid AS rowid", *record_select_columns(conn)))
-    for row in conn.execute(
-        f"SELECT {selected} FROM node_results WHERE node_id LIKE '%{WORKS_ESTIMATES_SUFFIX}'"
-    ).fetchall():
-        try:
-            value = read_node_record(row).get("value")
-        except (ValueError, zlib.error):
-            continue
-        if isinstance(value, dict) and value:
-            conn.execute("UPDATE node_results SET created_at=? WHERE rowid=?", (now, row["rowid"]))
+
+    def __init__(self, conn: sqlite3.Connection, mapping: Mapping[str, str]) -> None:
+        self.conn = conn
+        self.mapping = mapping
+
+    def rows_to_remap(self, chunk_size: int = 10_000):
+        """Stream every row in batches, yielding the remapped entries.
+
+        Never materializes the table: the fetchall() + list build held every
+        row's re-serialized dep_timestamps — multi-GB on the 862k-row live
+        DB — and the box OOM-killed the migration's dry-run (v1.5.0 release,
+        2026-09-23). Callers count once and re-generate for the apply.
+
+        The record is read through ``dag.persistence.read_node_record`` for the
+        works_estimates rows that need it and for no others — every other row is
+        re-keyed from node_id/dep_timestamps alone.
+        """
+        selected = ", ".join(("rowid AS rowid", "node_id", "dep_timestamps", *record_select_columns(self.conn)))
+        sel = self.conn.execute(f"SELECT {selected} FROM node_results")
+        while True:
+            rows = sel.fetchmany(chunk_size)
+            if not rows:
+                return
+            for row in rows:
+                node_id = row["node_id"]
+                dep = json.loads(row["dep_timestamps"] or "{}")
+                remapped = remap_row(node_id, dep, _row_record(row, node_id), self.mapping)
+                if remapped is None:
+                    continue
+                yield (row["rowid"], *remapped)
+
+    def backfill_persons(self, persons_row_id: int, data) -> None:
+        """Write the stable person_id onto every person in the persons row."""
+        for p in data.get("value", []):
+            if isinstance(p, dict):
+                name = p.get("name")
+                if name and not p.get("person_id"):
+                    p["person_id"] = self.mapping[name]
+            else:
+                pid = self.mapping.get(getattr(p, "name", ""), "")  # defensive: stored rows are dicts
+                if pid and not getattr(p, "person_id", ""):
+                    p.person_id = pid
+        write_node_record(self.conn, persons_row_id, data)
+
+    def _mark_changed_sources(self, persons_row_id: int) -> None:
+        """Advance the freshness stamp (created_at) of the SOURCE rows whose
+        content this migration rewrote: the persons row and every
+        person-keyed works_estimates row. The persons bump targets the
+        CURRENT row by its rowid — never the whole history: stamping every
+        version identically destroys the append-order the latest-row query
+        relies on (and an old row can win the tie).
+
+        created_at IS the DAG's data-staleness contract (derived_node._is_stale
+        compares each dep row's _db_created_at against the stored
+        dep_timestamps). Rewriting source content without advancing the stamp
+        leaves consumers looking fresh while their inputs changed — exactly
+        the boot-sweep blind spot this migration hit. Derived rows are NOT
+        marked: their values didn't change; the sweep will re-price them
+        through the sources' new stamps, and route planners (address-keyed)
+        stay untouched.
+        """
+        conn = self.conn
+        now = datetime.now(UTC).isoformat()
+        conn.execute("UPDATE node_results SET created_at=? WHERE rowid=?", (now, persons_row_id))
+        selected = ", ".join(("rowid AS rowid", *record_select_columns(conn)))
+        for row in conn.execute(
+            f"SELECT {selected} FROM node_results WHERE node_id LIKE '%{_PersonIdBackfill.WORKS_ESTIMATES_SUFFIX}'"
+        ).fetchall():
+            try:
+                value = read_node_record(row).get("value")
+            except (ValueError, zlib.error):
+                continue
+            if isinstance(value, dict) and value:
+                conn.execute("UPDATE node_results SET created_at=? WHERE rowid=?", (now, row["rowid"]))
+
+    def leftover_after_apply(self, data) -> int:
+        """How many rows the rewritten rename table would still remap (0 is the proof)."""
+        rewritten = PersonIdMigration(self.conn, collect_mapping(data.get("value")))
+        return sum(1 for _ in rewritten.rows_to_remap())
+
+    def apply(self, persons_row_id: int, data, remaps, *, backup_path: str | None, verify: bool) -> MigrationResult:
+        """Write the transform, checkpoint first, and prove it exhausted the
+        work. Returns a MigrationResult; ok=False means the run must fail loudly.
+
+        The applied count is the generator's OWN consumption — a post-apply
+        re-scan on the same connection sees migrated rows and would report
+        zero (the 2026-09-23 '0 remapped (applied)' lie)."""
+        conn = self.conn
+        if backup_path:
+            conn.backup(sqlite3.connect(backup_path))
+            print(f"backup written: {backup_path}")
+        applied = 0
+        for idx, (row_id, node_id, dep_json, record) in enumerate(remaps):
+            applied += 1
+            conn.execute(
+                "UPDATE node_results SET node_id=?, dep_timestamps=? WHERE rowid=?",
+                (node_id, dep_json, row_id),
+            )
+            if record is not None:
+                write_node_record(conn, row_id, record)
+            if idx % _PersonIdBackfill.COMMIT_BATCH_SIZE == _PersonIdBackfill.COMMIT_BATCH_SIZE - 1:
+                conn.commit()  # bound the journal: a single 860k-row transaction
+                # needs a ~2.4 GB rollback journal — the original out-of-disk crash
+                # (2026-09-18). Batched commits keep it bounded and make the
+                # idempotent migration resumable after any interruption.
+        self._mark_changed_sources(persons_row_id)
+        self.backfill_persons(persons_row_id, data)
+        conn.commit()
+        if verify:
+            leftover = self.leftover_after_apply(data)
+            if leftover:
+                print(f"VERIFY FAILED: {leftover} rows still remappable", file=sys.stderr)
+                return MigrationResult(ok=False, applied=0)
+            print("verify: zero rows remappable after apply")
+        return MigrationResult(ok=True, applied=applied)
 
 
-# lucidlint: ignore long-param-list one-shot migration step — the signature IS its IO boundary;
-# an Options object would be a facade over nothing
-def apply_migration(conn, persons_id: int, data, mapping, remaps, *, backup_path: str | None, verify: bool) -> MigrationResult:  # noqa: E501 the signature IS its IO boundary (see the long-param-list ignore above)
-    """Write the transform, checkpoint first, and prove it exhausted the
-    work. Returns a MigrationResult; ok=False means the run must fail loudly.
-
-    The applied count is the generator's OWN consumption — a post-apply
-    re-scan on the same connection sees migrated rows and would report
-    zero (the 2026-09-23 '0 remapped (applied)' lie)."""
-    if backup_path:
-        conn.backup(sqlite3.connect(backup_path))
-        print(f"backup written: {backup_path}")
-    applied = 0
-    for idx, (row_id, node_id, dep_json, record) in enumerate(remaps):
-        applied += 1
-        conn.execute(
-            "UPDATE node_results SET node_id=?, dep_timestamps=? WHERE rowid=?",
-            (node_id, dep_json, row_id),
-        )
-        if record is not None:
-            write_node_record(conn, row_id, record)
-        if idx % 10000 == 9999:
-            conn.commit()  # bound the journal: a single 860k-row transaction
-            # needs a ~2.4 GB rollback journal — the original out-of-disk crash
-            # (2026-09-18). Batched commits keep it bounded and make the
-            # idempotent migration resumable after any interruption.
-    _mark_changed_sources(conn, persons_id)
-    backfill_persons(conn, persons_id, data, mapping)
-    conn.commit()
-    if verify:
-        second_persons = _read_persons(conn)
-        if second_persons is None:
-            print("VERIFY FAILED: persons row missing after apply", file=sys.stderr)
-            return MigrationResult(ok=False, applied=0)
-        leftover = sum(1 for _ in rows_to_remap(conn, collect_mapping(second_persons[1].get("value"))))
-        if leftover:
-            print(f"VERIFY FAILED: {leftover} rows still remappable", file=sys.stderr)
-            return MigrationResult(ok=False, applied=0)
-        print("verify: zero rows remappable after apply")
-    return MigrationResult(ok=True, applied=applied)
-
-# lucidlint: ignore latent-class main is the thin CLI shell over the same one-shot IO steps (see rows_to_remap)
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="write the changes (dry-run default)")
@@ -316,7 +334,7 @@ def main() -> int:
         help="where --backup writes (default: <db>.pre-<this script's basename>)",
     )
     parser.add_argument("--verify", action="store_true", help="re-scan after apply: must find zero remaps")
-    parser.add_argument("--db", default=DB_PATH, help="sqlite path (default: data/houses.db)")
+    parser.add_argument("--db", default=_PersonIdBackfill.DB_PATH, help="sqlite path (default: data/houses.db)")
     args = parser.parse_args()
 
     if args.apply and os.environ.get("HOUSES_SCRIPTS_MAY_WRITE") != "1":
@@ -329,19 +347,17 @@ def main() -> int:
     persons_values = _read_persons(conn)
     if persons_values is None:
         return 1
-    persons, data = persons_values
+    persons_row_id, data = persons_values
     mapping = collect_mapping(data.get("value"))
     if not mapping:
         print("no persons found — nothing to do", file=sys.stderr)
         return 1
-    remaps = rows_to_remap(conn, mapping)
+    migration = PersonIdMigration(conn, mapping)
     if args.apply:
-        result = apply_migration(
-            conn,
-            persons,
+        result = migration.apply(
+            persons_row_id,
             data,
-            mapping,
-            rows_to_remap(conn, mapping),  # a fresh scan — the first is counted below
+            migration.rows_to_remap(),  # a fresh scan — the first is counted below
             backup_path=(args.backup_path or f"{args.db}.pre-{os.path.basename(__file__)}") if args.backup else None,
             verify=args.verify,
         )
@@ -349,10 +365,11 @@ def main() -> int:
             return 2
         print(f"persons: {len(mapping)} | rows remapped: {result.applied} (applied)")
         return 0
-    count = sum(1 for _ in remaps)
+    count = sum(1 for _ in migration.rows_to_remap())
     print(f"persons: {len(mapping)} | rows remapped: {count} (dry-run)")
     if count:
-        sample = [r[1] for r in itertools.islice(rows_to_remap(conn, mapping), 3)]
+        sample_size = 3  # a few node ids are enough to eyeball the remapping
+        sample = [r[1] for r in itertools.islice(migration.rows_to_remap(), sample_size)]
         print("sample node ids:", sample)
     return 0
 

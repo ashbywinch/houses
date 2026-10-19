@@ -91,7 +91,7 @@ class TestSummaryShape:
     @pytest.mark.asyncio
     async def test_has_expected_keys(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
         assert s["rid"] == "test_shape"
         assert "best_address" in s
         assert "best_location" in s
@@ -105,7 +105,7 @@ class TestSummaryShape:
     @pytest.mark.asyncio
     async def test_every_value_is_wrapped(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
         for key in (
             "best_address",
             "best_location",
@@ -132,7 +132,7 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_has_all_sections(self, prop):
         await flush_processor()
-        d = await prop.to_json_detail()
+        d = (await prop.detail()).to_dict()
         assert d["rid"] == "test_shape"
         for section in ("location", "commutes", "schools", "affordability", "area", "comments", "settings"):
             assert section in d, f"missing section: {section}"
@@ -140,7 +140,7 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_affordability_keys(self, prop):
         await flush_processor()
-        d = await prop.to_json_detail()
+        d = (await prop.detail()).to_dict()
         af = d["affordability"]
         expected = (
             "council_tax",
@@ -161,7 +161,7 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_comments_keys(self, prop):
         await flush_processor()
-        d = await prop.to_json_detail()
+        d = (await prop.detail()).to_dict()
         cm = d["comments"]
         expected = (
             "status",
@@ -177,7 +177,7 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_location_keys(self, prop):
         await flush_processor()
-        d = await prop.to_json_detail()
+        d = (await prop.detail()).to_dict()
         loc = d["location"]
         expected = ("best_location", "geocode", "rightmove_location", "precise_location")
         for key in expected:
@@ -186,7 +186,7 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_settings_keys(self, prop):
         await flush_processor()
-        d = await prop.to_json_detail()
+        d = (await prop.detail()).to_dict()
         s = d["settings"]
         assert "persons" in s
         assert "financial" in s
@@ -194,7 +194,7 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_schools_keys(self, prop):
         await flush_processor()
-        d = await prop.to_json_detail()
+        d = (await prop.detail()).to_dict()
         sc = d["schools"]
         assert "primary" in sc
         assert "secondary" in sc
@@ -204,7 +204,7 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_monthly_sinking_is_monthly_not_yearly(self, prop):
         await flush_processor()
-        d = await prop.to_json_detail()
+        d = (await prop.detail()).to_dict()
         sf = d["affordability"]["monthly_sinking_fund"]
         assert sf["status"] == "succeeded"
         assert float(sf["value"]["amount"]) < 1000, f"sinking fund {sf['value']} looks like yearly, not monthly"
@@ -263,7 +263,7 @@ class TestCommuteData:
         schools).  The flag must be present on every entry, whatever
         serialization path the pipeline took."""
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
         assert s["commutes"], "summary must contain commutes"
         for key, cd in s["commutes"].items():
             assert "is_child" in cd["commute"], (
@@ -276,7 +276,7 @@ class TestCommuteData:
     async def test_commute_duration_appears_in_summary(self, prop):
         """List page PropertyCard accesses c.commute.value.duration.value."""
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
         assert s["commutes"], "summary must contain commutes"
         for key, cd in s["commutes"].items():
             c = cd["commute"]
@@ -300,7 +300,7 @@ class TestFinancialSettingsPropagation:
         await flush_processor()
 
         # Read detail baseline
-        d1 = await prop.to_json_detail()
+        d1 = (await prop.detail()).to_dict()
         fin1 = d1["settings"]["financial"]["value"]
         old_mortgage = d1["affordability"]["monthly_mortgage"]["value"]
 
@@ -308,18 +308,18 @@ class TestFinancialSettingsPropagation:
         new_financials = dict(fin1)
         new_financials["mortgage_rate"] = 0.99
         # Push to individual setting nodes (the canonical financial source)
-        from houses.nodes.settings_node import API_KEY_TO_NODE
+        from houses.nodes.settings_node import SettingsNode
 
         svc = get_services()
         for api_key, val in new_financials.items():
-            nid = API_KEY_TO_NODE.get(api_key)
+            nid = SettingsNode.API_KEY_TO_NODE.get(api_key)
             if nid and nid in svc.setting_nodes:
                 svc.setting_nodes[nid].push(val, "user")
 
         await flush_processor()
 
         # Re-read — must reflect the new rate
-        d2 = await prop.to_json_detail()
+        d2 = (await prop.detail()).to_dict()
         fin2 = d2["settings"]["financial"]["value"]
         new_mortgage = d2["affordability"]["monthly_mortgage"]["value"]
 
@@ -430,7 +430,7 @@ class TestReadsAreNonBlocking:
         calls: list[str] = []
         sched.schedule = lambda node: calls.append(node._id)
         try:
-            summary = await p.to_json_summary()
+            summary = (await p.summary()).to_dict()
         finally:
             del sched.schedule
         served = summary["best_address"]

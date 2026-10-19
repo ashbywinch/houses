@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
-from typing import Any, Generic, TypeVar, cast, override
+from typing import Any, Generic, TypedDict, TypeVar, cast, override
 
 from money import Money
 from pint import Quantity
@@ -15,44 +15,27 @@ import dag.persistence as _per
 from dag.attempt import Attempt, AttemptError, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
 from dag.node import Node
-from dag.persistence import latest_node_result
+from dag.persistence import MoneyEncoding, QuantityEncoding, latest_node_result
 from dag.scheduler import assert_mutation_allowed, submit_to_processor
 
 logger = logging.getLogger(__name__)
 
-# Friendly display names for settings nodes, keyed by the node id stem
-# (the part after "settings/"). Matches the prototype's labels.
-_SETTING_LABELS: dict[str, str] = {
-    "mortgage_rate": "Mortgage Rate",
-    "mortgage_term": "Mortgage Term (years)",
-    "sinking_fund_rate": "Sinking Fund Rate",
-    "life_insurance_monthly": "Life Insurance Monthly",
-    "working_weeks": "Working Weeks per Year",
-    "current_home_sale_price": "Current Home Sale Price",
-    "current_home_outstanding_mortgage": "Current Home Outstanding Mortgage",
-    "petrol_mpg": "Petrol MPG",
-    "petrol_cost_per_litre": "Petrol Cost per Litre",
-    "rental_income_monthly": "Rental Income Monthly",
-}
-
-# Friendly names for per-property source node stems (e.g. the last path
-# segment of "87650634/status").
-_NODE_STEM_LABELS: dict[str, str] = {
-    "status": "Property Status",
-    "works_estimates": "Renovation estimates",
-    "rightmove_price": "Rightmove",
-    "rightmove_address": "Address from Rightmove",
-    "rightmove_bedrooms": "Bedrooms from Rightmove",
-    "best_address": "Property address",
-    "best_location": "Property location",
-    "postcode": "Postcode",
-    "comment_status": "Property Status",
-    "comment_status_reason": "Status reason",
-    "triage_status": "Your assessment",
-    "rental_income": "Rental Income",
-    "life_insurance_total": "Life Insurance Total",
-}
 _GBP_SCALE = _Decimal("0.01")
+
+
+type _StemLabels = dict[str, str]
+
+
+class NodeResult(TypedDict, total=False):
+    """A node-result persist payload: the wire dict pushed across the
+    processor seam and written to node_results (status always present;
+    the remaining keys vary with the result kind)."""
+
+    status: str
+    value: Any
+    source_label: str
+    error: str
+    error_detail: dict
 
 
 def _validate_money(v) -> Money:
@@ -71,13 +54,11 @@ def _validate_money(v) -> Money:
     raise ValueError(f"Cannot convert {type(v)} to Money")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _serialize_money(m) -> dict:
-    # lucidlint: ignore record-shape wire-format dict — pydantic serializer payload, serialization boundary owns the
-    return {
-        "amount": str(m.amount.quantize(_GBP_SCALE)),
-        "currency": m.currency,
-    }
+def _serialize_money(m) -> MoneyEncoding:
+    return MoneyEncoding(
+        amount=str(m.amount.quantize(_GBP_SCALE)),
+        currency=m.currency,
+    )
 
 
 def _validate_quantity(v) -> Quantity:
@@ -88,11 +69,9 @@ def _validate_quantity(v) -> Quantity:
     raise ValueError(f"Cannot convert {type(v)} to Quantity")
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _serialize_quantity(q) -> dict:
+def _serialize_quantity(q) -> QuantityEncoding:
     m = float(q.magnitude)
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {"value": int(m) if m == int(m) else m, "unit": str(q.units)}
+    return QuantityEncoding(value=int(m) if m == int(m) else m, unit=str(q.units))
 
 
 class MoneySchema:
@@ -161,12 +140,45 @@ class UserInputNode(Node[T], Generic[T]):
     Persists to SQLite automatically on every push.
     """
 
+    # Friendly display names for settings nodes, keyed by the node id stem
+    # (the part after "settings/"). Matches the prototype's labels.
+    _SETTING_LABELS: _StemLabels = {
+        "mortgage_rate": "Mortgage Rate",
+        "mortgage_term": "Mortgage Term (years)",
+        "sinking_fund_rate": "Sinking Fund Rate",
+        "life_insurance_monthly": "Life Insurance Monthly",
+        "working_weeks": "Working Weeks per Year",
+        "current_home_sale_price": "Current Home Sale Price",
+        "current_home_outstanding_mortgage": "Current Home Outstanding Mortgage",
+        "petrol_mpg": "Petrol MPG",
+        "petrol_cost_per_litre": "Petrol Cost per Litre",
+        "rental_income_monthly": "Rental Income Monthly",
+    }
+
+    # Friendly names for per-property source node stems (e.g. the last path
+    # segment of "87650634/status").
+    _NODE_STEM_LABELS: _StemLabels = {
+        "status": "Property Status",
+        "works_estimates": "Renovation estimates",
+        "rightmove_price": "Rightmove",
+        "rightmove_address": "Address from Rightmove",
+        "rightmove_bedrooms": "Bedrooms from Rightmove",
+        "best_address": "Property address",
+        "best_location": "Property location",
+        "postcode": "Postcode",
+        "comment_status": "Property Status",
+        "comment_status_reason": "Status reason",
+        "triage_status": "Your assessment",
+        "rental_income": "Rental Income",
+        "life_insurance_total": "Life Insurance Total",
+    }
+
     def __init__(self, node_id: str, value_type: type[T]) -> None:
         super().__init__(node_id, value_type)
         # Validate that property node IDs have a numeric RID prefix.
         # Non-numeric RIDs like "exp/" or "big_0/" are test data that
         # must not enter the production DB.
-        if not _per.testing and "/" in node_id:
+        if not _per.Runtime.testing and "/" in node_id:
             rid = node_id.split("/")[0]
             # Allow known non-property prefixes (settings, global config nodes, etc.)
             if not rid.isdigit() and rid not in ("settings",):
@@ -219,9 +231,9 @@ class UserInputNode(Node[T], Generic[T]):
         validated = self._adapter.validate_python(value)
 
         # Reject source labels that indicate test data leaking into the
-        # production DB.  Test fixtures set persistence.testing=True so
+        # production DB.  Test fixtures set persistence.Runtime.testing=True so
         # this guard is bypassed during test runs.
-        if source_label in ("test", "tests") and not _per.testing:
+        if source_label in ("test", "tests") and not _per.Runtime.testing:
             raise RuntimeError(
                 f"Blocked push to {self._id!r}: source_label={source_label!r} is "
                 f"reserved for test data. A code path attempted to write test data "
@@ -229,7 +241,7 @@ class UserInputNode(Node[T], Generic[T]):
                 f"\n"
                 f"This is a bug in the code path that triggered the push. If you are "
                 f"seeing this during development, use pytest with the standard test "
-                f"isolation fixtures (they set persistence.testing=True so this guard "
+                f"isolation fixtures (they set persistence.Runtime.testing=True so this guard "
                 f"is bypassed).\n"
             )
 
@@ -237,17 +249,14 @@ class UserInputNode(Node[T], Generic[T]):
         self._impossible_info = None
         self._push_timestamp = datetime.now(UTC)
         self._source_label = source_label
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        result_dict: dict[str, Any] = {
-            "status": "succeeded",
-            "value": self._adapter.dump_python(validated),
-            "source_label": source_label,
-        }
+        result_dict: NodeResult = NodeResult(
+            status="succeeded",
+            value=self._adapter.dump_python(validated),
+            source_label=source_label,
+        )
         submit_to_processor(lambda: self._apply_result(result_dict))
 
-    # lucidlint: ignore record-shape the node-result persist payload crosses the processor seam as a wire dict —
-    # serialization boundary (the value field is node-generic; _persist writes it verbatim) (coding-standards.md)
-    def _apply_result(self, result_dict: dict[str, Any]) -> None:
+    def _apply_result(self, result_dict: NodeResult) -> None:
         """The queued half of a push/fail — persist the row and notify dependents.
         Runs on the processor thread: the guard is an invariant check here,
         never something a caller has to satisfy.
@@ -272,12 +281,11 @@ class UserInputNode(Node[T], Generic[T]):
         self._push_timestamp = None
         self._source_label = ""
         self._impossible_info = error_info or AttemptError(code="error", source=self._id, message=message)
-        # lucidlint: ignore record-shape the node-result persist payload crosses the processor seam as a wire dict
-        result_dict: dict[str, Any] = {
-            "status": "impossible",
-            "error": message,
-            "error_detail": self._impossible_info.to_dict(),
-        }
+        result_dict: NodeResult = NodeResult(
+            status="impossible",
+            error=message,
+            error_detail=self._impossible_info.to_dict(),
+        )
         submit_to_processor(lambda: self._apply_result(result_dict))
 
     @override
@@ -335,14 +343,14 @@ class UserInputNode(Node[T], Generic[T]):
             return "Household members"
         if self._id.startswith("settings/"):
             stem = self._id.split("/", 1)[1]
-            return _SETTING_LABELS.get(stem, stem.replace("_", " ").title())
+            return self._SETTING_LABELS.get(stem, stem.replace("_", " ").title())
         label = self._source_label or ""
         if label in ("db", "config", "migration", "settings", "sheet-migration", ""):
             # Per-property source nodes (e.g. "87650634/status") get a
             # friendly name from their stem; generic settings fall back
             # to the raw id stem.
             stem = self._id.split("/")[-1]
-            return _NODE_STEM_LABELS.get(stem, stem.replace("_", " ").title())
+            return self._NODE_STEM_LABELS.get(stem, stem.replace("_", " ").title())
         return label or self._id
 
     def _provenance_value(self):

@@ -16,19 +16,43 @@ from tools.commute.intersection import (
     validate_payload,
 )
 from tools.commute.rightmove_url import parse_search_url
+from tools.commute.station_shed import ShedMetadata, ShedPayload, ShedRecord
 from tools.commute.tile import Grid, GridCell
-from tools.commute.units import KM
+from tools.commute.units import Units
 
 NOW = "2026-08-03T09:00:00+00:00"
 
-SHED = {
-    "metadata": {"threshold_min": 132},
-    "stations": [
-        {"name": "Centre", "crs": "CEN", "lat": 51.1, "lon": -0.9, "kept": True},
-        {"name": "Far", "crs": "FAR", "lat": 51.6, "lon": -1.6, "kept": True},
-        {"name": "Out", "crs": "OUT", "lat": 52.0, "lon": -2.0, "kept": False},
+
+def _station(name: str, crs: str, lat: float, lon: float, *, kept: bool) -> ShedRecord:
+    """One shed record with only the fields the intersection reads varied."""
+    return ShedRecord(
+        name=name,
+        crs=crs,
+        lat=lat,
+        lon=lon,
+        duration_pimlico=30,
+        duration_aldgate=30,
+        kept=kept,
+    )
+
+
+SHED = ShedPayload(
+    metadata=ShedMetadata(
+        threshold_min=132,
+        destinations=["SW1P 1AA", "EC3A 4NE"],
+        bbox={"lat_min": 50.0, "lat_max": 54.0, "lon_min": -4.0, "lon_max": 2.0},
+        inner_radius_km=20.0,
+        engine_version="station-shed-v1",
+        expected_stations=3,
+        generated_at=NOW,
+    ),
+    stations=[
+        _station("Centre", "CEN", 51.1, -0.9, kept=True),
+        _station("Far", "FAR", 51.6, -1.6, kept=True),
+        _station("Out", "OUT", 52.0, -2.0, kept=False),
     ],
-}
+)
+
 DRIVE_RAW: DriveRawPayload = {
     "metadata": {"region_km": 50.0, "cell_km": 4.0},
     "destinations": [
@@ -63,7 +87,7 @@ DRIVE_SEARCHES: DriveSearchesPayload = {
 
 
 def _grid() -> Grid:
-    return common_grid(DRIVE_RAW, 4.0 * KM)
+    return common_grid(DRIVE_RAW, 4.0 * Units.KM)
 
 
 def test_common_grid_is_the_overlap_of_drive_regions():
@@ -80,7 +104,7 @@ def test_common_grid_is_the_overlap_of_drive_regions():
 
 def test_transit_cells_use_station_buffer_predicate():
     grid = _grid()
-    kept = transit_cells([s for s in SHED["stations"] if s["kept"]], grid, 5.0 * KM)
+    kept = transit_cells([s for s in SHED.stations if s.kept], grid, 5.0 * Units.KM)
     assert kept
     # the cell CONTAINING the Centre station is trivially within 5 km → kept
     assert GridCell(9, 10) in kept
@@ -189,7 +213,7 @@ def test_small_intersection_keeps_main_component():
 
 
 def test_no_intersection_yields_empty_searches():
-    shed = {"metadata": {}, "stations": [{"name": "Nowhere", "crs": "NOW", "lat": 55.0, "lon": -5.0, "kept": True}]}
+    shed = SHED.model_copy(update={"stations": [_station("Nowhere", "NOW", 55.0, -5.0, kept=True)]})
     payload = build_payload(
         shed=shed, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, options=IntersectionOptions(generated_at=NOW)
     )
@@ -253,12 +277,12 @@ async def test_run_fails_cleanly_with_no_drive_destinations(tmp_path):
 
     from tools.commute.intersection import run as intersection_run
 
-    shed = {"metadata": {}, "stations": [{"name": "S", "crs": "S", "lat": 51.1, "lon": -0.9, "kept": True}]}
+    shed = SHED.model_copy(update={"stations": [_station("S", "S", 51.1, -0.9, kept=True)]})
     drive_raw = {"metadata": {"region_km": 50.0, "threshold_min": 90}, "destinations": []}
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     shed_path = tmp_path / "shed.json"
-    shed_path.write_text(json.dumps(shed))
+    shed_path.write_text(shed.model_dump_json())
     raw_path = tmp_path / "raw.json"
     raw_path.write_text(json.dumps(drive_raw))
     searches_path = tmp_path / "searches.json"
@@ -380,7 +404,7 @@ def test_run_fails_cleanly_on_list_shaped_drive_searches(tmp_path):
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     shed_path = tmp_path / "shed.json"
-    shed_path.write_text(_json.dumps({"metadata": {}, "stations": []}))
+    shed_path.write_text(SHED.model_dump_json())
     raw_path = tmp_path / "raw.json"
     raw_path.write_text(_json.dumps({"metadata": {"region_km": 50.0}, "destinations": []}))
     searches_path = tmp_path / "searches.json"

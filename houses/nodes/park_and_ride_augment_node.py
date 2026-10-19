@@ -8,7 +8,8 @@ the station's car park.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import replace
 from typing import override
 
 from money import Money
@@ -21,22 +22,22 @@ from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
+from houses.nodes.park_and_ride_options import ParkAndRideOptions
 from houses.services_provider import get_services
 from houses.stations import StationRegistry
 
 
-@dataclass(frozen=True)
-class ParkAndRideOptions:
-    """Wiring for ``ParkAndRideAugmentNode``: the commute chain inputs plus
-    the station/car-park registries (injected for tests)."""
+def _injected_or_default[T](registry: T | None, default_factory: Callable[[], T]) -> T:
+    """The injected registry when a caller/test supplied one, else the real default."""
+    return registry if registry is not None else default_factory()
 
-    transit_node: Node
-    best_location: Node
-    postcode_node: Node
-    has_car: bool
-    max_walk_node: Node
-    station_registry: StationRegistry | None = None
-    car_park_registry: CarParkRegistry | None = None
+
+async def _drive_minutes(postcode: str | None, origin: GeoPoint | None, station_name: str) -> float | None:
+    """Actual drive time to the station — postcode first, best-location fallback."""
+    service = get_services().drive_time_service
+    if postcode:
+        return await service.estimate(postcode, station_name)
+    return await service.estimate_from_location(origin, station_name)
 
 
 class ParkAndRideAugmentNode(DerivedNode[Commute]):
@@ -142,25 +143,15 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         if not postcode and origin is None:
             return transit
 
-        # Get actual drive time via the drive time service — postcode
-        # first, best-location fallback when the property has none.
-
-        if postcode:
-            drive_minutes = await get_services().drive_time_service.estimate(postcode, station_name)
-        else:
-            drive_minutes = await get_services().drive_time_service.estimate_from_location(origin, station_name)
-        if drive_minutes is None:
+        # Park-and-ride needs both a drive time to the station and a station
+        # to park at — resolve them together and bail when either is missing.
+        drive_minutes = await _drive_minutes(postcode, origin, station_name)
+        station = _injected_or_default(self._station_registry, StationRegistry).find(station_name)
+        if drive_minutes is None or station is None:
             return transit
 
         # Look up car park cost at that station (injected or default)
-        registry = self._station_registry or StationRegistry()
-        station = registry.find(station_name)
-        # lucidlint: ignore duplicate-block parallel injected-registry lookups (station, then its car park) — each
-        if station is None:
-            return transit
-
-        parking = self._car_park_registry or CarParkRegistry()
-        car_park = parking.find_car_park(station)
+        car_park = _injected_or_default(self._car_park_registry, CarParkRegistry).find_car_park(station)
         # The drive leg is added whenever driving beats walking — a
         # missing car-park COST must not leave a 76-minute walk in place.
         # The PARK leg is shown whenever a car park exists (its name

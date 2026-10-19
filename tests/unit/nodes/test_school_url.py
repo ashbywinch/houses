@@ -21,7 +21,7 @@ def _fake_svc():
 async def test_school_location_node_returns_geopoint():
     """SchoolLocationNode must return the school's coordinates as GeoPoint."""
     from dag.user_input_node import UserInputNode
-    from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode
+    from houses.nodes.schools import NearestSchoolNode, SchoolLocationNode
     from houses.school import School
     from houses.school_gender import SchoolGender
 
@@ -29,7 +29,7 @@ async def test_school_location_node_returns_geopoint():
     addr = UserInputNode[str]("addr", str)
 
     # Create derived nodes FIRST so they connect to dep signals
-    primary = PrimarySchoolNode("ps", best_location=loc)
+    primary = NearestSchoolNode("ps", child_age=4, stage="primary", best_location=loc)
     school_loc = SchoolLocationNode("sln", school_node=primary)
 
     # Push values — this triggers changed.emit() which queues the derived nodes
@@ -75,7 +75,7 @@ async def test_school_location_node_returns_geopoint():
 async def test_school_node_output_has_url():
     """School node output must contain 'url' and 'coords' keys."""
     from dag.user_input_node import UserInputNode
-    from houses.nodes.schools import PrimarySchoolNode
+    from houses.nodes.schools import NearestSchoolNode
     from houses.school import School
     from houses.school_gender import SchoolGender
 
@@ -83,7 +83,7 @@ async def test_school_node_output_has_url():
     addr = UserInputNode[str]("addr2", str)
 
     # Create derived node FIRST so it connects to dep signals
-    sn = PrimarySchoolNode("ps2", best_location=loc)
+    sn = NearestSchoolNode("ps2", child_age=4, stage="primary", best_location=loc)
 
     # Push values — this triggers changed.emit() which queues the derived node
     loc.push(GeoPoint(51.5, -0.37), "test")

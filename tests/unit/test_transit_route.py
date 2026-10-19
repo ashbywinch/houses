@@ -452,7 +452,7 @@ class TestPickBestJourney:
         }
         summary = TflClient._pick_best_journey(data)
         assert summary.duration == 30
-        assert summary.cost == 16.0
+        assert summary.cost == Money("16", "GBP")
         assert isinstance(summary.route_summary, str)
 
     def test_empty_journeys_returns_none(self):

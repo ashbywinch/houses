@@ -51,7 +51,7 @@ def _payload():
     )
 
 
-KEPT = [r.to_dict() for r in SHED_RECORDS if r.kept]
+KEPT = [r for r in SHED_RECORDS if r.kept]
 
 
 def test_validate_clean_payload_passes():
@@ -150,7 +150,17 @@ def test_validate_kept_station_coverage_failure():
             engine_version="v1",
         ),
     )
-    far_kept = [{"name": "Brighton", "crs": "BTN", "lat": 50.8290, "lon": -0.1410, "kept": True}]
+    far_kept = [
+        ShedRecord(
+            name="Brighton",
+            crs="BTN",
+            lat=50.8290,
+            lon=-0.1410,
+            duration_pimlico=None,
+            duration_aldgate=None,
+            kept=True,
+        )
+    ]
     issues = validate(payload, far_kept, ValidationOptions(buffer_km=5.0, bbox=BBOX, positive=[], negative=[]))
     assert any("Brighton" in i for i in issues)
 

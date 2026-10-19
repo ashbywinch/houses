@@ -10,7 +10,6 @@ from pint import Quantity
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.model.domain import (
     Commute,
-    EpcRating,
     Person,
     PlaceOfInterest,
     Property,
@@ -198,24 +197,6 @@ class TestSchools:
         schools = Schools()
         assert schools.primary is None
         assert schools.secondary is None
-
-
-class TestEpcRating:
-    def test_construction(self):
-        epc = EpcRating(
-            rating="C",
-            potential_rating="B",
-            evidence_url="https://gov.uk/epc/123",
-        )
-        assert epc.rating == "C"
-        assert epc.potential_rating == "B"
-        assert epc.evidence_url == "https://gov.uk/epc/123"
-
-    def test_defaults(self):
-        epc = EpcRating()
-        assert epc.rating == ""
-        assert epc.potential_rating == ""
-        assert epc.evidence_url == ""
 
 
 class TestWalkability:

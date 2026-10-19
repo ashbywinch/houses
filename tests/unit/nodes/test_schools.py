@@ -35,13 +35,13 @@ def _fake_svc():
 
 @pytest.mark.asyncio
 async def test_primary_school_impossible_without_location():
-    from houses.nodes.schools import PrimarySchoolNode
+    from houses.nodes.schools import NearestSchoolNode
 
     loc = UserInputNode[GeoPoint]("loc_ps", GeoPoint)
     addr = UserInputNode[str]("addr_ps", str)
     addr.push("10 High St, SW1P 1AA", "test")
     await flush_processor()
-    node = PrimarySchoolNode("ps", best_location=loc)
+    node = NearestSchoolNode("ps", child_age=4, stage="primary", best_location=loc)
     await flush_processor()
     a = await node.attempt()
     assert a.impossible or a.pending  # location dep is pending → impossible or pending
@@ -49,13 +49,13 @@ async def test_primary_school_impossible_without_location():
 
 @pytest.mark.asyncio
 async def test_secondary_school_impossible_without_location():
-    from houses.nodes.schools import SecondarySchoolNode
+    from houses.nodes.schools import NearestSchoolNode
 
     loc = UserInputNode[GeoPoint]("loc_ss", GeoPoint)
     addr = UserInputNode[str]("addr_ss", str)
     addr.push("10 High St, SW1P 1AA", "test")
     await flush_processor()
-    node = SecondarySchoolNode("ss", best_location=loc)
+    node = NearestSchoolNode("ss", child_age=12, stage="secondary", best_location=loc)
     await flush_processor()
     a = await node.attempt()
     assert a.impossible or a.pending
@@ -115,7 +115,7 @@ async def test_school_location_node_falls_back_to_name_postcode():
 async def test_secondary_school_returns_impossible_when_no_school_found():
     """When school lookup returns None, secondary school must return
     Attempt.impossible (not crash with AttributeError)."""
-    from houses.nodes.schools import SecondarySchoolNode
+    from houses.nodes.schools import NearestSchoolNode
     from houses.services_provider import _request_services as _sp
     from tests.helpers import FakeSchoolLookup, make_services
 
@@ -123,7 +123,7 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
     try:
         loc = UserInputNode[GeoPoint]("loc_ss3", GeoPoint)
         addr = UserInputNode[str]("addr_ss3", str)
-        node = SecondarySchoolNode("ss3", best_location=loc)
+        node = NearestSchoolNode("ss3", child_age=12, stage="secondary", best_location=loc)
         loc.push(GeoPoint(51.5, -0.1), "test")
         addr.push("10 High St, London, SW1P 1AA", "test")
         await flush_processor()
@@ -137,7 +137,7 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
 @pytest.mark.asyncio
 async def test_primary_school_returns_impossible_when_no_school_found():
     """Primary school must return Attempt.impossible when lookup returns None."""
-    from houses.nodes.schools import PrimarySchoolNode
+    from houses.nodes.schools import NearestSchoolNode
     from houses.services_provider import _request_services as _sp
     from tests.helpers import FakeSchoolLookup, make_services
 
@@ -145,7 +145,7 @@ async def test_primary_school_returns_impossible_when_no_school_found():
     try:
         loc = UserInputNode[GeoPoint]("loc_ps3", GeoPoint)
         addr = UserInputNode[str]("addr_ps3", str)
-        node = PrimarySchoolNode("ps3", best_location=loc)
+        node = NearestSchoolNode("ps3", child_age=4, stage="primary", best_location=loc)
         loc.push(GeoPoint(51.5, -0.1), "test")
         addr.push("10 High St, London, SW1P 1AA", "test")
         await flush_processor()
@@ -224,7 +224,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_primary_school_uses_custom_acceptable(self):
-        from houses.nodes.schools import PrimarySchoolNode
+        from houses.nodes.schools import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -246,7 +246,7 @@ class TestSchoolNodeAcceptable:
             addr = UserInputNode[str]("addr_ps_acc", str)
             acc_src = UserInputNode[tuple[str, ...]]("acc_src_ps", tuple[str, ...])
             acc_src.push(("boys", "girls"), "test")
-            PrimarySchoolNode("ps_acc", best_location=loc, acceptable=acc_src)
+            NearestSchoolNode("ps_acc", child_age=4, stage="primary", best_location=loc, acceptable=acc_src)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -257,7 +257,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_secondary_school_uses_custom_acceptable(self):
-        from houses.nodes.schools import SecondarySchoolNode
+        from houses.nodes.schools import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -279,7 +279,7 @@ class TestSchoolNodeAcceptable:
             addr = UserInputNode[str]("addr_ss_acc", str)
             acc_src = UserInputNode[tuple[str, ...]]("acc_src_ss", tuple[str, ...])
             acc_src.push(("girls",), "test")
-            SecondarySchoolNode("ss_acc", best_location=loc, acceptable=acc_src)
+            NearestSchoolNode("ss_acc", child_age=12, stage="secondary", best_location=loc, acceptable=acc_src)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -290,7 +290,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_primary_school_default_acceptable_is_mixed(self):
-        from houses.nodes.schools import PrimarySchoolNode
+        from houses.nodes.schools import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -310,7 +310,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ps_def", GeoPoint)
             addr = UserInputNode[str]("addr_ps_def", str)
-            PrimarySchoolNode("ps_def", best_location=loc)
+            NearestSchoolNode("ps_def", child_age=4, stage="primary", best_location=loc)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -320,7 +320,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_secondary_school_default_acceptable_is_mixed(self):
-        from houses.nodes.schools import SecondarySchoolNode
+        from houses.nodes.schools import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -340,7 +340,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ss_def", GeoPoint)
             addr = UserInputNode[str]("addr_ss_def", str)
-            SecondarySchoolNode("ss_def", best_location=loc)
+            NearestSchoolNode("ss_def", child_age=12, stage="secondary", best_location=loc)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -998,7 +998,7 @@ class TestSchoolErrorPropagation:
 
     @pytest.mark.asyncio
     async def test_propagates_geocode_failure(self):
-        from houses.nodes.schools import PrimarySchoolNode
+        from houses.nodes.schools import NearestSchoolNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -1013,7 +1013,7 @@ class TestSchoolErrorPropagation:
         try:
             loc = UserInputNode[GeoPoint]("loc_pe1", GeoPoint)
             addr = UserInputNode[str]("addr_pe1", str)
-            node = PrimarySchoolNode("pe1", best_location=loc)
+            node = NearestSchoolNode("pe1", child_age=4, stage="primary", best_location=loc)
             loc.push(GeoPoint(51.5, -0.1), "test")
             addr.push("10 High St, London, SW1P 1AA", "test")
             await flush_processor()
@@ -1026,7 +1026,7 @@ class TestSchoolErrorPropagation:
 
     @pytest.mark.asyncio
     async def test_no_school_has_sensible_message(self):
-        from houses.nodes.schools import PrimarySchoolNode
+        from houses.nodes.schools import NearestSchoolNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import FakeSchoolLookup, make_services
 
@@ -1034,7 +1034,7 @@ class TestSchoolErrorPropagation:
         try:
             loc = UserInputNode[GeoPoint]("loc_pe2", GeoPoint)
             addr = UserInputNode[str]("addr_pe2", str)
-            node = PrimarySchoolNode("pe2", best_location=loc)
+            node = NearestSchoolNode("pe2", child_age=4, stage="primary", best_location=loc)
             loc.push(GeoPoint(51.5, -0.1), "test")
             addr.push("10 High St, London, SW1P 1AA", "test")
             await flush_processor()
@@ -1052,7 +1052,7 @@ class TestSchoolAcceptanceDep:
 
     @pytest.mark.asyncio
     async def test_acceptable_edit_recomputes_lookup(self):
-        from houses.nodes.schools import PrimarySchoolNode, SchoolAcceptanceNode
+        from houses.nodes.schools import NearestSchoolNode, SchoolAcceptanceNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -1076,7 +1076,7 @@ class TestSchoolAcceptanceDep:
             acc = SchoolAcceptanceNode("acc_dep", persons_source=persons)
             loc = UserInputNode[GeoPoint]("loc_acc_dep", GeoPoint)
             addr = UserInputNode[str]("addr_acc_dep", str)
-            PrimarySchoolNode("ps_acc_dep", best_location=loc, acceptable=acc)
+            NearestSchoolNode("ps_acc_dep", child_age=4, stage="primary", best_location=loc, acceptable=acc)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()

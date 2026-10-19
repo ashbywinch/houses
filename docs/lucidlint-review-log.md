@@ -2,9 +2,13 @@
 
 Records every lucidlint finding we did **not** fix outright, and why — plus
 what lucidlint missed and where the tool cost us time. Current state:
-**lucidlint 0.4.0 sweep** (2026-08-30 — see [§0.4.0 sweep](#04-0-sweep-2026-08-30)
-below). Previous state (0.2.0, 2026-08-23): **0 open actions, empty baseline**
-(`lucidlint.json` locked nothing). Every remaining diagnostic carries a per-site
+**lucidlint 0.6.7 — 35 open `record-shape`**: the tool bug in
+[lucidlint#42](#tool-bugs-filed-open), plus the DAG's deliberately dict-like node
+values — plus four `duplicate-module` markers; the owner rulings
+behind them are in
+[§Serialisation migration](#serialisation-migration-owner-ruling-2026-10-17-one-type-per-thing).
+Before that: the 0.6.7 sweep (2026-10-08) and the 0.4.0 sweep (2026-08-30,
+**0 open actions, empty baseline**). Every remaining diagnostic carries a per-site
 `# lucidlint: ignore <kind> <why>` comment; a suppression without a written
 why is itself a finding. The 0.2.0 suppression census (record-shape 408,
 fakefs 77, broad-except 72, magic-number 54, global-state 33, detached-method
@@ -475,3 +479,303 @@ came with them:
   passing `list[dict]` to a `list[Mapping[str, Any]]` parameter is a pyrefly
   error, so widen signatures only where the caller's type actually matches.
 
+
+## 0.6.7 sweep (2026-10-08) — the census era
+
+Repin `1019627b` (0.6.1) → `5c893cbc` (0.6.7). The 0.6.7 rule set changed in
+ways that invalidate several earlier verdicts, and the tool gained a
+**suppression census**: a `bulk-suppression` WARNING fires per signal suppressed
+at ≥10 sites repo-wide (attached to the file with the most). The user's scope
+for this sweep: clean gate, **no baseline, no config ignores, suppressions near
+zero** — so the census gate is binding, not advisory.
+
+### What 0.6.7 changed under us
+
+- **global-state now fires on ANY module-level assignment — constants
+  included.** `SECONDS_PER_MINUTE = 60` and the named data tables the
+  magic-number doctrine had us create are all findings. Disposition (user
+  ruling): quantities move to `timedelta`/Pint/`Money`; tunables and data
+  tables become **class attributes** of the class that serves them; scripts
+  with no class get a small program/config class (probe-verified clean — no
+  static-husk/assembly-class on a constants-only class).
+- **Money doctrine (user ruling)**: money is only the `Money` class; no
+  `PENCE_PER_POUND`-style factors in business code — pence→pounds lives in ONE
+  money-layer function per file (`_pence_to_money`), which carries the single
+  `/ 100` with a written why. Return-trip costs are `Money * 2`.
+- **`[tool.lucidlint]` config ignores are gone** (user: no baseline). Every
+  hidden finding is now fixed or carries a per-site why.
+
+### Marker-binding mechanics — probed this sweep (do not re-derive)
+
+1. A marker binds a finding when it sits on the finding's line, the line
+   before, the logical line's first source line, or the line before that —
+   **from the marker's side it is the finding's window, not a free 3-line
+   radius**.
+2. **Decorated defs/classes**: the marker must sit BETWEEN the decorator and
+   the `def`/`class` line. Above the decorator does not bind.
+3. **Chained-comparison literals** (`51.5 < x < 51.52`) cannot be suppressed by
+   a marker at all (above or same-line tail, both probed). Deterministic fix:
+   name the literals as class attributes — the constant-definition RHS is
+   exemption territory.
+4. **`duplicate-block` binds above the SECOND twin** in repo mode; per-file
+   mode anchors the first. Extracting the shared part is the only placement-
+   independent fix.
+5. **2-line markers**: only the line carrying `lucidlint:` is a marker; the
+   continuation is dead text. Every 2-line marker in the tree was unbound —
+   each was re-anchored single-line.
+6. **Cross-file families self-report stale under `--file`** (duplicate,
+   duplicate-module, record-shape similarity): the marker binds in `--repo`
+   mode only. The per-file stale-suppression report is a false artifact.
+7. **`record-shape` — three scanner-clean patterns** (probe-verified): a
+   PEP 695 `type X = dict[k, v]` alias for keyed collections; `Mapping[str, Any]`
+   for parsed JSON; a named `TypedDict` built with keyword construction at the
+   writer, with the function's return typed as it. `dataclasses.asdict` alone
+   at an untyped return is NOT clean.
+8. `dataclasses.replace(record, **{dynamic_field: v})` is untypable
+   (pyrefly `bad-argument-type`): wrap in `cast(...)` and, where pyrefly still
+   reports, `# type: ignore[bad-argument-type]` with a why.
+
+### Structural conversions this sweep
+
+- **Seam state classes** (probe-verified pattern: class attributes are clean,
+  including mutation from functions): `dag.persistence.Runtime` (`path`,
+  `testing` — the DB seam, read by settings/scheduler/tests),
+  `_Schema`/`_SchemaCache`, `houses.database.Runtime`, `_BroadcastState`
+  (queue/clients/debounce), `_OAuthStateStore`, `_ServerRuntime.loop`,
+  `_ChromeRuntime` (scraper subprocess), `_ScrapeConstants`, `_ApiPolicy`,
+  `_MapColors`, `_GeocodeApi`, `_EpcEndpoints`, `_TaxRates` (council-tax band
+  ratios + cache), `DriveIsochroneConfig`/`StationShedConfig`/`IntersectionConfig`
+  (tools), `SettingsNode` (node IDs + `SETTING_DEFAULTS`/`API_KEY_TO_NODE`).
+- **Pint/`timedelta` unit fixes**: `capture_dom.LOGIN_TIMEOUT = timedelta(minutes=10)`,
+  route durations via `Quantity(seconds, "second").to("minute")`,
+  `dag.derived_node` retry caps as timedeltas, `scrape_queue` backoff policy as
+  timedeltas, `Person.bus_walk_penalty = Quantity(30, "minute")` (the aliased
+  `from pint import Quantity as _Quantity` hid the unit-constructor exemption —
+  the real name is required).
+- **`dag/guard.py`** — shared never-raise guards (`guarded`/`guarded_async`)
+  so the DAG-subclass and user-callable boundaries carry ONE suppression
+  instead of one per call site (the census counts sites).
+- **static-husk**: `_WhatIfRoutes`/`_PropertyPatches` became module endpoint
+  functions with `@api_router.<verb>` decorators (the file's own majority
+  pattern); `services.py`'s `_Default*` classes took their real state.
+- **class-module**: the 0.4.0 precedent held — split/rename to a file named
+  after the class (13 new `houses/apis/*` DTO modules); the small wire-DTO
+  modules then trip `duplicate-module` (parallel TypedDict boilerplate) and
+  carry a module-head marker with that why.
+- **Unused**: dead classes deleted (`BusJourney`, `CommuteMode`,
+  `NearestStationNode`, `SinkingFundRate` id, `TOTAL_SHARE_PERCENT`); test-only
+  seams carry `unused` markers stating they are test-exercised.
+
+### Engine/verify lessons
+
+- `lucidlint fix` remains per-kind and silent; every applied fix was
+  diff-checked. The `extract-record-class`/`split-module` seams were not used —
+  hand conversions with the probes above were deterministic.
+- Wave-based subagent conversion works, but **agent reports are optimistic**:
+  two wave-1 regressions (a dropped `selling_home=True` in
+  `make_default_persons`, three dropped `API_KEY_TO_NODE` entries) and one
+  missing `TypedDict` import passed the agents' own per-file gates and were
+  caught only by the full suite. The full suite is the integration gate; run it
+  after every wave.
+- Concurrent agents editing one file produced transient broken states
+  (`dag/http_error` docstring, `tile.py` constant) — slices must be
+  file-disjoint, and cross-slice reference flips need an explicit owner.
+
+### The suppression census — final state (2026-10-08)
+
+The 0.6.7 census gate (a `bulk-suppression` warning per signal suppressed at
+≥10 sites) was driven from ~650 suppressed sites to, per signal: broad-except
+5, class-module 8, latent-class 9, duplicate-block 2, duplicate-module 4,
+unused 9, middle-man 8, magic-number 5, record-shape 5 — **every signal under
+the gate, zero reported actions.**
+
+### Wire formats get classes, not markers (owner ruling, 2026-10-08)
+
+The 213 record-shape markers left after the first pass were the "boundary
+verdict" family (the 2026-08-31 "boundary methods are not convertible records"
+ruling). The owner overruled the marker route: **"Being a wire format is no
+excuse not to have a class with a to_dict or to_json method."** Every one was
+converted to code with three patterns:
+
+1. **A record's `to_dict` returning a dict literal** → declare
+   `<Record>Wire(TypedDict)` beside the record, type the return, build with
+   keyword construction. Conditional/optional keys: `NotRequired[...]` + item
+   assignment after construction. Nested records: `list[_InnerWire]` fields.
+   The record class and its `to_dict`/`to_json` stay — the wire shape gets a
+   name and the compiler checks the construction.
+2. **A raw wire dict at a writer** → the same named-TypedDict construction,
+   with the writer's return typed.
+3. **Keyed collections / lookup tables** → a PEP 695 `type X = dict[k, v]`
+   alias, or a pairs-comprehension (a 2+-constant-key literal with variable
+   values fires even with an alias — probe-verified).
+4. **Parsed-JSON parameters** → `Mapping[str, Any]` (`object` ripples into
+   every read and breaks pyrefly at the consumers).
+5. **FastAPI bodies** → `Mapping[str, Any]`; where the latent-class pair rule
+   then fires on shared parameter names, each handler gets its own payload
+   noun (`address_patch`, `location_patch`, …) — distinct names state distinct
+   payloads.
+6. **Cross-cycle seams** → the cycle was removed by naming each side's wire
+   blocks (`tfl_client._TflLegWire`/`_TflJourneyWire` vs
+   `transit_route._DrivingLegWire`) instead of reproducing a payload through a
+   shared dict.
+7. **WirePayload seams** (`api_cache.with_cache`, `apis.epc.search`,
+   `GoogleRoutesClient.post`) → records inherit `WirePayload` and override
+   `to_dict` with `@override`; under pyrefly's default preset a TypedDict
+   return is not assignable to the protocol's `-> dict`, so nominal
+   inheritance is the clean route.
+
+Conversion notes worth keeping: the `houses/apis/*_params.py` splits from the
+class-module work hid a real bug — `OrsReverseParams.wire_key_rewrites` missed
+`boundary_country` → `boundary.country`, so the reverse-geocode request sent a
+key Pelias does not read; fixed during the conversion. The pyrefly lock was
+regenerated (47 entries) for the deliberate signature changes — the residue is
+test literals passed where the APIs now want the named wires; updating those
+literals is the next tidy-up, not a correctness issue.
+
+### Correction (2026-10-08, owner ruling): the payload twins were wrong
+
+The "wire formats get classes" pass above over-read the record-shape finding.
+The rule is: **the named type is the class that carries the serialisation
+method; `to_dict`/`to_json` return a plain dict; the returned object is not
+itself typed with a second class.** The named TypedDict twins (`*Wire` beside
+every record) were therefore reverted — `to_dict` returns `dict` again, and
+the twin declarations are deleted repo-wide (75 classes).
+
+The finding that drove the twins is a tool bug, reported as
+**ashbywinch/lucidlint#42**: `record-shape` fires on `def to_dict(self) -> dict`
+(the return arm keys on the annotation, `scanner/src/checks.rs:7638`) and again
+on the constant-key literal inside the method, although the enclosing class
+names the shape. The tool already carries the mirror exemption on the
+ingestion side (`checks.rs:7574`: a `from_dict` function in a module with a
+`from_dict` class produces no finding); the export side needs the same. Until
+the fix lands the gate reports those findings and they are deliberately left
+visible — no marker, because the code is correct and an exemption comment
+would be exactly the excuse pattern this log exists to prevent.
+
+
+### Serialisation migration (owner ruling, 2026-10-17): one type per thing
+
+Owner ruling: a wire format is no excuse for a parallel class. The named type
+is the class that carries the value, and it serialises itself. What follows from
+it, and why findings in this family are *not* fixed:
+
+- **HTTP responses** are Pydantic models + `response_model=`; the response model
+  *is* the API's contract type, not a serialisation twin, so it survives the
+  rule.
+- **`to_json()`** exists only where our code owns the bytes (websocket messages,
+  artifacts, DAG rows) — never where a consumer (FastAPI, httpx) will encode
+  again.
+- **Third-party types** (`money.Money`, `pint.Quantity`) get a serialiser on the
+  field that carries them (`MoneyValue` / `QuantityValue` in
+  `houses/web/json_utils.py`), never a class beside them.
+- **Mirror classes are deleted, not renamed.** The `*Json`/`*Wire` suffix is
+  gone repo-wide (82 classes), and every class whose only job was to hold a wire
+  shape was deleted rather than converted: `MoneyJson`, `NodeJson`,
+  `_WalkToTown`, `_StopFare`, `_PetrolAugment` — plus the pattern that keeps
+  recurring, **a record whose one method unwraps the dict it holds**
+  (`api_cache._UrlQuery`, `commute._CommuteValue`).
+- `SerializableAsDict` (`houses/web/json_utils.py`) is the one base for boundary
+  records, both directions. How to write one is in
+  [coding-standards.md](coding-standards.md) → *Boundary records*, the single
+  source for aliases, the two field conditions, and when a wrap serializer is
+  warranted.
+
+Probes worth not re-deriving:
+
+- pydantic cannot build a schema for `money.Money` at all without
+  `arbitrary_types_allowed`; `response_model=` with an
+  `Annotated[Money, PlainSerializer(...)]` field emits byte-identical JSON,
+  aliases included — but FastAPI re-dumps a returned model before validating it
+  against `response_model=`, so the field type must be able to read its own
+  output (the `BeforeValidator` half of `MoneyValue`).
+- `exclude_none` is not a substitute for a per-field condition: it recurses and
+  strips Nones from nested node maps that belong on the wire.
+- `wire_key_rewrites` was deleted with the alias move, and the reason is itself
+  the finding: a rename map keyed by field name fails **silently** — the sweep
+  found one missing `boundary_country → boundary.country`, i.e. a country filter
+  absent from every request, with nothing raised anywhere.
+- A per-field `exclude_if` condition is not a wrap serializer, and the
+  difference matters for the gate: the wrap is a method returning a dict, so it
+  is a `record-shape` action wherever a field rule would have done.
+
+Byte identity was the acceptance test, not reading the diff: a throwaway oracle
+captured the pre-migration bytes of the 10 endpoints, the three `PropertyNodes`
+projections, the websocket envelopes and the DAG rows, and compared them after
+each step with run-to-run volatile values masked (timestamps, object counts, tie
+order); committed artifacts were round-tripped the same way
+(`data/commute/station_shed.json`, 400,969 bytes, byte-identical). The full
+suite stayed green throughout.
+
+#### Tool bugs filed (open)
+
+- **lucidlint#42** — `record-shape` fires on a method or function annotated
+  `-> dict` that returns a record's dict, and on the constant-key literal inside
+  a serializer. The shape *is* named at the build site, so these are left
+  visible with no marker: a marker here would be the excuse pattern this log
+  exists to prevent.
+- **lucidlint#44** — `middle-man` fires on delegation that *is* the
+  encapsulation (a library base, a Protocol implementation, a call that fixes an
+  argument): https://github.com/ashbywinch/lucidlint/issues/44, filed with a
+  verified repro.
+
+
+**`duplicate-module` (4 suppressions)** — the request DTOs in `houses/apis/` are
+structurally identical *by design* (one class, one docstring, N fields), which
+is what the doctrine produces; "reconcile the copies into one" is not
+actionable on different request shapes, so each site carries a marker whose why
+says so.
+
+**The DAG core is deliberate, not pending.** `dag/node.py`,
+`dag/derived_node.py` and `dag/attempt.py` carry 15 of the 38. They are two
+families and neither is a mechanical conversion:
+
+1. the `-> dict` arm of #42 (`to_json`, `to_json_value`, `_safe_result_dict`,
+   `_build_provenance_dict`, `_enrich_json`) — the shape *is* named at the build
+   site;
+2. records on `dag/persistence.WireRecord`, which are dict-like **on purpose**:
+   its docstring records the decision — a node value is read as `value["rid"]`
+   all over the codebase, so attribute-only access would be a second, needless
+   migration. Converting them to `SerializableAsDict` was attempted and reverted
+   the same hour: `tests/unit/dag/test_architecture.py` forbids `dag/` importing
+   `houses/`, so the base would first have to move into the DAG layer, and the
+   subscript readers would have to move with it.
+
+If the DAG's node values are ever to become models, that is a slice of its own
+with its own decision: move the serialization seam into `dag/` (it is the lower
+layer, and the seam is used by both), then migrate the readers.
+
+Current state: **35 open `record-shape`** — the DAG core above (deliberate), the
+serializers that return a dict by definition, and the remaining per-file records
+(`model/domain` 3, `api_cache` 2, `transit_route` 2, `rightmove_scraper` 1,
+`services` 1, `monthly_delta` 1).
+
+
+### The serialization seam moved to its own library (owner ruling, 2026-10-17)
+
+The DAG conversion could not start: `tests/unit/dag/test_architecture.py`
+forbids `dag/` importing `houses/`, and the seam lived in
+`houses/web/json_utils.py`. Owner ruling: it is not coupled to the DAG, so it
+belongs in a library of its own that every layer may use — **`serialization/`**
+(`SerializableAsDict`, `MoneyValue`, `QuantityValue`, `omit_when_none`,
+`omit_when_empty`, `asdict_serializable`, `optional_parse`).
+
+`houses/web/json_utils.py` is deleted; 35 importers now read
+`from serialization import …`. The layering test gained the
+`serialization` layer and lets `dag` depend on it (and nothing else).
+
+Two forks the move surfaced, both consolidated rather than marked:
+
+- `dag/attempt.py`'s three HTTP status constants were module-level (the
+  `global-state` finding); they are now `RetryableStatus` on the class the
+  decision serves, which also made the class public.
+- `houses/helpers.py` had a byte-identical `_HttpStatus` (the same three
+  constants) — a real fork the `duplicate-module` rule caught the moment the
+  DAG's copy was named. `_HttpStatus` is deleted; the helper imports
+  `RetryableStatus`.
+
+Two warnings remain, both deliberate: the **census** fires because
+`record-shape` is suppressed at 12 sites, and its advice (move the rule to
+`[tool.lucidlint]` guidance) contradicts the standing owner scope decision
+*no blanket config ignores — per-site treatment only*, so the per-site markers
+stand; and the **middle-man** warning on the base's `to_dict` is left visible
+on purpose (lucidlint#44).

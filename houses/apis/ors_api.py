@@ -3,54 +3,22 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import ClassVar
 
 import httpx
 from pint import Quantity
 
 from houses import apigw
-from houses.apis.transport import BaseApi, FetchArgs
+from houses.apis.base_api import BaseApi
+from houses.apis.fetch_args import FetchArgs
+from houses.apis.ors_directions_body import OrsDirectionsBody
+from houses.apis.ors_reverse_params import OrsReverseParams
+from houses.apis.ors_search_params import OrsSearchParams
 from houses.geopoint import GeoPoint
 from houses.ors_endpoints import ORS_DIRECTIONS, PELIAS_REVERSE, PELIAS_SEARCH
 from houses.settings import settings
-from houses.web.json_utils import WirePayload
 
 logger = logging.getLogger(__name__)
 
-# Which Pelias layers count as "a town" for a reverse lookup. Unconstrained,
-# Pelias answers with the closest feature of ANY kind — for a house that is
-# its own street (or a school), i.e. a 0-minute walk, which walkability's
-# plausibility gate rejects: houses whose address-derived town is a district
-# name (London, South Oxfordshire, "Maidenhead Station Area") then silently
-# lost walk_to_town. Settlement layers only — locality (town), borough
-# (London boroughs), neighbourhood (suburbs). Pelias sorts by distance, so an
-# SW20 house resolves to West Barnes (10 min walk) rather than the London
-# centroid (210 min).
-SETTLEMENT_LAYERS = "locality,borough,neighbourhood"
-
-
-@dataclass(frozen=True)
-class OrsSearchParams(WirePayload):
-    text: str
-    size: int
-
-
-@dataclass(frozen=True)
-class OrsReverseParams(WirePayload):
-    point_lat: float
-    point_lon: float
-    size: int
-    boundary_country: str
-    layers: str
-    # the Pelias reverse endpoint wants dotted keys
-    wire_key_rewrites: ClassVar[dict[str, str]] = {"point_lat": "point.lat", "point_lon": "point.lon"}
-
-
-@dataclass(frozen=True)
-class OrsDirectionsBody(WirePayload):
-    coordinates: list[list[float]]
-    units: str
 
 
 class ORSApi(BaseApi):
@@ -59,6 +27,20 @@ class ORSApi(BaseApi):
     profile = apigw.ORS
     directions_url = ORS_DIRECTIONS
     geocode_url = PELIAS_SEARCH
+
+    # Which Pelias layers count as "a town" for a reverse lookup. Unconstrained,
+    # Pelias answers with the closest feature of ANY kind — for a house that is
+    # its own street (or a school), i.e. a 0-minute walk, which walkability's
+    # plausibility gate rejects: houses whose address-derived town is a district
+    # name (London, South Oxfordshire, "Maidenhead Station Area") then silently
+    # lost walk_to_town. Settlement layers only — locality (town), borough
+    # (London boroughs), neighbourhood (suburbs). Pelias sorts by distance, so an
+    # SW20 house resolves to West Barnes (10 min walk) rather than the London
+    # centroid (210 min).
+    SETTLEMENT_LAYERS = "locality,borough,neighbourhood"
+
+    # The one no-route signal ORS returns for an impossible point pair.
+    HTTP_NOT_FOUND = 404
 
     @staticmethod
     def _auth_headers() -> dict[str, str]:
@@ -91,7 +73,7 @@ class ORSApi(BaseApi):
             point_lon=lng,
             size=1,
             boundary_country="GBR",
-            layers=SETTLEMENT_LAYERS,
+            layers=self.SETTLEMENT_LAYERS,
         )
         req = FetchArgs(
             "GET",
@@ -143,7 +125,7 @@ class ORSApi(BaseApi):
         try:
             data = await self._fetch(req)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+            if exc.response.status_code == self.HTTP_NOT_FOUND:
                 # no route exists between these points (e.g. no road
                 # connection): keep the walk leg, never an impossible pill
                 logger.warning(

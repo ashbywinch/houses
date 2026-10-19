@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from money import Money
+from pydantic import Field
 
 import dag.derived_node as _dag_derived
 import dag.persistence as _dag_per
@@ -29,13 +30,14 @@ from houses.nodes.location import BestAddressNode, BestLocationNode, PostcodeNod
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
 from houses.nodes.mortgage_required_node import MortgageRequiredNode
-from houses.nodes.schools import PrimarySchoolNode, SchoolAcceptanceNode, SecondarySchoolNode
+from houses.nodes.schools import NearestSchoolNode, SchoolAcceptanceNode
 from houses.nodes.settings_node import aggregate_dict
 from houses.nodes.stamp_duty_node import StampDutyNode
 from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode, HousingCostConfig
 from houses.nodes.total_works_node import TotalWorksNode
 from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 from houses.services_provider import get_services
+from serialization import SerializableAsDict
 
 if TYPE_CHECKING:
     from houses.services import Services
@@ -44,12 +46,18 @@ if TYPE_CHECKING:
 # A node's provenance tree as the serve path returns it (Provenance.to_dict):
 # label/value/sources, recursive and mostly optional, so it is named here
 # rather than modelled field by field.
-ProvenanceTree = dict[str, Any]
+type ProvenanceTree = dict[str, Any]
 
+# Dotted-path → provenance-tree map served on demand (the detail payload's
+# node layout is the key contract — variable keys, one tree per path).
+type ProvenanceMap = dict[str, ProvenanceTree]
 
-@dataclass(frozen=True)
-class PropertyJson:
-    """Wire shape of PropertyNodes.to_json."""
+# Node attribute → factory for an input whose empty state is a valid fact
+# (the construction invariant materialises them; see _EMPTY_VALID_INPUT_DEFAULTS).
+type _EmptyValidDefaults = dict[str, Callable[[], Any]]
+# lucidlint: ignore class-module the property projections are PropertyNodes' own serialization records (review-log)
+class PropertyView(SerializableAsDict):
+    """The property document the API reports: one node-map projection."""
 
     rid: str
     best_address: Any
@@ -59,36 +67,21 @@ class PropertyJson:
     rightmove_bedrooms: Any
     postcode: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _SchoolEntry:
+class _SchoolEntry(TypedDict, total=False):
     """The {school: ...} wrapper used per school stage."""
 
     school: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return dict(school=self.school)
 
-
-@dataclass(frozen=True)
-class _SchoolsJson:
+class _Schools(TypedDict, total=False):
     """Wire shape of the schools block (primary and secondary)."""
 
     primary: _SchoolEntry
     secondary: _SchoolEntry
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _TriageJson:
+class _Triage(TypedDict, total=False):
     """Wire shape of the triage block."""
 
     favourite: Any
@@ -97,25 +90,15 @@ class _TriageJson:
     user_notes: Any
     triage_status: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _FreshnessJson:
+class _Freshness(TypedDict, total=False):
     """Wire shape of the freshness block."""
 
     property_added_at: str | None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return dict(property_added_at=self.property_added_at)
 
-
-@dataclass(frozen=True)
-class SummaryJson:
-    """Wire shape of PropertyNodes.to_json_summary."""
+class PropertySummary(SerializableAsDict):
+    """One property as the list and the live-update push report it."""
 
     rid: str = ""
     best_address: Any = None
@@ -124,20 +107,15 @@ class SummaryJson:
     rightmove_bedrooms: Any = None
     group_monthly_cost: Any = None
     town_name: Any = None
-    commutes: dict = field(default_factory=dict)
-    schools: dict = field(default_factory=dict)
+    commutes: dict[str, Mapping[str, Any]] = Field(default_factory=dict)
+    schools: _Schools = Field(default_factory=_Schools)
     walkability: Any = None
     epc: Any = None
-    triage: dict = field(default_factory=dict)
-    freshness: dict = field(default_factory=dict)
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
+    triage: _Triage = Field(default_factory=_Triage)
+    freshness: _Freshness = Field(default_factory=_Freshness)
 
 
-@dataclass(frozen=True)
-class _LocationJson:
+class _Location(TypedDict, total=False):
     """Wire shape of the detail location block."""
 
     best_location: Any
@@ -145,13 +123,8 @@ class _LocationJson:
     rightmove_location: Any
     precise_location: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _AffordabilityJson:
+class _Affordability(TypedDict, total=False):
     """Wire shape of the detail affordability block."""
 
     stamp_duty: Any
@@ -163,42 +136,27 @@ class _AffordabilityJson:
     mortgage_required: Any
     monthly_mortgage: Any
     monthly_sinking_fund: Any
-    monthly_commute_cost: Any
     rental_income: Any
+    monthly_commute_cost: Any
     group_monthly_cost: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _CouncilTaxApportionmentJson:
+class _CouncilTaxApportionment(TypedDict, total=False):
     """Wire shape of the council-tax apportionment block."""
 
     main_payers: Any
     annexe_payers: Any
     ignored: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _AreaJson:
+class _Area(TypedDict, total=False):
     """Wire shape of the detail area block."""
 
     walkability: Any
     town_description: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _CommentsJson:
+class _Comments(TypedDict, total=False):
     """Wire shape of the detail comments block."""
 
     status: Any
@@ -208,40 +166,23 @@ class _CommentsJson:
     design_needed: Any
     planning_needed: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class _SettingsFinancial:
+class _SettingsFinancial(TypedDict, total=False):
     """The financial settings block: status plus the aggregate value."""
 
     status: str
     value: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(status=self.status, value=self.value)
 
-
-@dataclass(frozen=True)
-class _SettingsBlock:
+class _SettingsBlock(TypedDict, total=False):
     """The settings section of the detail payload."""
 
     persons: Any
     financial: _SettingsFinancial
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(persons=self.persons, financial=self.financial.to_dict())
 
-
-@dataclass(frozen=True)
-class _DetailJson:
-    """Wire shape of PropertyNodes.to_json_detail."""
+class PropertyDetail(SerializableAsDict):
+    """One property's full detail document — every section the page renders."""
 
     rid: str
     best_address: Any
@@ -251,23 +192,17 @@ class _DetailJson:
     rightmove_bedrooms: Any
     town_name: Any
     epc: Any
-    location: dict
-    commutes: dict
-    schools: dict
-    affordability: dict
-    council_tax_apportionment: dict
-    area: dict
-    triage: dict
-    comments: dict
+    location: _Location
+    commutes: dict[str, Any]
+    schools: _Schools
+    affordability: _Affordability
+    council_tax_apportionment: _CouncilTaxApportionment
+    area: _Area
+    triage: _Triage
+    comments: _Comments
     settings: _SettingsBlock
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        d = asdict(self)
-        d["settings"] = self.settings.to_dict()
-        return d
-
-
+# lucidlint: ignore latent-class no field-disjoint partition — 13 methods, one property-wiring contract (review-log)
 class PropertyNodes:
     """Holds all DAG node references for one property.
 
@@ -282,7 +217,7 @@ class PropertyNodes:
         # (Rightmove property IDs are 6-10 digits; shorter values like
         # "999" are test data written outside pytest isolation).
 
-        if not _dag_per.testing and (not rid.isdigit() or len(rid) < 6):
+        if not _dag_per.Runtime.testing and (not rid.isdigit() or len(rid) < 6):
             raise ValueError(
                 f"Invalid RID {rid!r}: property RIDs must be all digits and at "
                 f"least 6 characters long (Rightmove IDs are 6-10 digits). "
@@ -295,8 +230,9 @@ class PropertyNodes:
         # ── Source Nodes (user-entered / scraped) ──────────────────────
         self.rightmove_url: UserInputNode[str] = UserInputNode[str](f"{rid}/rightmove_url", str)
         self.rightmove_address: UserInputNode[str] = UserInputNode[str](f"{rid}/rightmove_address", str)
-        # lucidlint: ignore duplicate-block structurally identical UserInputNode constructor calls are this file's
         self.rightmove_bedrooms: UserInputNode[str] = UserInputNode[str](f"{rid}/rightmove_bedrooms", str)
+        # Every line of this UserInputNode wiring table wires a distinct node key and value type —
+        # lucidlint: ignore duplicate-block extracting a helper/loop was probed and re-fires or drops the types
         self.rightmove_price: UserInputNode[Money] = UserInputNode[Money](f"{rid}/rightmove_price", Money)
         self.rightmove_location: UserInputNode[GeoPoint] = UserInputNode[GeoPoint](
             f"{rid}/rightmove_location", GeoPoint
@@ -406,14 +342,18 @@ class PropertyNodes:
             f"{rid}/school_acceptable",
             persons_source=self._svc.persons_source,
         )
-        self.primary_school: PrimarySchoolNode = PrimarySchoolNode(
+        self.primary_school: NearestSchoolNode = NearestSchoolNode(
             f"{rid}/primary_school",
             best_location=self.best_location,
+            child_age=4,
+            stage="primary",
             acceptable=self.school_acceptable,
         )
-        self.secondary_school: SecondarySchoolNode = SecondarySchoolNode(
+        self.secondary_school: NearestSchoolNode = NearestSchoolNode(
             f"{rid}/secondary_school",
             best_location=self.best_location,
+            child_age=12,
+            stage="secondary",
             acceptable=self.school_acceptable,
         )
         # ── Commute Pipeline ────────────────────────────────────────────
@@ -543,13 +483,14 @@ class PropertyNodes:
     # Empty-valid input defaults, kept next to the node definitions.
     # A new user-input node with an "empty is valid" semantic must be
     # registered here.
-    # lucidlint: ignore record-shape keyed dispatch table — node-attr name → empty-valid default maker, variable keys,
-    # never serialized (review-log style)
-    _EMPTY_VALID_INPUT_DEFAULTS = {
-        "comment_status": lambda: "",
-        "comment_status_reason": lambda: "",
-        "works_estimates": dict,
-        "rental_income": lambda: Money(amount="0", currency="GBP"),
+    _EMPTY_VALID_INPUT_DEFAULTS: _EmptyValidDefaults = {
+        attr: make_default
+        for attr, make_default in (
+            ("comment_status", lambda: ""),
+            ("comment_status_reason", lambda: ""),
+            ("works_estimates", dict),
+            ("rental_income", lambda: Money(amount="0", currency="GBP")),
+        )
     }
 
     def _build_commute_pipeline(self) -> None:
@@ -601,9 +542,8 @@ class PropertyNodes:
     def _on_node_changed(self) -> None:
         self.changed.emit()
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json(self) -> dict[str, Any]:
-        rec = PropertyJson(
+    async def view(self) -> PropertyView:
+        rec = PropertyView(
             rid=self.rid,
             best_address=await self.best_address.to_json(),
             best_location=await self.best_location.to_json(),
@@ -612,7 +552,7 @@ class PropertyNodes:
             rightmove_bedrooms=await self.rightmove_bedrooms.to_json(),
             postcode=await self.postcode.to_json(),
         )
-        return rec.to_dict()
+        return rec
 
     def schedule_code_stale_nodes(self) -> None:
         """Schedule (never await) recompute for derived nodes whose
@@ -629,7 +569,7 @@ class PropertyNodes:
         nothing could have become stale.
         """
         last = getattr(self, "_code_refresh_epoch", None)
-        if last == _dag_derived._CODE_VERSION_EPOCH:
+        if last == _dag_derived.DerivedNode._CODE_VERSION_EPOCH:
             return
 
         # Walk the whole node graph — vars(self) alone misses nodes stored
@@ -640,10 +580,9 @@ class PropertyNodes:
         # the failure cannot propagate, and a refresh that inherited that
         # narrowing could never reach the pipeline it must refresh.
         schedule_code_stale_nodes(n for n in vars(self).values() if isinstance(n, Node))
-        self._code_refresh_epoch = _dag_derived._CODE_VERSION_EPOCH
+        self._code_refresh_epoch = _dag_derived.DerivedNode._CODE_VERSION_EPOCH
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _commute_breakdown_json(self) -> dict:
+    async def _commute_breakdown_json(self) -> Mapping[str, Any]:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""
         return await self.commute_breakdown.to_json_value()
@@ -660,8 +599,8 @@ class PropertyNodes:
             for q in (p.places_of_interest or [])
             if (q.trips_per_week or 0) > 0 and (q.weeks_per_year or 0) > 0
         }
-
-    def _commute_wire_key(self, key: str, name_by_id: dict[str, str]) -> str:
+    @staticmethod
+    def _commute_wire_key(key: str, name_by_id: dict[str, str]) -> str:
         """Selector keys are id/label; the WIRE keys stay name/label —
         names are display, ids never leak to the frontend."""
         pid, _, label = key.partition("/")
@@ -674,20 +613,19 @@ class PropertyNodes:
             for p in (self._svc.persons_source._value or [])
         }
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json_summary(self) -> dict[str, Any]:
-        triage = _TriageJson(
+    async def summary(self) -> PropertySummary:
+        triage = _Triage(
             favourite=await self.favourite.to_json_value(),
             dismissed=await self.dismissed.to_json_value(),
             is_viewed=await self.is_viewed.to_json_value(),
             user_notes=await self.user_notes.to_json_value(),
             triage_status=await self.triage_status.to_json_value(),
         )
-        schools = _SchoolsJson(
+        schools = _Schools(
             primary=_SchoolEntry(school=await self.primary_school.to_json_value()),
             secondary=_SchoolEntry(school=await self.secondary_school.to_json_value()),
         )
-        rec = SummaryJson(
+        rec = PropertySummary(
             rid=self.rid,
             best_address=await self.best_address.to_json_value(),
             best_location=await self.best_location.to_json_value(),
@@ -700,27 +638,26 @@ class PropertyNodes:
                 for k, v in self.commute_selectors.items()
                 if k in self._commuted_destinations()
             },
-            schools=schools.to_dict(),
+            schools=schools,
             walkability=await self.walkability.to_json_value(),
             epc=await self.epc.to_json_value(),
-            triage=triage.to_dict(),
-            freshness=_FreshnessJson(property_added_at=property_created_at(self.rid)).to_dict(),
+            triage=triage,
+            freshness=_Freshness(property_added_at=property_created_at(self.rid)),
         )
-        return rec.to_dict()
+        return rec
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json_detail(self) -> dict[str, Any]:
-        location = _LocationJson(
+    async def detail(self) -> PropertyDetail:
+        location = _Location(
             best_location=await self.best_location.to_json_value(),
             geocode=await self.geocode.to_json_value(),
             rightmove_location=await self.rightmove_location.to_json_value(),
             precise_location=await self.precise_location.to_json_value(),
         )
-        schools = _SchoolsJson(
+        schools = _Schools(
             primary=_SchoolEntry(school=await self.primary_school.to_json_value()),
             secondary=_SchoolEntry(school=await self.secondary_school.to_json_value()),
         )
-        affordability = _AffordabilityJson(
+        affordability = _Affordability(
             stamp_duty=await self.stamp_duty.to_json_value(),
             council_tax=await self.council_tax.to_json_value(),
             works_estimates=await self.works_estimates.to_json_value(),
@@ -734,23 +671,23 @@ class PropertyNodes:
             monthly_commute_cost=await self._commute_breakdown_json(),
             group_monthly_cost=await self.group_monthly_cost.to_json_value(),
         )
-        apportionment = _CouncilTaxApportionmentJson(
+        apportionment = _CouncilTaxApportionment(
             main_payers=await self.council_tax_payers.to_json_value(),
             annexe_payers=await self.annexe_payers.to_json_value(),
             ignored=await self.annexe_ignored.to_json_value(),
         )
-        area = _AreaJson(
+        area = _Area(
             walkability=await self.walkability.to_json_value(),
             town_description=await self.town_desc.to_json_value(),
         )
-        triage = _TriageJson(
+        triage = _Triage(
             favourite=await self.favourite.to_json_value(),
             dismissed=await self.dismissed.to_json_value(),
             is_viewed=await self.is_viewed.to_json_value(),
             user_notes=await self.user_notes.to_json_value(),
             triage_status=await self.triage_status.to_json_value(),
         )
-        comments = _CommentsJson(
+        comments = _Comments(
             status=await self.comment_status.to_json_value(),
             status_reason=await self.comment_status_reason.to_json_value(),
             group_notes=await self.comment_group_notes.to_json_value(),
@@ -758,7 +695,7 @@ class PropertyNodes:
             design_needed=await self.comment_design_needed.to_json_value(),
             planning_needed=await self.comment_planning_needed.to_json_value(),
         )
-        rec = _DetailJson(
+        rec = PropertyDetail(
             rid=self.rid,
             best_address=await self.best_address.to_json_value(),
             user_entered_address=await self.user_entered_address.to_json_value(),
@@ -767,27 +704,27 @@ class PropertyNodes:
             rightmove_bedrooms=await self.rightmove_bedrooms.to_json_value(),
             town_name=await self.town_name.to_json_value(),
             epc=await self.epc.to_json_value(),
-            location=location.to_dict(),
+            location=location,
             commutes={
                 self._commute_wire_key(k, self._commute_wire_map()): await v.to_json_value()
                 for k, v in self.commute_selectors.items()
                 if k in self._commuted_destinations()
             },
-            schools=schools.to_dict(),
-            affordability=affordability.to_dict(),
-            council_tax_apportionment=apportionment.to_dict(),
-            area=area.to_dict(),
-            triage=triage.to_dict(),
-            comments=comments.to_dict(),
+            schools=schools,
+            affordability=affordability,
+            council_tax_apportionment=apportionment,
+            area=area,
+            triage=triage,
+            comments=comments,
             settings=_SettingsBlock(
                 persons=await self._svc.persons_source.to_json_value(),
                 financial=_SettingsFinancial(status="succeeded", value=aggregate_dict(self._svc.setting_nodes)),
             ),
         )
-        return rec.to_dict()
+        return rec
 
 
-    async def to_provenance_map(self) -> dict[str, ProvenanceTree]:
+    async def to_provenance_map(self) -> ProvenanceMap:
         """Provenance for every detail-surface node, keyed by dotted path.
 
         The detail wire carries no provenance (P8: a derivation is
@@ -829,7 +766,7 @@ class PropertyNodes:
             ("epc", self.epc),
             ("settings.persons", self._svc.persons_source),
         ]
-        result: dict[str, ProvenanceTree] = {}
+        result: ProvenanceMap = {}
         for path, node in pairs:
             result[path] = await _prov(node)
         for key, selector in self.commute_selectors.items():

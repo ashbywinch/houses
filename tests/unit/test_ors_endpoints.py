@@ -19,7 +19,7 @@ import pytest
 
 from houses import apigw
 from houses import ors_endpoints as endpoints
-from houses.apis.ors import SETTLEMENT_LAYERS, ORSApi
+from houses.apis.ors_api import ORSApi
 from houses.settings import settings
 
 # https://ask.openrouteservice.org/t/deprecating-api-openrouteservice-org-in-favour-of-api-heigit-org/7912
@@ -88,10 +88,16 @@ async def test_reverse_geocode_asks_for_settlements_not_streets():
     with pytest.raises(apigw.GatewayHttpError):
         await ORSApi().reverse_geocode(51.5, -0.1, _client_factory=lambda **k: client)
     assert client.params, "no request params captured — the assertions below would be vacuous"
-    assert client.params.get("layers") == SETTLEMENT_LAYERS
+    assert client.params.get("layers") == ORSApi.SETTLEMENT_LAYERS
     assert "locality" in str(client.params.get("layers"))
     assert "street" not in str(client.params.get("layers"))
     assert "address" not in str(client.params.get("layers"))
+    # Pelias reads the point and the country boundary by their DOTTED names;
+    # a flat key is silently ignored, so the request would ask a different
+    # question and still look successful.
+    assert client.params.get("point.lat") == 51.5
+    assert client.params.get("point.lon") == -0.1
+    assert client.params.get("boundary.country") == "GBR"
 
 
 def test_a_trailing_slash_on_the_base_urls_is_normalised():

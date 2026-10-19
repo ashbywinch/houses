@@ -5,8 +5,8 @@ from pathlib import Path
 from money import Money
 
 from houses.geopoint import GeoPoint
-from houses.rail_fares import RailFare
-from houses.rail_fares import RailFareRegistry as Registry
+from houses.rail_fare import RailFare
+from houses.rail_fare_registry import RailFareRegistry as Registry
 from houses.stations import StationRegistry
 
 

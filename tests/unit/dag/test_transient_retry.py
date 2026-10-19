@@ -15,7 +15,7 @@ import pytest
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 from houses.helpers import is_transient_error
 
@@ -24,7 +24,7 @@ from houses.helpers import is_transient_error
 async def test_non_transient_403_does_not_schedule_retry():
     """A compute() that catches httpx.HTTPStatusError(403) should NOT
     schedule a retry — 403 is permanent and the node goes impossible."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[str]("nt403_src", str)
     node = _CatchAndDecideNode("nt403_result", deps=(src,))
@@ -47,7 +47,7 @@ async def test_non_transient_403_does_not_schedule_retry():
 @pytest.mark.asyncio
 async def test_transient_429_schedules_retry():
     """A 429 (rate limit) caught in compute() schedules a retry and returns pending."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[str]("t429_src", str)
     node = _CatchAndDecideNode("t429_result", deps=(src,))
@@ -70,7 +70,7 @@ async def test_transient_429_schedules_retry():
 @pytest.mark.asyncio
 async def test_transient_500_schedules_retry():
     """A 500 (server error) schedules a retry."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[str]("t500_src", str)
     node = _CatchAndDecideNode("t500_result", deps=(src,))
@@ -117,7 +117,7 @@ async def test_returned_retryable_impossible_schedules_retry():
     Attempt.impossible(msg) with error_info.retryable (instead of
     raising) must still schedule a DAG retry — the retry decision must
     not depend on whether the service raised or returned."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[str]("rt_src", str)
     node = _ReturnImpossibleNode("rt_result", deps=(src,))
@@ -133,7 +133,7 @@ async def test_returned_retryable_impossible_schedules_retry():
 @pytest.mark.asyncio
 async def test_returned_permanent_impossible_does_not_retry():
     """A returned impossible WITHOUT retryable must stay impossible."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[str]("rp_src", str)
     node = _ReturnImpossibleNode("rp_result", deps=(src,), permanent=True)

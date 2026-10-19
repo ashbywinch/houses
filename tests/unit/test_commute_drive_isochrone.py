@@ -9,8 +9,8 @@ import pytest
 
 from houses.geopoint import GeoPoint
 from tools.commute.drive_isochrone import (
-    DEFAULT_THRESHOLD_MIN,
     DriveDestination,
+    DriveIsochroneConfig,
     _components,
     _signed_area,
     build_matrix_requests,
@@ -26,7 +26,7 @@ from tools.commute.drive_isochrone import (
 )
 from tools.commute.rightmove_url import parse_search_url
 from tools.commute.tile import Grid, GridCell, Rect
-from tools.commute.units import KM, MINUTE
+from tools.commute.units import Units
 
 NOW = "2026-08-03T09:00:00+00:00"
 
@@ -46,7 +46,7 @@ def _grid(
 
 
 def _dest(label: str = "Dad", postcode: str = "OX7 1AA", threshold: int = 90) -> DriveDestination:
-    return DriveDestination(label=label, postcode=postcode, threshold_min=threshold * MINUTE)
+    return DriveDestination(label=label, postcode=postcode, threshold_min=threshold * Units.MINUTE)
 
 
 # ── config ───────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ def test_load_config_applies_global_threshold(tmp_path):
 def test_load_config_default_threshold_when_omitted(tmp_path):
     cfg = tmp_path / "destinations.json"
     cfg.write_text(json.dumps({"destinations": [{"label": "Dad", "postcode": "OX7 1AA"}]}))
-    assert load_config(cfg) == [_dest(threshold=DEFAULT_THRESHOLD_MIN)]
+    assert load_config(cfg) == [_dest(threshold=DriveIsochroneConfig.DEFAULT_THRESHOLD_MIN)]
 
 
 # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
@@ -106,7 +106,7 @@ def test_apply_default_threshold_skips_explicit_overrides(tmp_path):
         )
     )
     data = _json.loads(cfg.read_text())
-    dests = apply_default_threshold(load_config(cfg), data, 60 * MINUTE)
+    dests = apply_default_threshold(load_config(cfg), data, 60 * Units.MINUTE)
     assert [d.threshold_min.to("minute").magnitude for d in dests] == [60, 75]
 
 
@@ -153,12 +153,12 @@ def test_load_config_rejects_missing_fields(tmp_path):
 
 def test_slack_minutes_is_half_diagonal_crossing_time():
     # 4 km cell, half-diagonal 2.83 km, at 70 km/h → 2.42 min
-    slack = slack_minutes(4.0 * KM)
+    slack = slack_minutes(4.0 * Units.KM)
     assert slack.to("minute").magnitude == pytest.approx(4.0 * math.sqrt(2) / 2 / 70.0 * 60.0, abs=1e-9)
 
 
 def test_region_bbox_centers_on_destination():
-    rect = region_bbox(51.94, -1.55, 100.0 * KM)
+    rect = region_bbox(51.94, -1.55, 100.0 * Units.KM)
     assert (rect.lat_min + rect.lat_max) / 2 == pytest.approx(51.94)
     assert (rect.lon_min + rect.lon_max) / 2 == pytest.approx(-1.55)
     assert rect.lat_max - rect.lat_min == pytest.approx(2 * 100.0 / 111.0, rel=0.01)
@@ -655,23 +655,25 @@ async def test_run_does_not_write_when_validation_fails(tmp_path):
 
 def test_kept_cells_threshold_boundary():
     cells = [GridCell(r, c, 51.0 + r * 0.05, -2.0 + c * 0.08) for r in range(2) for c in range(3)]
-    durations = [d * MINUTE if d is not None else None for d in (0.0, 89.0, 90.0, 90.5, 91.0, None)]
-    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {GridCell(0, 0), GridCell(0, 1), GridCell(0, 2)}
+    durations = [d * Units.MINUTE if d is not None else None for d in (0.0, 89.0, 90.0, 90.5, 91.0, None)]
+    assert kept_cells(cells, durations, 90 * Units.MINUTE, 0 * Units.MINUTE) == {
+        GridCell(0, 0), GridCell(0, 1), GridCell(0, 2)
+    }
 
 
 def test_kept_cells_slack_absorbs_boundary_overage():
     cells = [GridCell(0, c, 51.0, -2.0 + c * 0.08) for c in range(4)]
-    durations = [d * MINUTE for d in (90.0, 92.0, 93.0, 94.0)]
-    slack = slack_minutes(4.0 * KM)  # ≈ 2.42
-    assert kept_cells(cells, durations, 90 * MINUTE, slack) == {GridCell(0, 0), GridCell(0, 1)}
-    assert GridCell(0, 2) not in kept_cells(cells, durations, 90 * MINUTE, slack)  # 93.0 > 90 + 2.42
+    durations = [d * Units.MINUTE for d in (90.0, 92.0, 93.0, 94.0)]
+    slack = slack_minutes(4.0 * Units.KM)  # ≈ 2.42
+    assert kept_cells(cells, durations, 90 * Units.MINUTE, slack) == {GridCell(0, 0), GridCell(0, 1)}
+    assert GridCell(0, 2) not in kept_cells(cells, durations, 90 * Units.MINUTE, slack)  # 93.0 > 90 + 2.42
 
 
 def test_kept_cells_drops_unreachable():
     cells = [(0, 0, 51.0, -2.0), (0, 1, 51.0, -1.92)]
     cells = [GridCell(0, 0, 51.0, -2.0), GridCell(0, 1, 51.0, -1.92)]
-    durations = [None, 10.0 * MINUTE]
-    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {GridCell(0, 1)}
+    durations = [None, 10.0 * Units.MINUTE]
+    assert kept_cells(cells, durations, 90 * Units.MINUTE, 0 * Units.MINUTE) == {GridCell(0, 1)}
 
 
 # ── raw → searches ───────────────────────────────────────────────────

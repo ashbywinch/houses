@@ -329,7 +329,7 @@ class TestProcessorPipeline:
 
         import dag.scheduler as sched_mod
 
-        sched = sched_mod.AsyncQueueScheduler(respect_time=False)
+        sched = sched_mod.AsyncRefreshQueue(respect_time=False)
         done: list[str] = []
 
         class _Flaky:

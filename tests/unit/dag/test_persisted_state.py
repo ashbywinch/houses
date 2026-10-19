@@ -14,7 +14,7 @@ import pytest
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 
 
@@ -33,7 +33,7 @@ class _IntNode(DerivedNode[int]):
 @pytest.mark.asyncio
 async def test_succeeded_survives_recreation():
     """A succeeded node reports succeeded on restart, not pending."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[int]("surv_src", int)
     node = _IntNode("surv_node", deps=(src,))
@@ -58,7 +58,7 @@ async def test_impossible_survives_recreation():
     restart, the scheduler thrashes re-processing them, and the frontend
     shows ``?`` for minutes before the node resolves.
     """
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[int]("imps_src", int)
     node = _IntNode("imps_node", deps=(src,))
@@ -84,7 +84,7 @@ async def test_impossible_survives_recreation():
 @pytest.mark.asyncio
 async def test_impossible_not_re_queued_on_register():
     """An impossible-loaded node must NOT be scheduled by register()."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[int]("nrq_src", int)
     node = _IntNode("nrq_node", deps=(src,))
@@ -94,7 +94,7 @@ async def test_impossible_not_re_queued_on_register():
 
     # Re-create with a fresh scheduler so we can check queue emptiness
     src2 = UserInputNode[int]("nrq_src", int)
-    fresh_sched = AsyncQueueScheduler(respect_time=False)
+    fresh_sched = AsyncRefreshQueue(respect_time=False)
     set_scheduler(fresh_sched)
     node2 = _IntNode("nrq_node", deps=(src2,))
 

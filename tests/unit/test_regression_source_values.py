@@ -95,7 +95,7 @@ async def test_bootstrap_pushes_sources_and_dag_computes():
     await flush_processor()
 
     register_property(rid, prop)
-    sm = await prop.to_json_summary()
+    sm = (await prop.summary()).to_dict()
     commutes = sm.get("commutes", {})
     assert len(commutes) > 0, "No commute selectors"
     for key, cd in commutes.items():

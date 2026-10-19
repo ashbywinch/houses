@@ -2,29 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from houses import apigw
-from houses.apis.transport import BaseApi, FetchArgs
-from houses.web.json_utils import WirePayload
-
-
-@dataclass(frozen=True)
-class OverpassParams(WirePayload):
-    data: str
-
-
-@dataclass(frozen=True)
-class OverpassElement:
-    tags: dict[str, str]
-    latitude: float | None
-    longitude: float | None
-    center: tuple[float, float] | None
-
-
-@dataclass(frozen=True)
-class OverpassResponse:
-    elements: list[OverpassElement]
+from houses.apis.base_api import BaseApi
+from houses.apis.fetch_args import FetchArgs
+from houses.apis.overpass_element import OverpassElement
+from houses.apis.overpass_params import OverpassParams
+from houses.apis.overpass_response import OverpassResponse
 
 
 class OverpassApi(BaseApi):

@@ -3,65 +3,42 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any
+
+import httpx
 
 from houses import apis
-from houses.web.json_utils import optional_parse
+from serialization import optional_parse
 
 logger = logging.getLogger(__name__)
 
 
-class _LegModeWire(TypedDict, total=False):
-    """A TfL journey leg's mode as the provider sends it: the ``{name}`` shape."""
-
-    name: str | None
-
-
-class _ArrivalPointWire(TypedDict, total=False):
-    """A TfL journey leg's arrival point as the provider sends it: the
-    ``{commonName}`` shape (the row keeps the provider's other keys)."""
-
-    commonName: str
-
-
-class _FirstLegWire(TypedDict, total=False):
-    """A TfL journey's first leg as the provider sends it: the
-    ``{mode, duration, arrivalPoint}`` shape."""
-
-    mode: _LegModeWire
-    duration: int
-    arrivalPoint: _ArrivalPointWire
-
-
 @dataclass(frozen=True)
-class _LegModeJson:
+class _LegMode:
     """A TfL journey leg mode — the {name} wire shape."""
 
     name: str | None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return dict(name=self.name)
-
     @classmethod
-    def from_dict(cls, raw: _LegModeWire) -> _LegModeJson:
+    def from_dict(cls, raw: dict) -> _LegMode:
         return cls(name=raw.get("name"))
 
 
 @dataclass(frozen=True)
-class _InstructionJson:
+class _Instruction:
     """A TfL journey leg instruction — the {summary} wire shape."""
 
     summary: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return dict(summary=self.summary)
+    @classmethod
+    def from_dict(cls, raw: dict) -> _Instruction:
+        return cls(summary=raw.get("summary", ""))
 
 
 @dataclass(frozen=True)
-class _ArrivalPointJson:
+class _ArrivalPoint:
     """A TfL journey leg arrival point — the {commonName} wire shape.
 
     Holds the provider's raw row so the park-and-ride replacement leg
@@ -69,51 +46,48 @@ class _ArrivalPointJson:
     """
 
     common_name: str
-    raw: dict[str, Any]
+    raw: Mapping[str, Any]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Mapping[str, Any]:
         return self.raw
 
     @classmethod
-    def from_dict(cls, raw: _ArrivalPointWire) -> _ArrivalPointJson:
+    def from_dict(cls, raw: dict) -> _ArrivalPoint:
         return cls(common_name=raw.get("commonName", ""), raw=dict(raw))
 
 
 @dataclass(frozen=True)
-class _FirstLegJson:
+class _FirstLeg:
     """The first leg of a TfL journey — the walk-to-station leg the
     park-and-ride swap inspects (mode, duration, arrival point)."""
 
-    mode: _LegModeJson
+    mode: _LegMode
     duration: int
-    arrival_point: _ArrivalPointJson | None
+    arrival_point: _ArrivalPoint | None
 
     @classmethod
-    def from_dict(cls, raw: _FirstLegWire) -> _FirstLegJson:
+    def from_dict(cls, raw: dict) -> _FirstLeg:
         return cls(
-            mode=_LegModeJson.from_dict(raw.get("mode", {})),
+            mode=_LegMode.from_dict(raw.get("mode", {})),
             duration=raw.get("duration", 0),
-            arrival_point=optional_parse(raw, "arrivalPoint", _ArrivalPointJson.from_dict),
+            arrival_point=optional_parse(raw, "arrivalPoint", _ArrivalPoint.from_dict),
         )
 
 
 @dataclass(frozen=True)
-class _DrivingLegJson:
+class _DrivingLeg:
     """The park-and-ride driving leg written into the TfL journeys payload."""
 
-    mode: _LegModeJson
+    mode: _LegMode
     duration: int
-    instruction: _InstructionJson
+    instruction: _Instruction
     arrival_point: Any
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the TfL journeys leg shape (coding-standards.md)
         return dict(
-            mode=self.mode.to_dict(),
+            mode=dict(name=self.mode.name),
             duration=self.duration,
-            instruction=self.instruction.to_dict(),
+            instruction=dict(summary=self.instruction.summary),
             arrivalPoint=self.arrival_point,
         )
 
@@ -176,11 +150,13 @@ async def _get_drive_minutes_from_location(
             _client_factory=_client_factory,
             _no_cache=_no_cache,
         )
-    except Exception as exc:
+    except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
         # Log and re-raise the ORIGINAL exception: _compute_attempt is the
         # single classifier (transient -> retry + pending, permanent ->
         # impossible). Wrapping in RuntimeError would hide the httpx type
-        # and lose the retry decision (2026-09-19).
+        # and lose the retry decision (2026-09-19). This is the whole ORS
+        # wire blast radius: HTTP statuses, transport errors, body JSON
+        # parse failures — anything else is a bug and must surface.
         logger.warning(
             "Park-and-ride ORS lookup failed for %s -> %s: %s",
             origin_coords,
@@ -190,15 +166,16 @@ async def _get_drive_minutes_from_location(
         raise
 
 
-# lucidlint: ignore record-shape consumes the TfL journeys provider payload — provider wire shape (coding-standards.md)
-# lucidlint: ignore record-shape returns the mutated TfL journeys payload — provider wire shape (coding-standards.md)
+# The TfL journeys payload is the provider's own nested mapping: it carries
+# keys no TypedDict can name (``$type``), so the swap types it as the mutable
+# provider mapping it is — the one shape both ends of the seam agree on.
 async def apply_park_and_ride_to_journeys(
-    data: dict,
+    data: MutableMapping[str, Any],
     origin_postcode: str,
     max_walk_minutes: int,
     _drive_fn=None,
     services: Any | None = None,
-) -> dict:
+) -> MutableMapping[str, Any]:
     if _drive_fn is not None:
         get_drive = _drive_fn
     else:
@@ -218,7 +195,7 @@ async def apply_park_and_ride_to_journeys(
         legs = journey.get("legs", [])
         if not legs:
             continue
-        first = _FirstLegJson.from_dict(legs[0])
+        first = _FirstLeg.from_dict(legs[0])
         if first.mode.name != "walking":
             continue
         walk_duration = first.duration
@@ -251,10 +228,10 @@ async def apply_park_and_ride_to_journeys(
             drive_minutes,
             station_name,
         )
-        legs[0] = _DrivingLegJson(
-            mode=_LegModeJson(name="driving"),
+        legs[0] = _DrivingLeg(
+            mode=_LegMode(name="driving"),
             duration=drive_minutes,
-            instruction=_InstructionJson(summary=f"Drive to {station_name}"),
+            instruction=_Instruction(summary=f"Drive to {station_name}"),
             arrival_point=first.arrival_point.to_dict() if first.arrival_point else None,
         ).to_dict()
         old_duration = journey.get("duration", 0)

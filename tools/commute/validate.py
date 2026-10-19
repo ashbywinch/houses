@@ -10,14 +10,20 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from houses.geopoint import GeoPoint
 from houses.stations import find as find_station
 from tools.commute.rightmove_url import parse_search_url
-from tools.commute.station_shed import BBox
+from tools.commute.station_shed import BBox, ShedPayload, ShedRecord
 from tools.commute.tile import Grid, Rect, point_to_rect_distance_km, rasterize
+
+type SearchRow = dict[str, Any]  # one searches.json record — the wire shape
+type CellIndex = tuple[int, int]  # a grid (row, col) index
+type Vertex = tuple[float, float]  # a polyline [lat, lon] vertex pair
 
 
 @dataclass(frozen=True)
@@ -31,40 +37,39 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SHED = Path("data/commute/station_shed.json")
 DEFAULT_SEARCHES = Path("data/commute/searches.json")
-MAX_RECTANGLES = 100
-MAX_VERTICES = 20
-COVERAGE_EPS_KM = 1e-6
-NEGATIVE_EPS_KM = 0.5
-ROUND_TRIP_EPS = 5e-6
-RECT_VERTEX_COUNT = 4
-MAX_REPORTED_UNCOVERED = 10
-
 
 @dataclass(frozen=True)
 class ValidationOptions:
     """The search-set validation policy: coverage buffer, bounding box, the
-    curated positive/negative controls, and the rectangle cap."""
+    curated positive/negative controls, and the rectangle cap. The tunables
+    are class attributes — one config surface for the validators (review-log)."""
+
+    MAX_RECTANGLES = 100
+    MAX_VERTICES = 20
+    COVERAGE_EPS_KM = 1e-6  # kept-station cover tolerance around the buffer
+    NEGATIVE_EPS_KM = 0.5  # controls must be this far outside the union
+    ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
+    RECT_VERTEX_COUNT = 4
+    MAX_REPORTED_UNCOVERED = 10
+    # Curated commuter towns — every one must be covered by the search union.
+    POSITIVE_TOWNS = [
+        "Reading", "Guildford", "Brighton", "Cambridge", "Milton Keynes Central",
+        "Luton", "Bedford", "Peterborough", "Grantham", "Colchester",
+        "Southend Victoria", "Maidstone East", "Sevenoaks", "Tunbridge Wells",
+        "Ashford International", "Basingstoke", "Oxford", "High Wycombe",
+        "Aylesbury", "Swindon", "Chelmsford", "Crawley", "Watford Junction",
+        "St Albans", "Slough", "Northampton", "Ipswich",
+        # Inner-London assertions — the inner zone must not hollow out.
+        "Ealing Broadway", "Richmond", "East Croydon", "Bromley South", "Stratford (London)",
+    ]
+    # Towns that must stay OUTSIDE the union (catch a keep-everything bug).
+    NEGATIVE_TOWNS = ["Exeter St Davids", "Sheffield"]
 
     buffer_km: float
     bbox: BBox
     positive: list[StationControl] | None = None
     negative: list[StationControl] | None = None
     max_rectangles: int = MAX_RECTANGLES
-
-
-# Curated commuter towns — every one must be covered by the search union.
-POSITIVE_TOWNS = [
-    "Reading", "Guildford", "Brighton", "Cambridge", "Milton Keynes Central",
-    "Luton", "Bedford", "Peterborough", "Grantham", "Colchester",
-    "Southend Victoria", "Maidstone East", "Sevenoaks", "Tunbridge Wells",
-    "Ashford International", "Basingstoke", "Oxford", "High Wycombe",
-    "Aylesbury", "Swindon", "Chelmsford", "Crawley", "Watford Junction",
-    "St Albans", "Slough", "Northampton", "Ipswich",
-    # Inner-London assertions — the inner zone must not hollow out.
-    "Ealing Broadway", "Richmond", "East Croydon", "Bromley South", "Stratford (London)",
-]
-# Towns that must stay OUTSIDE the union (catch a keep-everything bug).
-NEGATIVE_TOWNS = ["Exeter St Davids", "Sheffield"]
 
 
 def _polygon_to_rect(poly: list[GeoPoint]) -> Rect:
@@ -90,16 +95,14 @@ def _point_in_rect(point: GeoPoint, rect: Rect) -> bool:
     return rect.lat_min <= point.lat <= rect.lat_max and rect.lon_min <= point.lon <= rect.lon_max
 
 
-# lucidlint: ignore record-shape kept_stations ride in the committed searches payload's station shape
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def uncovered_cells(  # lucidlint: ignore record-shape returns a list of (row, col) grid lattice coordinates — keyed
-    searches: list[dict],
-    kept_stations: list[dict],
+def uncovered_cells(
+    searches: list[SearchRow],
+    kept_stations: list[ShedRecord],
     bbox: BBox,
     *,
     cell_km: float,
     buffer_km: float,
-) -> list[tuple[int, int]]:
+) -> list[CellIndex]:
     """Kept cells not inside any search rectangle — regeneration-drift guard.
 
     searches.json and union.json are generated from the same keep-set in one
@@ -109,7 +112,7 @@ def uncovered_cells(  # lucidlint: ignore record-shape returns a list of (row, c
     """
 
     grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), cell_km)
-    cells = rasterize([GeoPoint(r["lat"], r["lon"]) for r in kept_stations], buffer_km, grid)
+    cells = rasterize([GeoPoint(r.lat, r.lon) for r in kept_stations], buffer_km, grid)
     rects = [_polygon_to_rect([GeoPoint(lat, lon) for lat, lon in s["polygon"]]) for s in searches]
     uncovered: list[tuple[int, int]] = []
     for cell in cells:
@@ -119,8 +122,7 @@ def uncovered_cells(  # lucidlint: ignore record-shape returns a list of (row, c
     return uncovered
 
 
-# lucidlint: ignore record-shape [lat, lon] vertex pairs — GeoPoint is the record; a pair wrapper is ceremony
-def _rect_from_poly(poly: list[tuple[float, float]]) -> Rect:
+def _rect_from_poly(poly: list[Vertex]) -> Rect:
     """Bounding rect of a polygon's [lat, lon] vertex list."""
     return _polygon_to_rect([GeoPoint(lat, lon) for lat, lon in poly])
 
@@ -128,10 +130,10 @@ def _rect_from_poly(poly: list[tuple[float, float]]) -> Rect:
 def _search_issues(sid: str, poly, url: str, bbox: BBox) -> list[str]:
     """Geometry, bbox, and URL round-trip issues for one search rectangle."""
     issues: list[str] = []
-    if len(poly) != RECT_VERTEX_COUNT:
+    if len(poly) != ValidationOptions.RECT_VERTEX_COUNT:
         issues.append(f"{sid}: polygon has {len(poly)} points, expected 4")
-    if len(poly) > MAX_VERTICES:
-        issues.append(f"{sid}: polygon has {len(poly)} vertices, limit {MAX_VERTICES}")
+    if len(poly) > ValidationOptions.MAX_VERTICES:
+        issues.append(f"{sid}: polygon has {len(poly)} vertices, limit {ValidationOptions.MAX_VERTICES}")
     issues.extend(
         f"{sid}: vertex ({lat},{lon}) outside bounding box"
         for lat, lon in poly
@@ -141,7 +143,7 @@ def _search_issues(sid: str, poly, url: str, bbox: BBox) -> list[str]:
         parsed = parse_search_url(url)
         expected = poly + [poly[0]]
         if len(parsed) != len(expected) or any(
-            abs(pl - el) > ROUND_TRIP_EPS or abs(po - eo) > ROUND_TRIP_EPS
+            abs(pl - el) > ValidationOptions.ROUND_TRIP_EPS or abs(po - eo) > ValidationOptions.ROUND_TRIP_EPS
             for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
         ):
             issues.append(f"{sid}: URL polygon round-trip mismatch")
@@ -160,33 +162,32 @@ def _overlap_issues(rects: list[Rect]) -> list[str]:
     ]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _coverage_issues(rects: list[Rect], kept_stations: list[dict], buffer_km: float, positive, negative) -> list[str]:
+def _coverage_issues(
+    rects: list[Rect], kept_stations: list[ShedRecord], buffer_km: float, positive, negative
+) -> list[str]:
     """Coverage contract: kept stations and positive controls covered, negative controls not."""
     issues: list[str] = []
     issues.extend(
-        f"kept station {st['name']} ({st['crs']}) is not covered by any search"
+        f"kept station {st.name} ({st.crs}) is not covered by any search"
         for st in kept_stations
-        if not _covered(rects, GeoPoint(st["lat"], st["lon"]), buffer_km + COVERAGE_EPS_KM)
+        if not _covered(rects, GeoPoint(st.lat, st.lon), buffer_km + ValidationOptions.COVERAGE_EPS_KM)
     )
     issues.extend(
         f"positive control {c.name} is not covered"
         for c in positive
-        if not _covered(rects, c.point, buffer_km + COVERAGE_EPS_KM)
+        if not _covered(rects, c.point, buffer_km + ValidationOptions.COVERAGE_EPS_KM)
     )
     issues.extend(
         f"negative control {c.name} is unexpectedly covered"
         for c in negative
-        if _covered(rects, c.point, NEGATIVE_EPS_KM)
+        if _covered(rects, c.point, ValidationOptions.NEGATIVE_EPS_KM)
     )
     return issues
 
 
-# lucidlint: ignore record-shape kept_stations ride in the committed searches payload's station shape
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def validate(
-    payload: dict,
-    kept_stations: list[dict],
+    payload: Mapping[str, Any],
+    kept_stations: list[ShedRecord],
     options: ValidationOptions,
 ) -> list[str]:
     """Return a list of issues; empty means the search set passes."""
@@ -253,12 +254,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    shed = json.loads(shed_path.read_text())
+    shed = ShedPayload(**json.loads(shed_path.read_text()))
     payload = json.loads(searches_path.read_text())
-    kept = [r for r in shed["stations"] if r["kept"]]
+    kept = [r for r in shed.stations if r.kept]
 
-    positive = resolve_controls(POSITIVE_TOWNS)
-    negative = resolve_controls(NEGATIVE_TOWNS)
+    positive = resolve_controls(ValidationOptions.POSITIVE_TOWNS)
+    negative = resolve_controls(ValidationOptions.NEGATIVE_TOWNS)
     missing = [(name, "positive") for name in positive.missing] + [(name, "negative") for name in negative.missing]
 
     issues = validate(
@@ -266,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
         kept,
         ValidationOptions(
             buffer_km=args.buffer_km,
-            bbox=BBox(**shed["metadata"]["bbox"]),
+            bbox=BBox(**shed.metadata.bbox),
             positive=positive.controls,
             negative=negative.controls,
         ),
@@ -280,16 +281,16 @@ def main(argv: list[str] | None = None) -> int:
     uncovered = uncovered_cells(
         payload["searches"],
         kept,
-        BBox(**shed["metadata"]["bbox"]),
+        BBox(**shed.metadata.bbox),
         cell_km=args.cell_km,
         buffer_km=args.buffer_km,
     )
     issues.extend(
         f"kept cell ({r},{c}) is not covered by any search rectangle"
-        for r, c in uncovered[:MAX_REPORTED_UNCOVERED]
+        for r, c in uncovered[: ValidationOptions.MAX_REPORTED_UNCOVERED]
     )
-    if len(uncovered) > MAX_REPORTED_UNCOVERED:
-        issues.append(f"... and {len(uncovered) - MAX_REPORTED_UNCOVERED} more uncovered cells")
+    if len(uncovered) > ValidationOptions.MAX_REPORTED_UNCOVERED:
+        issues.append(f"... and {len(uncovered) - ValidationOptions.MAX_REPORTED_UNCOVERED} more uncovered cells")
 
     for issue in issues:
         print(f"  ✗ {issue}")

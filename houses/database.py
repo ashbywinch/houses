@@ -12,9 +12,9 @@ Usage::
     conn = get_connection()
     conn.execute("SELECT ...")
 
-For tests, set ``database.testing = True`` and the connection will be
-replaced with an in-memory SQLite database (same mechanism as
-``dag.persistence.testing``).
+For tests, set ``houses.database.Runtime.testing = True`` and the
+connection will be replaced with an in-memory SQLite database (same
+mechanism as ``dag.persistence.Runtime.testing``).
 """
 
 from __future__ import annotations
@@ -29,7 +29,17 @@ from houses.settings import settings
 
 logger = logging.getLogger(__name__)
 
-testing: bool = False
+
+class Runtime:
+    """The app-DB seam: whether test isolation is active.
+
+    Mirrors ``dag.persistence.Runtime`` (and reads its connection while
+    testing — one in-memory DB, one thread, shared by both layers).
+    """
+
+    testing: bool = False
+
+
 _connection_cache: contextvars.ContextVar[sqlite3.Connection | None] = contextvars.ContextVar(
     "_connection_cache", default=None
 )
@@ -37,7 +47,7 @@ _connection_cache: contextvars.ContextVar[sqlite3.Connection | None] = contextva
 
 def get_connection() -> sqlite3.Connection:
     """Return a context-local SQLite connection with WAL mode enabled."""
-    if testing:
+    if Runtime.testing:
         conn = per._get_db()
         conn.row_factory = sqlite3.Row
         return conn
@@ -63,7 +73,16 @@ def close_db() -> None:
         _connection_cache.set(None)
 
 
-_COMMENTS_TABLE = """
+class _AppSchema:
+    """The application tables' DDL — one owner, executed in order by
+    ``init_db``.
+
+    The scrape queue's table lives with the other app tables — its retry
+    state must survive box restarts (see houses/scrape_queue.py for the
+    queue logic; the DDL stays here to avoid an import cycle).
+    """
+
+    COMMENTS_TABLE = """
 CREATE TABLE IF NOT EXISTS comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rid TEXT NOT NULL,
@@ -73,12 +92,9 @@ CREATE TABLE IF NOT EXISTS comments (
 )
 """
 
-_COMMENTS_INDEX = "CREATE INDEX IF NOT EXISTS idx_comments_rid ON comments(rid, created_at ASC)"
+    COMMENTS_INDEX = "CREATE INDEX IF NOT EXISTS idx_comments_rid ON comments(rid, created_at ASC)"
 
-# The scrape queue's table lives with the other app tables — its retry
-# state must survive box restarts (see houses/scrape_queue.py for the
-# queue logic; the DDL stays here to avoid an import cycle).
-_SCRAPES_TABLE = """
+    SCRAPES_TABLE = """
 CREATE TABLE IF NOT EXISTS pending_scrapes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rid TEXT NOT NULL,
@@ -92,11 +108,11 @@ CREATE TABLE IF NOT EXISTS pending_scrapes (
 )
 """
 
-_SCRAPES_INDEX = (
-    "CREATE INDEX IF NOT EXISTS idx_scrapes_due ON pending_scrapes(next_retry_at, status)"
-)
+    SCRAPES_INDEX = (
+        "CREATE INDEX IF NOT EXISTS idx_scrapes_due ON pending_scrapes(next_retry_at, status)"
+    )
 
-_SCRAPES_RID_INDEX = "CREATE INDEX IF NOT EXISTS idx_scrapes_rid ON pending_scrapes(rid)"
+    SCRAPES_RID_INDEX = "CREATE INDEX IF NOT EXISTS idx_scrapes_rid ON pending_scrapes(rid)"
 
 
 def init_db() -> None:
@@ -106,9 +122,9 @@ def init_db() -> None:
     times (e.g. in tests).
     """
     conn = get_connection()
-    conn.execute(_COMMENTS_TABLE)
-    conn.execute(_COMMENTS_INDEX)
-    conn.execute(_SCRAPES_TABLE)
-    conn.execute(_SCRAPES_INDEX)
-    conn.execute(_SCRAPES_RID_INDEX)
+    conn.execute(_AppSchema.COMMENTS_TABLE)
+    conn.execute(_AppSchema.COMMENTS_INDEX)
+    conn.execute(_AppSchema.SCRAPES_TABLE)
+    conn.execute(_AppSchema.SCRAPES_INDEX)
+    conn.execute(_AppSchema.SCRAPES_RID_INDEX)
     conn.commit()

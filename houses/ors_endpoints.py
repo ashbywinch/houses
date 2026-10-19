@@ -18,10 +18,22 @@ Source (migration table): https://ask.openrouteservice.org/t/7912
 
 from houses.settings import settings
 
-ORS_BASE = f"{settings.ors_base_url}/openrouteservice"
-PELIAS_BASE = f"{settings.ors_base_url}/pelias/v1"
 
-ORS_DIRECTIONS = f"{ORS_BASE}/v2/directions"
-ORS_MATRIX = f"{ORS_BASE}/v2/matrix"
-PELIAS_SEARCH = f"{PELIAS_BASE}/search"
-PELIAS_REVERSE = f"{PELIAS_BASE}/reverse"
+class HeiGITEndpoints:
+    """HeiGIT endpoint URLs — one owner for every HeiGIT service we call.
+
+    Importers reach the paths as ``HeiGITEndpoints.ORS_DIRECTIONS`` or keep
+    the module-level spelling through the module ``__getattr__`` below.
+    """
+
+    ORS_BASE = f"{settings.ors_base_url}/openrouteservice"
+    PELIAS_BASE = f"{settings.ors_base_url}/pelias/v1"
+
+    ORS_DIRECTIONS = f"{ORS_BASE}/v2/directions"
+    ORS_MATRIX = f"{ORS_BASE}/v2/matrix"
+    PELIAS_SEARCH = f"{PELIAS_BASE}/search"
+    PELIAS_REVERSE = f"{PELIAS_BASE}/reverse"
+
+def __getattr__(name: str):
+    """Re-export the endpoint class attributes as module attributes."""
+    return getattr(HeiGITEndpoints, name)

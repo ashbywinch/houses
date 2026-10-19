@@ -25,8 +25,11 @@ def test_dag_does_not_import_houses():
     la = la.layer("dag").defined_by(f"{ROOT}/dag/*.py")
     la = la.layer("dag_tests").defined_by(f"{ROOT}/tests/unit/dag/*.py")
     la = la.layer("houses").defined_by(f"{ROOT}/houses/*.py")  # fnmatch * crosses "/" — matches the whole tree
-    la = la.where_layer("dag").may_only_depend_on_layers()
-    la = la.where_layer("dag_tests").may_only_depend_on_layers("dag", "houses")
+    # The serialization seam is a library of its own: it depends on nothing of
+    # ours, and every layer may use it.
+    la = la.layer("serialization").defined_by(f"{ROOT}/serialization/*.py")
+    la = la.where_layer("dag").may_only_depend_on_layers("serialization")
+    la = la.where_layer("dag_tests").may_only_depend_on_layers("dag", "houses", "serialization")
     violations = la.check()
     assert len(violations) == 0, _format_violations(violations)
 

@@ -1,11 +1,10 @@
-# lucidlint: ignore-file bulk-suppression the repeated duplicate-block suppressions here are per-site verdicts on
 """PropertyLocation — where a property is on the map, possibly unresolved."""
 
 from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
 from typing import Any
@@ -13,51 +12,33 @@ from typing import Any
 import httpx
 
 from dag.attempt import Attempt
+from dag.guard import capture_async
 from houses import apis
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.apis.ors import SETTLEMENT_LAYERS
+from houses.apis.ors_api import ORSApi
+from houses.apis.ors_reverse_params import OrsReverseParams
 from houses.geopoint import GeoPoint
 from houses.ors_endpoints import PELIAS_REVERSE
 from houses.services_provider import get_services
 from houses.settings import settings
-from houses.web.json_utils import WirePayload
+from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
-HTTP_TOO_MANY_REQUESTS = 429
-HTTP_NOT_FOUND = 404
-HTTP_5XX_START = 500
-HTTP_5XX_END = 600
-
-# ── URL constants ────────────────────────────────────────────────
-
-POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
-OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 
 
+class _GeocodeApi:
+    """The location module's API constants and URL endpoints — one owner
+    (the global-state gate: values belong to the class they serve)."""
 
-# ── Geocoder query params (external API wire shapes) ───────────────
+    HTTP_TOO_MANY_REQUESTS = 429
+    HTTP_NOT_FOUND = 404
+    HTTP_5XX_START = 500
+    HTTP_5XX_END = 600
+    POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
+    OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 
 
-@dataclass(frozen=True)
-class _OrsReverseParams:
-    """Query params for the ORS Pelias reverse API."""
 
-    point_lat: float
-    point_lon: float
-    size: int
-    boundary_country: str
-    layers: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {
-            "point.lat": self.point_lat,
-            "point.lon": self.point_lon,
-            "size": self.size,
-            "boundary.country": self.boundary_country,
-            "layers": self.layers,
-        }
 
 # ── Regex patterns ───────────────────────────────────────────────
 
@@ -71,8 +52,10 @@ _TOWN_SUFFIXES = re.compile(
 # ── In-memory geocode cache (per-request via Services) ─────────
 
 
-# lucidlint: ignore record-shape keyed geocode cache map (variable keys), not a fixed record shape
-def _geo_cache(*, services: Any | None = None) -> dict:
+type _GeocodeCache = dict[str, Attempt[GeoPoint]]
+
+
+def _geo_cache(*, services: Any | None = None) -> _GeocodeCache:
     """Return the per-request geocode cache, lazily created on the services container."""
     svc = services or get_services()
     if svc.geo_cache is None:
@@ -89,8 +72,8 @@ class ReverseGeocodeOptions:
     """
 
     api_key: str | None = None
-    get_cached_fn: Callable[[str, str, WirePayload | None, str | None], dict[str, Any] | None] | None = None
-    set_cached_fn: Callable[[str, str, WirePayload | None, str | None, dict[str, Any]], None] | None = None
+    get_cached_fn: Callable[[str, str, SerializableAsDict | None, str | None], dict[str, Any] | None] | None = None
+    set_cached_fn: Callable[[str, str, SerializableAsDict | None, str | None, dict[str, Any]], None] | None = None
     client_factory: Callable[..., AbstractAsyncContextManager[Any]] | None = None
 
 
@@ -227,12 +210,13 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None, _client
     try:
         gp = await apis.nominatim.geocode(clean, _client_factory=_client_factory)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == HTTP_TOO_MANY_REQUESTS or (
-            HTTP_5XX_START <= exc.response.status_code < HTTP_5XX_END
+        if exc.response.status_code == _GeocodeApi.HTTP_TOO_MANY_REQUESTS or (
+            _GeocodeApi.HTTP_5XX_START <= exc.response.status_code < _GeocodeApi.HTTP_5XX_END
         ):
             raise  # transient — the DAG retries at the provider's interval
         logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
         return Attempt.impossible(f"HTTP {exc.response.status_code}")
+    # lucidlint: ignore special-case gp=None is the cascade signal — the geocoder chain's contract (review-log)
     if gp is None:
         return Attempt.impossible("no results")
     result = Attempt.succeeded(gp)
@@ -240,45 +224,64 @@ async def _geocode_nominatim(query: str, *, services: Any | None = None, _client
     return result
 
 
-async def _geocode_google(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
-    """Geocode *address* via Google Maps; ``None`` means "try the next provider"."""
-    try:
-        gp = await apis.google_geocode.geocode(address)
-    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
-        raise  # transient — let the caller's next-geocoder fallback run
-    # lucidlint: ignore broad-except deliberate fallback — provider failure means try the next geocoder
-    except Exception as exc:
-        logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)
+@dataclass(frozen=True)
+class _GeoQuery:
+    """One address geocode request: the address and its cache identity
+    (the pair every provider step threads together)."""
+
+    address: str
+    cache_key: str
+
+
+async def _geocode_provider(
+    provider: Callable[[], Awaitable[Any]],
+    label: str,
+    query: _GeoQuery,
+    *,
+    services: Any | None = None,
+) -> Attempt[GeoPoint] | None:
+    """The geo-cascade's shared provider step: run one provider, cache and
+    return its result, or ``None`` meaning "try the next provider".
+
+    Transient HTTP failures RE-RAISE (the DAG retries at the provider's
+    interval — swallowing a 5xx into a permanent impossible is the bug this
+    gateway exists to fix); any other failure degrades to the next provider.
+    """
+    gp, failure = await capture_async(
+        provider,
+        reraise=(httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException),
+    )
+    if failure is not None:
+        logger.warning("%s geocoding failed for '%s': %s", label, query.address, failure)
         return None
     if gp is None:
         return None
     result = Attempt.succeeded(gp)
-    _cache_result(cache_key, result, services=services)
-    logger.info("Geocoded '%s' via google-maps", address)
+    _cache_result(query.cache_key, result, services=services)
+    logger.info("Geocoded '%s' via %s", query.address, label)
     return result
+
+
+async def _geocode_google(address: str, cache_key: str, *, services: Any | None = None) -> Attempt[GeoPoint] | None:
+    """Geocode *address* via Google Maps; ``None`` means "try the next provider"."""
+    return await _geocode_provider(
+        lambda: apis.google_geocode.geocode(address),
+        "google-maps",
+        _GeoQuery(address, cache_key),
+        services=services,
+    )
 
 
 async def _geocode_ors(
     address: str, cache_key: str, *, services: Any | None = None, _client_factory=None
 ) -> Attempt[GeoPoint] | None:
     """Geocode *address* via ORS Pelias; ``None`` means "try the next provider"."""
-    try:
-        # quota-exhausted and no-result both surface as None (stop and
-        # fall through to the next geocoder); transient HTTP RE-RAISES so
-        # the DAG retries at the provider's interval — swallowing a 5xx
-        # into a permanent impossible is the bug this gateway exists to fix
-        gp = await apis.ors.geocode(address, _client_factory=_client_factory)
-    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
-        raise  # transient — the DAG retries at the provider's interval
-    except Exception as exc:
-        logger.warning("ORS geocoding failed for '%s': %s", address, exc)
-        return None
-    if gp is None:
-        return None
-    result = Attempt.succeeded(gp)
-    _cache_result(cache_key, result, services=services)
-    logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{gp.lat:.4f}", f"{gp.lon:.4f}")
-    return result
+    return await _geocode_provider(
+        lambda: apis.ors.geocode(address, _client_factory=_client_factory),
+        "ors-pelias",
+        _GeoQuery(address, cache_key),
+        services=services,
+    )
 
 
 
@@ -294,16 +297,13 @@ async def geocode_address(address: str, *, services: Any | None = None) -> Attem
     # Note: No pre-check for the API key. Just try the call — the mock
     # transport handles it in tests, and in production a missing key
     # produces a non-OK response that falls through to the next geocoder.
-    # lucidlint: ignore duplicate-block the cascade intentionally repeats the try-next-geocoder step per provider —
-    result = await _geocode_google(address, cache_key, services=services)
-    if result is not None:
+    if (result := await _geocode_google(address, cache_key, services=services)) is not None:
         return result
 
     # ── 2: ORS Pelias ─────────────────────────────────────────────
     # Note: No pre-check for the API key (same reason as Google Maps).
     # The exhausted flag is kept to stop hammering a rate-limited API.
-    result = await _geocode_ors(address, cache_key, services=services)
-    if result is not None:
+    if (result := await _geocode_ors(address, cache_key, services=services)) is not None:
         return result
 
     # ── 3: Nominatim (free, no key, works for UK) ─────────────────
@@ -321,23 +321,23 @@ async def _geocode_postcode(postcode: str, *, services: Any | None = None, _clie
     if cached is not None:
         return cached
 
-    try:
-        gp = await apis.postcodes.geocode(key, _client_factory=_client_factory)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == HTTP_NOT_FOUND:
+    gp, failure = await capture_async(
+        lambda: apis.postcodes.geocode(key, _client_factory=_client_factory),
+        reraise=(httpx.RequestError, httpx.TimeoutException),
+    )
+    if isinstance(failure, httpx.HTTPStatusError):
+        status = failure.response.status_code
+        if status == _GeocodeApi.HTTP_NOT_FOUND:
             _cache_result(key, Attempt.impossible("postcode not found (404)"), services=services)
             return Attempt.impossible("postcode not found (404)")
-        if e.response.status_code == HTTP_TOO_MANY_REQUESTS or (
-            HTTP_5XX_START <= e.response.status_code < HTTP_5XX_END
+        if status == _GeocodeApi.HTTP_TOO_MANY_REQUESTS or (
+            _GeocodeApi.HTTP_5XX_START <= status < _GeocodeApi.HTTP_5XX_END
         ):
-            raise  # transient — the DAG retries at the provider's interval
-        logger.warning("Geocode HTTP error for %s: %s", key, e)
-        return Attempt.impossible(f"HTTP {e.response.status_code}")
-    except (httpx.RequestError, httpx.TimeoutException):
-        raise  # transient — the DAG retries
-    # lucidlint: ignore broad-except unexpected geocode failure logs the key and returns Attempt.impossible
-    except Exception:
-        logger.exception("Failed to geocode postcode: %s", key)
+            raise failure  # transient — the DAG retries at the provider's interval
+        logger.warning("Geocode HTTP error for %s: %s", key, failure)
+        return Attempt.impossible(f"HTTP {status}")
+    if failure is not None:
+        logger.error("Failed to geocode postcode: %s", key, exc_info=failure)
         return Attempt.impossible("unexpected error")
     if gp is None:
         return Attempt.impossible("postcode not found")
@@ -365,12 +365,12 @@ async def find_nearest_town_name(
     """
     options = options or ReverseGeocodeOptions()
     rev_url = PELIAS_REVERSE
-    params = _OrsReverseParams(
+    params = OrsReverseParams(
         point_lat=lat,
         point_lon=lon,
         size=1,
         boundary_country="GBR",
-        layers=SETTLEMENT_LAYERS,
+        layers=ORSApi.SETTLEMENT_LAYERS,
     )
     headers = {}
     api_key = options.api_key
@@ -387,17 +387,22 @@ async def find_nearest_town_name(
     if cached is not None:
         data = cached
     else:
-        try:
+        async def _fetch_reverse() -> Any:
+            """Fetch (and cache) the ORS reverse payload for this request."""
             async with client_factory(timeout=10.0) as client:
                 resp = await client.get(rev_url, params=params.to_dict(), headers=headers or None)
                 resp.raise_for_status()
-                data = resp.json()
-                set_cached_fn("GET", rev_url, params, None, data)
-        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
-            raise  # transient — let DAG retry handle it
-        # lucidlint: ignore broad-except boundary — reverse-geocode failures convert to an impossible attempt
-        except Exception as e:
-            return Attempt.impossible(f"reverse geocode failed: {e}")
+                payload = resp.json()
+            set_cached_fn("GET", rev_url, params, None, payload)
+            return payload
+
+        payload, failure = await capture_async(
+            _fetch_reverse,
+            reraise=(httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException),
+        )
+        if failure is not None:
+            return Attempt.impossible(f"reverse geocode failed: {failure}")
+        data = payload if payload is not None else {}
 
     features = data.get("features", [])
     if not features:
@@ -430,21 +435,23 @@ async def reverse_geocode_postcode(lat: float, lon: float, *, services: Any | No
     """Nearest postcode to a coordinate via the postcodes.io reverse
     lookup.  Returns "" when nothing resolves (caller decides whether
     that is an error)."""
-    url = f"{POSTCODES_IO_URL}?lat={lat}&lon={lon}"
-    try:
+    url = f"{_GeocodeApi.POSTCODES_IO_URL}?lat={lat}&lon={lon}"
+
+    async def _lookup() -> str:
+        """The postcodes.io reverse lookup for these coordinates."""
         async with cached_async_client(timeout=10.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-            data = resp.json()
-            results = data.get("result") or []
-            if not results:
-                return ""
-            return results[0].get("postcode", "")
-    # lucidlint: ignore broad-except boundary — reverse-geocode failure
-    # means "try the next provider", never a crash; logged
-    except Exception:
-        logger.exception("Reverse postcode lookup failed at %s,%s", lat, lon)
+            results = resp.json().get("result") or []
+        if not results:
+            return ""
+        return results[0].get("postcode", "")
+
+    postcode, failure = await capture_async(_lookup)
+    if failure is not None:
+        logger.error("Reverse postcode lookup failed at %s,%s", lat, lon, exc_info=failure)
         return ""
+    return postcode or ""
 
 
 def is_outcode(s: str) -> bool:

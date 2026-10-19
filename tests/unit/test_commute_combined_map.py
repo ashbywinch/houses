@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from tools.commute.combined_map import _COLORS, MapAssets, build_html, write_map
+from tools.commute.combined_map import MapAssets, MapPageConfig, build_html, write_map
 
 UNION = {
     "components": [
@@ -209,7 +209,7 @@ def test_drive_colours_never_collide_with_transit():
 
     for layer in re.findall(r"\{[^{}]*\"name\": \"Drive to[^{}]*\}", html):
         assert '"color": "#e33"' not in layer  # transit red
-    assert _COLORS[0] == "#e33"  # sanity: the transit colour constant
+    assert MapPageConfig.COLORS[0] == "#e33"  # sanity: the transit colour constant
 
 
 def test_build_html_without_intersection_has_no_layer():

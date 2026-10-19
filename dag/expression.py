@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, override
 from money import Money
 
 from dag.attempt import Attempt, AttemptError, Formula, FormulaLine
+from dag.guard import capture
 from dag.measurement import Measurement
 
 if TYPE_CHECKING:
@@ -372,11 +373,9 @@ class Conditional(Expression):
 
     @override
     def evaluate(self) -> Attempt:
-        try:
-            condition = self.predicate()
-        # lucidlint: ignore broad-except boundary — predicate failure converts to an impossible attempt
-        except Exception as e:
-            return Attempt.impossible(f"Condition failed: {e}")
+        condition, failure = capture(self.predicate)
+        if failure is not None:
+            return Attempt.impossible(f"Condition failed: {failure}")
 
         if condition:
             return self.if_true.evaluate()
@@ -388,16 +387,15 @@ class Conditional(Expression):
     def _condition_for_formula(self) -> bool | None:
         """Predicate for formula rendering; None when it cannot be evaluated
         (the display degrades to the false branch)."""
-        try:
-            return self.predicate()
-        # lucidlint: ignore broad-except deliberate degrade — predicate failure during formula rendering yields None
-        except Exception as e:
-            logger.debug(
-                "Conditional %r: predicate failed during formula rendering; treating as unknown: %s",
-                self.description,
-                e,
-            )
-            return None
+        condition, failure = capture(self.predicate)
+        if failure is None:
+            return condition
+        logger.debug(
+            "Conditional %r: predicate failed during formula rendering; treating as unknown: %s",
+            self.description,
+            failure,
+        )
+        return None
 
     @override
     def to_formula_lines(self) -> list[FormulaLine]:
@@ -472,6 +470,9 @@ def _alternative_reason(name: str, att: Attempt) -> str:
     return f"{name} produced no route"
 
 
+type _Alternatives = dict[str, Expression]
+
+
 class Choose(Expression):
     """Evaluates all alternatives and selects the best one.
 
@@ -498,11 +499,11 @@ class Choose(Expression):
 
     def __init__(
         self,
-        alternatives: dict[str, Expression],
+        alternatives: _Alternatives,
         selector,
         description: str = "",
     ):
-        self.alternatives: dict[str, Expression] = alternatives
+        self.alternatives: _Alternatives = alternatives
         self.selector: Callable[[dict[str, Attempt]], str | None] = selector
         self.description: str = description
         self.last_results: dict[str, Attempt] | None = None
@@ -510,16 +511,12 @@ class Choose(Expression):
 
     @override
     def evaluate(self):
-        results: dict[str, Attempt] = {}
-        for name, expr in self.alternatives.items():
-            results[name] = expr.evaluate()
+        results: dict[str, Attempt] = {name: expr.evaluate() for name, expr in self.alternatives.items()}
         self.last_results = results
 
-        try:
-            winner = self.selector(results)
-        # lucidlint: ignore broad-except boundary — selector failure converts to an impossible attempt
-        except Exception as e:
-            return Attempt.impossible(f"Choose selector failed: {e}")
+        winner, failure = capture(lambda: self.selector(results))
+        if failure is not None:
+            return Attempt.impossible(f"Choose selector failed: {failure}")
 
         if winner is None:
             # No alternative was feasible. Surface the ACTUAL reasons the
@@ -562,12 +559,11 @@ class Choose(Expression):
         the winner)."""
         if self.last_results is None:
             return None
-        try:
-            return self.selector(self.last_results)
-        # lucidlint: ignore broad-except deliberate degrade — selector failure during formula rendering yields None
-        except Exception as e:
-            logger.debug("Choose: selector failed during formula rendering: %s", e)
+        winner, failure = capture(lambda: self.selector(self.last_results))
+        if failure is not None:
+            logger.debug("Choose: selector failed during formula rendering: %s", failure)
             return None
+        return winner
 
     @override
     def to_formula_lines(self):

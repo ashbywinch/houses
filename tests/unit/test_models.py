@@ -4,8 +4,9 @@ from money import Money
 
 from houses.commute import CommuteBreakdown
 from houses.council_tax_info import CouncilTaxInfo
+from houses.enriched_property import EnrichedProperty
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.property import EnrichedProperty, Property
+from houses.property import Property
 from houses.school import School
 from houses.school_gender import SchoolGender
 

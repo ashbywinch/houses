@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 from __future__ import annotations
 
 import contextlib
@@ -6,21 +5,25 @@ import gc
 import logging
 import typing
 from collections import Counter
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from itsdangerous import BadSignature, SignatureExpired
 from money import Money
 from pint import Quantity as _Quantity
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+)
 
 import dag.scheduler
 from dag.persistence import node_result_before
-from dag.scheduler import AsyncQueueScheduler, run_on_processor
+from dag.scheduler import AsyncRefreshQueue, run_on_processor
 from houses.comments import add_comment, get_comments
 from houses.geopoint import GeoPoint
 from houses.map_layers import DRIVE_PATH, INTERSECTION_PATH, UNION_PATH, isochrone_layers
@@ -31,8 +34,8 @@ from houses.model.domain import (
     person_id_of,
 )
 from houses.nodes.commute import commute_band
-from houses.nodes.property_nodes import PropertyJson, PropertyNodes, SummaryJson
-from houses.nodes.settings_node import API_KEY_TO_NODE
+from houses.nodes.property_nodes import PropertyNodes, PropertySummary, PropertyView
+from houses.nodes.settings_node import SettingsNode
 from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
 from houses.web.auth import (
@@ -45,7 +48,8 @@ from houses.web.auth import (
 )
 from houses.web.broadcaster import register_client, stale_push_rids
 from houses.web.monthly_delta import attach as attach_monthly_delta
-from houses.web.settings_payload import SessionPersons, settings_payload
+from houses.web.settings_payload import SessionPersons, SettingsPayload, settings_payload
+from serialization import SerializableAsDict, omit_when_none
 
 
 def _registry_property(rid: str):
@@ -58,12 +62,15 @@ def _registry_rids() -> list[str]:
     return get_services().property_registry.list_properties()
 
 
-GOOD_WALK_MIN = 15
-WARN_WALK_MIN = 30
-TOTAL_SHARE_PERCENT = 100
-MIN_SHARE_PERCENT = 1
-MAX_SHARE_PERCENT = 100
-TOP_TYPES_LIMIT = 30
+class _ApiPolicy:
+    """The list/detail wire policies: walk-band minutes, share-percent sanity
+    bounds, and the top-types limit — one owner (global-state gate)."""
+
+    GOOD_WALK_MIN = 15
+    WARN_WALK_MIN = 30
+    MIN_SHARE_PERCENT = 1
+    MAX_SHARE_PERCENT = 100
+    TOP_TYPES_LIMIT = 30
 
 logger = logging.getLogger(__name__)
 
@@ -81,22 +88,15 @@ class IsochronePaths:
 api_router = APIRouter(prefix="/api")
 
 
-@dataclass(frozen=True)
-class _StalenessReport:
-    """Per-property node staleness as serialized to the response."""
+class StalenessReport(SerializableAsDict):
+    """Per-property node staleness as the endpoint reports it."""
 
     rid: str
-    nodes: dict
+    nodes: dict[str, bool]
     fresh: bool
-    error: str | None = None
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape conditional error key — the wire shape owns the omission (coding-standards.md)
-        d = dict(rid=self.rid, nodes=self.nodes, fresh=self.fresh)
-        if self.error is not None:
-            d["error"] = self.error
-        return d
+    # ``error`` appears only when there is one — the frontend reads its
+    # presence, not its value.
+    error: str | None = Field(default=None, exclude_if=omit_when_none)
 
 
 def _registered_properties() -> Iterable[PropertyNodes]:
@@ -118,6 +118,13 @@ def _require_property(rid: str) -> PropertyNodes:
     return prop
 
 
+
+
+
+class _StatusOk(TypedDict):
+    """The patch endpoints' {status: ok} envelope."""
+
+    status: str
 
 
 @api_router.websocket("/ws")
@@ -190,116 +197,109 @@ def _require_family_member(request: Request) -> None:
         persons=list(get_services().persons_source.latest_attempt().value_or_none() or []),
         session_user=session_user,
     )
-    if not session_user.get("is_superuser") and not view.session_name():
+    if not session_user.is_superuser and not view.session_name():
         raise HTTPException(status_code=403, detail="Not authorised")
 
 
 @dataclass(frozen=True)
-class _WhatIfApplyJson:
+class _WhatIfApply:
     """The what-if apply request body: the person updates to merge."""
 
     persons: list
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> _WhatIfApplyJson:
+    def from_dict(cls, raw: Mapping[str, Any]) -> _WhatIfApply:
         people = raw.get("persons")
         return cls(persons=people if isinstance(people, list) else [])
 
 
-class _WhatIfRoutes:
-    """The household's numbers as a reversible DAG scenario: apply merges the
-    person updates through the normal settings push, restore re-appends the
-    attempt the started-at marker points before, and accept clears the marker
-    (the scenario becomes the real numbers).
-
-    The handlers take no instance state; the class is the routes' name."""
-
-    @staticmethod
-    # lucidlint: ignore record-shape the FastAPI request body IS the wire boundary — _WhatIfApplyJson ingests it
-    # at the network edge; the same shape tolerates any person-update subset inside the list (coding-standards.md)
-    async def what_if_apply(body: dict, request: Request):
-        """Apply what-if person values THROUGH THE DAG.
-
-        The merged persons are written via the normal settings push, so the
-        DAG recomputes everything downstream (totals, commute breakdown,
-        deltas) and the broadcaster pushes every surface — there is no side
-        evaluation to keep in sync.
-
-        On the inactive->active transition the whatif_started_at marker is
-        set: node_results is append-only history, so the pre-what-if persons
-        attempt stays in the DAG and restore simply re-appends the attempt
-        the marker points before. No numbers are copied anywhere.
-        """
-        _require_family_member(request)
-        updates = _WhatIfApplyJson.from_dict(body).persons
-        if not isinstance(updates, list) or not updates:
-            raise HTTPException(status_code=422, detail="persons required")
-        svc = get_services()
-        started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
-        if not started:
-            # Mark the boundary BEFORE the scenario push: the persons attempt
-            # latest before this instant is the restore reference.
-            started = datetime.now(UTC).isoformat()
-            svc.whatif_started_at.push(started, "what-if")
-
-        current = list(svc.persons_source.latest_attempt().value_or_none() or [])
-        merged = _merge_what_if_persons(updates, current)
-        svc.persons_source.push(merged, "what-if")
-        return {"active": True}
-
-    @staticmethod
-    async def what_if_restore(request: Request):
-        """End the what-if: re-append the pre-what-if persons attempt (the
-        one the started-at marker points before) through the normal settings
-        write, and clear the marker."""
-        _require_family_member(request)
-        svc = get_services()
-        started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
-        if not started:
-            raise HTTPException(status_code=409, detail="No what-if is active")
-
-        row = node_result_before(svc.persons_source._id, started)
-        if row is None or not isinstance(row.get("value"), list):
-            raise HTTPException(status_code=409, detail="No pre-what-if persons attempt found to restore")
-
-        persons = svc.persons_source._adapter.validate_python(row["value"])
-
-        def _restore() -> None:
-            svc.persons_source.push(persons, "what-if-restore")
-            svc.whatif_started_at.push("", "what-if-restore")
-
-        _restore()
-        return {"active": False}
-
-    @staticmethod
-    async def what_if_state():
-        """Whether what-if numbers are currently live (the started-at marker
-        is set)."""
-        started = (get_services().whatif_started_at.latest_attempt().value_or_none() or "").strip()
-        return {"active": bool(started)}
-
-    @staticmethod
-    async def what_if_accept(request: Request):
-        """Accept the what-if: the scenario becomes the real numbers. The
-        marker clears and the snapshot is discarded — restore can no longer
-        reach the pre-what-if values."""
-        _require_family_member(request)
-        svc = get_services()
-        started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
-        if not started:
-            raise HTTPException(status_code=409, detail="No what-if is active")
-        svc.whatif_started_at.push("", "what-if-accept")
-        return {"active": False}
 
 
-api_router.post("/what-if/apply")(_WhatIfRoutes.what_if_apply)
-api_router.post("/what-if/restore")(_WhatIfRoutes.what_if_restore)
-api_router.get("/what-if/state")(_WhatIfRoutes.what_if_state)
-api_router.post("/what-if/accept")(_WhatIfRoutes.what_if_accept)
+@api_router.post("/what-if/apply")
+async def what_if_apply(what_if_body: Mapping[str, Any], request: Request):
+    """Apply what-if person values THROUGH THE DAG.
+
+    The merged persons are written via the normal settings push, so the
+    DAG recomputes everything downstream (totals, commute breakdown,
+    deltas) and the broadcaster pushes every surface — there is no side
+    evaluation to keep in sync.
+
+    On the inactive->active transition the whatif_started_at marker is
+    set: node_results is append-only history, so the pre-what-if persons
+    attempt stays in the DAG and restore simply re-appends the attempt
+    the marker points before. No numbers are copied anywhere.
+    """
+    _require_family_member(request)
+    updates = _WhatIfApply.from_dict(what_if_body).persons
+    if not isinstance(updates, list) or not updates:
+        raise HTTPException(status_code=422, detail="persons required")
+    svc = get_services()
+    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    if not started:
+        # Mark the boundary BEFORE the scenario push: the persons attempt
+        # latest before this instant is the restore reference.
+        started = datetime.now(UTC).isoformat()
+        svc.whatif_started_at.push(started, "what-if")
+
+    current = list(svc.persons_source.latest_attempt().value_or_none() or [])
+    merged = _merge_what_if_persons(updates, current)
+    svc.persons_source.push(merged, "what-if")
+    return {"active": True}
+
+
+
+@api_router.post("/what-if/restore")
+async def what_if_restore(request: Request):
+    """End the what-if: re-append the pre-what-if persons attempt (the
+    one the started-at marker points before) through the normal settings
+    write, and clear the marker."""
+    _require_family_member(request)
+    svc = get_services()
+    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    if not started:
+        raise HTTPException(status_code=409, detail="No what-if is active")
+
+    row = node_result_before(svc.persons_source._id, started)
+    if row is None or not isinstance(row.get("value"), list):
+        raise HTTPException(status_code=409, detail="No pre-what-if persons attempt found to restore")
+
+    persons = svc.persons_source._adapter.validate_python(row["value"])
+
+    def _restore() -> None:
+        svc.persons_source.push(persons, "what-if-restore")
+        svc.whatif_started_at.push("", "what-if-restore")
+
+    _restore()
+    return {"active": False}
+
 
 
 @api_router.get("/what-if/state")
-@api_router.get("/properties/{rid}/staleness")
+async def what_if_state():
+    """Whether what-if numbers are currently live (the started-at marker
+    is set)."""
+    started = (get_services().whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    return {"active": bool(started)}
+
+
+
+@api_router.post("/what-if/accept")
+async def what_if_accept(request: Request):
+    """Accept the what-if: the scenario becomes the real numbers. The
+    marker clears and the snapshot is discarded — restore can no longer
+    reach the pre-what-if values."""
+    _require_family_member(request)
+    svc = get_services()
+    started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
+    if not started:
+        raise HTTPException(status_code=409, detail="No what-if is active")
+    svc.whatif_started_at.push("", "what-if-accept")
+    return {"active": False}
+
+
+
+
+@api_router.get("/properties/{rid}/staleness", response_model=StalenessReport)
 async def staleness_check(rid: str, nodes: str = ""):
     """Check which DAG nodes are stale for a given property.
 
@@ -307,10 +307,10 @@ async def staleness_check(rid: str, nodes: str = ""):
     """
     prop = _registry_property(rid)
     if prop is None:
-        return _StalenessReport(rid=rid, nodes={}, fresh=False, error="property not found").to_dict()
+        return StalenessReport(rid=rid, nodes={}, fresh=False, error="property not found")
 
     node_list = [n.strip() for n in nodes.split(",") if n.strip()]
-    detail = await prop.to_json_detail()
+    detail = (await prop.detail()).to_dict()
     stale_map: dict[str, bool] = {}
     for nid in node_list:
         parts = nid.split("/", 1)
@@ -330,7 +330,7 @@ async def staleness_check(rid: str, nodes: str = ""):
             stale_map[nid] = True
 
     fresh = not any(stale_map.values())
-    return _StalenessReport(rid=rid, nodes=stale_map, fresh=fresh).to_dict()
+    return StalenessReport(rid=rid, nodes=stale_map, fresh=fresh)
 
 
 def _commute_score(minutes: int | None, bracknell: bool = False) -> int:
@@ -353,7 +353,7 @@ def _walk_score(minutes: int | None) -> int:
     """2 for a quick walk, 1 for acceptable, -1 for a slog, 0 unknown."""
     if minutes is None:
         return 0
-    return 2 if minutes < GOOD_WALK_MIN else (1 if minutes <= WARN_WALK_MIN else -1)
+    return 2 if minutes < _ApiPolicy.GOOD_WALK_MIN else (1 if minutes <= _ApiPolicy.WARN_WALK_MIN else -1)
 
 
 def _walk_metric_score(walk: object) -> int:
@@ -375,24 +375,27 @@ def _school_score(school_value: object) -> int:
     return _ofsted_score(school_value.get("ofsted")) + _walk_metric_score(school_value.get("walk"))
 
 
+def _mapping_at(value: object, key: str) -> Mapping[str, Any] | None:
+    """Unwrap one level of a nested wire dict: the mapping at *key*, else
+    ``None`` — a missing level ends the walk without a guard per step."""
+    if not isinstance(value, Mapping):
+        return None
+    nested = value.get(key)
+    return nested if isinstance(nested, Mapping) else None
+
+
 def _walkability_score(walk_val: object) -> int:
     """The walk_to_town metric buried in walkability → walk score."""
-    if not isinstance(walk_val, dict):
+    walk_to_town = _mapping_at(_mapping_at(walk_val, "value"), "walk_to_town")
+    if walk_to_town is None:
         return 0
-    wv = walk_val.get("value")
-    # lucidlint: ignore duplicate-block parallel isinstance-guards walking a nested wire dict — each level guards its
-    if not isinstance(wv, dict):
-        return 0
-    wt = wv.get("walk_to_town")
-    if not isinstance(wt, dict):
-        return 0
-    val = wt.get("value")
+    val = walk_to_town.get("value")
     if val is None:
         return 0
     return _walk_score(int(val))
 
 
-def _score_from_summary(s: SummaryJson) -> int:
+def _score_from_summary(s: PropertySummary) -> int:
     """Compute card score matching old ``card_data`` formula:
     green=2, orange=1, red=-1, muted=0, summed across 8 metrics.
     """
@@ -414,14 +417,13 @@ def _score_from_summary(s: SummaryJson) -> int:
     return score
 
 
-# lucidlint: ignore record-shape the scrape attach IS the serialization boundary — the summary record
-# carries no scrape field (coding-standards.md)
-def _attach_scrape_state(summary: SummaryJson | PropertyJson, rid: str) -> dict:
-    """Attach the property's REAL scrape-queue state to the summary wire
-    dict, when a job exists — the card's honest states come from here,
-    never a fake client-side timer. Wire-record at the serialization
-    boundary: returns the serialized summary plus the optional scrape."""
-    d = summary.to_dict()
+def _attach_scrape_state(summary: PropertySummary | PropertyView, rid: str) -> Mapping[str, Any]:
+    """Attach the property's REAL scrape-queue state to its serialized
+    record, when a job exists — the card's honest states come from here,
+    never a fake client-side timer. The card's key set follows the record
+    passed in (summary or property json), so callers that mutate the card
+    take a copy; the returned object is the card's JSON object."""
+    d = dict(summary.to_dict())
     status = scrape_status_for_rid(rid)
     if status is not None:
         d["scrape"] = status.to_dict()
@@ -434,11 +436,8 @@ async def get_all_properties():
     scores: dict[str, int] = {}
     for prop in _registered_properties():
         rid = prop.rid
-        # property_nodes.to_json_summary still returns the wire dict (its
-        # record conversion is out of this wave's file set) — reconstruct
-        # the record at the consumption boundary.
-        summary = SummaryJson(**await prop.to_json_summary())
-        wire = _attach_scrape_state(summary, rid)
+        summary = await prop.summary()
+        wire = dict(_attach_scrape_state(summary, rid))
         await attach_monthly_delta(wire, rid)
         if rid in stale_push_rids():
             wire["push_stale"] = True
@@ -448,24 +447,24 @@ async def get_all_properties():
     return dict(scored)
 
 
-@dataclass(frozen=True)
-class _CurrentHome:
+class CurrentHome(SerializableAsDict):
     """One current-status property in the current-homes listing."""
 
     rid: str
     address: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
-        return dict(rid=self.rid, address=self.address)
+
+class CurrentHomesListing(SerializableAsDict):
+    """The current-homes response: the family's current house(s)."""
+
+    homes: list[CurrentHome]
 
 
-@api_router.get("/properties/current-homes")
+@api_router.get("/properties/current-homes", response_model=CurrentHomesListing)
 async def list_current_homes():
     """The family's CURRENT house(s) — properties marked status=current —
     so a person can link their settings home fields to the right one."""
-    result: list[_CurrentHome] = []
+    result: list[CurrentHome] = []
     for prop in _registered_properties():
         rid = prop.rid
         status = prop.comment_status.latest_attempt()
@@ -473,21 +472,21 @@ async def list_current_homes():
             continue
         att = prop.best_address.latest_attempt()
         address = str(att.value_or_none()) if att.succeeded and att.value_or_none() else ""
-        result.append(_CurrentHome(rid=str(rid), address=address))
-    return {"homes": [h.to_dict() for h in result]}
+        result.append(CurrentHome(rid=str(rid), address=address))
+    return CurrentHomesListing(homes=result)
 
 
 @api_router.get("/properties/{rid}")
 async def get_property(rid: str):
     prop = _require_property(rid)
-    prop_json = PropertyJson(**await prop.to_json())
+    prop_json = await prop.view()
     return _attach_scrape_state(prop_json, rid)
 
 
 @api_router.get("/properties/{rid}/detail")
 async def get_property_detail(rid: str):
     prop = _require_property(rid)
-    detail = await prop.to_json_detail()
+    detail = (await prop.detail()).to_dict()
     await attach_monthly_delta(detail, rid)
 
     return detail
@@ -520,148 +519,143 @@ def _council_tax_payers(value) -> list[str]:
     return value
 
 
-class _PropertyPatches:
-    """The property PATCH endpoints — each validates one wire body, pushes the
-    property's nodes, and reports {"status": "ok"}.  The frontend refetches the
-    detail as soon as the response lands, so the push happens before it.
 
-    The handlers take no instance state; the class is the routes' name."""
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    @staticmethod
-    async def patch_address(rid: str, body: dict):
-        prop = _require_property(rid)
+@api_router.patch("/properties/{rid}/address")
+async def patch_address(rid: str, address_patch: Mapping[str, Any]):
+    prop = _require_property(rid)
 
-        prop.corrected_address.push(body.get("address", ""), "user")
-        # Recompute before responding — the frontend refetches the detail
-        # immediately; the processor drains the cascade in order.
-        return {"status": "ok"}
+    prop.corrected_address.push(address_patch.get("address", ""), "user")
+    # Recompute before responding — the frontend refetches the detail
+    # immediately; the processor drains the cascade in order.
+    return _StatusOk(status="ok")
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    @staticmethod
-    async def patch_location(rid: str, body: dict):
-        prop = _require_property(rid)
-        lat = body.get("lat")
-        lon = body.get("lon")
-        if lat is None or lon is None:
-            raise HTTPException(status_code=422, detail="lat and lon are required")
-        gp = GeoPoint(lat=lat, lon=lon)
-        prop.precise_location.push(gp, "user")
-        # Recompute before responding — same race as the address PATCH.
-        return {"status": "ok"}
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    @staticmethod
-    async def patch_council_tax(rid: str, body: dict):
-        """Set the council-tax apportionment for a property.
 
-        ``main_payers`` — who pays a share of the MAIN house's council tax
-        (they split it equally; empty = all adults, the default headcount
-        split).  ``annexe_payers`` — who pays the ANNEXE's council tax.
-        ``ignored`` — the detected second dwelling is unrelated; hide it and
-        exclude its costs.
-        """
-        prop = _require_property(rid)
+@api_router.patch("/properties/{rid}/location")
+async def patch_location(rid: str, location_patch: Mapping[str, Any]):
+    prop = _require_property(rid)
+    lat = location_patch.get("lat")
+    lon = location_patch.get("lon")
+    if lat is None or lon is None:
+        raise HTTPException(status_code=422, detail="lat and lon are required")
+    gp = GeoPoint(lat=lat, lon=lon)
+    prop.precise_location.push(gp, "user")
+    # Recompute before responding — same race as the address PATCH.
+    return _StatusOk(status="ok")
 
-        # Validate the ENTIRE body before pushing anything — a partial write
-        # on a 422 leaves the property in a half-updated state (review).
-        main_payers = _council_tax_payers(body["main_payers"]) if "main_payers" in body else None
-        annexe_payers = _council_tax_payers(body["annexe_payers"]) if "annexe_payers" in body else None
-        if "ignored" in body and not isinstance(body["ignored"], bool):
-            raise HTTPException(status_code=422, detail="ignored must be a boolean")
-        ignored = body.get("ignored")
 
-        if main_payers is not None:
-            prop.council_tax_payers.push(main_payers, "user")
-        if annexe_payers is not None:
-            prop.annexe_payers.push(annexe_payers, "user")
-        if ignored is not None:
-            prop.annexe_ignored.push(ignored, "user")
-        return {"status": "ok"}
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    @staticmethod
-    async def patch_triage(rid: str, body: dict):
-        prop = _require_property(rid)
+@api_router.patch("/properties/{rid}/council-tax")
+async def patch_council_tax(rid: str, council_tax_patch: Mapping[str, Any]):
+    """Set the council-tax apportionment for a property.
 
-        def _apply_triage() -> None:
-            # lucidlint: ignore record-shape field-name → coercer keyed dispatch table — variable subsets of the body,
-            # never a wire dict of its own (coding-standards.md)
-            coercers = {
-                "favourite": bool,
-                "dismissed": bool,
-                "is_viewed": bool,
-                "user_notes": str,
-                "triage_status": str,
-            }
-            for key, convert in coercers.items():
-                if key in body:
-                    getattr(prop, key).push(convert(body[key]), "user")
+    ``main_payers`` — who pays a share of the MAIN house's council tax
+    (they split it equally; empty = all adults, the default headcount
+    split).  ``annexe_payers`` — who pays the ANNEXE's council tax.
+    ``ignored`` — the detected second dwelling is unrelated; hide it and
+    exclude its costs.
+    """
+    prop = _require_property(rid)
 
-        _apply_triage()
-        return {"status": "ok"}
+    # Validate the ENTIRE council_tax_patch before pushing anything — a partial write
+    # on a 422 leaves the property in a half-updated state (review).
+    main_payers = (
+        _council_tax_payers(council_tax_patch["main_payers"]) if "main_payers" in council_tax_patch else None
+    )
+    annexe_payers = (
+        _council_tax_payers(council_tax_patch["annexe_payers"]) if "annexe_payers" in council_tax_patch else None
+    )
+    if "ignored" in council_tax_patch and not isinstance(council_tax_patch["ignored"], bool):
+        raise HTTPException(status_code=422, detail="ignored must be a boolean")
+    ignored = council_tax_patch.get("ignored")
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    @staticmethod
-    async def patch_rental_income(rid: str, body: dict):
-        """Update the monthly rental income for a property.
+    if main_payers is not None:
+        prop.council_tax_payers.push(main_payers, "user")
+    if annexe_payers is not None:
+        prop.annexe_payers.push(annexe_payers, "user")
+    if ignored is not None:
+        prop.annexe_ignored.push(ignored, "user")
+    return _StatusOk(status="ok")
 
-        Body: {"value": 1200} or {"value": null} to clear.
-        """
-        prop = _require_property(rid)
 
-        value = body.get("value")
-        if value is not None and not isinstance(value, (int, float)):
-            raise HTTPException(
-                status_code=400,
-                detail="value must be a number",
-            )
 
-        await run_on_processor(
-            lambda: prop.rental_income.push(
-                Money(str(value), "GBP") if value is not None else Money(amount="0", currency="GBP"),
-                "user",
-            )
+
+@api_router.patch("/properties/{rid}/triage")
+async def patch_triage(rid: str, triage_patch: Mapping[str, Any]):
+    prop = _require_property(rid)
+
+    def _apply_triage() -> None:
+        for key, convert in (
+            ("favourite", bool),
+            ("dismissed", bool),
+            ("is_viewed", bool),
+            ("user_notes", str),
+            ("triage_status", str),
+        ):
+            if key in triage_patch:
+                getattr(prop, key).push(convert(triage_patch[key]), "user")
+
+    _apply_triage()
+    return _StatusOk(status="ok")
+
+
+
+@api_router.patch("/properties/{rid}/rental-income")
+async def patch_rental_income(rid: str, rental_income_patch: Mapping[str, Any]):
+    """Update the monthly rental income for a property.
+
+    Body: {"value": 1200} or {"value": null} to clear.
+    """
+    prop = _require_property(rid)
+
+    value = rental_income_patch.get("value")
+    if value is not None and not isinstance(value, (int, float)):
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a number",
         )
-        return {"status": "ok"}
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    @staticmethod
-    async def patch_works_estimate(rid: str, body: dict):
-        """Update the works estimate for a person on this property.
-
-        Body: {"person": "p_ashby", "value": 15000} — the key is the
-        canonical person_id (legacy names resolve); the estimate is stored
-        under the id so a rename never orphans it.
-        """
-        prop = _require_property(rid)
-
-        target = _validate_works_person(body.get("person", ""))
-        person_id = person_id_of(target)
-        value = body.get("value")
-        _validate_works_value(value)
-
-        def _apply() -> None:
-            estimates = dict(prop.works_estimates.latest_attempt().value_or_none() or {})
-            if value is None:
-                estimates.pop(person_id, None)  # emptied field: drop the estimate
-            else:
-                estimates[person_id] = Money(str(value), "GBP")
-            prop.works_estimates.push(estimates, "user")
-
-        # Thread rule 7, no exceptions: enqueue and return. The drain runs in
-        # the background; this page's update lands via the summary broadcast.
-        await run_on_processor(_apply)
-
-        return {"status": "ok"}
+    await run_on_processor(
+        lambda: prop.rental_income.push(
+            Money(str(value), "GBP") if value is not None else Money(amount="0", currency="GBP"),
+            "user",
+        )
+    )
+    return _StatusOk(status="ok")
 
 
-api_router.patch("/properties/{rid}/address")(_PropertyPatches.patch_address)
-api_router.patch("/properties/{rid}/location")(_PropertyPatches.patch_location)
-api_router.patch("/properties/{rid}/council-tax")(_PropertyPatches.patch_council_tax)
-api_router.patch("/properties/{rid}/triage")(_PropertyPatches.patch_triage)
-api_router.patch("/properties/{rid}/rental-income")(_PropertyPatches.patch_rental_income)
-api_router.patch("/properties/{rid}/works-estimate")(_PropertyPatches.patch_works_estimate)
+
+@api_router.patch("/properties/{rid}/works-estimate")
+async def patch_works_estimate(rid: str, works_estimate_patch: Mapping[str, Any]):
+    """Update the works estimate for a person on this property.
+
+    Body: {"person": "p_ashby", "value": 15000} — the key is the
+    canonical person_id (legacy names resolve); the estimate is stored
+    under the id so a rename never orphans it.
+    """
+    prop = _require_property(rid)
+
+    target = _validate_works_person(works_estimate_patch.get("person", ""))
+    person_id = person_id_of(target)
+    value = works_estimate_patch.get("value")
+    _validate_works_value(value)
+
+    def _apply() -> None:
+        estimates = dict(prop.works_estimates.latest_attempt().value_or_none() or {})
+        if value is None:
+            estimates.pop(person_id, None)  # emptied field: drop the estimate
+        else:
+            estimates[person_id] = Money(str(value), "GBP")
+        prop.works_estimates.push(estimates, "user")
+
+    # Thread rule 7, no exceptions: enqueue and return. The drain runs in
+    # the background; this page's update lands via the summary broadcast.
+    await run_on_processor(_apply)
+
+    return _StatusOk(status="ok")
+
+
 
 
 @api_router.get("/properties/{rid}/comments")
@@ -757,19 +751,23 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
         raise HTTPException(status_code=401, detail="Authentication required")
 
     svc = get_services()
-    person = _comment_person(request, SessionClaims.from_dict(session_user), svc)
+    person = _comment_person(request, session_user, svc)
     return add_comment(rid, person, body.text)
 
 
-@api_router.get("/settings")
+@api_router.get("/settings", response_model=SettingsPayload)
 async def get_settings(request: Request):
-    return (await settings_payload(effective_session_user(request))).to_dict()
+    return await settings_payload(effective_session_user(request))
 
 
-_PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
-# Large house-purchase / deposit amounts are whole pounds — never pence
-# (the UI enforces this too; this is the hard guarantee).
-_WHOLE_POUND_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution"}
+class _PersonWireFields:
+    """Person-update fields by serialization kind: money-typed vs whole-pound-
+    rounded (the patch serializer reads these once)."""
+
+    MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
+    # Large house-purchase / deposit amounts are whole pounds — never pence
+    # (the UI enforces this too; this is the hard guarantee).
+    WHOLE_POUND_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution"}
 
 
 def _parse_money(v: object, *, whole_pounds: bool = False, field: str = "amount") -> Money:
@@ -783,8 +781,8 @@ def _parse_money(v: object, *, whole_pounds: bool = False, field: str = "amount"
             raise ValueError(f"money value missing 'amount': {v!r}")
         try:
             m = Money(v["amount"], v.get("currency", "GBP"))
-        # lucidlint: ignore broad-except money coercion re-raises as ValueError with the value
-        except Exception as e:
+        except (ArithmeticError, TypeError, ValueError) as e:
+            # A non-numeric amount or an unknown currency: 400 with the value.
             raise ValueError(f"invalid money value {v!r}: {e}") from e
     else:
         raise ValueError(f"invalid money value {v!r} — expected a number or {{'amount': ...}}")
@@ -799,8 +797,8 @@ def _parse_penalty(v: object) -> _Quantity:
         raise ValueError(f"invalid walk penalty {v!r} — expected {{'value': ..., 'unit': ...}}")
     try:
         return _Quantity(v["value"], v["unit"])
-        # lucidlint: ignore broad-except boundary — any Quantity construction failure converts to ValueError (→ 400)
-    except Exception as e:
+    except (AttributeError, TypeError, ValueError) as e:
+        # A non-numeric value or an unknown unit: 400 with the value.
         raise ValueError(f"invalid walk penalty {v!r}: {e}") from e
 
 
@@ -821,11 +819,11 @@ def _parse_co_owners(co: object) -> tuple[HomeCoOwner, ...]:
         if not isinstance(item, dict) or "name" not in item or "share" not in item:
             raise ValueError(f"invalid co-owner {item!r} — expected {{'name', 'share'}}")
         share = item["share"]
-        if not isinstance(share, int) or not MIN_SHARE_PERCENT <= share <= MAX_SHARE_PERCENT:
+        if not isinstance(share, int) or not _ApiPolicy.MIN_SHARE_PERCENT <= share <= _ApiPolicy.MAX_SHARE_PERCENT:
             raise ValueError(f"co-owner share must be a whole percent 1-100, got {share!r}")
         parsed.append(HomeCoOwner(name=str(item["name"]), share=share))
         total_share += share
-    if total_share > MAX_SHARE_PERCENT:
+    if total_share > _ApiPolicy.MAX_SHARE_PERCENT:
         raise ValueError(f"co-owner shares total {total_share}% — cannot exceed 100%")
     return tuple(parsed)
 
@@ -835,6 +833,31 @@ def _parse_home_property_rid(rid: object) -> str:
     if rid is not None and not isinstance(rid, str):
         raise ValueError("home_property_rid must be a string or null")
     return rid if isinstance(rid, str) else ""
+
+
+def _parse_rent_paid_monthly(v: object) -> Money:
+    """rent_paid_monthly is a plain monthly amount — no whole-pound rule."""
+    return _parse_money(v, field="rent_paid_monthly")
+
+
+type _FieldParser = Callable[[Any], Any]
+
+
+class _PersonFieldParsers:
+    """The single-parser person-update fields: field name → its parser.
+
+    One table, so a field's guard and its parse cannot drift apart.  The
+    money fields share _parse_money with per-field flags and keep their
+    own loop; editable_by and places_of_interest have their own rules.
+    """
+
+    RULES: tuple[tuple[str, _FieldParser], ...] = (
+        ("bus_walk_penalty", _parse_penalty),
+        ("petrol_mpg", _parse_petrol_mpg),
+        ("home_co_owners", _parse_co_owners),
+        ("home_property_rid", _parse_home_property_rid),
+        ("rent_paid_monthly", _parse_rent_paid_monthly),
+    )
 
 
 def _parse_places_of_interest(pois: object) -> tuple:
@@ -858,23 +881,16 @@ def _parse_places_of_interest(pois: object) -> tuple:
 def _coerce_person_updates(
     updates: MutableMapping[str, Any], target: Person, merge_destinations: bool
 ) -> MutableMapping[str, Any]:
-    """Parse each present field with its own parser — the per-field guards
-    are a flat table of rules, extracted so _person_from_dict stays a
+    """Parse each present field with its parser — the single-parser fields
+    come from _PersonFieldParsers.RULES (one rule per field), the money
+    fields from their own loop; extracted so _person_from_dict stays a
     merge, not a parser."""
-    for f in _PERSON_MONEY_FIELDS:
+    for f in _PersonWireFields.MONEY_FIELDS:
         if f in updates:
-            updates[f] = _parse_money(updates[f], whole_pounds=f in _WHOLE_POUND_FIELDS, field=f)
-    if "bus_walk_penalty" in updates:
-        updates["bus_walk_penalty"] = _parse_penalty(updates["bus_walk_penalty"])
-    if "petrol_mpg" in updates:
-        updates["petrol_mpg"] = _parse_petrol_mpg(updates["petrol_mpg"])
-    # lucidlint: ignore duplicate-block parallel per-field parse guards — each field has its own parser and type rule;
-    if "home_co_owners" in updates:
-        updates["home_co_owners"] = _parse_co_owners(updates["home_co_owners"])
-    if "home_property_rid" in updates:
-        updates["home_property_rid"] = _parse_home_property_rid(updates["home_property_rid"])
-    if "rent_paid_monthly" in updates:
-        updates["rent_paid_monthly"] = _parse_money(updates["rent_paid_monthly"], field="rent_paid_monthly")
+            updates[f] = _parse_money(updates[f], whole_pounds=f in _PersonWireFields.WHOLE_POUND_FIELDS, field=f)
+    for field, parse in _PersonFieldParsers.RULES:
+        if field in updates:
+            updates[field] = parse(updates[field])
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     if "places_of_interest" in updates:
@@ -930,12 +946,11 @@ async def get_isochrone_layers(paths: IsochronePaths = Depends(_isochrone_paths)
 
 
 @api_router.patch("/settings/person/{name}")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_person(name: str, body: dict, request: Request):
+async def patch_person(name: str, person_patch: Mapping[str, Any], request: Request):
     """Update one person's settings — own person / superuser / guardian.
 
     Replaces the whole-list PUT: the server decides who may edit whom,
-    never the UI.  ``body`` is the full person record (the old PUT item)
+    never the UI.  ``person_patch`` is the full person record (the old PUT item)
     plus an optional ``thresholds`` dict for the person's commute
     thresholds, saved to the separate thresholds source under the same
     ownership rule.
@@ -961,13 +976,13 @@ async def patch_person(name: str, body: dict, request: Request):
             detail="You can only edit your own settings (or a child's, if you are their guardian)",
         )
 
-    if not session_user.get("is_superuser"):
+    if not session_user.is_superuser:
         # identity/privilege fields are superuser-only: editing your own
         # record must not escalate to superuser, hijack the email link,
         # rename yourself onto another person's ownership key (name IS the
         # authz identity), or flip is_child (which changes guardianship)
-        body = {
-            **body,
+        person_patch = {
+            **person_patch,
             "name": target.name,
             "person_id": target.person_id,
             "is_child": target.is_child,
@@ -977,34 +992,33 @@ async def patch_person(name: str, body: dict, request: Request):
         }
 
     try:
-        updated = [_person_from_dict(body, target) if p is target else p for p in persons]
+        updated = [_person_from_dict(person_patch, target) if p is target else p for p in persons]
         svc.persons_source.push(updated, "user")
     except (ValueError, TypeError) as e:
         # malformed client input is a CLIENT error (400), never a 500
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    thresholds = body.get("thresholds")
+    thresholds = person_patch.get("thresholds")
     if isinstance(thresholds, dict):
         current = dict(svc.commute_thresholds_source.latest_attempt().value_or_none() or {})
         current[name] = thresholds
         svc.commute_thresholds_source.push(current, "user")
 
-    return {"status": "ok"}
+    return _StatusOk(status="ok")
 
 
 @api_router.patch("/settings/financial")
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def patch_financial(body: dict):
+async def patch_financial(financial_patch: Mapping[str, Any]):
     svc = get_services()
 
     def _apply_financial() -> None:
-        for api_key, value in body.items():
-            node_id = API_KEY_TO_NODE.get(api_key)
+        for api_key, value in financial_patch.items():
+            node_id = SettingsNode.API_KEY_TO_NODE.get(api_key)
             if node_id is not None and node_id in svc.setting_nodes:
                 svc.setting_nodes[node_id].push(value, "user")
 
     _apply_financial()
-    return {"status": "ok"}
+    return _StatusOk(status="ok")
 
 
 def _validate_works_person(person_ref: str):
@@ -1042,22 +1056,22 @@ def _validate_works_value(value: object) -> None:
         raise HTTPException(status_code=400, detail="value must be a whole number of pounds — no pence")
 
 
-@dataclass(frozen=True)
-class _PersonSummary:
-    """One person as serialized to the /persons response."""
+class PersonSummary(SerializableAsDict):
+    """One person as the /persons listing reports them."""
 
     name: str
     person_id: str
     email: str
     is_child: bool
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(name=self.name, person_id=self.person_id, email=self.email, is_child=self.is_child)
+
+class PersonsListing(SerializableAsDict):
+    """The /persons response — every person, for the impersonation dropdown."""
+
+    persons: list[PersonSummary]
 
 
-@api_router.get("/persons")
+@api_router.get("/persons", response_model=PersonsListing)
 async def list_persons():
     """Return ALL persons (name, email when present, is_child).
 
@@ -1068,76 +1082,53 @@ async def list_persons():
     """
     svc = get_services()
     persons_attempt = svc.persons_source.latest_attempt()
-    result: list[dict[str, object]] = []
+    result: list[PersonSummary] = []
     if persons_attempt.succeeded:
         result = [
             (
-                _PersonSummary(
+                PersonSummary(
                     name=p.get("name", ""),
                     person_id=p.get("person_id") or person_id_of(p),
                     email=p.get("email", ""),
                     is_child=bool(p.get("is_child")),
                 )
                 if isinstance(p, dict)
-                else _PersonSummary(
+                else PersonSummary(
                     name=getattr(p, "name", ""),
                     person_id=person_id_of(p),
                     email=getattr(p, "email", ""),
                     is_child=bool(getattr(p, "is_child", False)),
                 )
-            ).to_dict()
+            )
             for p in persons_attempt.value_or_none() or []
         ]
-    return {"persons": result}
+    return PersonsListing(persons=result)
 
 
-@dataclass(frozen=True)
-class _SchedulerError:
-    """The non-AsyncQueueScheduler branch of /debug/scheduler."""
+class SchedulerError(SerializableAsDict):
+    """The non-AsyncRefreshQueue branch of /debug/scheduler."""
 
     type: str
     error: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(type=self.type, error=self.error)
 
-
-@dataclass(frozen=True)
-class _QueueEntry:
-    """One queued node as serialized to the /debug/scheduler response."""
+class QueueEntry(SerializableAsDict):
+    """One queued node in the /debug/scheduler response."""
 
     node_id: str
     scheduled_at: float
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(node_id=self.node_id, scheduled_at=self.scheduled_at)
 
-
-@dataclass(frozen=True)
-class _SchedulerSnapshot:
-    """The scheduler's pending work as serialized to the response."""
+class SchedulerSnapshot(SerializableAsDict):
+    """The scheduler's pending work as the endpoint reports it."""
 
     queue_size: int
     scheduled_count: int
     wakeup_set: bool
-    queue: list[_QueueEntry]
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(
-            queue_size=self.queue_size,
-            scheduled_count=self.scheduled_count,
-            wakeup_set=self.wakeup_set,
-            queue=[entry.to_dict() for entry in self.queue],
-        )
+    queue: list[QueueEntry]
 
 
-@api_router.get("/debug/scheduler")
+@api_router.get("/debug/scheduler", response_model=SchedulerSnapshot | SchedulerError)
 async def debug_scheduler():
     """Snapshot the scheduler's pending work — read-only, never drains.
 
@@ -1147,62 +1138,47 @@ async def debug_scheduler():
     event loop, wedging the server.)
     """
     sched = dag.scheduler.get_scheduler()
-    if not isinstance(sched, AsyncQueueScheduler):
-        return _SchedulerError(type=type(sched).__name__, error="not AsyncQueueScheduler").to_dict()
+    if not isinstance(sched, AsyncRefreshQueue):
+        return SchedulerError(type=type(sched).__name__, error="not AsyncRefreshQueue")
 
     # _scheduled: node_id -> QueueEvent, one entry per queued node (the
     # queue itself is drained by the processor — never touch it here)
     queue_snapshot = [
-        _QueueEntry(node_id=node_id, scheduled_at=event.scheduled_at)
+        QueueEntry(node_id=node_id, scheduled_at=event.scheduled_at)
         for node_id, event in list(sched._scheduled.items())[:500]
     ]
 
-    return _SchedulerSnapshot(
+    return SchedulerSnapshot(
         queue_size=sched._queue.qsize(),
         scheduled_count=len(sched._scheduled),
         wakeup_set=sched._wakeup.is_set(),
         queue=queue_snapshot,
-    ).to_dict()
+    )
 
 
-@dataclass(frozen=True)
-class _TypeCount:
+class TypeCount(SerializableAsDict):
     """One object-type bucket in the /debug/memory response."""
 
     type: str
     count: int
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(type=self.type, count=self.count)
 
-
-@dataclass(frozen=True)
-class _MemorySnapshot:
-    """Object counts by type as serialized to the /debug/memory response."""
+class MemorySnapshot(SerializableAsDict):
+    """Object counts by type as the endpoint reports them."""
 
     total_objects: int
-    top_types: list[_TypeCount]
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(
-            total_objects=self.total_objects,
-            top_types=[t.to_dict() for t in self.top_types],
-        )
+    top_types: list[TypeCount]
 
 
-@api_router.get("/debug/memory")
+@api_router.get("/debug/memory", response_model=MemorySnapshot)
 async def debug_memory():
     """Count Python objects by type — helps diagnose memory leaks."""
 
     gc.collect()
     obj_counts = Counter(type(o).__name__ for o in gc.get_objects())
-    top = obj_counts.most_common(TOP_TYPES_LIMIT)
+    top = obj_counts.most_common(_ApiPolicy.TOP_TYPES_LIMIT)
 
-    return _MemorySnapshot(
+    return MemorySnapshot(
         total_objects=sum(obj_counts.values()),
-        top_types=[_TypeCount(type=t, count=c) for t, c in top],
-    ).to_dict()
+        top_types=[TypeCount(type=t, count=c) for t, c in top],
+    )

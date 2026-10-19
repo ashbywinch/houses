@@ -10,7 +10,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from houses.apis.ors import SETTLEMENT_LAYERS
+from houses.apis.ors_api import ORSApi
 from houses.location import ReverseGeocodeOptions, find_nearest_town_name
 from houses.town_desc import generate_town_description
 
@@ -155,7 +155,7 @@ class TestFindNearestTownName:
             ),
         )
 
-        assert seen.get("layers") == SETTLEMENT_LAYERS
+        assert seen.get("layers") == ORSApi.SETTLEMENT_LAYERS
         assert "street" not in str(seen.get("layers"))
 class TestGenerateTownDescription:
     @pytest.mark.asyncio

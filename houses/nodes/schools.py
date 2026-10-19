@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, override
+
+from pydantic import SerializerFunctionWrapHandler, model_serializer
 
 from dag.attempt import Attempt, SourceType, project_value
 from dag.derived_node import DerivedNode
@@ -9,10 +10,10 @@ from dag.node import Node
 from houses.geopoint import GeoPoint
 from houses.school_gender import SchoolGender
 from houses.services_provider import get_services
+from serialization import SerializableAsDict
 
 
-@dataclass(frozen=True)
-class _SchoolJson:
+class _School(SerializableAsDict):
     """Wire shape of the nearest-school value — lat/lon included only
     when the school has coordinates."""
 
@@ -25,23 +26,17 @@ class _SchoolJson:
     lat: float | None = None
     lon: float | None = None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        d: dict[str, object] = dict(
-            name=self.name,
-            ofsted=self.ofsted,
-            walk=self.walk,
-            url=self.url,
-            postcode=self.postcode,
-            full_address=self.full_address,
-        )
-        if self.lat is not None:
-            d["lat"] = self.lat
-            d["lon"] = self.lon
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, str | float | None]:
+        """A school without coordinates emits the six address keys and
+        never a null coordinate pair."""
+        d = handler(self)
+        if self.lat is None:
+            d.pop("lat", None)
+            d.pop("lon", None)
         return d
 
-
+# lucidlint: ignore class-module one compact school-family node file — acceptance/nearest/location (review-log)
 class SchoolAcceptanceNode(DerivedNode[tuple[str, ...]]):
     """The acceptable school genders for the first child person — a
     PERSONS-SOURCED dep, never a constructor snapshot, so a filter edit
@@ -73,18 +68,23 @@ class SchoolAcceptanceNode(DerivedNode[tuple[str, ...]]):
 
 
 class NearestSchoolNode(DerivedNode[dict]):
-    """Nearest-school lookup shared by the primary and secondary stages.
-
-    Subclasses supply the child age and the stage name used in failure
-    messages; the lookup itself is identical.
+    """Nearest-school lookup for one stage (age and stage name are
+    constructor config — primary and secondary differ only there).
     """
-
-    child_age: int
-    stage: str
 
     provenance_source_type = SourceType.API
 
-    def __init__(self, node_id: str, *, best_location, acceptable: Node | None = None):
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        best_location,
+        child_age: int,
+        stage: str,
+        acceptable: Node | None = None,
+    ):
+        self.child_age: int = child_age
+        self.stage: str = stage
         deps: list[Node] = [best_location]
         if acceptable is not None:
             deps.append(acceptable)
@@ -117,7 +117,7 @@ class NearestSchoolNode(DerivedNode[dict]):
         if school is None:
             return Attempt.impossible(f"no {self.stage} school found within search radius")
         return Attempt.succeeded(
-            _SchoolJson(
+            _School(
                 name=school.name,
                 ofsted=school.ofsted_rating,
                 walk=None,
@@ -130,18 +130,6 @@ class NearestSchoolNode(DerivedNode[dict]):
         )
 
 
-class PrimarySchoolNode(NearestSchoolNode):
-    """Nearest primary school (age-4 entry)."""
-
-    child_age = 4
-    stage = "primary"
-
-
-class SecondarySchoolNode(NearestSchoolNode):
-    """Nearest secondary school (age-12 entry)."""
-
-    child_age = 12
-    stage = "secondary"
 
 
 class SchoolLocationNode(DerivedNode[str]):

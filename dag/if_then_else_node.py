@@ -3,28 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.if_then_else_options import IfThenElseOptions
 from dag.node import Node
 
 T = TypeVar("T")
-
-
-@dataclass(frozen=True)
-class IfThenElseOptions:
-    """Wiring for an ``IfThenElseNode``: the branch predicate and sources.
-
-    ``condition_fn`` receives the condition sources' ``Attempt`` values (in
-    order); ``then_branch``/``else_branch`` provide the activated result.
-    """
-
-    condition_sources: tuple[Node, ...]
-    condition_fn: Callable[..., bool]
-    then_branch: Node[Any]
-    else_branch: Node[Any] | None = None
 
 
 class IfThenElseNode(DerivedNode[T], Generic[T]):

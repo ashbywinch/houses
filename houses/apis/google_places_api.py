@@ -2,46 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from houses import apigw
-from houses.apis.transport import BaseApi, FetchArgs
+from houses.apis.base_api import BaseApi
+from houses.apis.fetch_args import FetchArgs
+from houses.apis.places_center import PlacesCenter
+from houses.apis.places_circle import PlacesCircle
+from houses.apis.places_restriction import PlacesRestriction
+from houses.apis.places_result import PlacesResult
+from houses.apis.places_search_body import PlacesSearchBody
 from houses.settings import settings
-from houses.web.json_utils import WirePayload
-
-
-@dataclass(frozen=True)
-class PlacesCenter(WirePayload):
-    latitude: float
-    longitude: float
-
-
-@dataclass(frozen=True)
-class PlacesCircle(WirePayload):
-    center: PlacesCenter
-    radius: float
-
-
-@dataclass(frozen=True)
-class PlacesRestriction(WirePayload):
-    circle: PlacesCircle
-
-
-@dataclass(frozen=True)
-class PlacesSearchBody(WirePayload):
-    included_types: list[str]
-    max_result_count: int
-    location_restriction: PlacesRestriction
-
-
-@dataclass(frozen=True)
-class PlacesResult:
-    """One Places result — the display name + coordinates the UI shows."""
-
-    name: str
-    latitude: float | None
-    longitude: float | None
-    types: list[str]
 
 
 class GooglePlacesApi(BaseApi):

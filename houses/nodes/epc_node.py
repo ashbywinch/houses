@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import override
+from dataclasses import replace
+from typing import TypedDict, override
 
 from money import Money
 
@@ -14,21 +14,13 @@ from houses.services_provider import get_services
 
 # Fallback when the council tax lookup fails: a Band D estimate with a
 # spread, so the total can show "≈" instead of a bare "?" (Part A).
-_FALLBACK_YEARLY_COST = Money(amount="1200", currency="GBP")
-_FALLBACK_STDDEV = 50.0
 
 
-@dataclass(frozen=True)
-class _EpcJson:
+class _Epc(TypedDict):
     """Wire shape of the EpcNode value — the band served verbatim to the frontend."""
 
     band: str
     potential: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(band=self.band, potential=self.potential)
 
 
 class EpcNode(DerivedNode[dict]):
@@ -46,7 +38,7 @@ class EpcNode(DerivedNode[dict]):
         if result.succeeded:
             band = result.value_or_none()
             if band:
-                return Attempt.succeeded(_EpcJson(band=band, potential=band).to_dict())
+                return Attempt.succeeded(_Epc(band=band, potential=band))
             return Attempt.impossible("no EPC data")
         # Propagate the real reason (e.g. ambiguous address) so the frontend
         # can show it — not a generic "no EPC data".
@@ -55,18 +47,29 @@ class EpcNode(DerivedNode[dict]):
     provenance_source_type = SourceType.API
 
     @override
-    # lucidlint: ignore duplicate the difference IS the node identity (band vs description extraction) (review-log)
     async def build_provenance(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
     ) -> Provenance:
         prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
-        val = self._attempt.value_or_none()
-        if self._attempt.succeeded and isinstance(val, dict) and val.get("band"):
-            prov.value = f"Band {val['band']}"
+        prov.value = _band_label(self._attempt)
         return prov
 
 
+def _band_label(att: Attempt[dict]) -> str | None:
+    """The EpcNode value's band rendered as a provenance label."""
+    val = att.value_or_none()
+    if att.succeeded and isinstance(val, dict) and val.get("band"):
+        return f"Band {val['band']}"
+    return None
+
 class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
+
+    """Council-tax band + yearly cost with the lookup-failure fallback."""
+
+    # Fallback when the council tax lookup fails: a Band D estimate with
+    # a spread, so the total can show "≈" instead of a bare "?" (Part A).
+    FALLBACK_YEARLY_COST = Money(amount="1200", currency="GBP")
+    FALLBACK_STDDEV = 50.0
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, CouncilTaxInfo, (best_address, postcode_node))
 
@@ -97,7 +100,7 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
         return Attempt.succeeded(
             CouncilTaxInfo(
                 band="?",
-                yearly_cost=Measurement(_FALLBACK_YEARLY_COST, _FALLBACK_STDDEV),
+                yearly_cost=Measurement(CouncilTaxNode.FALLBACK_YEARLY_COST, CouncilTaxNode.FALLBACK_STDDEV),
                 lookup_error=result.error or "address lookup failed",
             )
         )

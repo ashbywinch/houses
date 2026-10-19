@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from houses import apigw
-from houses.apis.transport import BaseApi, FetchArgs
+from houses.apis.base_api import BaseApi
+from houses.apis.fetch_args import FetchArgs
+from houses.apis.google_geocode_params import GoogleGeocodeParams
 from houses.geopoint import GeoPoint
 from houses.settings import settings
-from houses.web.json_utils import WirePayload
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class GoogleGeocodeParams(WirePayload):
-    address: str
 
 
 class GoogleGeocodeApi(BaseApi):

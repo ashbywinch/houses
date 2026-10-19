@@ -14,6 +14,7 @@ from houses.location import extract_postcode
 from houses.model.geo import is_single_property_address
 
 
+# lucidlint: ignore class-module one compact location-family node file — BestAddress/Postcode/BestLocation (review-log)
 class BestAddressNode(DerivedNode[str]):
     """Selects the best address from available sources.
 

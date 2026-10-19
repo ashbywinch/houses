@@ -16,7 +16,7 @@ import pytest
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.scheduler import AsyncQueueScheduler, flush_processor, get_scheduler, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, flush_processor, get_scheduler, set_scheduler
 from dag.user_input_node import UserInputNode
 
 
@@ -37,7 +37,7 @@ async def test_cascade_processing_is_silent_until_the_hook_routes_it():
     no callback behind — the silence is by construction, pinned here at
     the scheduler level. (The routing itself is covered end-to-end in
     tests/unit/web/test_summary_broadcast.py.)"""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
     sched = get_scheduler()
     src = UserInputNode[str]("bc_src", str)
     child = _Node("prop123/test_bc_node", deps=(src,))

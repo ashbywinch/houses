@@ -18,18 +18,36 @@ import csv
 import logging
 import re
 from pathlib import Path
+from typing import TypedDict
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
+
+from dag.guard import capture_async
 
 logger = logging.getLogger(__name__)
 
-STATIONS_CSV = Path("data/stations.csv")
-PARKING_CSV = Path("data/parking_rates.csv")
-MAX_COST_GBP = 100.0
+class _ApcoaRates:
+    """The APCOA parking-rates source: data paths, base URL, and scrape pacing."""
 
-APCOA_BASE = "https://www.apcoa.co.uk/find-parking/locations"
-REQUEST_DELAY_SECONDS = 3.0
-CHECKPOINT_INTERVAL = 5
+    STATIONS_CSV = Path("data/stations.csv")
+    PARKING_CSV = Path("data/parking_rates.csv")
+    MAX_COST_GBP = 100.0
+    APCOA_BASE = "https://www.apcoa.co.uk/find-parking/locations"
+    REQUEST_DELAY_SECONDS = 3.0
+    CHECKPOINT_INTERVAL = 5
+
+
+type _StationPosition = tuple[float, float]
+"""A station's (latitude, longitude) as stations.csv states them."""
+
+
+class _StationRecord(TypedDict):
+    """One station as this script's CSV boundary carries it: the stations.csv
+    row's station name and CRS code, projected for the parking-rates CSV."""
+
+    stationName: str
+    crs: str
 
 
 def extract_daily_rate_from_tariff(tariff_text: str) -> float | None:
@@ -115,35 +133,25 @@ def city_slugs(station_name: str) -> list[str]:
     return candidates
 
 
-def _apcoa_urls(station_name: str) -> list[str]:
-    """Generate candidate APCOA location page URLs for a station."""
-    station_slug = make_slug(station_name)
-    urls: list[str] = []
-    for city_slug in city_slugs(station_name):
-        urls.append(f"{APCOA_BASE}/{city_slug}/{station_slug}-station-{city_slug}")
-        urls.append(f"{APCOA_BASE}/{city_slug}/{city_slug}-station-{city_slug}")
-    return urls
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def load_stations() -> list[dict]:
-    stations: list[dict] = []
-    with STATIONS_CSV.open(newline="") as f:
+def load_stations() -> list[_StationRecord]:
+    stations: list[_StationRecord] = []
+    with _ApcoaRates.STATIONS_CSV.open(newline="") as f:
         for row in csv.DictReader(f):
             crs = (row.get("crsCode", "") or "").strip()
             name = (row.get("stationName", "") or "").strip()
             if crs and name:
-                # lucidlint: ignore record-shape wire-format dict — station CSV row shape, the CSV boundary owns the
-                stations.append({"stationName": name, "crs": crs.upper()})
-    logger.info("Loaded %d stations from %s", len(stations), STATIONS_CSV)
+                stations.append(_StationRecord(stationName=name, crs=crs.upper()))
+    logger.info("Loaded %d stations from %s", len(stations), _ApcoaRates.STATIONS_CSV)
     return stations
 
 def load_existing_rates() -> dict[str, float | None]:
     """Return {crs: cost} from existing CSV."""
     rates: dict[str, float | None] = {}
-    if not PARKING_CSV.is_file():
+    if not _ApcoaRates.PARKING_CSV.is_file():
         return rates
-    with PARKING_CSV.open(newline="") as f:
+    with _ApcoaRates.PARKING_CSV.open(newline="") as f:
         for row in csv.DictReader(f):
             crs = (row.get("crs", "") or "").strip().upper()
             raw = (row.get("daily_cost_gbp", "") or "").strip()
@@ -159,10 +167,9 @@ def load_existing_rates() -> dict[str, float | None]:
     return rates
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def write_rates(all_stations: list[dict], rates: dict[str, float | None]) -> None:
-    PARKING_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with PARKING_CSV.open("w", newline="") as f:
+def write_rates(all_stations: list[_StationRecord], rates: dict[str, float | None]) -> None:
+    _ApcoaRates.PARKING_CSV.parent.mkdir(parents=True, exist_ok=True)
+    with _ApcoaRates.PARKING_CSV.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["station_name", "crs", "daily_cost_gbp"])
         for s in sorted(all_stations, key=lambda x: x["crs"]):
@@ -170,7 +177,7 @@ def write_rates(all_stations: list[dict], rates: dict[str, float | None]) -> Non
             cost = rates.get(crs)
             val = f"{cost:.2f}" if cost is not None else ""
             writer.writerow([s["stationName"], crs, val])
-    logger.info("Wrote %d rates to %s", len(rates), PARKING_CSV)
+    logger.info("Wrote %d rates to %s", len(rates), _ApcoaRates.PARKING_CSV)
 
 
 async def find_station_urls(page, station_name: str) -> list[str]:
@@ -180,7 +187,7 @@ async def find_station_urls(page, station_name: str) -> list[str]:
     extracts links containing '-station-'.
     """
     for city_slug in city_slugs(station_name):
-        listing_url = f"{APCOA_BASE}/{city_slug}/"
+        listing_url = f"{_ApcoaRates.APCOA_BASE}/{city_slug}/"
         try:
             await page.goto(listing_url, wait_until="domcontentloaded", timeout=15000)
             await asyncio.sleep(2)
@@ -196,8 +203,8 @@ async def find_station_urls(page, station_name: str) -> list[str]:
             if station_urls:
                 logger.info("Found %d station URLs in %s", len(station_urls), listing_url)
                 return station_urls
-        # lucidlint: ignore broad-except scraper boundary — one city-listing failure continues to the next slug
-        except Exception as e:
+        # Playwright's Error covers goto/title/evaluate — one slug degrades, the loop continues.
+        except PlaywrightError as e:
             logger.warning("Failed to fetch city listing %s: %s", listing_url, e)
             continue
     return []
@@ -279,7 +286,7 @@ async def extract_daily_rate(page, url: str) -> float | None:
             logger.warning("Could not extract daily rate from %s", url)
             return None
 
-        if cost < 0 or cost > MAX_COST_GBP:
+        if cost < 0 or cost > _ApcoaRates.MAX_COST_GBP:
             logger.warning("Implausible rate £%.2f on %s", cost, url)
             return None
 
@@ -287,8 +294,8 @@ async def extract_daily_rate(page, url: str) -> float | None:
         logger.info("  → %s: £%.2f", station_name, cost)
         return round(cost, 2)
 
-    # lucidlint: ignore broad-except scraper boundary — one URL's extraction failure returns None
-    except Exception as e:
+    # Playwright's Error covers goto/title/evaluate — one URL degrades to None, the caller tries the next.
+    except PlaywrightError as e:
         logger.warning("Failed to extract rate from %s: %s", url, e)
         return None
 
@@ -302,8 +309,7 @@ async def _try_urls(page, urls) -> float | None:
     return None
 
 
-# lucidlint: ignore record-shape (lat, lng) pair — a NamedTuple is ceremony for a local lookup
-def _station_coords(station_name: str) -> tuple[float, float] | None:
+def _station_coords(station_name: str) -> _StationPosition | None:
     csv_path = Path("data/stations.csv")
     if not csv_path.is_file():
         return None
@@ -324,8 +330,13 @@ async def find_station_rate(page, station_name: str) -> float | None:
     Tries candidate direct URLs first. If none work, falls back
     to the city listing page to find station car park URLs.
     """
+    # houses.apcoa_scraper imports this module's slug helpers, so importing it
+    # at module level would close the cycle — the URL-shape helper comes in here.
+    # lucidlint: ignore inline-import deferred to break the houses↔scripts cycle (review-log)
+    from houses.apcoa_scraper import apcoa_location_urls
+
     # Try direct URLs first
-    rate = await _try_urls(page, _apcoa_urls(station_name))
+    rate = await _try_urls(page, apcoa_location_urls(station_name))
     if rate is not None:
         return rate
 
@@ -335,54 +346,55 @@ async def find_station_rate(page, station_name: str) -> float | None:
     if rate is not None:
         return rate
 
-    # Last resort: try APCOA prebook listing page near the station
-    try:
-        coords = _station_coords(station_name)
-        if coords is not None:
-            lat, lng = coords
-            listing_url = (
-                f"https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
-                f"?latitude={lat}&longitude={lng}&placeName={station_name}&maximumDistance=3"
-            )
-            logger.info("Trying APCOA prebook listing for '%s'...", station_name)
-            rate = await extract_daily_rate(page, listing_url)
-            if rate is not None:
-                # Check that the page actually showed results (not just "Sorry!")
-                page_text = await page.evaluate("() => document.body.innerText.substring(0, 300)")
-                if "Sorry" not in page_text:
-                    return rate
-    # lucidlint: ignore broad-except deliberate fallback — prebook-listing failure returns None
-    except Exception as e:
-        logger.warning("APCOA prebook listing failed for %s: %s", station_name, e)
-        return None
+    # Last resort: the APCOA prebook listing page near the station. A failure
+    # here is the station's failure — the caller's boundary records None and
+    # the sync continues with the next station.
+    coords = _station_coords(station_name)
+    if coords is not None:
+        lat, lng = coords
+        listing_url = (
+            f"https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
+            f"?latitude={lat}&longitude={lng}&placeName={station_name}&maximumDistance=3"
+        )
+        logger.info("Trying APCOA prebook listing for '%s'...", station_name)
+        rate = await extract_daily_rate(page, listing_url)
+        if rate is not None:
+            # Check that the page actually showed results (not just "Sorry!")
+            page_text = await page.evaluate("() => document.body.innerText.substring(0, 300)")
+            if "Sorry" not in page_text:
+                return rate
 
     return None
 
 
 async def _process_station(page, name: str, crs: str, rate_map: dict[str, float | None]) -> None:
-    """Fetch and record one station's daily rate; failures record None."""
-    try:
-        rate = await find_station_rate(page, name)
-        rate_map[crs] = rate
-        if rate is None:
-            logger.info("  → %s: no rate found", name)
-    # lucidlint: ignore broad-except one station's rate sync failure logs and continues with the rest
-    except Exception as e:
-        logger.warning("Failed to process %s (%s): %s", name, crs, e)
+    """Fetch and record one station's daily rate; failures record None.
+
+    One station is one unit of work: any failure is logged and recorded as
+    None, and the sync continues with the rest.
+    """
+    rate, failure = await capture_async(lambda: find_station_rate(page, name))
+    if failure is not None:
+        logger.warning("Failed to process %s (%s): %s", name, crs, failure)
         rate_map[crs] = None
         return
+    rate_map[crs] = rate
+    if rate is None:
+        logger.info("  → %s: no rate found", name)
 
 
-# lucidlint: ignore record-shape station records — CSV boundary owns the shape
-def _select_stations(args, all_stations) -> list[dict]:
+def _select_stations(args, all_stations: list[_StationRecord]) -> list[_StationRecord]:
     if args.crs:
         target = {c.strip().upper() for c in args.crs.split(",")}
         return [s for s in all_stations if s["crs"] in target]
     return list(all_stations)
 
 
-# lucidlint: ignore record-shape station records — CSV boundary owns the shape
-def _filter_missing(args, stations, existing) -> list[dict]:
+def _filter_missing(
+    args,
+    stations: list[_StationRecord],
+    existing: dict[str, float | None],
+) -> list[_StationRecord]:
     if not args.missing:
         return stations
     filtered = [s for s in stations if s["crs"] not in existing or existing.get(s["crs"]) is None]
@@ -390,6 +402,7 @@ def _filter_missing(args, stations, existing) -> list[dict]:
     return filtered
 
 
+# lucidlint: ignore latent-class main is the one-shot sync's thin CLI shell — threads args, no reuse axis (review-log)
 async def main():
     parser = argparse.ArgumentParser(description="Sync parking rates from APCOA via Playwright")
     parser.add_argument("--crs", help="Comma-separated CRS codes to process")
@@ -424,11 +437,11 @@ async def main():
 
             logger.info("Processing %s (%s)...", name, crs)
             if processed > 0:
-                await asyncio.sleep(REQUEST_DELAY_SECONDS)
+                await asyncio.sleep(_ApcoaRates.REQUEST_DELAY_SECONDS)
             await _process_station(page, name, crs, rate_map)
 
             processed += 1
-            if processed % CHECKPOINT_INTERVAL == 0:
+            if processed % _ApcoaRates.CHECKPOINT_INTERVAL == 0:
                 write_rates(all_stations, rate_map)
 
     write_rates(all_stations, rate_map)

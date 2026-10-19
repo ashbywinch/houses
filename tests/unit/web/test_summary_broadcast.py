@@ -112,7 +112,7 @@ async def _prime_property(rid: str) -> PropertyNodes:
     register_property(rid, prop)
 
     loop = asyncio.get_running_loop()
-    server_mod._main_loop = loop
+    server_mod._ServerRuntime.loop = loop
     set_after_refresh(server_mod._on_node_refreshed)
     return prop
 
@@ -121,7 +121,7 @@ async def _wire_broadcasts() -> tuple[Any, asyncio.Task]:
     import houses.web.broadcaster as bcast
 
     fake = _FakeWsClient()
-    bcast._websocket_clients.add(cast(Any, fake))
+    bcast._BroadcastState.websocket_clients.add(cast(Any, fake))
     task = asyncio.create_task(bcast._broadcaster())
     return fake, task
 
@@ -129,7 +129,7 @@ async def _wire_broadcasts() -> tuple[Any, asyncio.Task]:
 async def _stop_broadcasts(fake: Any, task: asyncio.Task) -> None:
     import houses.web.broadcaster as bcast
 
-    bcast._websocket_clients.discard(cast(Any, fake))
+    bcast._BroadcastState.websocket_clients.discard(cast(Any, fake))
     task.cancel()
 
 
@@ -215,7 +215,7 @@ async def test_refresh_routing_uses_the_declared_role_not_the_node_id():
     from houses.services_provider import get_services as _get_services
 
     loop = asyncio.get_running_loop()
-    server_mod._main_loop = loop
+    server_mod._ServerRuntime.loop = loop
     fake, task = await _wire_broadcasts()
     try:
         # A real settings-family node: its refresh re-pushes the payload
@@ -237,7 +237,7 @@ async def test_refresh_routing_uses_the_declared_role_not_the_node_id():
         await asyncio.sleep(0.3)
         assert _messages(fake) == [], "an untagged node must not broadcast anything"
     finally:
-        server_mod._main_loop = None
+        server_mod._ServerRuntime.loop = None
         await _stop_broadcasts(fake, task)
 
 
@@ -300,11 +300,11 @@ async def test_scenario_apply_pushes_updated_summary_to_websocket_clients():
     # Wire the production seam exactly as server startup does: the
     # DAG after-refresh hook hands updates to the broadcaster.
     loop = asyncio.get_running_loop()
-    server_mod._main_loop = loop
+    server_mod._ServerRuntime.loop = loop
     set_after_refresh(server_mod._on_node_refreshed)
 
     fake = _FakeWsClient()
-    bcast._websocket_clients.add(cast(Any, fake))
+    bcast._BroadcastState.websocket_clients.add(cast(Any, fake))
     broadcaster_task = asyncio.create_task(bcast._broadcaster())
     try:
         resp = client.post(
@@ -350,10 +350,10 @@ async def test_scenario_apply_pushes_updated_summary_to_websocket_clients():
             f"the pushed summary must carry the UPDATED totals: baseline={baseline} pushed={couple}"
         )
     finally:
-        bcast._websocket_clients.discard(cast(Any, fake))
+        bcast._BroadcastState.websocket_clients.discard(cast(Any, fake))
         broadcaster_task.cancel()
-        bcast._pending_notify_rids.clear()
-        server_mod._main_loop = None
+        bcast._BroadcastState.pending_notify_rids.clear()
+        server_mod._ServerRuntime.loop = None
 
 
 @pytest.mark.asyncio
@@ -370,7 +370,7 @@ async def test_failed_push_marks_the_rid_stale_on_the_listing_wire():
     rid = "stale-rid"
     await _prime_property(rid)
     fake = _FakeWsClient()
-    bcast._websocket_clients.add(cast(Any, fake))
+    bcast._BroadcastState.websocket_clients.add(cast(Any, fake))
 
     real_push = bcast._push_summary
 
@@ -382,7 +382,7 @@ async def test_failed_push_marks_the_rid_stale_on_the_listing_wire():
     bcast._push_summary = cast(Any, boom)
     task = asyncio.create_task(bcast._broadcaster())
     try:
-        bcast._broadcast_queue.put_nowait(rid)
+        bcast._BroadcastState.queue.put_nowait(rid)
         for _ in range(50):
             if rid in bcast.stale_push_rids():
                 break
@@ -397,7 +397,7 @@ async def test_failed_push_marks_the_rid_stale_on_the_listing_wire():
             return real_push(_rid)
 
         bcast._push_summary = cast(Any, no_boom)
-        bcast._broadcast_queue.put_nowait(rid)
+        bcast._BroadcastState.queue.put_nowait(rid)
         for _ in range(50):
             if rid not in bcast.stale_push_rids():
                 break

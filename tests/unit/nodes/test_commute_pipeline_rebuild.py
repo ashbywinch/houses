@@ -55,7 +55,7 @@ def _push(persons: list[Person]) -> None:
 def test_added_destination_gains_a_pipeline():
     import dag.scheduler as sched_mod
 
-    print("LEAK-DEBUG: processor_loop:", sched_mod._processor_loop, "| task:", sched_mod._processor_task)
+    print("LEAK-DEBUG: processor_loop:", sched_mod._ProcessorRuntime.loop, "| task:", sched_mod._ProcessorRuntime.task)
     _push(_persons("Pimlico"))
     rid = "42424242"
     prop = PropertyNodes(rid)

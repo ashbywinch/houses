@@ -14,13 +14,13 @@ import pytest
 
 import dag.persistence as per
 import houses.database as db
-from dag.scheduler import AsyncQueueScheduler, current_processor_thread, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, current_processor_thread, set_scheduler
 
 
 @pytest.fixture(autouse=True)
 def _inject_test_scheduler():
     """Each test gets an isolated scheduler — no global queue leakage."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
     yield
 
 
@@ -34,7 +34,7 @@ def _sqlite_memory():
     """
 
     saved = per._get_db
-    per.testing = True
+    per.Runtime.testing = True
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     per._get_db = lambda: conn
@@ -43,11 +43,11 @@ def _sqlite_memory():
     # synchronously (see teardown assert below).
     from houses.database import init_db as init_app_db
 
-    db.testing = True
+    db.Runtime.testing = True
     init_app_db()
     yield
-    per.testing = False
-    db.testing = False
+    per.Runtime.testing = False
+    db.Runtime.testing = False
     conn.close()
     per._get_db = saved
     assert current_processor_thread() is None, (

@@ -10,8 +10,6 @@ from dag.derived_node import DerivedNode
 from dag.user_input_node import UserInputNode
 from houses.model.domain import EquityInputs, Person, equity_line, home_equity_contributions, person_id_of
 
-_ZERO = Decimal("0")
-
 
 class EquityTotalNode(DerivedNode[Money]):
     """Total equity from all persons.
@@ -22,6 +20,8 @@ class EquityTotalNode(DerivedNode[Money]):
     When the property Status is "Current" (owner-occupied), cash_contributions
     are excluded — they apply only to new property purchases.
     """
+
+    _ZERO = Decimal("0")
 
     @property
     @override
@@ -40,7 +40,11 @@ class EquityTotalNode(DerivedNode[Money]):
         for p in ps:
             if not isinstance(p, Person) or getattr(p, "is_child", False):
                 continue
-            cash = _ZERO if is_current else getattr(p, "cash_contribution", Money(amount="0", currency="GBP")).amount
+            cash = (
+                EquityTotalNode._ZERO
+                if is_current
+                else getattr(p, "cash_contribution", Money(amount="0", currency="GBP")).amount
+            )
             # Every adult gets a line — even a £0 contribution — so the
             # unpack never collapses to a bare total (a current home with
             # cash-only people, or zero equity, must still show each
@@ -84,7 +88,7 @@ class EquityTotalNode(DerivedNode[Money]):
 
         ps = persons.value_or_none() or []
         contributions = home_equity_contributions(ps)
-        total = _ZERO
+        total = EquityTotalNode._ZERO
         for p in ps:
             pid = person_id_of(p)
             if pid not in contributions:

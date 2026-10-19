@@ -8,7 +8,8 @@ import subprocess
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from typing import Annotated, Any
+from functools import partial
+from typing import Annotated, Any, TypedDict
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,7 @@ import houses.services_provider as _sp
 import houses.town_desc as _town_desc
 import houses.web.api_router as _api_mod
 import houses.web.broadcaster as _broadcaster_mod
+from dag.guard import capture
 from dag.persistence import WireRecord, delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
 from dag.scheduler import (
@@ -37,25 +39,28 @@ from houses.admin_router import admin_router
 from houses.database import close_db as close_app_db
 from houses.database import get_connection
 from houses.database import init_db as init_app_db
+from houses.enriched_property import EnrichedProperty
 from houses.location import extract_postcode, upgrade_address
 from houses.nodes.bootstrap import load_property_nodes_from_db
-from houses.nodes.cutover import push_enriched_property
+from houses.nodes.cutover import SourceNodes, push_enriched_property
 from houses.nodes.property_nodes import PropertyNodes
 from houses.nodes.settings import set_app_mode
-from houses.property import EnrichedProperty, Property
+from houses.property import Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.services import Services
 from houses.settings import settings
 from houses.web.api_router import api_router
 from houses.web.auth import auth_router, effective_session_user, get_session_user
-from houses.web.json_utils import asdict_serializable
+from serialization import asdict_serializable
 
 logger = logging.getLogger(__name__)
 
 
-_main_loop: asyncio.AbstractEventLoop | None = None
-"""The uvicorn loop, captured at lifespan startup — the processor thread
-hands broadcaster pushes to it (see _on_node_refreshed)."""
+class _ServerRuntime:
+    """The uvicorn loop, captured at lifespan startup — the processor thread
+    hands broadcaster pushes to it (see _on_node_refreshed)."""
+
+    loop: asyncio.AbstractEventLoop | None = None
 
 
 def _log_prewarm_failure(task: asyncio.Task) -> None:
@@ -85,14 +90,14 @@ def _on_node_refreshed(node):
       re-renders settings, thresholds, and the what-if flag from it.
     - anything else: dropped. A node with no role is not broadcast; a
       new role must be declared at construction, then routed here."""
-    if _main_loop is None:
+    if _ServerRuntime.loop is None or _ServerRuntime.loop.is_closed():
         return
     kind = getattr(node, "refresh_kind", None)
     if kind == "property":
-        asyncio.run_coroutine_threadsafe(_broadcaster_mod.notify_node_refreshed_async(node), _main_loop)
+        asyncio.run_coroutine_threadsafe(_broadcaster_mod.notify_node_refreshed_async(node), _ServerRuntime.loop)
         return
     if kind == "settings":
-        asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _main_loop)
+        asyncio.run_coroutine_threadsafe(_broadcaster_mod.push_settings_updated(), _ServerRuntime.loop)
         return
     # An unknown or undeclared kind is dropped on purpose — but loudly:
     # a new node kind that was not given a role would otherwise vanish
@@ -122,29 +127,40 @@ def _seed_dag(rid2: str, enriched: EnrichedProperty, scrape_errors: dict[str, st
     PropertyNodes instance collides by node-id in the scheduler and its
     derived nodes starve behind the first instance's queued events).
     """
-    try:
-        registry = _sp.get_services().property_registry
-        prop = registry.get(rid2) or PropertyNodes(rid2)
-        push_enriched_property(
-            rid2,
-            enriched,
-            # lucidlint: ignore record-shape keyed collection, not a record — source-key → node lookup map
-            {
-                "rightmove_address": prop.rightmove_address,
-                "rightmove_url": prop.rightmove_url,
-                "rightmove_bedrooms": prop.rightmove_bedrooms,
-                "rightmove_price": prop.rightmove_price,
-                "rightmove_location": prop.rightmove_location,
-            },
-            scrape_errors=scrape_errors,
-        )
-        registry.register(rid2, prop)
-        logger.info("Seeded DAG for %s", rid2)
-        return True
-    # lucidlint: ignore broad-except boundary — DAG-seeding failures return False instead of raising
-    except Exception as e:
-        logger.warning("Failed to seed DAG for %s: %s", rid2, e)
+    _, failure = capture(partial(_seed_nodes, rid2, enriched, scrape_errors))
+    if failure is not None:
+        logger.warning("Failed to seed DAG for %s: %s", rid2, failure)
         return False
+    return True
+
+
+def _seed_nodes(rid2: str, enriched: EnrichedProperty, scrape_errors: dict[str, str] | None) -> None:
+    """Push *enriched* onto the rid's nodes and register them."""
+    registry = _sp.get_services().property_registry
+    prop = registry.get(rid2) or PropertyNodes(rid2)
+    # The property's node registry, keyed by DAG node key — built by
+    # assignment, not a record literal: the map is the callee's keyed
+    # collection (SourceNodes), not a shape of its own.
+    sources: SourceNodes = {}
+    sources["rightmove_address"] = prop.rightmove_address
+    sources["rightmove_url"] = prop.rightmove_url
+    sources["rightmove_bedrooms"] = prop.rightmove_bedrooms
+    sources["rightmove_price"] = prop.rightmove_price
+    sources["rightmove_location"] = prop.rightmove_location
+    push_enriched_property(rid2, enriched, sources, scrape_errors=scrape_errors)
+    registry.register(rid2, prop)
+    logger.info("Seeded DAG for %s", rid2)
+
+
+def _require_setting(value: str, message: str, error: str) -> None:
+    """Fail fast when a required setting is missing.
+
+    ``message`` names the missing env var and the fix; ``error`` is the
+    RuntimeError message the caller raises with.
+    """
+    if not value:
+        logger.error(message)
+        raise RuntimeError(error)
 
 
 @asynccontextmanager
@@ -172,16 +188,21 @@ async def lifespan(_app: FastAPI):
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    if not settings.web_client_id:
-        logger.error("HOUSES_GOOGLE_WEB_CLIENT_ID is not set. Configure Google OAuth in .env.")
-        raise RuntimeError("Authentication not configured")
-    # lucidlint: ignore duplicate-block parallel settings-validation guards — each missing setting names its own env
-    if not settings.web_client_secret:
-        logger.error("HOUSES_GOOGLE_WEB_CLIENT_SECRET is missing. Set it in .env.")
-        raise RuntimeError("Google Client Secret not configured")
-    if not settings.session_secret:
-        logger.error("HOUSES_SESSION_SECRET is empty. Set a non-empty value in .env.")
-        raise RuntimeError("Session secret not configured")
+    _require_setting(
+        value=settings.web_client_id,
+        message="HOUSES_GOOGLE_WEB_CLIENT_ID is not set. Configure Google OAuth in .env.",
+        error="Authentication not configured",
+    )
+    _require_setting(
+        value=settings.web_client_secret,
+        message="HOUSES_GOOGLE_WEB_CLIENT_SECRET is missing. Set it in .env.",
+        error="Google Client Secret not configured",
+    )
+    _require_setting(
+        value=settings.session_secret,
+        message="HOUSES_SESSION_SECRET is empty. Set a non-empty value in .env.",
+        error="Session secret not configured",
+    )
 
     init_dag_db(settings.sqlite_path)
     init_app_db()
@@ -195,8 +216,7 @@ async def lifespan(_app: FastAPI):
     # persistence; the event loop never runs cascade work (see
     # .kilo/plans/dag-save-queue.md). The broadcaster stays on THIS loop;
     # the processor hands pushes to it via run_coroutine_threadsafe.
-    global _main_loop
-    _main_loop = asyncio.get_running_loop()
+    _ServerRuntime.loop = asyncio.get_running_loop()
     set_after_refresh(_on_node_refreshed)
     start_processor()
     # Pre-warm the front-page listing: the first real request after a
@@ -274,18 +294,12 @@ async def _require_auth(request, call_next):
     return await call_next(request)
 
 
-@dataclass(frozen=True)
-class _PropertyListing:
+class _PropertyListing(TypedDict):
     """The /properties response: the legacy tab selector echo plus one
     PropertyNodes JSON document per registered property."""
 
     tab: str
     properties: list[dict]
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
-        return dict(tab=self.tab, properties=self.properties)
 
 
 @app.get("/properties")
@@ -307,21 +321,15 @@ async def list_properties(
         prop = _property_registry.get_property(rid)
         if prop is None:
             continue
-        props.append(await prop.to_json())
-    return _PropertyListing(tab=tab, properties=props).to_dict()
+        props.append((await prop.view()).to_dict())
+    return _PropertyListing(tab=tab, properties=props)
 
 
-@dataclass(frozen=True)
-class _DuplicateError:
+class _DuplicateError(TypedDict):
     """The 400 response body when a property already exists."""
 
     status: str
     error: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(status=self.status, error=self.error)
 
 
 def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
@@ -337,7 +345,7 @@ def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
             content=_DuplicateError(
                 status="error",
                 error=f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
-            ).to_dict(),
+            ),
             status_code=400,
         )
     return None
@@ -473,7 +481,7 @@ async def upsert_property(
 def _require_superuser(request: Request) -> None:
     """403 unless the request carries a signed-in superuser session."""
     user = effective_session_user(request)
-    if not user or not user.get("is_superuser"):
+    if not user or not user.is_superuser:
         raise HTTPException(status_code=403, detail="Superuser access required")
 
 
@@ -483,7 +491,7 @@ def _job_wire(job):
 
 
 @dataclass(frozen=True)
-class _ScrapedReportJson:
+class _ScrapedReport:
     """The scraped-listing block of a worker's report body (wire shape).
 
     The worker's ``data`` object: scraped TEXT fields, guarded at the DAG
@@ -498,9 +506,7 @@ class _ScrapedReportJson:
     longitude: Any
 
     @classmethod
-    # lucidlint: ignore record-shape from_dict parses the worker's report body — serialization boundary
-    # (coding-standards.md)
-    def from_dict(cls, raw: dict) -> "_ScrapedReportJson":
+    def from_dict(cls, raw: Mapping[str, Any]) -> "_ScrapedReport":
         return cls(
             url=raw.get("url", ""),
             address=raw.get("address", ""),
@@ -512,7 +518,7 @@ class _ScrapedReportJson:
         )
 
 
-async def _apply_scraped_report(rid: str, data: _ScrapedReportJson) -> bool:
+async def _apply_scraped_report(rid: str, data: _ScrapedReport) -> bool:
     """Push a worker's scraped listing into the property's DAG — the same
     seed the sync add path performs, sourced entirely from the report.
     Returns False when the DAG seed fails (the caller re-queues the job)."""
@@ -562,7 +568,7 @@ async def report_scrape(request: Request, body: Mapping[str, Any]) -> JSONRespon
     if not isinstance(job_id, int):
         raise HTTPException(status_code=422, detail="job_id required")
     if body.get("ok"):
-        data = _ScrapedReportJson.from_dict(body.get("data") or {})
+        data = _ScrapedReport.from_dict(body.get("data") or {})
         # A login wall / block page can parse to an empty address — such a
         # "success" would seed a garbage property. Reject it: the job is
         # re-queued with backoff instead of deleted.
@@ -583,18 +589,18 @@ async def report_scrape(request: Request, body: Mapping[str, Any]) -> JSONRespon
     return JSONResponse(content={"status": "ok"})
 
 
-@dataclass(frozen=True)
-class _ScrapeStatus:
-    """Queue depth by status as serialized to the /api/scrapes/status response."""
+class _ScrapeCounts(TypedDict):
+    """Queue depth by status as serialized to /api/scrapes/status."""
 
     pending: int
     in_progress: int
     failed: int
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(scrapes=dict(pending=self.pending, in_progress=self.in_progress, failed=self.failed))
+
+class _ScrapeStatus(TypedDict):
+    """Queue depth by status as serialized to the /api/scrapes/status response."""
+
+    scrapes: _ScrapeCounts
 
 
 @app.get("/api/scrapes/status", response_model=None)
@@ -603,7 +609,9 @@ async def scrape_status(request: Request) -> JSONResponse:
     _require_superuser(request)
     st = _scrape_queue.scrape_queue_status()
     return JSONResponse(
-        content=_ScrapeStatus(pending=st.pending, in_progress=st.in_progress, failed=st.failed).to_dict()
+        content=_ScrapeStatus(
+            scrapes=_ScrapeCounts(pending=st.pending, in_progress=st.in_progress, failed=st.failed)
+        )
     )
 
 
@@ -689,7 +697,7 @@ async def remove_property(rid: str) -> JSONResponse:
 
 
 @dataclass(frozen=True)
-class HealthProbeWire(WireRecord):
+class HealthProbe(WireRecord):
     """The /health probe's wire payload: liveness plus DB-readiness."""
 
     status: str
@@ -699,7 +707,7 @@ class HealthProbeWire(WireRecord):
 
 def _health_response(db: str, last_write: str) -> JSONResponse:
     """The probe's response for one outcome (``db`` is ``ok`` or ``error``)."""
-    return JSONResponse(content=asdict(HealthProbeWire(status="ok", db=db, last_write=last_write)))
+    return JSONResponse(content=asdict(HealthProbe(status="ok", db=db, last_write=last_write)))
 
 
 @app.get("/health")

@@ -1,3 +1,100 @@
 {
- "errors": []
+ "errors": [
+  {
+   "line": 385,
+   "column": 22,
+   "stop_line": 385,
+   "stop_column": 30,
+   "path": "tests/unit/test_commute_drive_isochrone.py",
+   "code": -2,
+   "name": "bad-argument-type",
+   "description": "Argument `dict[str, dict[Unknown, Unknown] | list[dict[str, list[list[float]] | str | dict[str, float | str]]]]` is not assignable to parameter `searches` with type `SearchesPayload` in function `tools.commute.drive_isochrone._map_html`",
+   "concise_description": "Argument `dict[str, dict[Unknown, Unknown] | list[dict[str, list[list[float]] | str | dict[str, float | str]]]]` is not assignable to parameter `searches` with type `SearchesPayload` in function `tools.commute.drive_isochrone._map_html`",
+   "severity": "error"
+  },
+  {
+   "line": 413,
+   "column": 22,
+   "stop_line": 413,
+   "stop_column": 30,
+   "path": "tests/unit/test_commute_drive_isochrone.py",
+   "code": -2,
+   "name": "bad-argument-type",
+   "description": "Argument `dict[str, dict[Unknown, Unknown] | list[dict[str, list[list[float]] | str | dict[str, float | str]]]]` is not assignable to parameter `searches` with type `SearchesPayload` in function `tools.commute.drive_isochrone._map_html`",
+   "concise_description": "Argument `dict[str, dict[Unknown, Unknown] | list[dict[str, list[list[float]] | str | dict[str, float | str]]]]` is not assignable to parameter `searches` with type `SearchesPayload` in function `tools.commute.drive_isochrone._map_html`",
+   "severity": "error"
+  },
+  {
+   "line": 940,
+   "column": 41,
+   "stop_line": 940,
+   "stop_column": 56,
+   "path": "tests/unit/test_commute_drive_isochrone.py",
+   "code": -2,
+   "name": "bad-assignment",
+   "description": "`Literal['not a polygon']` is not assignable to TypedDict key `polygon` with type `list[tuple[float, float]]`",
+   "concise_description": "`Literal['not a polygon']` is not assignable to TypedDict key `polygon` with type `list[tuple[float, float]]`",
+   "severity": "error"
+  },
+  {
+   "line": 949,
+   "column": 45,
+   "stop_line": 949,
+   "stop_column": 49,
+   "path": "tests/unit/test_commute_drive_isochrone.py",
+   "code": -2,
+   "name": "bad-assignment",
+   "description": "`None` is not assignable to TypedDict key `destination` with type `SearchDestination`\n  The declared type does not allow `None`. Consider changing the declared type to `SearchDestination | None`.",
+   "concise_description": "`None` is not assignable to TypedDict key `destination` with type `SearchDestination`",
+   "severity": "error"
+  },
+  {
+   "line": 958,
+   "column": 5,
+   "stop_line": 958,
+   "stop_column": 41,
+   "path": "tests/unit/test_commute_drive_isochrone.py",
+   "code": -2,
+   "name": "unsupported-operation",
+   "description": "Cannot set item in `list[tuple[float, float]]`\n  No matching overload found for function `list.__setitem__` called with arguments: (Literal[0], list[str])\n  Possible overloads:\n    (key: SupportsIndex, value: tuple[float, float], /) -> None [closest match]\n    (key: slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None], value: Iterable[tuple[float, float]], /) -> None\n  Argument `list[str]` is not assignable to parameter `value` with type `tuple[float, float]` in function `list.__setitem__`",
+   "concise_description": "Cannot set item in `list[tuple[float, float]]`",
+   "severity": "error"
+  },
+  {
+   "line": 967,
+   "column": 45,
+   "stop_line": 967,
+   "stop_column": 54,
+   "path": "tests/unit/test_commute_drive_isochrone.py",
+   "code": -2,
+   "name": "bad-assignment",
+   "description": "`Literal['corrupt']` is not assignable to TypedDict key `destination` with type `SearchDestination`",
+   "concise_description": "`Literal['corrupt']` is not assignable to TypedDict key `destination` with type `SearchDestination`",
+   "severity": "error"
+  },
+  {
+   "line": 182,
+   "column": 33,
+   "stop_line": 182,
+   "stop_column": 41,
+   "path": "tests/unit/test_commute_validate.py",
+   "code": -2,
+   "name": "bad-argument-type",
+   "description": "Argument `list[SearchRecord]` is not assignable to parameter `searches` with type `list[dict[str, Any]]` in function `tools.commute.validate.uncovered_cells`",
+   "concise_description": "Argument `list[SearchRecord]` is not assignable to parameter `searches` with type `list[dict[str, Any]]` in function `tools.commute.validate.uncovered_cells`",
+   "severity": "error"
+  },
+  {
+   "line": 190,
+   "column": 28,
+   "stop_line": 190,
+   "stop_column": 47,
+   "path": "tests/unit/test_commute_validate.py",
+   "code": -2,
+   "name": "bad-argument-type",
+   "description": "Argument `list[SearchRecord]` is not assignable to parameter `searches` with type `list[dict[str, Any]]` in function `tools.commute.validate.uncovered_cells`",
+   "concise_description": "Argument `list[SearchRecord]` is not assignable to parameter `searches` with type `list[dict[str, Any]]` in function `tools.commute.validate.uncovered_cells`",
+   "severity": "error"
+  }
+ ]
 }

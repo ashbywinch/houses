@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from money import Money
 
@@ -15,43 +15,16 @@ from houses.location import upgrade_address
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
 
+type _LabelMap = dict[str, str]
+type _SourcesMap = dict[str, UserInputNode]
 logger = logging.getLogger(__name__)
 
-SOURCE_LABELS: dict[str, str] = {
-    "rightmove_url": "Browser extension",
-    "rightmove_address": "Rightmove",
-    "rightmove_bedrooms": "Rightmove",
-    "rightmove_price": "Rightmove",
-    "rightmove_location": "Rightmove map",
-    "precise_location": "User location",
-    "corrected_address": "User correction",
-    "user_entered_address": "User correction",
-}
 
-COMMENT_LABELS: dict[str, str] = {
-    "comment_status": "Sheet",
-    "comment_status_reason": "Sheet",
-    "comment_group_notes": "Sheet",
-    "comment_ashby_comments": "Sheet",
-    "comment_design_needed": "Sheet",
-    "comment_planning_needed": "Sheet",
-}
-
-COMMENT_COLUMNS: dict[str, str] = {
-    "comment_status": "Status",
-    "comment_status_reason": "Status Reason",
-    "comment_group_notes": "Group Notes / WhatsApp",
-    "comment_ashby_comments": "Ashby comments",
-    "comment_design_needed": "Design Needed",
-    "comment_planning_needed": "Planning Needed",
-}
-
-
-def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng: str, what: str) -> bool:
+def _push_geo_coords(sources: _SourcesMap, key: str, lat: str, lng: str, what: str) -> bool:
     """Push a sheet coordinate pair into sources; False when the cells aren't numeric."""
     try:
         flat, flng = float(lat), float(lng)
-        sources[key].push(GeoPoint(flat, flng), SOURCE_LABELS[key])
+        sources[key].push(GeoPoint(flat, flng), SheetRow.SOURCE_LABELS[key])
         return True
     except (ValueError, TypeError) as exc:
         logger.warning("Invalid %s coords: lat=%s lng=%s (%s)", what, lat, lng, exc)
@@ -61,9 +34,39 @@ def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng:
 class SheetRow:
     """One sheet row plus the input nodes it feeds; the push methods
     materialise the row's cells onto those nodes."""
+    # Source node key → the provenance label pushed with the value ("Sheet"
+    # is the fallback when a key has no label).
+    SOURCE_LABELS: ClassVar[_LabelMap] = {
+        "rightmove_url": "Browser extension",
+        "rightmove_address": "Rightmove",
+        "rightmove_bedrooms": "Rightmove",
+        "rightmove_price": "Rightmove",
+        "rightmove_location": "Rightmove map",
+        "precise_location": "User location",
+        "corrected_address": "User correction",
+        "user_entered_address": "User correction",
+    }
+    # Comment node key → provenance label.
+    COMMENT_LABELS: ClassVar[_LabelMap] = {
+        "comment_status": "Sheet",
+        "comment_status_reason": "Sheet",
+        "comment_group_notes": "Sheet",
+        "comment_ashby_comments": "Sheet",
+        "comment_design_needed": "Sheet",
+        "comment_planning_needed": "Sheet",
+    }
+    # Comment node key → the sheet column header it maps to.
+    COMMENT_COLUMNS: ClassVar[_LabelMap] = {
+        "comment_status": "Status",
+        "comment_status_reason": "Status Reason",
+        "comment_group_notes": "Group Notes / WhatsApp",
+        "comment_ashby_comments": "Ashby comments",
+        "comment_design_needed": "Design Needed",
+        "comment_planning_needed": "Planning Needed",
+    }
 
-    row: dict[str, Any]
-    sources: dict[str, UserInputNode]
+    row: Mapping[str, Any]
+    sources: _SourcesMap
 
     def push_cell(
         self,
@@ -75,7 +78,7 @@ class SheetRow:
         """Push one stripped sheet cell into a source node; False (no push)
         when the node isn't wired, the cell is blank, or the parser rejects
         it — callers count only real pushes.  The label comes from
-        SOURCE_LABELS (Sheet fallback), matching the per-key push chain."""
+        SheetRow.SOURCE_LABELS (Sheet fallback), matching the per-key push chain."""
         if source_key not in self.sources:
             return False
         val = (self.row.get(col_name) or "").strip()
@@ -85,7 +88,7 @@ class SheetRow:
             val = parse(val)
             if val is None:
                 return False
-        self.sources[source_key].push(val, SOURCE_LABELS.get(source_key, "Sheet"))
+        self.sources[source_key].push(val, SheetRow.SOURCE_LABELS.get(source_key, "Sheet"))
         return True
 
     def push_upgraded_address(self) -> int:
@@ -97,24 +100,24 @@ class SheetRow:
         upgraded = upgrade_address(address, postcode)
         pushed = 0
         if upgraded != address and "user_entered_address" in self.sources:
-            self.sources["user_entered_address"].push(upgraded, SOURCE_LABELS["user_entered_address"])
+            self.sources["user_entered_address"].push(upgraded, SheetRow.SOURCE_LABELS["user_entered_address"])
             pushed += 1
         if "corrected_address" in self.sources:
-            self.sources["corrected_address"].push(upgraded, SOURCE_LABELS["corrected_address"])
+            self.sources["corrected_address"].push(upgraded, SheetRow.SOURCE_LABELS["corrected_address"])
             pushed += 1
         return pushed
 
     def push_comment_cells(self) -> int:
         """Push every non-blank comment column; floats coerced for float nodes."""
         pushed = 0
-        for source_key, col_name in COMMENT_COLUMNS.items():
+        for source_key, col_name in SheetRow.COMMENT_COLUMNS.items():
             if source_key not in self.sources:
                 continue
             val = (self.row.get(col_name) or "").strip()
             if not val:
                 continue
             src = self.sources[source_key]
-            label = COMMENT_LABELS.get(source_key, "Sheet")
+            label = SheetRow.COMMENT_LABELS.get(source_key, "Sheet")
             if isinstance(src, UserInputNode) and src._value_type is float:
                 try:
                     val = float(val)
@@ -144,9 +147,8 @@ def _parse_price(value: str) -> Money | None:
     return Money(cleaned, "GBP")
 
 
-# lucidlint: ignore record-shape external sheet row — keyed collection, not a fixed record shape (review-log)
 # lucidlint: ignore unused sheet-import entry point exercised by the source-values regression suite — startup uses the
-def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -> int:
+def bootstrap_from_row(row: Mapping[str, Any], sources: _SourcesMap) -> int:
     sheet = SheetRow(row=row, sources=sources)
     pushed = 0
 
@@ -171,13 +173,12 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
     return pushed
 
 
+class _PropertyRidContract:
+    """Rightmove property IDs are 6-10 digits; anything shorter or longer
+    is test data that must never enter the production DB."""
 
-
-# Rightmove property IDs are 6-10 digits; anything shorter or longer is
-# test data that must not enter the production DB.
-_RID_MIN_LENGTH = 6
-_RID_MAX_LENGTH = 10
-
+    MIN_LENGTH = 6
+    MAX_LENGTH = 10
 
 
 def load_property_nodes_from_db() -> int:
@@ -194,7 +195,7 @@ def load_property_nodes_from_db() -> int:
         # do, startup fails loudly instead of silently serving them:
         # delete the offending rows immediately (back the rows up first)
         # and fix whatever wrote them.
-        if not rid.isdigit() or not _RID_MIN_LENGTH <= len(rid) <= _RID_MAX_LENGTH:
+        if not rid.isdigit() or not _PropertyRidContract.MIN_LENGTH <= len(rid) <= _PropertyRidContract.MAX_LENGTH:
             raise RuntimeError(
                 f"node_results contains test-data rows under invalid property "
                 f"RID {rid!r}. Test data must never live in the real DB — "

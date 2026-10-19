@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """NeTEx XML parsing and bus fare zone extraction."""
 
 from __future__ import annotations
@@ -7,51 +6,35 @@ import csv
 import logging
 import math
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+from pydantic import field_serializer
+
+from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
-
-NS = {
-    "netex": "http://www.netex.org.uk/netex",
-    "fxc": "http://www.netex.org.uk/fxc",
-}
-
-NATIONAL_MAX_SINGLE_GBP = 3.00
-
 STATIONS_CSV = Path("data/stations.csv")
 NAPTAN_CACHE = Path("data/bods_stops.csv")
-NAPTAN_DOWNLOAD = "https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv"
-GRID_COLS = 36
-GRID_ROWS = 18
-GRID_CELL_DEG = 0.5
-# lucidlint: ignore magic-number -7.5 is the named constant's value — scanner flags negatives in constant definitions
-GRID_LON_ORIGIN = -7.5
-GRID_LAT_ORIGIN = 49.5
-COORD_ROUND_DIGITS = 5
 
+type _StationGrid = list[list[list[Station]]]
+type _ParsedStop = tuple[str, NetexStop]
+type _ZoneParse = tuple[dict[str, list[str]], dict[str, str]]
+type _DmeParse = tuple[dict[str, dict[str, float]], dict[str, str]]
 
-@dataclass(frozen=True)
-class ParseResult:
+# ── the parser's output records ──────────────────────────────────────
+# Each record's dict IS its wire form: the model declares the key order and
+# the nested records, and ``to_dict`` comes from the boundary base.
+
+class ParseResult(SerializableAsDict):
     """The parser's output record for one NeTEx document."""
 
     stop_zones: dict[str, str]
-    stop_coords: list[dict]
+    stop_coords: list[StopCoord]
     zone_fares: dict[str, dict[str, float]]
-    network_fares: list[dict]
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here
-        # (coding-standards.md)
-        return dict(
-            stop_zones=self.stop_zones,
-            stop_coords=self.stop_coords,
-            zone_fares=self.zone_fares,
-            network_fares=self.network_fares,
-        )
+    network_fares: list[NetworkFare]
 
 
 def _first_found(*elements):
@@ -78,8 +61,7 @@ class Station:
     long: float
 
 
-@dataclass(frozen=True)
-class NetexStop:
+class NetexStop(SerializableAsDict):
     """A NeTEx ScheduledStopPoint record: name, coordinates (when present),
     and whether it lies near a railway station."""
 
@@ -88,20 +70,8 @@ class NetexStop:
     lon: float | None
     near_station: bool
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        """Serialized shape consumed by the commute-map builders."""
-        # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-        return dict(
-            name=self.name,
-            lat=self.lat,
-            lon=self.lon,
-            near_station=self.near_station,
-        )
 
-
-@dataclass(frozen=True)
-class StopCoord:
+class StopCoord(SerializableAsDict):
     """A zone member's map entry: stop name, rounded coordinates, zone id."""
 
     name: str
@@ -109,24 +79,19 @@ class StopCoord:
     lon: float
     zone: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-        return dict(name=self.name, lat=self.lat, lon=self.lon, zone=self.zone)
 
-
-@dataclass(frozen=True)
-class NetworkFare:
+class NetworkFare(SerializableAsDict):
     """A network-wide fare (day/return) that is not scoped to a zone pair."""
 
     price: float
     product_type: str
     covered_stops: set[str]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-        return dict(price=self.price, product_type=self.product_type, covered_stops=sorted(self.covered_stops))
+    @field_serializer("covered_stops")
+    @staticmethod
+    def _serialize_covered_stops(stops: set[str]) -> list[str]:
+        """The wire shape is a sorted list — a set is not JSON."""
+        return sorted(stops)
 
 
 def load_stations() -> list[Station]:
@@ -163,8 +128,7 @@ def _naptan_from_rows(rows):
     return naptan
 
 
-# lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
-def load_naptan_stops() -> dict[str, tuple[float, float]] | None:
+def load_naptan_stops() -> Mapping[str, tuple[float, float]] | None:
     naptan: dict[str, tuple[float, float]] = {}
 
     if NAPTAN_CACHE.is_file():
@@ -174,9 +138,9 @@ def load_naptan_stops() -> dict[str, tuple[float, float]] | None:
         logger.info("Loaded %d NaPTAN stop coordinates", len(naptan))
         return naptan
 
-    logger.info("Downloading NaPTAN stop data from %s (101MB)", NAPTAN_DOWNLOAD)
+    logger.info("Downloading NaPTAN stop data from %s (101MB)", NetexFareParser.NAPTAN_DOWNLOAD)
     try:
-        resp = httpx.get(NAPTAN_DOWNLOAD, timeout=300, follow_redirects=True)
+        resp = httpx.get(NetexFareParser.NAPTAN_DOWNLOAD, timeout=300, follow_redirects=True)
         resp.raise_for_status()
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
         logger.warning("Failed to download NaPTAN data: %s", e)
@@ -201,35 +165,6 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-# lucidlint: ignore record-shape spatial grid — indexed collection, not a record (review-log)
-def _build_station_grid(stations: list[Station]) -> list[list[list[Station]]]:
-    grid: list[list[list[Station]]] = [[[] for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
-    for s in stations:
-        col = int((s.long - GRID_LON_ORIGIN) / GRID_CELL_DEG)
-        row = int((s.lat - GRID_LAT_ORIGIN) / GRID_CELL_DEG)
-        if 0 <= col < GRID_COLS and 0 <= row < GRID_ROWS:
-            grid[row][col].append(s)
-    logger.info("Built station grid (%d×%d cells)", len(grid), len(grid[0]))
-    return grid
-
-
-STATION_GRID: list[list[list[Station]]] = []
-
-
-def is_near_station(lat: float, lon: float, stations: list[Station], max_dist_km: float = 0.2) -> bool:
-    global STATION_GRID
-    if not STATION_GRID:
-        STATION_GRID = _build_station_grid(stations)
-    col = int((lon - GRID_LON_ORIGIN) / GRID_CELL_DEG)
-    row = int((lat - GRID_LAT_ORIGIN) / GRID_CELL_DEG)
-    for dr in (-1, 0, 1):
-        for dc in (-1, 0, 1):
-            r, c = row + dr, col + dc
-            if 0 <= r < GRID_ROWS and 0 <= c < GRID_COLS:
-                for s in STATION_GRID[r][c]:
-                    if haversine_km(lat, lon, s.lat, s.long) <= max_dist_km:
-                        return True
-    return False
 
 
 def _classify_fare_product_type(name: str) -> str | None:
@@ -249,13 +184,11 @@ def _as_float(text: str | None) -> float | None:
         return None
 
 
-# lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
-# lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
 def parse_netex_fares(
     xml_str: str,
     stations: list[Station],
-    naptan: dict[str, tuple[float, float]] | None = None,
-) -> dict | None:
+    naptan: Mapping[str, tuple[float, float]] | None = None,
+) -> ParseResult | None:
     try:
         root = ET.fromstring(xml_str)
     except ET.ParseError as e:
@@ -272,8 +205,7 @@ class _StopCoordinates:
     lat: float | None
     lon: float | None
 
-        # lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
-    def with_fallback(self, naptan: dict[str, tuple[float, float]], atco: str) -> _StopCoordinates:
+    def with_fallback(self, naptan: Mapping[str, tuple[float, float]], atco: str) -> _StopCoordinates:
         """NaPTAN lookup fills both coordinates when the XML carried none."""
         if self.lat is None and self.lon is None:
             coords = naptan.get(atco.removeprefix("atco:"))
@@ -281,7 +213,7 @@ class _StopCoordinates:
                 return _StopCoordinates(lat=coords[0], lon=coords[1])
         return self
 
-
+# lucidlint: ignore latent-class one parse surface — 27 methods; process-class parser is the domain noun (review-log)
 class NetexFareParser:
     """One-shot parser for a BODS NeTEx fares XML document.
 
@@ -290,23 +222,63 @@ class NetexFareParser:
     output record set on :meth:`run`.
     """
 
-    # lucidlint: ignore record-shape atco-to-coords lookup table — keyed collection, not a record (review-log)
+    NS = {
+        "netex": "http://www.netex.org.uk/netex",
+        "fxc": "http://www.netex.org.uk/fxc",
+    }
+    NAPTAN_DOWNLOAD = "https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv"
+    GRID_COLS = 36
+    GRID_ROWS = 18
+    GRID_CELL_DEG = 0.5
+    # lucidlint: ignore magic-number geographic bounding-box origin — west edge, Longitude −7.5 (data verdict)
+    GRID_LON_ORIGIN = -7.5
+    GRID_LAT_ORIGIN = 49.5
+    COORD_ROUND_DIGITS = 5
+
     def __init__(
         self,
         root: ET.Element,
         stations: list[Station],
-        naptan: dict[str, tuple[float, float]] | None = None,
+        naptan: Mapping[str, tuple[float, float]] | None = None,
     ):
         self.root: ET.Element = root
         self.stations: list[Station] = stations
-        self.naptan: dict[str, tuple[float, float]] | None = naptan
+        self.naptan: Mapping[str, tuple[float, float]] | None = naptan
         self.stops: dict[str, NetexStop] = {}
         self.zone_fares: dict[str, dict[str, float]] = {}
         self.dme_zone_pairs: dict[str, str] = {}
-        self.network_fares: list[dict] = []
+        self.network_fares: list[NetworkFare] = []
+        self._station_grid: _StationGrid | None = None
 
-    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-    def run(self) -> dict | None:
+    def _build_station_grid(self) -> _StationGrid:
+        grid: list[list[list[Station]]] = [
+            [[] for _ in range(self.GRID_COLS)] for _ in range(self.GRID_ROWS)
+        ]
+        for s in self.stations:
+            col = int((s.long - self.GRID_LON_ORIGIN) / self.GRID_CELL_DEG)
+            row = int((s.lat - self.GRID_LAT_ORIGIN) / self.GRID_CELL_DEG)
+            if 0 <= col < self.GRID_COLS and 0 <= row < self.GRID_ROWS:
+                grid[row][col].append(s)
+        logger.info("Built station grid (%d×%d cells)", len(grid), len(grid[0]))
+        return grid
+
+    def _is_near_station(self, lat: float, lon: float, max_dist_km: float = 0.2) -> bool:
+        if self._station_grid is None:
+            self._station_grid = self._build_station_grid()
+        grid = self._station_grid
+        col = int((lon - self.GRID_LON_ORIGIN) / self.GRID_CELL_DEG)
+        row = int((lat - self.GRID_LAT_ORIGIN) / self.GRID_CELL_DEG)
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                r, c = row + dr, col + dc
+                if 0 <= r < self.GRID_ROWS and 0 <= c < self.GRID_COLS:
+                    for s in grid[r][c]:
+                        if haversine_km(lat, lon, s.lat, s.long) <= max_dist_km:
+                            return True
+        return False
+
+
+    def run(self) -> ParseResult | None:
         self._parse_stops()
         if not self.stops:
             logger.warning("No stops found in NeTEx data")
@@ -334,10 +306,10 @@ class NetexFareParser:
 
         return ParseResult(
             stop_zones=stop_zones,
-            stop_coords=[sc.to_dict() for sc in stop_coords],
+            stop_coords=stop_coords,
             zone_fares=self.zone_fares,
             network_fares=self.network_fares,
-        ).to_dict()
+        )
 
     def _parse_stops(self) -> None:
         for ssp in self.root.iter():
@@ -350,16 +322,15 @@ class NetexFareParser:
             atco, entry = stop
             if atco in self.stops:
                 continue
-            near_station = entry.lat is not None and entry.lon is not None and is_near_station(
-                entry.lat, entry.lon, self.stations
+            near_station = entry.lat is not None and entry.lon is not None and self._is_near_station(
+                entry.lat, entry.lon
             )
             self.stops[atco] = NetexStop(name=entry.name, lat=entry.lat, lon=entry.lon, near_station=near_station)
 
-    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-    def _parse_stop_point(self, ssp: ET.Element) -> tuple[str, NetexStop] | None:
+    def _parse_stop_point(self, ssp: ET.Element) -> _ParsedStop | None:
         name_el = _first_found(
-            ssp.find(".//netex:Name", NS),
-            ssp.find(".//netex:name", NS),
+            ssp.find(".//netex:Name", self.NS),
+            ssp.find(".//netex:name", self.NS),
         )
         # lucidlint: ignore special-case — _first_found's None is the shared contract; a sentinel alters fallbacks
         if name_el is None:
@@ -369,8 +340,8 @@ class NetexFareParser:
             return None
 
         atco_el = _first_found(
-            ssp.find(".//netex:AtcoCode", NS),
-            ssp.find(".//netex:atcoCode", NS),
+            ssp.find(".//netex:AtcoCode", self.NS),
+            ssp.find(".//netex:atcoCode", self.NS),
         )
         atco = atco_el.text.strip() if atco_el is not None and atco_el.text else (ssp.get("id", "") or "").strip()
         if not atco:
@@ -384,12 +355,12 @@ class NetexFareParser:
     @staticmethod
     def _stop_coordinates(ssp: ET.Element) -> _StopCoordinates:
         lat_el = _first_found(
-            ssp.find(".//netex:Latitude", NS),
-            ssp.find(".//netex:latitude", NS),
+            ssp.find(".//netex:Latitude", NetexFareParser.NS),
+            ssp.find(".//netex:latitude", NetexFareParser.NS),
         )
         lon_el = _first_found(
-            ssp.find(".//netex:Longitude", NS),
-            ssp.find(".//netex:longitude", NS),
+            ssp.find(".//netex:Longitude", NetexFareParser.NS),
+            ssp.find(".//netex:longitude", NetexFareParser.NS),
         )
         return _StopCoordinates(
             lat=float(lat_el.text) if lat_el is not None and lat_el.text else None,
@@ -410,16 +381,15 @@ class NetexFareParser:
         logger.info("Found %d total stops, %d near stations", len(self.stops), near_count)
         return True
 
-    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-    def _parse_fare_zones(self) -> tuple[dict[str, list[str]], dict[str, str]]:
+    def _parse_fare_zones(self) -> _ZoneParse:
         zones: dict[str, list[str]] = {}
         for zone_el in self.root.iter():
             tag = _unprefixed(zone_el.tag)
             if tag not in ("FareZone", "fareZone"):
                 continue
             zone_id_el = _first_found(
-                zone_el.find(".//netex:Id", NS),
-                zone_el.find(".//netex:id", NS),
+                zone_el.find(".//netex:Id", self.NS),
+                zone_el.find(".//netex:id", self.NS),
             )
             zone_id = (
                 zone_id_el.text.strip()
@@ -452,8 +422,7 @@ class NetexFareParser:
                     members.append(ref)
         return members
 
-    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
-    def _parse_distance_matrix_elements(self) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    def _parse_distance_matrix_elements(self) -> _DmeParse:
         for dme in self.root.iter():
             tag = _unprefixed(dme.tag)
             if tag not in ("DistanceMatrixElement", "distanceMatrixElement"):
@@ -462,16 +431,16 @@ class NetexFareParser:
             dme_id = dme.get("id", "")
 
             start_el = _first_found(
-                dme.find(".//netex:StartTariffZoneRef", NS),
-                dme.find(".//netex:startTariffZoneRef", NS),
-                dme.find(".//netex:StartZoneRef", NS),
-                dme.find(".//netex:startZoneRef", NS),
+                dme.find(".//netex:StartTariffZoneRef", self.NS),
+                dme.find(".//netex:startTariffZoneRef", self.NS),
+                dme.find(".//netex:StartZoneRef", self.NS),
+                dme.find(".//netex:startZoneRef", self.NS),
             )
             end_el = _first_found(
-                dme.find(".//netex:EndTariffZoneRef", NS),
-                dme.find(".//netex:endTariffZoneRef", NS),
-                dme.find(".//netex:EndZoneRef", NS),
-                dme.find(".//netex:endZoneRef", NS),
+                dme.find(".//netex:EndTariffZoneRef", self.NS),
+                dme.find(".//netex:endTariffZoneRef", self.NS),
+                dme.find(".//netex:EndZoneRef", self.NS),
+                dme.find(".//netex:endZoneRef", self.NS),
             )
             if start_el is None or end_el is None:
                 continue
@@ -492,8 +461,8 @@ class NetexFareParser:
 
     def _apply_price_group_fare(self, dme: ET.Element, normalized_key: str) -> None:
         price_ref_el = _first_found(
-            dme.find(".//netex:PriceGroupRef", NS),
-            dme.find(".//netex:priceGroupRef", NS),
+            dme.find(".//netex:PriceGroupRef", self.NS),
+            dme.find(".//netex:priceGroupRef", self.NS),
         )
         if price_ref_el is not None:
             price_group_ref = price_ref_el.get("ref", "") or price_ref_el.text or ""
@@ -507,7 +476,7 @@ class NetexFareParser:
             if tag not in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
                 continue
 
-            amount_el = dmep.find(".//netex:Amount", NS)
+            amount_el = dmep.find(".//netex:Amount", self.NS)
             if amount_el is None or not amount_el.text:
                 continue
             try:
@@ -516,8 +485,8 @@ class NetexFareParser:
                 continue
 
             dme_ref_el = _first_found(
-                dmep.find(".//netex:DistanceMatrixElementRef", NS),
-                dmep.find(".//netex:distanceMatrixElementRef", NS),
+                dmep.find(".//netex:DistanceMatrixElementRef", self.NS),
+                dmep.find(".//netex:distanceMatrixElementRef", self.NS),
             )
             if dme_ref_el is None:
                 continue
@@ -535,9 +504,8 @@ class NetexFareParser:
             if "adult_single" not in self.zone_fares[nk]:
                 self.zone_fares[nk]["adult_single"] = price
 
-    # lucidlint: ignore record-shape serialized fare records — CSV/JSON export boundary (coding-standards.md)
     def _collect_stop_coords(
-        self, zones: dict[str, list[str]], stop_zones: dict[str, str]
+        self, zones: Mapping[str, list[str]], stop_zones: Mapping[str, str]
     ) -> list[StopCoord]:
         stop_coords: list[StopCoord] = []
         for _, members in zones.items():
@@ -549,8 +517,8 @@ class NetexFareParser:
                         stop_coords.append(
                             StopCoord(
                                 name=stop.name,
-                                lat=round(stop.lat, COORD_ROUND_DIGITS),
-                                lon=round(stop.lon, COORD_ROUND_DIGITS),
+                                lat=round(stop.lat, self.COORD_ROUND_DIGITS),
+                                lon=round(stop.lon, self.COORD_ROUND_DIGITS),
                                 zone=zone_name,
                             )
                         )
@@ -561,7 +529,7 @@ class NetexFareParser:
             tag = _unprefixed(pg.tag)
             if tag not in ("PriceGroup", "priceGroup"):
                 continue
-            pg_id_el = pg.find(".//netex:id", NS)
+            pg_id_el = pg.find(".//netex:id", self.NS)
             pg_id = pg_id_el.text if pg_id_el is not None else pg.get("id", pg.get("Id", ""))
 
             attrs = {**pg.attrib}
@@ -576,7 +544,7 @@ class NetexFareParser:
                     try:
                         text = amt.text or ""
                         if text:
-                            val_el = amt.find(".//netex:amount", NS) or amt.find("netex:Amount", NS)
+                            val_el = amt.find(".//netex:amount", self.NS) or amt.find("netex:Amount", self.NS)
                             if val_el is not None:
                                 return float(val_el.text or "")
                             return float(text)
@@ -592,8 +560,8 @@ class NetexFareParser:
                 continue
 
             name_el = _first_found(
-                product.find(".//netex:Name", NS),
-                product.find(".//netex:name", NS),
+                product.find(".//netex:Name", self.NS),
+                product.find(".//netex:name", self.NS),
             )
             if name_el is None:
                 continue
@@ -621,17 +589,11 @@ class NetexFareParser:
             tag = _unprefixed(child.tag)
             if tag == "Price" or tag == "price":
                 amt_el = _first_found(
-                    child.find(".//netex:Amount", NS),
-                    child.find("netex:Amount", NS),
+                    child.find(".//netex:Amount", NetexFareParser.NS),
+                    child.find("netex:Amount", NetexFareParser.NS),
                 )
-                if amt_el is not None:
-                    price = _as_float(amt_el.text)
-                    if price is not None:
-                        return price
-                    continue
-                # lucidlint: ignore duplicate-block deliberate two-stage fallback — Amount element, then element text
-                # (review-log)
-                price = _as_float(child.text)
+                # one fallback expression: the Amount element's own text, else the Price element's
+                price = _as_float((amt_el if amt_el is not None else child).text)
                 if price is not None:
                     return price
         return None
@@ -648,12 +610,12 @@ class NetexFareParser:
                     ref = pfep.get("ref", "")
                     if ref and product_id and (ref == product_id or ref in product_id):
                         start_ref = _first_found(
-                            dme.find(".//netex:StartZoneRef", NS),
-                            dme.find(".//netex:startZoneRef", NS),
+                            dme.find(".//netex:StartZoneRef", self.NS),
+                            dme.find(".//netex:startZoneRef", self.NS),
                         )
                         end_ref = _first_found(
-                            dme.find(".//netex:EndZoneRef", NS),
-                            dme.find(".//netex:endZoneRef", NS),
+                            dme.find(".//netex:EndZoneRef", self.NS),
+                            dme.find(".//netex:endZoneRef", self.NS),
                         )
                         key = self._zone_price_key(start_ref, end_ref)
                         if key is not None:
@@ -707,8 +669,12 @@ class NetexFareParser:
                     sop_ref = dme_sop_ref.get("ref", "")
                     sop_id = sop.get("id", sop.attrib.get("{http://www.netex.org.uk/netex}id", ""))
                     if sop_ref and sop_id and sop_ref == sop_id:
-                        start_ref = dme.find(".//netex:StartZoneRef", NS) or dme.find(".//netex:startZoneRef", NS)
-                        end_ref = dme.find(".//netex:EndZoneRef", NS) or dme.find(".//netex:endZoneRef", NS)
+                        start_ref = dme.find(
+                            ".//netex:StartZoneRef", self.NS
+                        ) or dme.find(".//netex:startZoneRef", self.NS)
+                        end_ref = dme.find(
+                            ".//netex:EndZoneRef", self.NS
+                        ) or dme.find(".//netex:endZoneRef", self.NS)
                         key = self._zone_price_key(start_ref, end_ref)
                         if key is not None:
                             self._record_zone_fare(key, product_type, price)
@@ -727,7 +693,7 @@ class NetexFareParser:
                 if ct in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
                     network_fare = self._apply_fare_table_price(ft_child, ptype)
                     if network_fare is not None:
-                        self.network_fares.append(network_fare.to_dict())
+                        self.network_fares.append(network_fare)
 
     def _collect_fare_product_types(self) -> dict[str, str]:
         products: dict[str, str] = {}
@@ -736,8 +702,8 @@ class NetexFareParser:
             if tag not in ("PreassignedFareProduct", "preassignedFareProduct"):
                 continue
             name_el = _first_found(
-                product.find(".//netex:Name", NS),
-                product.find(".//netex:name", NS),
+                product.find(".//netex:Name", self.NS),
+                product.find(".//netex:name", self.NS),
             )
             if name_el is None:
                 continue
@@ -764,8 +730,8 @@ class NetexFareParser:
 
     def _apply_fare_table_price(self, ft_child: ET.Element, ptype: str) -> NetworkFare | None:
         amt_el = _first_found(
-            ft_child.find(".//netex:Amount", NS),
-            ft_child.find(".//netex:amount", NS),
+            ft_child.find(".//netex:Amount", self.NS),
+            ft_child.find(".//netex:amount", self.NS),
         )
         if amt_el is None or not amt_el.text:
             return None
@@ -774,8 +740,8 @@ class NetexFareParser:
         except ValueError:
             return None
         dme_ref_el = _first_found(
-            ft_child.find(".//netex:DistanceMatrixElementRef", NS),
-            ft_child.find(".//netex:distanceMatrixElementRef", NS),
+            ft_child.find(".//netex:DistanceMatrixElementRef", self.NS),
+            ft_child.find(".//netex:distanceMatrixElementRef", self.NS),
         )
         if dme_ref_el is not None:
             dme_ref = dme_ref_el.get("ref", "") or dme_ref_el.text or ""

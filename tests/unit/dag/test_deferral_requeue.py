@@ -17,7 +17,7 @@ import pytest
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.scheduler import AsyncQueueScheduler, flush_processor, get_scheduler
+from dag.scheduler import AsyncRefreshQueue, flush_processor, get_scheduler
 from dag.user_input_node import UserInputNode
 
 
@@ -65,7 +65,7 @@ class _PendingOnce(DerivedNode[str]):
 def _sched_state() -> tuple[int, dict]:
     """(queue depth, scheduled-map) of the active scheduler."""
     sched = get_scheduler()
-    assert isinstance(sched, AsyncQueueScheduler)
+    assert isinstance(sched, AsyncRefreshQueue)
     return sched._queue.qsize(), dict(sched._scheduled)
 
 

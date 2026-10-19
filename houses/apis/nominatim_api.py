@@ -2,19 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from houses import apigw
-from houses.apis.transport import BaseApi, FetchArgs
+from houses.apis.base_api import BaseApi
+from houses.apis.fetch_args import FetchArgs
+from houses.apis.nominatim_params import NominatimParams
 from houses.geopoint import GeoPoint
-from houses.web.json_utils import WirePayload
-
-
-@dataclass(frozen=True)
-class NominatimParams(WirePayload):
-    q: str
-    format: str
-    limit: int
 
 
 class NominatimApi(BaseApi):

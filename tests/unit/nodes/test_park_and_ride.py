@@ -22,7 +22,8 @@ from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+from houses.nodes.park_and_ride_options import ParkAndRideOptions
 from houses.stations import StationRegistry
 
 

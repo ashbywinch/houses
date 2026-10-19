@@ -359,7 +359,8 @@ class TestParkAndRideAugmentNode:
     async def test_impossible_without_transit(self):
         from dag.user_input_node import UserInputNode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
 
         transit = UserInputNode[Commute]("t_pr3", Commute)
         loc = UserInputNode[GeoPoint]("loc_pr3", GeoPoint)
@@ -408,7 +409,8 @@ class TestParkAndRideAugmentNode:
         if pc_node is None:
             pc_node = UserInputNode[str]("pc_dummy", str)
             pc_node.push("SW1P 1AA", "test")
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
 
         return ParkAndRideAugmentNode(
             "pr_test",
@@ -475,7 +477,8 @@ class TestParkAndRideAugmentNode:
         from houses.car_park import CarPark, CarParkRegistry
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from houses.stations import StationRegistry
         from tests.helpers import make_services
@@ -705,7 +708,8 @@ class TestTransitCostAttribution:
         from dag.user_input_node import UserInputNode
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -785,7 +789,8 @@ class TestTransitCostAttribution:
         from dag.user_input_node import UserInputNode
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 

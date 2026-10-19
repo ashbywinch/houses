@@ -26,7 +26,7 @@ import pytest
 
 from dag.attempt import Attempt, classify_exception
 from dag.derived_node import DerivedNode
-from dag.scheduler import AsyncQueueScheduler, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, set_scheduler
 from houses import apigw, apis
 from houses.geopoint import GeoPoint
 from houses.location import _geocode_nominatim, _geocode_ors, _geocode_postcode
@@ -150,7 +150,7 @@ async def test_transient_503_from_raise_for_status_carries_retry_after():
 def test_retry_delay_honors_provider_window_beyond_backoff_cap():
     """An explicit Retry-After window is authoritative within a day; only
     the exponential backoff path keeps the 5-minute cap."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
     node = _DelayProbeNode()
     node._retry_count = 1
 

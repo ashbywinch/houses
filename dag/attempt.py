@@ -30,9 +30,15 @@ U = TypeVar("U")
 R = TypeVar("R")
 
 logger = logging.getLogger(__name__)
-HTTP_TOO_MANY_REQUESTS = 429
-HTTP_5XX_START = 500
-HTTP_5XX_END = 600
+
+
+class RetryableStatus:
+    """Which HTTP statuses make an error retryable — one policy point, so the
+    retry decision reads where it is made."""
+
+    TOO_MANY_REQUESTS = 429
+    SERVER_ERROR_START = 500
+    SERVER_ERROR_END = 600
 
 
 class SourceType(StrEnum):
@@ -208,9 +214,11 @@ def classify_exception(exc: BaseException | None) -> ExceptionClassification:
             logger.debug("status %r is not a numeric HTTP code; classifying as a plain exception: %s", status, e)
             return ExceptionClassification("exception", retryable=False)
         if code is not None:
-            if code == HTTP_TOO_MANY_REQUESTS or HTTP_5XX_START <= code < HTTP_5XX_END:
-                return ExceptionClassification("http_error", retryable=True)
-            return ExceptionClassification("http_error", retryable=False)
+            retryable = (
+                code == RetryableStatus.TOO_MANY_REQUESTS
+                or RetryableStatus.SERVER_ERROR_START <= code < RetryableStatus.SERVER_ERROR_END
+            )
+            return ExceptionClassification("http_error", retryable=retryable)
     return ExceptionClassification("exception", retryable=False)
 
 
@@ -639,7 +647,6 @@ class Provenance:
         if isinstance(freshness, str):
             try:
                 freshness = datetime.fromisoformat(freshness)
-            # lucidlint: ignore swallow terminal parse — a malformed timestamp drops freshness only; the warning says so
             except ValueError as e:
                 logger.warning("provenance has an unparseable freshness %r: %s", freshness, e)
                 freshness = None

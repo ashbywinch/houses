@@ -39,7 +39,7 @@ async def isolated_cache(tmp_path):
     """
     from houses import api_cache
 
-    previous = api_cache.CACHE_DIR
+    previous = api_cache._CacheRuntime.CACHE_DIR
     api_cache.set_cache_dir(tmp_path)
     yield tmp_path
     api_cache.set_cache_dir(previous)

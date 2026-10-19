@@ -15,7 +15,7 @@ import pytest
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.regenerate import force_regenerate, nodes_matching, pattern_regex
-from dag.scheduler import AsyncQueueScheduler, flush_processor, reset_scheduler, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, flush_processor, reset_scheduler, set_scheduler
 from dag.user_input_node import UserInputNode
 
 
@@ -35,7 +35,7 @@ class _Counter(DerivedNode[int]):
 
 @pytest.fixture(autouse=True)
 def _isolated_scheduler():
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
     yield
     reset_scheduler()
 

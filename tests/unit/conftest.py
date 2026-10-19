@@ -47,7 +47,7 @@ def flush_all() -> None:
     import dag.scheduler as _dag_sched
 
     sched = _dag_sched.get_scheduler()
-    assert isinstance(sched, _dag_sched.AsyncQueueScheduler)
+    assert isinstance(sched, _dag_sched.AsyncRefreshQueue)
     enqueued_before = sched.enqueued_since_flush
     drained = drain_recompute()
     if drained == 0 and enqueued_before == 0:
@@ -99,11 +99,11 @@ def _isolate_api_cache():
 def _isolate_settings_sources():
     """Clear the settings-source cache so _make_settings_source always
     reads from the per-test in-memory DB or factory, never stale state."""
-    from houses.services import SETTINGS_SOURCE_CACHE
+    from houses.services import Services
 
-    SETTINGS_SOURCE_CACHE.clear()
+    Services.SETTINGS_SOURCE_CACHE.clear()
     yield
-    SETTINGS_SOURCE_CACHE.clear()
+    Services.SETTINGS_SOURCE_CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

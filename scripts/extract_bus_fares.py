@@ -15,35 +15,46 @@ import json
 import logging
 import os
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, ClassVar
 
-from dag.persistence import WireRecord
+from dag.guard import capture
+
+# lucidlint: ignore private-import scripts-internal shared BODS API config (same one-shot package, review-log)
 from scripts.download_bus_fares import (
-    CACHE_DIR,
-    CHECKPOINT_DIR,
+    _BodsFares,
     checkpoint_path,
     download_dataset,
     get_bods_datasets,
 )
 from scripts.parse_netex_fares import (
-    NATIONAL_MAX_SINGLE_GBP,
     STATIONS_CSV,
+    NetworkFare,
     Station,
+    StopCoord,
     dataset_description_matches,
     load_naptan_stops,
     load_stations,
     parse_netex_fares,
 )
+from serialization import SerializableAsDict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-OUTPUT_PATH = Path("data/bus_fares.json")
-COORD_ROUND_DIGITS = 4
+def _abort_if_unset(value: object, message: str) -> bool:
+    """Log *message* and flag an abort when *value* is falsy (fail-fast guard)."""
+    if not value:
+        logger.error(message)
+        return True
+    return False
 
-type NaptanStops = dict[str, tuple[float, float]]
+OUTPUT_PATH = Path("data/bus_fares.json")
+
+type NaptanStops = Mapping[str, tuple[float, float]]
 """NaPTAN stop coordinates keyed by ATCO code.  A keyed lookup table, not a
 record: the keys are the country's stop codes, and ``parse_netex_fares``
 indexes it by the ATCO code on each stop."""
@@ -60,35 +71,50 @@ type ZoneFlags = dict[str, bool]
 type ZonePairFares = dict[str, dict[str, float]]
 """Zone-pair key (``"zone_a:zone_b"``) → fare product type → price."""
 
-
-class StopCoord(TypedDict, total=False):
-    """One stop's coordinates as the fare JSON states them."""
-
-    name: str
-    lat: float
-    lon: float
+type StopZoneCandidates = dict[str, ZoneFlags]
+"""Stop name → zone → whether the zone carries fares: a keyed collection, not a record."""
 
 
-class NetworkFare(TypedDict, total=False):
-    """One network fare product: the stops it covers and its price."""
 
-    covered_stops: set[str]
-    product_type: str
-    price: float
+
 
 
 @dataclass(frozen=True)
 class OperatorRef:
-    """One BODS operator: its NOC code and human-readable display name."""
+    """One BODS operator: its NOC code, display name, and the sub-operator
+    names its datasets carry.
+
+    The NOC's datasets are split per sub-operator, so those names belong to
+    the operator itself — a second table keyed by display name would restate
+    every operator's key and let the two drift apart.
+    """
 
     noc: str
     display_name: str
+    sub_operators: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class FareExtractionOptions:
     """The harness context every operator extraction shares: the station
-    list, the BODS API key, and the cache/coordinate policies."""
+    list, the BODS API key, and the harvest policy constants."""
+
+    # Harvest policy — ClassVar keeps these out of the dataclass fields.
+    OPERATORS: ClassVar[list[OperatorRef]] = [
+        OperatorRef(noc="SCSO", display_name="Stagecoach_South", sub_operators=("Stagecoach South",)),
+        OperatorRef(noc="SCSO", display_name="Stagecoach_South_East", sub_operators=("Stagecoach South East",)),
+        OperatorRef(noc="SCOX", display_name="Stagecoach_Oxfordshire", sub_operators=("Stagecoach Oxfordshire",)),
+        OperatorRef(noc="SCEM", display_name="Stagecoach_East_Midlands", sub_operators=("Stagecoach East Midlands",)),
+        OperatorRef(noc="READ", display_name="Reading_Buses", sub_operators=("Reading",)),
+        OperatorRef(noc="METR", display_name="Metrobus", sub_operators=("Metrobus",)),
+        OperatorRef(noc="ABSS", display_name="Abellio", sub_operators=("Abellio",)),
+        OperatorRef(
+            noc="GALD",
+            display_name="Go_Ahead_London",
+            sub_operators=("Go-Ahead London", "Fastrack"),
+        ),
+    ]
+    COORD_ROUND_DIGITS: ClassVar[int] = 4
 
     stations: list[Station]
     api_key: str
@@ -96,35 +122,11 @@ class FareExtractionOptions:
     naptan: NaptanStops | None = None
 
 
-OPERATORS: list[tuple[str, str]] = [
-    ("SCSO", "Stagecoach_South"),
-    ("SCSO", "Stagecoach_South_East"),
-    ("SCOX", "Stagecoach_Oxfordshire"),
-    ("SCEM", "Stagecoach_East_Midlands"),
-    ("READ", "Reading_Buses"),
-    ("METR", "Metrobus"),
-    ("ABSS", "Abellio"),
-    ("GALD", "Go_Ahead_London"),
-]
-
-NOC_SUB_OPERATORS: dict[str, list[str]] = {
-    "Stagecoach_South": ["Stagecoach South"],
-    "Stagecoach_South_East": ["Stagecoach South East"],
-    "Stagecoach_Oxfordshire": ["Stagecoach Oxfordshire"],
-    "Stagecoach_East_Midlands": ["Stagecoach East Midlands"],
-    "Reading_Buses": ["Reading"],
-    "Metrobus": ["Metrobus"],
-    "Abellio": ["Abellio"],
-    "Go_Ahead_London": ["Go-Ahead London", "Fastrack"],
-}
-
-
-@dataclass(frozen=True)
-class OperatorFares(WireRecord):
+class OperatorFares(SerializableAsDict):
     """The extraction result for one operator: zones, fares, stop coords.
 
-    Its fields ARE the per-operator shape the bus-fares JSON stores; the
-    writer projects the record with ``dict(...)``.
+    Its fields ARE the per-operator shape the bus-fares JSON stores; the writer
+    projects the record with ``to_dict()``, which walks the nested stop records.
     """
 
     stop_zones: dict[str, str]
@@ -132,9 +134,11 @@ class OperatorFares(WireRecord):
     stop_coords: list[StopCoord]
 
 
-@dataclass(frozen=True)
-class FareMeta(WireRecord):
+class FareMeta(SerializableAsDict):
     """The bus-fares JSON's ``_meta`` block: the national single-fare cap."""
+
+    # The national single-fare cap of the UK Gov Bus Fare Cap Scheme.
+    NATIONAL_MAX_SINGLE_GBP: ClassVar[float] = 3.00
 
     national_max_single_gbp: float
     national_max_single_notes: str
@@ -147,7 +151,7 @@ def extract_operator_fares(operator: OperatorRef, options: FareExtractionOptions
         logger.warning("No datasets found for NOC %s (%s)", noc, display_name)
         return None
 
-    datasets = _filter_datasets_by_sub_operators(noc, display_name, datasets)
+    datasets = _filter_datasets_by_sub_operators(operator, datasets)
     if not datasets:
         logger.info("No matching datasets for %s after sub-operator filter", display_name)
         return None
@@ -181,14 +185,12 @@ class _MergeResults:
     fares: ZonePairFares
     network_fares: list[NetworkFare]
     stop_coords: list[StopCoord]
-    zone_candidates: dict[str, ZoneFlags]
+    zone_candidates: StopZoneCandidates
     datasets_processed: int
 
 
-def _filter_datasets_by_sub_operators(
-    noc: str, display_name: str, datasets: list[BodsDataset]
-) -> list[BodsDataset]:
-    sub_ops = NOC_SUB_OPERATORS.get(display_name, [])
+def _filter_datasets_by_sub_operators(operator: OperatorRef, datasets: list[BodsDataset]) -> list[BodsDataset]:
+    sub_ops = operator.sub_operators
     if sub_ops:
         filtered: list[BodsDataset] = []
         for ds in datasets:
@@ -200,13 +202,13 @@ def _filter_datasets_by_sub_operators(
                     "Skipping dataset %s (%s) for %s — does not match sub-operators %s",
                     ds.get("id"),
                     desc,
-                    noc,
+                    operator.noc,
                     sub_ops,
                 )
         datasets = filtered
         logger.info(
             "NOC %s: %d datasets remain after sub-operator filter",
-            noc,
+            operator.noc,
             len(datasets),
         )
     return datasets
@@ -223,7 +225,7 @@ def _merge_dataset_results(
     combined_network_fares: list[NetworkFare] = []
     combined_stop_coords: list[StopCoord] = []
     datasets_processed = 0
-    zone_candidates: dict[str, ZoneFlags] = {}
+    zone_candidates: StopZoneCandidates = {}
 
     for ds in datasets:
         ds_id = ds.get("id")
@@ -240,8 +242,8 @@ def _merge_dataset_results(
             if result is None:
                 continue
             datasets_processed += 1
-            file_zones = result.get("stop_zones", {})
-            file_fares = result.get("zone_fares", {})
+            file_zones = result.stop_zones
+            file_fares = result.zone_fares
             file_fare_zones = set()
             for k in file_fares:
                 file_fare_zones.add(k.split(":")[0])
@@ -254,10 +256,8 @@ def _merge_dataset_results(
                 if key not in combined_fares:
                     combined_fares[key] = {}
                 combined_fares[key].update(fares)
-            file_network_fares: list[NetworkFare] = result.get("network_fares", [])
-            combined_network_fares.extend(nf for nf in file_network_fares if nf.get("covered_stops"))
-            file_coords: list[StopCoord] = result.get("stop_coords", [])
-            combined_stop_coords.extend(file_coords)
+            combined_network_fares.extend(nf for nf in result.network_fares if nf.covered_stops)
+            combined_stop_coords.extend(result.stop_coords)
         del result
         if not had_any:
             logger.warning("No XML content yielded for dataset %d", ds_id)
@@ -275,7 +275,11 @@ def _dedupe_stop_coords(combined_stop_coords: list[StopCoord]) -> list[StopCoord
     seen: set[tuple[str, float, float]] = set()
     deduped: list[StopCoord] = []
     for c in combined_stop_coords:
-        k = (c.get("name", ""), round(c.get("lat", 0), COORD_ROUND_DIGITS), round(c.get("lon", 0), COORD_ROUND_DIGITS))
+        k = (
+            c.name,
+            round(c.lat, FareExtractionOptions.COORD_ROUND_DIGITS),
+            round(c.lon, FareExtractionOptions.COORD_ROUND_DIGITS),
+        )
         if k not in seen:
             seen.add(k)
             deduped.append(c)
@@ -283,7 +287,7 @@ def _dedupe_stop_coords(combined_stop_coords: list[StopCoord]) -> list[StopCoord
 
 
 def _resolve_stop_zones(
-    zone_candidates: dict[str, ZoneFlags],
+    zone_candidates: StopZoneCandidates,
     combined_fares: ZonePairFares,
 ) -> dict[str, str]:
     fare_zones = set()
@@ -306,7 +310,7 @@ def _apply_network_fares(
     combined_fares: ZonePairFares,
 ) -> None:
     for nf in combined_network_fares:
-        covered_stops = nf.get("covered_stops", set())
+        covered_stops = nf.covered_stops
         if not covered_stops:
             continue
         covered_zones = {zone for stop_name, zone in combined_zones.items() if stop_name in covered_stops}
@@ -314,8 +318,8 @@ def _apply_network_fares(
             continue
         for key in list(combined_fares):
             z1, z2 = key.split(":")
-            if z1 in covered_zones and z2 in covered_zones and nf["product_type"] not in combined_fares[key]:
-                combined_fares[key][nf["product_type"]] = nf["price"]
+            if z1 in covered_zones and z2 in covered_zones and nf.product_type not in combined_fares[key]:
+                combined_fares[key][nf.product_type] = nf.price
 
 
 def main():
@@ -325,19 +329,16 @@ def main():
     args = parser.parse_args()
 
     api_key = os.environ.get("BUS_DATA_API_KEY", "")
-    if not api_key:
-        logger.error("BUS_DATA_API_KEY is not set")
+    if _abort_if_unset(api_key, "BUS_DATA_API_KEY is not set"):
         return
 
     logger.info("Loading stations from %s", STATIONS_CSV)
     stations = load_stations()
-    # lucidlint: ignore duplicate-block fail-fast guard pair — each guard validates a different precondition with the
-    if not stations:
-        logger.error("No stations loaded — check stations.csv exists")
+    if _abort_if_unset(stations, "No stations loaded — check stations.csv exists"):
         return
 
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _BodsFares.CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    _BodsFares.CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     naptan = load_naptan_stops()
     fare_options = FareExtractionOptions(
@@ -348,37 +349,33 @@ def main():
     )
 
     all_operator_data: dict[str, Any] = {}
-    all_operator_data["_meta"] = dict(
-        FareMeta(
-            national_max_single_gbp=NATIONAL_MAX_SINGLE_GBP,
-            national_max_single_notes="UK Gov Bus Fare Cap Scheme — applies to all participating operators in England",
-        )
-    )
+    all_operator_data["_meta"] = FareMeta(
+        national_max_single_gbp=FareMeta.NATIONAL_MAX_SINGLE_GBP,
+        national_max_single_notes="UK Gov Bus Fare Cap Scheme — applies to all participating operators in England",
+    ).to_dict()
 
-    for noc, display_name in OPERATORS:
-        ckpt = checkpoint_path(display_name)
+    for operator in FareExtractionOptions.OPERATORS:
+        ckpt = checkpoint_path(operator.display_name)
         if ckpt.is_file() and not args.force:
-            logger.info("Checkpoint exists for %s — skipping (use --force to re-process)", display_name)
+            logger.info("Checkpoint exists for %s — skipping (use --force to re-process)", operator.display_name)
             with ckpt.open() as f:
-                all_operator_data[display_name] = json.load(f)
+                all_operator_data[operator.display_name] = json.load(f)
             gc.collect()
             continue
 
-        logger.info("Processing %s (%s)...", display_name, noc)
-        try:
-            fare_result = extract_operator_fares(OperatorRef(noc, display_name), fare_options)
-            if fare_result:
-                op_data = dict(fare_result)
-                all_operator_data[display_name] = op_data
-                with ckpt.open("w") as f:
-                    json.dump(op_data, f, indent=2)
-                logger.info("Extracted data for %s, checkpoint saved", display_name)
-            else:
-                logger.info("No data extracted for %s (no station-serving routes)", display_name)
-        # lucidlint: ignore broad-except one operator block failure logs and continues with the next
-        except Exception as e:
-            logger.error("Failed to extract for %s: %s", display_name, e)
+        logger.info("Processing %s (%s)...", operator.display_name, operator.noc)
+        fare_result, failure = capture(partial(extract_operator_fares, operator, fare_options))
+        if failure is not None:
+            logger.error("Failed to extract for %s: %s", operator.display_name, failure)
             continue
+        if fare_result:
+            op_data = fare_result.to_dict()
+            all_operator_data[operator.display_name] = op_data
+            with ckpt.open("w") as f:
+                json.dump(op_data, f, indent=2)
+            logger.info("Extracted data for %s, checkpoint saved", operator.display_name)
+        else:
+            logger.info("No data extracted for %s (no station-serving routes)", operator.display_name)
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     operator_count = len(all_operator_data) - 1

@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from houses.database import get_connection
-from houses.scrape_queue import MAX_ATTEMPTS
+from houses.scrape_queue import _RetryPolicy
 from houses.server import app
 from houses.services_provider import get_services
 from houses.web.auth import (
@@ -69,7 +69,7 @@ class TestRetry:
         the worker can try again (the wireframe's Retry button)."""
         _add_url_only()
         job = client.post("/api/scrapes/claim").json()["job"]
-        for _ in range(MAX_ATTEMPTS):
+        for _ in range(_RetryPolicy.MAX_ATTEMPTS):
             client.post("/api/scrapes/report", json={"job_id": job["id"], "ok": False, "error": "boom"})
             client.post("/api/scrapes/claim")
         assert _scrape_rows()[0]["status"] == "failed"

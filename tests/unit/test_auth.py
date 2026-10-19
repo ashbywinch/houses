@@ -7,11 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from houses.nodes.property_nodes import PropertyDetail, PropertySummary, PropertyView
 from houses.server import app
 from houses.services_provider import _request_services as _sp
 from houses.services_provider import get_services
 from houses.settings import settings
-from houses.web.auth import _make_session_cookie, _oauth_states, _OAuthState, get_session_user
+from houses.web.auth import _make_session_cookie, _OAuthState, _OAuthStateStore, get_session_user
 from tests.helpers import FakeOAuthService, make_services
 
 client = TestClient(app)
@@ -25,14 +26,40 @@ class _FakeProperty:
     def __init__(self, rid: str = "test-rid") -> None:
         self.rid = rid
 
-    async def to_json_summary(self) -> dict:
-        return {}
+    async def summary(self) -> PropertySummary:
+        return PropertySummary()
 
-    async def to_json(self) -> dict:
-        return {}
+    async def view(self) -> PropertyView:
+        return PropertyView(
+            rid=self.rid,
+            best_address=None,
+            best_location=None,
+            rightmove_url=None,
+            rightmove_price=None,
+            rightmove_bedrooms=None,
+            postcode=None,
+        )
 
-    async def to_json_detail(self) -> dict:
-        return {}
+    async def detail(self) -> PropertyDetail:
+        return PropertyDetail(
+            rid=self.rid,
+            best_address=None,
+            user_entered_address=None,
+            rightmove_url=None,
+            rightmove_price=None,
+            rightmove_bedrooms=None,
+            town_name=None,
+            epc=None,
+            location={},
+            commutes={},
+            schools={},
+            affordability={},
+            council_tax_apportionment={},
+            area={},
+            triage={},
+            comments={},
+            settings={"persons": [], "financial": {"status": "", "value": None}},
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +103,7 @@ def _inject_session(
 @pytest.fixture(autouse=True)
 def _clear_auth_state():
     """Clear in-memory OAuth state and client cookies between tests."""
-    _oauth_states.clear()
+    _OAuthStateStore.states.clear()
     # TestClient accumulates cookies from set-cookie responses.  Clear them
     # so auth state from one test doesn't leak into the next.
     client.cookies.clear()
@@ -101,16 +128,16 @@ class TestLogin:
         assert data["auth_url"].startswith("https://accounts.google.com")
 
     def test_login_stores_code_verifier(self):
-        """Login stores the PKCE code_verifier in _oauth_states."""
-        _oauth_states.clear()
+        """Login stores the PKCE code_verifier in _OAuthStateStore.states."""
+        _OAuthStateStore.states.clear()
         resp = client.get("/api/auth/login")
         assert resp.status_code == 200
-        assert len(_oauth_states) == 1
-        state_key = next(iter(_oauth_states))
-        state_data = _oauth_states[state_key]
+        assert len(_OAuthStateStore.states) == 1
+        state_key = next(iter(_OAuthStateStore.states))
+        state_data = _OAuthStateStore.states[state_key]
         assert isinstance(state_data, _OAuthState)
         assert len(state_data.code_verifier) > 0
-        _oauth_states.clear()
+        _OAuthStateStore.states.clear()
 
     def test_login_redirects_back_to_the_hostname_the_user_is_on(self):
         """The rollout reviews a box at the review hostname while the box
@@ -416,7 +443,7 @@ class TestCallback:
         assert "auth_error=missing_params" in location
 
     def test_rejects_invalid_state(self):
-        _oauth_states["valid_state"] = _OAuthState(code_verifier="abc", created_at=0.0)
+        _OAuthStateStore.states["valid_state"] = _OAuthState(code_verifier="abc", created_at=0.0)
         resp = client.get("/api/auth/callback?code=abc&state=invalid", follow_redirects=False)
         assert resp.status_code == 307
         location = resp.headers.get("location", "")
@@ -430,7 +457,7 @@ class TestCallback:
 
     def test_state_replay_is_rejected(self):
         """Once consumed, the same state token cannot be reused (CSRF+replay protection)."""
-        _oauth_states["s1"] = _OAuthState(code_verifier="v1", created_at=0.0)
+        _OAuthStateStore.states["s1"] = _OAuthState(code_verifier="v1", created_at=0.0)
         # First call succeeds with FakeOAuthService
         client.get("/api/auth/callback?code=c1&state=s1", follow_redirects=False)
         # Second call with same state should be rejected
@@ -441,7 +468,7 @@ class TestCallback:
 
     def test_success_creates_session(self):
         """Happy path: FakeOAuthService returns id_info, creates session cookie."""
-        _oauth_states["test_state"] = _OAuthState(code_verifier="test_verifier", created_at=0.0)
+        _OAuthStateStore.states["test_state"] = _OAuthState(code_verifier="test_verifier", created_at=0.0)
 
         id_info = {
             "email": "ashby@example.com",
@@ -478,9 +505,9 @@ class TestCallback:
 
         session = get_session_user(_FakeRequest())  # type: ignore[arg-type]  # request is annotated starlette Request but the function only reads .cookies — the duck-typed _FakeRequest supplies exactly that
         assert session is not None
-        assert session["email"] == "ashby@example.com"
-        assert session["name"] == "Ashby"
-        assert session["picture"] == "https://example.com/pic.jpg"
+        assert session.email == "ashby@example.com"
+        assert session.name == "Ashby"
+        assert session.picture == "https://example.com/pic.jpg"
 
     def test_uses_full_scope_urls(self):
         """The login endpoint returns an auth_url."""

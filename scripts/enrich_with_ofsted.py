@@ -11,7 +11,6 @@ Usage: uv run python scripts/enrich_with_ofsted.py
 from __future__ import annotations
 
 import csv
-import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -38,50 +37,49 @@ as by literal column names."""
 
 ENRICHED_CSV = Path("data/edubaseall_enriched.csv")
 OFSTED_CSV = Path("data/ofsted_inspections.csv")
+class _OfstedInspection:
+    """The Ofsted grade/dimension tables and date format that drive rating interpretation."""
 
-OEIF_RATING_MAP = {
-    "1": "Outstanding",
-    "2": "Good",
-    "3": "Requires Improvement",
-    "4": "Inadequate",
-}
+    OEIF_RATING_MAP = {
+        "1": "Outstanding",
+        "2": "Good",
+        "3": "Requires Improvement",
+        "4": "Inadequate",
+    }
 
-# Ungraded outcomes often contain the school's current rating
-_GRADE_FROM_UNGRADED = re.compile(
-    r"(Outstanding|Good|Requires Improvement|Inadequate|Special Measures)",
-    re.IGNORECASE,
-)
+    # Ungraded outcomes often contain the school's current rating.
+    # Map ungraded outcome phrases to implied grades.
+    UNGRADED_GRADE_MAP: dict[str, str] = {
+        "some aspects not as strong": "Requires Improvement",
+        "concerns": "Requires Improvement",
+        "special measures": "Inadequate",
+        "school remains good": "Good",
+        "school remains outstanding": "Outstanding",
+        "standards maintained": "Good",
+        "met": "Good",
+        "not met": "Inadequate",
+        "serious weaknesses": "Inadequate",
+        "insufficient progress": "Requires Improvement",
+        "reasonable progress": "Requires Improvement",
+        "significant improvement": "Good",
+    }
 
-# Map ungraded outcome phrases to implied grades
-_UNGRADED_GRADE_MAP: dict[str, str] = {
-    "some aspects not as strong": "Requires Improvement",
-    "concerns": "Requires Improvement",
-    "special measures": "Inadequate",
-    "school remains good": "Good",
-    "school remains outstanding": "Outstanding",
-    "standards maintained": "Good",
-    "met": "Good",
-    "not met": "Inadequate",
-    "serious weaknesses": "Inadequate",
-    "insufficient progress": "Requires Improvement",
-    "reasonable progress": "Requires Improvement",
-    "significant improvement": "Good",
-}
+    OEIF_DIMS = [
+        ("Quality", "Latest OEIF quality of education"),
+        ("Behaviour", "Latest OEIF behaviour and attitudes"),
+        ("Personal development", "Latest OEIF personal development"),
+        ("Leadership", "Latest OEIF effectiveness of leadership and management"),
+    ]
+    S5_DIMS = [
+        ("Achievement", "Achievement"),
+        ("Curriculum", "Curriculum and teaching"),
+        ("Leadership", "Leadership and governance"),
+        ("Personal development", "Personal development and wellbeing"),
+        ("Attendance", "Attendance and behaviour"),
+    ]
+    UK_DATE_PARTS = 3
 
-OEIF_DIMS = [
-    ("Quality", "Latest OEIF quality of education"),
-    ("Behaviour", "Latest OEIF behaviour and attitudes"),
-    ("Personal development", "Latest OEIF personal development"),
-    ("Leadership", "Latest OEIF effectiveness of leadership and management"),
-]
-S5_DIMS = [
-    ("Achievement", "Achievement"),
-    ("Curriculum", "Curriculum and teaching"),
-    ("Leadership", "Leadership and governance"),
-    ("Personal development", "Personal development and wellbeing"),
-    ("Attendance", "Attendance and behaviour"),
-]
-UK_DATE_PARTS = 3
+
 
 
 def _extract_year(date_str: str) -> str:
@@ -89,7 +87,7 @@ def _extract_year(date_str: str) -> str:
     if not date_str or date_str == "NULL":
         return ""
     parts = date_str.split("/")
-    if len(parts) == UK_DATE_PARTS:
+    if len(parts) == _OfstedInspection.UK_DATE_PARTS:
         return parts[2]
     return ""
 
@@ -141,7 +139,7 @@ def _determine_effective_rating(row: OfstedRow) -> _EffectiveRating:
     # Ungraded monitoring visit — just the rating, that's all we know
     ungraded = (row.get("Ungraded inspection overall outcome") or "").strip()
     if ungraded and ungraded != "NULL":
-        for phrase, grade in _UNGRADED_GRADE_MAP.items():
+        for phrase, grade in _OfstedInspection.UNGRADED_GRADE_MAP.items():
             if phrase in ungraded.lower():
                 return _EffectiveRating(rating=grade, highlights="")
     return _EffectiveRating(rating="", highlights="")
@@ -149,14 +147,14 @@ def _determine_effective_rating(row: OfstedRow) -> _EffectiveRating:
 
 def _collect_oeif_rating(row: OfstedRow) -> _OEIFRating:
     oeif_raw = (row.get("Latest OEIF overall effectiveness") or "").strip()
-    oeif_rating = OEIF_RATING_MAP.get(oeif_raw, "") if oeif_raw and oeif_raw != "NULL" else ""
+    oeif_rating = _OfstedInspection.OEIF_RATING_MAP.get(oeif_raw, "") if oeif_raw and oeif_raw != "NULL" else ""
 
     # Collect OEIF dimension grades
     oeif_grades: list[tuple[str, str]] = []
-    for label, col in OEIF_DIMS:
+    for label, col in _OfstedInspection.OEIF_DIMS:
         val = (row.get(col) or "").strip()
         if val and val != "NULL":
-            oeif_grades.append((label, OEIF_RATING_MAP.get(val, val)))
+            oeif_grades.append((label, _OfstedInspection.OEIF_RATING_MAP.get(val, val)))
 
     # If we have OEIF dimension grades but no overall rating, infer from dimensions
     if not oeif_rating and oeif_grades:
@@ -167,7 +165,7 @@ def _collect_oeif_rating(row: OfstedRow) -> _OEIFRating:
 
 
 def _collect_s5_data(row: OfstedRow) -> dict[str, str]:
-    s5_data = {label: (row.get(col) or "").strip() for label, col in S5_DIMS}
+    s5_data = {label: (row.get(col) or "").strip() for label, col in _OfstedInspection.S5_DIMS}
     return {k: v for k, v in s5_data.items() if v and v != "NULL"}
 
 

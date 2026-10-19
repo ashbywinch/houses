@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import override
+from typing import Any, override
 
 from money import Money
+from pydantic import SerializerFunctionWrapHandler, model_serializer
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
@@ -12,6 +14,7 @@ from dag.expression import Attr, Conditional, Div, Field, Literal, Ref
 from dag.measurement import Measurement
 from dag.node import Node
 from houses.model.domain import joint_owner_names
+from serialization import SerializableAsDict
 
 
 @dataclass(frozen=True)
@@ -21,7 +24,7 @@ class GroupFigureResult:
 
     value: Decimal
     stddev: float
-    breakdown: _GroupBreakdownJson
+    breakdown: _GroupBreakdown
 
 
 @dataclass(frozen=True)
@@ -120,7 +123,10 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                 predicate=lambda: (
                     (self._status_node.latest_attempt().value_or_none() or "").strip().lower() != "current"
                 ),
-                if_true=(Div(Ref(self._sinking_node), Literal(12)) + Ref(self._life_insurance_node)),
+                if_true=(
+                    Div(Ref(self._sinking_node), Literal(GroupMonthlyCostNode.MONTHS_PER_YEAR))
+                    + Ref(self._life_insurance_node)
+                ),
                 if_false=Literal(Money(amount="0", currency="GBP")),
             )
             + Conditional(
@@ -129,7 +135,10 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                     and isinstance(v3, dict)
                     and "yearly_total_gbp" in v3
                 ),
-                if_true=Div(Field(Ref(self._deps[3]), "yearly_total_gbp"), Literal(12)),
+                if_true=Div(
+                    Field(Ref(self._deps[3]), "yearly_total_gbp"),
+                    Literal(GroupMonthlyCostNode.MONTHS_PER_YEAR),
+                ),
                 if_false=Literal(Money(amount="0", currency="GBP")),
             )
             + Conditional(
@@ -140,7 +149,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                     and hasattr(v4, "yearly_cost")
                     and v4.yearly_cost is not None
                 ),
-                if_true=Div(Attr(Ref(self._deps[4]), "yearly_cost"), Literal(12)),
+                if_true=Div(Attr(Ref(self._deps[4]), "yearly_cost"), Literal(GroupMonthlyCostNode.MONTHS_PER_YEAR)),
                 if_false=Literal(Money(amount="0", currency="GBP")),
             )
             - Ref(self._deps[1])  # rental_income
@@ -154,10 +163,8 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
             return self._deps[:5]
         return self._deps
 
-    @override
-    # lucidlint: ignore middle-man protocol/reflected-operator requirement
-    def compute(self, **kwargs) -> Attempt[Measurement[Money]]:
-        return self.expression.evaluate()
+
+    compute = DerivedNode.compute  # the expression IS the computation — no forwarding shim
 
 
 class GroupMonthlyCostNode(DerivedNode[dict]):
@@ -171,7 +178,10 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
     each group's shares counted. The couple's figure subtracts rent
     received from the others; the others' figure adds the rent they pay.
     """
-
+    # Year → month conversions and share-rounding precision for the
+    # group cost math (all the ÷12 divisions use this one owner).
+    MONTHS_PER_YEAR = 12
+    SHARE_DECIMALS = 4
     def __init__(
         self,
         node_id: str,
@@ -336,8 +346,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         return prov
 
 
-MONTHS_PER_YEAR = 12
-SHARE_DECIMALS = 4
+
 
 
 def _band_line(label: str, band: str | None, amount: object, who: str, ignored: bool) -> str:
@@ -377,7 +386,7 @@ class _GroupCostCalculator:
         yearly = council.yearly_cost if council is not None else None
         if yearly is None:
             return _CouncilMonthly(Decimal(0), 0.0)
-        monthly = Decimal(str(yearly.value.amount)) / Decimal(MONTHS_PER_YEAR)
+        monthly = Decimal(str(yearly.value.amount)) / Decimal(GroupMonthlyCostNode.MONTHS_PER_YEAR)
         return _CouncilMonthly(monthly, float(yearly.stddev))
 
     @staticmethod
@@ -390,7 +399,7 @@ class _GroupCostCalculator:
         """The person's yearly commute cost spread to months."""
         per = (self.inputs.commute.value_or_none() or {}).get("persons") or {}
         yearly = (per.get(name) or {}).get("yearly_gbp") or 0
-        return Decimal(str(yearly)) / Decimal(MONTHS_PER_YEAR)
+        return Decimal(str(yearly)) / Decimal(GroupMonthlyCostNode.MONTHS_PER_YEAR)
 
     def payer_split(self, adults: list, council, ignored: bool) -> _PayerSplit:
         """Resolve the council-tax payer sets and the annexe allocation.
@@ -425,7 +434,7 @@ class _GroupCostCalculator:
                 payers = stored_payers & adult_names
         if not payers:
             payers = adult_names
-        monthly = Decimal(str(annexe.yearly_cost.value.amount)) / Decimal(MONTHS_PER_YEAR)
+        monthly = Decimal(str(annexe.yearly_cost.value.amount)) / Decimal(GroupMonthlyCostNode.MONTHS_PER_YEAR)
         stddev = float(annexe.yearly_cost.stddev) if annexe.yearly_cost.stddev else 0.0
         return _AnnexeAllocation(monthly, stddev, frozenset(payers))
 
@@ -440,28 +449,38 @@ class _GroupCostCalculator:
         split = ctx.split
         commutes = sum((self.commute_monthly(p.name) for p in group), Decimal(0))
         insurance = ctx.insurance_scale * sum((self.money_of(p, "life_insurance_monthly") for p in group), Decimal(0))
-        share = Decimal(str(round(owner_share, SHARE_DECIMALS)))
+        share = Decimal(str(round(owner_share, GroupMonthlyCostNode.SHARE_DECIMALS)))
         main_payer_count = sum(1 for p in group if p.name in split.main_payers) if split.main_payers else len(group)
         main_share = (
-            Decimal(str(round(main_payer_count / split.main_payer_total, SHARE_DECIMALS))) * ctx.council_monthly
+            Decimal(
+                str(round(main_payer_count / split.main_payer_total, GroupMonthlyCostNode.SHARE_DECIMALS))
+            ) * ctx.council_monthly
             if split.main_payers
             else share * ctx.council_monthly
         )
         payer_count = sum(1 for p in group if p.name in split.payers)
         annexe_share = (
-            Decimal(str(round(payer_count / len(split.payers), SHARE_DECIMALS))) * split.annexe_monthly
+            Decimal(
+                str(round(payer_count / len(split.payers), GroupMonthlyCostNode.SHARE_DECIMALS))
+            ) * split.annexe_monthly
             if split.payers
             else Decimal(0)
         )
         council_share = main_share + annexe_share
         sinking_share = share * ctx.sinking_monthly
         value = commutes + insurance + council_share + sinking_share + rent
-        stddev = owner_share * float(ctx.council_stddev) / float(MONTHS_PER_YEAR)
+        stddev = owner_share * float(ctx.council_stddev) / float(GroupMonthlyCostNode.MONTHS_PER_YEAR)
         if split.main_payers:
-            stddev = (main_payer_count / split.main_payer_total) * float(ctx.council_stddev) / float(MONTHS_PER_YEAR)
+            stddev = (
+                (main_payer_count / split.main_payer_total)
+                * float(ctx.council_stddev)
+                / float(GroupMonthlyCostNode.MONTHS_PER_YEAR)
+            )
         if split.payers:
-            stddev += (payer_count / len(split.payers)) * split.annexe_stddev / float(MONTHS_PER_YEAR)
-        breakdown = _GroupBreakdownJson(
+            stddev += (
+                (payer_count / len(split.payers)) * split.annexe_stddev / float(GroupMonthlyCostNode.MONTHS_PER_YEAR)
+            )
+        breakdown = _GroupBreakdown(
             commutes=round(float(commutes), 2),
             insurance=round(float(insurance), 2),
             # Main bill only — the annexe bill has its own row below, so
@@ -522,13 +541,12 @@ class _GroupCostContext:
     insurance_scale: int
 
 
-@dataclass
-class _GroupBreakdownJson:
+class _GroupBreakdown(SerializableAsDict):
     """Wire shape of one group's breakdown rows (node_results).
 
-    Not frozen: the assemblers append the rent, mortgage and
-    rental-income rows after ``group_figure`` returns — the original
-    dict was mutated in place at those sites.
+    Mutable: the assemblers append the rent, mortgage and rental-income
+    rows after ``group_figure`` returns — the original dict was mutated
+    in place at those sites.
     """
 
     commutes: float
@@ -540,65 +558,30 @@ class _GroupBreakdownJson:
     mortgage: float | None = None
     rental_income: float | None = None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        d = dict(
-            commutes=self.commutes,
-            insurance=self.insurance,
-            council_tax=self.council_tax,
-            sinking_fund=self.sinking_fund,
-        )
-        # The optional keys are emitted only when set — the omission is
-        # the wire contract. One data-driven loop, not four copies.
-        for _key, _val in (
-            ("annexe_council_tax", self.annexe_council_tax),
-            ("rent_paid", self.rent_paid),
-            ("mortgage", self.mortgage),
-            ("rental_income", self.rental_income),
-        ):
-            if _val is not None:
-                d[_key] = _val
-        return d
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Mapping[str, Any]:
+        """The optional rows are emitted only when set — the omission is
+        the wire contract, one rule for all four of them."""
+        return {k: v for k, v in handler(self).items() if v is not None}
 
 
-@dataclass(frozen=True)
-class _GroupFigureJson:
+class _GroupFigure(SerializableAsDict):
     """The {value, stddev} figure wrapper for one group."""
 
     value: str
     stddev: float
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(value=self.value, stddev=self.stddev)
 
-
-@dataclass(frozen=True)
-class _GroupCostsJson:
+class _GroupCosts(SerializableAsDict):
     """Wire shape of the GroupMonthlyCostNode value dict."""
 
-    couple: _GroupFigureJson
-    others: _GroupFigureJson
+    couple: _GroupFigure
+    others: _GroupFigure
     couple_label: str
     couple_names: str
     others_label: str
-    couple_breakdown: _GroupBreakdownJson
-    others_breakdown: _GroupBreakdownJson
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(
-            couple=self.couple.to_dict(),
-            others=self.others.to_dict(),
-            couple_label=self.couple_label,
-            couple_names=self.couple_names,
-            others_label=self.others_label,
-            couple_breakdown=self.couple_breakdown.to_dict(),
-            others_breakdown=self.others_breakdown.to_dict(),
-        )
+    couple_breakdown: _GroupBreakdown
+    others_breakdown: _GroupBreakdown
 
 
 def _group_figure_result(calc, ctx, group, owner_share, rent) -> GroupFigureResult:
@@ -621,7 +604,8 @@ def _compute_group_costs(inputs: GroupCostInputs) -> Attempt[dict]:
     sinking_monthly = (
         Decimal(0)
         if is_current
-        else (inputs.sinking.value_or_none() or Money(amount="0", currency="GBP")).amount / Decimal(MONTHS_PER_YEAR)
+        else (inputs.sinking.value_or_none() or Money(amount="0", currency="GBP")).amount
+        / Decimal(GroupMonthlyCostNode.MONTHS_PER_YEAR)
     )
     insurance_scale = 0 if is_current else 1
     ignored = (
@@ -662,9 +646,9 @@ def _assemble_result(calc, ctx, adults, owners, others) -> Attempt[dict]:
     others_fig = _group_figure_result(calc, ctx, others, others_share, others_rent_paid)
     others_val, others_std, others_breakdown = others_fig.value, others_fig.stddev, others_fig.breakdown
     return Attempt.succeeded(
-        _GroupCostsJson(
-            couple=_GroupFigureJson(value=f"{couple_val:.2f}", stddev=couple_std),
-            others=_GroupFigureJson(value=f"{others_val:.2f}", stddev=others_std),
+        _GroupCosts(
+            couple=_GroupFigure(value=f"{couple_val:.2f}", stddev=couple_std),
+            others=_GroupFigure(value=f"{others_val:.2f}", stddev=others_std),
             couple_label="+".join(p.name[0].upper() for p in adults if p.name in owners),
             # Full names, not initials — the detail page says "Ashby",
             # not "A". The card still uses the short couple label.

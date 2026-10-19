@@ -81,7 +81,7 @@ class TestExtractTown:
         )
         # Address branch produced no time, so the fallback supplied 15
         assert result.walk_to_town is not None
-        assert result.walk_to_town.value == 15, (
+        assert result.walk_to_town.magnitude == 15, (
             f"Expected 15 from reverse geocode fallback, got {result.walk_to_town}"
         )
 
@@ -119,5 +119,5 @@ class TestExtractTown:
             ),
         )
         assert result.walk_to_town is not None
-        assert result.walk_to_town.value == 10
+        assert result.walk_to_town.magnitude == 10
         assert not rev_called, "Reverse geocode should NOT be called when address works"

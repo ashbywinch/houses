@@ -10,6 +10,7 @@ from houses.services_provider import get_services
 from houses.walkability import extract_town
 
 
+# lucidlint: ignore class-module one compact area-family node file — Walkability/NearestTown/TownDesc/Town (review-log)
 class WalkabilityNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, best_address):
         deps: tuple[Node, ...] = (best_location, best_address)

@@ -15,23 +15,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import ClassVar
 
 from money import Money
-from pint import Quantity as _Quantity
+from pint import Quantity
 
 from houses.commute import (
     CostGroup,  # noqa: F401 — re-export
     JourneyLeg,  # noqa: F401 — re-export
 )
 from houses.school import School  # noqa: F401 — re-export
-
-_MODE_LABELS = {
-    "transit": "Transit",
-    "car": "Driving",
-    "drive": "Driving",
-    "walk": "Walking",
-}
-PERCENT = 100
 
 
 @dataclass
@@ -56,6 +49,8 @@ class PlaceOfInterest:
     # any combination.  Empty means unset (legacy) — the effective value is
     # derived by ``effective_acceptable_modes`` and is what routing uses.
     acceptable_modes: tuple[str, ...] = ()
+    # Canonical order for the all-modes set (also the UI checkbox order).
+    ALL_ACCEPTABLE_MODES: ClassVar[tuple[str, ...]] = ("transit", "car", "walk")
 
     def to_provenance_value(self) -> str:
         """User-friendly projection for provenance display: where the
@@ -88,7 +83,7 @@ class HomeCoOwner:
 
 
 @dataclass(frozen=True)
-class _PersonProvenanceJson:
+class _PersonProvenance:
     """Wire shape of a person's provenance projection — the identity-
     relevant fields; money fields render through their canonical string
     form via the generic projector."""
@@ -98,25 +93,25 @@ class _PersonProvenanceJson:
     is_child: bool
     places: list[str]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the provenance wire shape (coding-standards.md)
-        return {
-            "name": self.name,
-            "has_car": self.has_car,
-            "is_child": self.is_child,
-            "places": self.places,
-        }
+        return dict(
+            name=self.name,
+            has_car=self.has_car,
+            is_child=self.is_child,
+            places=self.places,
+        )
 
 
 @dataclass(frozen=True)
 class Person:
     """A person with dependents whose commute costs are considered."""
+    # Co-owner shares are percentages of the holder's home — 100 is the whole.
+    PERCENT: ClassVar[int] = 100
 
     name: str
     has_car: bool
     is_child: bool = False
-    bus_walk_penalty: _Quantity = _Quantity(30, "minute")
+    bus_walk_penalty: Quantity = Quantity(30, "minute")
     acceptable_schools: tuple[str, ...] = ("mixed",)
     petrol_mpg: int = 45
     home_co_owners: tuple[HomeCoOwner, ...] = ()
@@ -145,23 +140,18 @@ class Person:
     # the slug fallback is migration-only, never a new identity.
     person_id: str = ""
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display.
 
         Keeps the identity-relevant fields; money fields render through
         their canonical string form via the generic projector.
         """
-        return _PersonProvenanceJson(
+        return _PersonProvenance(
             name=self.name,
             has_car=self.has_car,
             is_child=self.is_child,
             places=[p.to_provenance_value() for p in self.places_of_interest],
         ).to_dict()
-
-
-# Canonical order for the all-modes set (also the UI checkbox order).
-ALL_ACCEPTABLE_MODES: tuple[str, ...] = ("transit", "car", "walk")
 
 
 def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
@@ -182,7 +172,7 @@ def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
         return ("car",)
     if label in ("pimlico", "aldgate"):
         return ("transit",)
-    return ALL_ACCEPTABLE_MODES
+    return PlaceOfInterest.ALL_ACCEPTABLE_MODES
 
 
 def effective_selling_home(person: Person) -> bool:
@@ -224,6 +214,8 @@ def effective_editable_by(person: Person, all_persons: list[Person]) -> tuple[st
     return (person.name,)
 
 
+type _ModeLabelMap = dict[str, str]
+
 @dataclass(frozen=True)
 class Commute:
     """A person's commute from a property to a place of interest.
@@ -239,11 +231,18 @@ class Commute:
     ``__repr__``, ``__eq__``, and ``__hash__`` use ``_details``
     directly, so they never trigger the guard.
     """
+    # Mode → UI label for the summary line.
+    MODE_LABELS: ClassVar[_ModeLabelMap] = {
+        "transit": "Transit",
+        "car": "Driving",
+        "drive": "Driving",
+        "walk": "Walking",
+    }
 
     person: Person
     label: str
     destination: PlaceOfInterest
-    duration: _Quantity
+    duration: Quantity
     daily_cost: Money
     mode: str = "transit"
     _details: tuple[CostGroup, ...] = ()
@@ -276,7 +275,7 @@ class Commute:
         """
         if self.infeasible:
             return self.no_route_reason or "Infeasible route"
-        mode_label = _MODE_LABELS.get(self.mode, self.mode.title())
+        mode_label = Commute.MODE_LABELS.get(self.mode, self.mode.title())
         poi = self.destination
         fare_unknown = not self.daily_cost.amount and self.mode != "walk"
         if fare_unknown:
@@ -340,19 +339,10 @@ class Schools:
 
 
 @dataclass(frozen=True)
-class EpcRating:
-    """Energy Performance Certificate rating for a property."""
-
-    rating: str = ""
-    potential_rating: str = ""
-    evidence_url: str = ""
-
-
-@dataclass(frozen=True)
 class Walkability:
     """Walkability data for a property — town access and amenities."""
 
-    walk_to_town: _Quantity | None = None
+    walk_to_town: Quantity | None = None
     amenities: str = ""
     town_description: str = ""
 
@@ -380,13 +370,17 @@ def joint_owner_names(persons: list) -> set[str]:
         return {p.name for p in adults}
     return owners
 
+type _EquityGross = dict[str, Decimal]
+type _OwnersById = dict[str, Person]
+type _EquityContributions = dict[str, Decimal]
+
 
 def _equity_for(
     name: str,
     person: Person,
     pid: str,
-    gross: dict[str, Decimal],
-    owners: dict[str, Person],
+    gross: _EquityGross,
+    owners: _OwnersById,
 ) -> Decimal:
     """One adult's home-equity contribution: their own home's remainder
     after co-owner shares, plus every co-owner share they hold in another
@@ -394,7 +388,7 @@ def _equity_for(
     mine = Decimal(0)
     if pid in gross:
         co_sum = Decimal(sum(co.share for co in person.home_co_owners))
-        mine += gross[pid] * (Decimal(PERCENT) - co_sum) / Decimal(PERCENT)
+        mine += gross[pid] * (Decimal(Person.PERCENT) - co_sum) / Decimal(Person.PERCENT)
     for holder_id, equity in gross.items():
         if holder_id == pid:
             continue
@@ -403,11 +397,11 @@ def _equity_for(
             continue
         for co in holder.home_co_owners:
             if co.name == name:
-                mine += equity * Decimal(co.share) / Decimal(PERCENT)
+                mine += equity * Decimal(co.share) / Decimal(Person.PERCENT)
     return mine
 
 
-def home_equity_contributions(persons: list) -> dict[str, Decimal]:
+def home_equity_contributions(persons: list) -> _EquityContributions:
     """Each adult's deposit contribution from home equity, distributed by
     co-owner shares.
 
@@ -419,10 +413,10 @@ def home_equity_contributions(persons: list) -> dict[str, Decimal]:
     """
     by_name = {p.name: p for p in persons if isinstance(p, Person) and not p.is_child}
     id_of = {p.name: person_id_of(p) for p in by_name.values()}
-    owners: dict[str, Person] = {}
+    owners: _OwnersById = {}
     for person in by_name.values():
         owners.setdefault(id_of[person.name], person)
-    gross: dict[str, Decimal] = {}
+    gross: _EquityGross = {}
     for p in by_name.values():
         if not effective_selling_home(p):
             continue
@@ -493,7 +487,7 @@ def equity_line(options: EquityInputs) -> str:
                 f"£{options.person.home_sale_price.amount:,.2f} sale − "
                 f"£{options.person.outstanding_mortgage.amount:,.2f} mortgage{cash_part} = £{value:,.2f}"
             )
-        holder_part = f"£{gross:,.2f} home ({PERCENT - co_sum}% yours) + "
+        holder_part = f"£{gross:,.2f} home ({Person.PERCENT - co_sum}% yours) + "
         return f"{holder_part}£{home_share:,.2f} home share{cash_part} = £{value:,.2f}"
     if home_share > 0:
         # this person's share came from co-owning someone else's home

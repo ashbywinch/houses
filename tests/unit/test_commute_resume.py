@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from houses.geopoint import GeoPoint
-from tools.commute.station_shed import BBox, Office, RoutingContext, Station, build_shed
+from tools.commute.station_shed import BBox, Office, RoutingContext, ShedRecord, Station, build_shed
 
 PIMLICO = GeoPoint(51.4904, -0.1378)
 ALDGATE = GeoPoint(51.5145, -0.0762)
@@ -107,19 +107,19 @@ async def test_implausible_durations_rejected():
         }
     )
     shed = await build_shed(far, _ctx(router))
-    wop = next(r for r in shed if r["crs"] == "WOP")
-    assert wop["kept"] is False
-    assert wop["routing_error"] == "failed"
-    assert wop["duration_pimlico"] is None
+    wop = next(r for r in shed if r.crs == "WOP")
+    assert wop.kept is False
+    assert wop.routing_error == "failed"
+    assert wop.duration_pimlico is None
 
 
 @pytest.mark.asyncio
 async def test_plausible_durations_accepted():
     """Legit fast rail (Reading, ~60 km at 55 min) must survive the floor."""
     shed = await build_shed(STATIONS, _ctx(_CountingRouter()))
-    rdg = next(r for r in shed if r["crs"] == "RDG")
-    assert rdg["kept"] is True
-    assert rdg["duration_pimlico"] == 55
+    rdg = next(r for r in shed if r.crs == "RDG")
+    assert rdg.kept is True
+    assert rdg.duration_pimlico == 55
 
 
 @pytest.mark.asyncio
@@ -128,9 +128,9 @@ async def test_resume_reroutes_failed_stations():
     # First run: EXD fails both destinations (not in the router's durations).
     failed_router = _CountingRouter({k: v for k, v in DURATIONS.items() if k[0] != "EXD"})
     first = await build_shed(STATIONS, _ctx(failed_router))
-    exd = next(r for r in first if r["crs"] == "EXD")
-    assert exd["routing_error"] == "failed"
-    assert exd["kept"] is False
+    exd = next(r for r in first if r.crs == "EXD")
+    assert exd.routing_error == "failed"
+    assert exd.kept is False
 
     # Resume: every non-failed record is done; EXD is re-routed.
     router2 = _CountingRouter()
@@ -139,9 +139,9 @@ async def test_resume_reroutes_failed_stations():
     assert ("EXD", "EC3A 4NE") in router2.calls
     # All other stations were not re-routed.
     assert all(c[0] == "EXD" for c in router2.calls)
-    exd2 = next(r for r in resumed if r["crs"] == "EXD")
-    assert exd2["duration_pimlico"] == 150  # fresh successful route
-    assert exd2["routing_error"] is None
+    exd2 = next(r for r in resumed if r.crs == "EXD")
+    assert exd2.duration_pimlico == 150  # fresh successful route
+    assert exd2.routing_error is None
 
 
 @pytest.mark.asyncio
@@ -149,12 +149,19 @@ async def test_resume_prunes_station_removed_from_input():
     router = _CountingRouter()
     full = await build_shed(STATIONS, _ctx(router))
     # Existing records include a CRS that no longer exists in the station list.
-    stale = [{
-        "name": "Gone", "crs": "ZZZ", "lat": 52.0, "lon": 0.0,
-        "duration_pimlico": 50, "duration_aldgate": 50, "kept": True,
-    }]
+    stale = [
+        ShedRecord(
+            name="Gone",
+            crs="ZZZ",
+            lat=52.0,
+            lon=0.0,
+            duration_pimlico=50,
+            duration_aldgate=50,
+            kept=True,
+        )
+    ]
     resumed = await build_shed(STATIONS, _ctx(router), existing_records=stale + full)
-    assert all(r["crs"] != "ZZZ" for r in resumed)
+    assert all(r.crs != "ZZZ" for r in resumed)
     assert resumed == full
 
 
@@ -169,7 +176,7 @@ async def test_resume_reroutes_station_with_changed_coords():
     ]
     router2 = _CountingRouter()
     resumed = await build_shed(moved, _ctx(router2), existing_records=full)
-    rdg = next(r for r in resumed if r["crs"] == "RDG")
-    assert rdg["lat"] == 51.45 and rdg["lon"] == -0.96  # fresh record, new coords
+    rdg = next(r for r in resumed if r.crs == "RDG")
+    assert rdg.lat == 51.45 and rdg.lon == -0.96  # fresh record, new coords
     assert ("RDG", "SW1P 1AA") in router2.calls  # was re-routed, not skipped
     assert len(router2.calls) == 2  # only RDG × 2 destinations

@@ -9,7 +9,8 @@ from pint import Quantity
 import dag.user_input_node  # noqa: F401 — register Money/Quantity pydantic schemas
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+from dag.if_then_else_node import IfThenElseNode
+from dag.if_then_else_options import IfThenElseOptions
 from dag.node import Node
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
@@ -894,7 +895,7 @@ class TestFareBetween:
 
     def test_fare_between_exact_match(self):
         """Direct station pair returns the fare."""
-        from houses.rail_fares import RailFareRegistry
+        from houses.rail_fare_registry import RailFareRegistry
         from houses.stations import Station
 
         reg = RailFareRegistry()
@@ -911,7 +912,7 @@ class TestFareBetween:
 
     def test_fare_between_no_match(self):
         """Returns None when no pair matches (no LON fallback either)."""
-        from houses.rail_fares import RailFareRegistry
+        from houses.rail_fare_registry import RailFareRegistry
         from houses.stations import Station
 
         reg = RailFareRegistry()
@@ -928,7 +929,7 @@ class TestFareBetween:
 
     def test_fare_between_reverse_match(self):
         """Fares are symmetric — reverse pair also matches."""
-        from houses.rail_fares import RailFareRegistry
+        from houses.rail_fare_registry import RailFareRegistry
         from houses.stations import Station
 
         reg = RailFareRegistry()
@@ -1100,7 +1101,7 @@ class TestRailFareNode:
 
         from houses.commute import LegMode
         from houses.nodes.rail_fare_node import RailFareNode
-        from houses.rail_fares import RailFareRegistry
+        from houses.rail_fare_registry import RailFareRegistry
         from houses.services_provider import get_services
         from houses.stations import StationRegistry
 
@@ -1187,7 +1188,7 @@ class TestRailFareNode:
 
         from houses.api_cache import CachingTransport
         from houses.nodes.rail_fare_node import RailFareNode
-        from houses.rail_fares import RailFareRegistry
+        from houses.rail_fare_registry import RailFareRegistry
         from houses.services_provider import get_services
         from houses.stations import StationRegistry
         from houses.tfl_client import TflClient
@@ -1260,7 +1261,7 @@ class TestRailFareNode:
         # so the autouse empty-cache assertion stays honest.
         from houses import api_cache
 
-        previous_cache_dir = api_cache.CACHE_DIR
+        previous_cache_dir = api_cache._CacheRuntime.CACHE_DIR
         api_cache.set_cache_dir(tmp_path)
         try:
             await flush_processor()
@@ -1583,7 +1584,8 @@ class TestFareConditionalDependency:
     async def test_drive_selection_never_activates_fare_dependency(self):
         """Bracknell case: selector picks drive; the fare node must stay
         PENDING — never calculated — and the merge keeps the drive commute."""
-        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+        from dag.if_then_else_node import IfThenElseNode
+        from dag.if_then_else_options import IfThenElseOptions
         from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
         from houses.nodes.commute import needs_rail_fare as _needs_rail_fare_fn
 
@@ -1687,7 +1689,8 @@ class TestFareConditionalDependency:
     async def test_transit_selection_activates_fare_dependency(self):
         """Selected commute is transit → the fare dependency activates and is
         applied."""
-        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+        from dag.if_then_else_node import IfThenElseNode
+        from dag.if_then_else_options import IfThenElseOptions
         from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
         from houses.nodes.commute import needs_rail_fare as _needs_rail_fare_fn
 

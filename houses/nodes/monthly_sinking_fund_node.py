@@ -18,6 +18,8 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
     headline's group node, not here — the old ×⅔ fudge is gone.
     """
 
+    MONTHS_PER_YEAR = 12
+
     def __init__(self, node_id: str, *, yearly_sinking_fund_node):
         self._yearly_node: Node = yearly_sinking_fund_node
         super().__init__(node_id, Money, (yearly_sinking_fund_node,))
@@ -44,5 +46,5 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         y = yearly.value_or_none()
         if y is None:
             return yearly
-        monthly = round(y.amount / 12, 2)
+        monthly = round(y.amount / MonthlySinkingFundNode.MONTHS_PER_YEAR, 2)
         return Attempt.succeeded(Money(str(monthly), "GBP"))

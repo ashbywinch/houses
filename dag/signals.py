@@ -5,8 +5,7 @@ import weakref
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
-
+# lucidlint: ignore class-module signals is the package for three mutually-recursive primitives (review-log)
 class Connection:
     """Represents a connected handler. Call ``.disconnect()`` to remove it."""
 

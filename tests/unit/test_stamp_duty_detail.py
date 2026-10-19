@@ -72,7 +72,7 @@ async def test_detail_includes_stamp_duty():
 
     await flush_processor()
     register_property(rid, prop)
-    detail = await prop.to_json_detail()
+    detail = (await prop.detail()).to_dict()
     aff = detail.get("affordability", {})
     assert "stamp_duty" in aff, f"stamp_duty missing from affordability. Got keys: {list(aff.keys())}"
     sd = aff["stamp_duty"]

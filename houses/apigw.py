@@ -98,9 +98,8 @@ OVERPASS = ApiProfile(pace_s=0.5)
 
 
 def _as_dict(obj: Any):
-    """WirePayload dataclass or plain dict — the class's ``to_dict`` is the
-    single serializer (the default WirePayload one handles plain dataclasses);
-    callers never hand-build wire dicts in API classes."""
+    """SerializableAsDict record or plain dict — the record's ``to_dict`` is the
+    single serializer; callers never hand-build wire dicts in API classes."""
     return obj.to_dict() if hasattr(obj, "to_dict") else obj
 
 
@@ -201,8 +200,7 @@ class ApiGate:
 GATE = ApiGate()
 
 
-# lucidlint: ignore long-param-list the flat signature IS the ease-of-use
-# contract — every caller would otherwise build a parameter object per call
+# lucidlint: ignore long-param-list flat signature is the ease-of-use contract — no param object per call (review-log)
 async def api_fetch(
     method: str,
     url: str,

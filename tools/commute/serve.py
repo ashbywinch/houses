@@ -17,8 +17,15 @@ from pathlib import Path
 from typing import override
 from urllib.parse import urlsplit
 
-PORT = 8123
-MAP_REL = "commute_map.html"
+
+class _MapServer:
+    """Constants of the privacy-safe map server (review-log: one config class
+    owns the port, map name, and HTTP status codes)."""
+
+    PORT = 8123
+    MAP_REL = "commute_map.html"
+    HTTP_OK = 200
+    HTTP_NOT_FOUND = 404
 
 
 def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
@@ -38,18 +45,20 @@ def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
         def _map_allowed(self) -> bool:
             # ignore the query string: the map's own ?debug=1 diagnostics
             # panel is a documented flow and must not 404
-            return urlsplit(self.path).path in ("/", "/" + MAP_REL)
+            return urlsplit(self.path).path in ("/", "/" + _MapServer.MAP_REL)
 
         def _send_map(self, with_body: bool) -> None:
             if not self._map_allowed():
-                self.send_error(404, "only the commute map is served")
+                self.send_error(_MapServer.HTTP_NOT_FOUND, "only the commute map is served")
                 return
             try:
-                body = (Path(self.directory) / MAP_REL).read_bytes()
+                body = (Path(self.directory) / _MapServer.MAP_REL).read_bytes()
             except OSError:
-                self.send_error(404, f"{MAP_REL} not found - run 'make commute-map' first")
+                self.send_error(
+                    _MapServer.HTTP_NOT_FOUND, f"{_MapServer.MAP_REL} not found - run 'make commute-map' first"
+                )
                 return
-            self.send_response(200)
+            self.send_response(_MapServer.HTTP_OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -72,13 +81,13 @@ def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Serve only the commute map (privacy-safe).")
-    parser.add_argument("--port", type=int, default=PORT)
+    parser.add_argument("--port", type=int, default=_MapServer.PORT)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--directory", default="data/commute")
     args = parser.parse_args(argv)
 
     handler = make_handler(Path(args.directory))
-    print(f"serving ONLY {MAP_REL} on http://{args.host}:{args.port}/{MAP_REL} (Ctrl-C to stop)")
+    print(f"serving ONLY {_MapServer.MAP_REL} on http://{args.host}:{args.port}/{_MapServer.MAP_REL} (Ctrl-C to stop)")
     sys.stdout.flush()
     http.server.ThreadingHTTPServer((args.host, args.port), handler).serve_forever()
     return 0

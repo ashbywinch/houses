@@ -2,20 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 from houses import apigw
-from houses.apis.transport import BaseApi, FetchArgs
+from houses.apis.base_api import BaseApi
+from houses.apis.epc_search_result import EpcSearchResult
+from houses.apis.fetch_args import FetchArgs
 from houses.settings import settings
-from houses.web.json_utils import WirePayload
-
-
-@dataclass(frozen=True)
-class EpcSearchResult:
-    """The EPC register's certificate rows, as returned by the search."""
-
-    certificates: list[Any]
+from serialization import SerializableAsDict
 
 
 class EpcApi(BaseApi):
@@ -25,7 +17,7 @@ class EpcApi(BaseApi):
     def _auth_headers() -> dict[str, str]:
         return {"Authorization": f"Bearer {settings.epc_bearer_token}"}
 
-    async def search(self, url: str, params: WirePayload, *, _client_factory=None) -> EpcSearchResult:
+    async def search(self, url: str, params: SerializableAsDict, *, _client_factory=None) -> EpcSearchResult:
         """Register search; the caller matches its building among the rows."""
         req = FetchArgs(
             "GET",

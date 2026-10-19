@@ -25,29 +25,43 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar, override
+from typing import Any, ClassVar, TypeVar, override
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
 from houses.settings import settings
-from houses.web.json_utils import WirePayload
+from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
 
 _APP_KEY_RE = re.compile(r"app_key=[^&\"'}\s]+")
 
 _ClientT = TypeVar("_ClientT", httpx.AsyncClient, httpx.Client)
+type _WireFragment = dict[str, Any]
 
 
-CACHE_DIR = Path("data/api_cache")
+class _CacheRuntime:
+    """The disk cache's process-wide state: where the cache lives, the
+    lazy TfL key value for scrubbing, and the transient HTTP verdicts —
+    one owner; tests swap the directory whole via ``set_cache_dir``."""
 
+    CACHE_DIR: ClassVar[Path] = Path("data/api_cache")
+    TFL_KEY_VALUE: ClassVar[str] = ""
 
-# lucidlint: ignore unused,unused-setter test-injection API — unit conftest calls set_cache_dir() to isolate the cache
+    # Statuses that must never poison the cache — retries stay genuine
+    # (key expiry 401/403, planner outage 409, rate limit 429, 5xx).
+    TRANSIENT_STATUSES: ClassVar[tuple[int, ...]] = (401, 403, 409, 429)
+    HTTP_5XX_START = 500
+    HTTP_OK = 200
+    HTTP_3XX_START = 300
+    HTTP_NOT_FOUND = 404
+    HTTP_3XX_END = 400
+
+# lucidlint: ignore unused-setter the cache dir is the test seam — conftest swaps it; production uses the default
 def set_cache_dir(path: str | Path) -> None:
     """Override the cache directory (used by tests to isolate caches)."""
-    global CACHE_DIR
-    CACHE_DIR = Path(path)
+    _CacheRuntime.CACHE_DIR = Path(path)
 
 
 @dataclass(frozen=True)
@@ -58,9 +72,7 @@ class CacheEnvelope:
     status: int
     body: object
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the cache-file shape (coding-standards)
         return dict(_cached_status=self.status, _cached_body=self.body)
 
     @classmethod
@@ -69,37 +81,28 @@ class CacheEnvelope:
         return cls(status=data["_cached_status"], body=data["_cached_body"])
 
 
-@dataclass(frozen=True)
-class _UrlQuery:
-    """The parsed URL query at the httpx transport edge — the one place
-    a request identity comes from the network, not from a caller."""
-
-    params: dict[str, str] | None
-
-    # lucidlint: ignore record-shape to_dict return IS the cache-key fragment edge — the parsed URL query must pass
-    # through verbatim, a class for it would be ceremony at the transport boundary (coding-standards.md)
-    def to_dict(self) -> dict:
-        return self.params or {}
-
-
-# lucidlint: ignore-file data-clump this module's public cache API deliberately threads one request identity (method,
-# lucidlint: ignore record-shape the return is the params fragment entering the cache key (coding-standards.md)
-def _wire_params(params: WirePayload | None) -> dict[str, Any] | None:
+def _wire_params(params: SerializableAsDict | Mapping[str, Any] | None) -> _WireFragment | None:
     """Serialise a request record exactly once, at the cache-key edge.
 
-    The cache seams take the caller's request RECORD (``WirePayload``);
-    ``to_dict()`` happens here, never in the callers.
+    The cache seams take the caller's request RECORD (``SerializableAsDict``) or a
+    plain wire dict: records serialize via ``to_dict()`` here, never in the
+    callers. Plain dicts are the wire already; falsy values are dropped to
+    mirror httpx (the transport omits them from the query, so the cache
+    identity must match what is actually on the wire).
     """
     if params is None:
         return None
+    if isinstance(params, Mapping):
+        wire: _WireFragment = {k: v for k, v in params.items() if v}
+    else:
+        wire = params.to_dict()
     # Normalize an empty serialization to None EXPLICITLY: the key omits
     # the query part when there is nothing on the wire, and no later truthy
     # check should be what makes that true.
-    wire = params.to_dict()
     return wire or None
 
-
-def _make_key(method: str, url: str, params: WirePayload | None, body: str | None) -> str:
+# lucidlint: ignore latent-class probed: 3+ fns sharing 2 params; CacheRequest re-fires first-arg; API is cross-module
+def _make_key(method: str, url: str, params: SerializableAsDict | Mapping[str, Any] | None, body: str | None) -> str:
     parts = [method.upper(), url]
     wire = _wire_params(params)
     if wire:
@@ -111,16 +114,14 @@ def _make_key(method: str, url: str, params: WirePayload | None, body: str | Non
 
 
 def _cache_path(key: str) -> Path:
-    return CACHE_DIR / f"{key}.json"
+    return _CacheRuntime.CACHE_DIR / f"{key}.json"
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def get_cached(
     method: str,
     url: str,
-    params: WirePayload | None = None,
+    params: SerializableAsDict | Mapping[str, Any] | None = None,
     body: str | None = None,
-) -> dict[str, Any] | None:
+) -> Mapping[str, Any] | None:
     """Return the cached JSON response for a request, or ``None``.
 
     ``params`` is the caller's request record — serialized once at the
@@ -131,17 +132,15 @@ def get_cached(
         return json.loads(path.read_text())
     return None
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def set_cached(
     method: str,
     url: str,
-    params: WirePayload | None,
+    params: SerializableAsDict | Mapping[str, Any] | None,
     body: str | None,
-    data: dict[str, Any],
+    data: Mapping[str, Any],
 ) -> None:
     """Store a JSON response so future identical requests skip the API."""
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _CacheRuntime.CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(_make_key(method, url, params, body))
     path.write_text(json.dumps(_scrub_secrets(data)))
 
@@ -174,33 +173,30 @@ def _scrub_secrets(obj: Any, secret_key_value: str | None = None) -> Any:
     return obj
 
 
-_cached_secret_key_value: str = ""
-
-
 def _cached_secret_key() -> str:
     """The TfL app key VALUE (lazily read) — scrubbing the raw value
     catches escaped/JSON-encoded echoes the query regex misses."""
-    global _cached_secret_key_value
-    if not _cached_secret_key_value:
-        _cached_secret_key_value = settings.tfl_api_key
-    return _cached_secret_key_value
+    if not _CacheRuntime.TFL_KEY_VALUE:
+        _CacheRuntime.TFL_KEY_VALUE = settings.tfl_api_key
+    return _CacheRuntime.TFL_KEY_VALUE
 
-
-def evict_cached(method: str, url: str, params: WirePayload | None, body: str | None) -> None:
+def evict_cached(
+    method: str, url: str, params: SerializableAsDict | Mapping[str, Any] | None, body: str | None
+) -> None:
     """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
     _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
 
 
 # lucidlint: ignore long-param-list the flat signature is this helper's ease-of-use contract (cache callers)
-async def with_cache(  # lucidlint: ignore record-shape return is the cached API response body — wire format
+async def with_cache(
     method: str,
     url: str,
-    params: WirePayload | None = None,
-    body: WirePayload | None = None,
+    params: SerializableAsDict | Mapping[str, Any] | None = None,
+    body: SerializableAsDict | Mapping[str, Any] | None = None,
     *,
     fetch,
     no_store: bool = False,
-) -> dict[str, Any]:
+) -> Mapping[str, Any]:
     """Check disk cache first; on miss call ``fetch``, cache result, return.
 
     ``fetch`` is an async callable that returns the parsed JSON dict.
@@ -252,9 +248,9 @@ class CachingTransport(httpx.AsyncBaseTransport):
         query = {k: v[0] for k, v in parse_qs(parsed.query).items()} if parsed.query else None
         if query:
             query = {k: v for k, v in query.items() if k != "app_key"} or None
-        # The URL query IS the wire request at this edge — own it in a
-        # record, never thread the raw dict through the seams.
-        params = _UrlQuery(query)
+        # The URL query IS the wire request at this edge — a plain mapping,
+        # never a record that only unwraps itself back into one.
+        params = query
         body = request.content.decode() if request.content else None
 
         cached = get_cached(request.method, url_path, params, body)
@@ -262,7 +258,9 @@ class CachingTransport(httpx.AsyncBaseTransport):
             status = cached.get("_cached_status") if isinstance(cached, dict) else None
             raw_status = cached.get("httpStatusCode") if isinstance(cached, dict) else None
             poison = status if isinstance(status, int) else raw_status if isinstance(raw_status, int) else None
-            if poison is not None and (poison in (401, 403, 409, 429) or poison >= 500):
+            if poison is not None and (
+                poison in _CacheRuntime.TRANSIENT_STATUSES or poison >= _CacheRuntime.HTTP_5XX_START
+            ):
                 # Legacy poisoned entry: auth failures, planner outages, rate
                 # limits and server errors cached before the whitelist rule.
                 # Evict so retries stay genuine.
@@ -273,7 +271,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
                 # (a cached 404 "no route" must not come back as HTTP 200).
                 return httpx.Response(cached["_cached_status"], json=cached["_cached_body"])
             else:
-                return httpx.Response(200, json=cached)
+                return httpx.Response(_CacheRuntime.HTTP_OK, json=cached)
 
         response = await self._inner.handle_async_request(request)
         # Cache only deterministic responses: 2xx raw; 3xx and 404 wrapped with
@@ -283,7 +281,10 @@ class CachingTransport(httpx.AsyncBaseTransport):
             data = response.json()
             if response.is_success:
                 set_cached(request.method, url_path, params, body, data)
-            elif 300 <= response.status_code < 400 or response.status_code == 404:
+            elif (
+                _CacheRuntime.HTTP_3XX_START <= response.status_code < _CacheRuntime.HTTP_3XX_END
+                or response.status_code == _CacheRuntime.HTTP_NOT_FOUND
+            ):
                 set_cached(
                     request.method,
                     url_path,
@@ -291,8 +292,8 @@ class CachingTransport(httpx.AsyncBaseTransport):
                     body,
                     CacheEnvelope(status=response.status_code, body=data).to_dict(),
                 )
-        # lucidlint: ignore broad-except deliberate fallback — a cache-write failure must never break the request
-        except Exception as e:
+        # A cache-write failure must never break the request.
+        except (OSError, TypeError, ValueError) as e:
             logger.debug("response not cached (%s): %s", url_path, e)
             return response
         return response

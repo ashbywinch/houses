@@ -10,22 +10,31 @@ from money import Money
 
 from dag.attempt import AttemptError
 from dag.user_input_node import UserInputNode
+from houses.enriched_property import EnrichedProperty
 from houses.geopoint import GeoPoint
-from houses.property import EnrichedProperty
 
-_SCRAPE_ERROR_NODES = {
-    "address": "rightmove_address",
-    "bedrooms": "rightmove_bedrooms",
-    "price": "rightmove_price",
-    "location": "rightmove_location",
-}
-"""Scraper parse-error field → the DAG source node that owns it."""
+# Push targets keyed by DAG node key — a keyed collection, not a wire record.
+type SourceNodes = dict[str, UserInputNode]
+
+# Scraper parse-error field → the DAG source node key that owns it.
+type _ScrapeErrorNodeKeys = dict[str, str]
+
+
+class _ScrapeErrorNodes:
+    """Scraper parse-error field → the DAG source node that owns it."""
+
+    FIELD_TO_NODE: _ScrapeErrorNodeKeys = {
+        "address": "rightmove_address",
+        "bedrooms": "rightmove_bedrooms",
+        "price": "rightmove_price",
+        "location": "rightmove_location",
+    }
 
 
 def push_enriched_property(
     rid: str,
     enriched: EnrichedProperty,
-    sources: dict[str, UserInputNode],
+    sources: SourceNodes,
     scrape_errors: dict[str, str] | None = None,
 ) -> None:
     """Push an EnrichedProperty's fields to the new DAG UserInputNodes.
@@ -33,7 +42,7 @@ def push_enriched_property(
     Args:
         rid: Property RID.
         enriched: The EnrichedProperty from enrichment.
-        sources: Dict of UserInputNode instances (from a PropertyNodes object).
+        sources: The property's UserInputNode registry (from PropertyNodes).
         scrape_errors: Per-field parse failures from the scrape (Rightmove
             page-model fields whose VALUE could not be interpreted). Each is
             recorded on its source node as an impossible attempt — the DAG's
@@ -42,7 +51,7 @@ def push_enriched_property(
             value) is pushed afterwards, which supersedes the failure.
     """
     for field, message in (scrape_errors or {}).items():
-        node_key = _SCRAPE_ERROR_NODES.get(field)
+        node_key = _ScrapeErrorNodes.FIELD_TO_NODE.get(field)
         if node_key and node_key in sources:
             sources[node_key].fail(
                 message,

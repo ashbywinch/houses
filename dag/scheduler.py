@@ -1,6 +1,5 @@
 """Pluggable refresh scheduler for DerivedNodes.
-
-Production: ``AsyncQueueScheduler`` — ONE FIFO queue drained by the DAG
+Production: ``AsyncRefreshQueue`` — ONE FIFO queue drained by the DAG
 processor thread, which owns a private asyncio loop for the async compute
 functions. The uvicorn event loop never runs cascade work; it enqueues
 work and reads in-memory snapshots.
@@ -19,14 +18,18 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any, override
+
+from dag.guard import capture, capture_async
 
 if TYPE_CHECKING:
     from dag.derived_node import DerivedNode
-
 logger = logging.getLogger(__name__)
 
+
+type _NodeRegistry = dict[str, "DerivedNode"]
 
 @dataclass(order=True)
 class QueueEvent:
@@ -35,19 +38,26 @@ class QueueEvent:
     node: DerivedNode = field(compare=False, repr=False)
 
 
-# ── Refresh scheduler (DI via ContextVar) ────────────────────────────
+# ── Refresh queue (DI via module registry) ───────────────
+class RefreshQueue:
+    """Pluggable refresh queue for stale DerivedNodes.
 
-
-class RefreshScheduler:
-    """Pluggable scheduler for refreshing stale DerivedNodes.
-
-    Production: ``AsyncQueueScheduler`` — background ``asyncio.PriorityQueue``.
+    Production: ``AsyncRefreshQueue`` — background ``asyncio.PriorityQueue``.
     Tests: provide an isolated instance with ``set_scheduler()``.
     """
 
-    # Set per-instance via set_after_refresh(); AsyncQueueScheduler.after_refresh
+    # Set per-instance via set_after_refresh(); AsyncRefreshQueue.after_refresh
     # delegates to it when non-None.
     _after_refresh_callback: Callable[[DerivedNode], object] | None = None
+
+    @staticmethod
+    def registered_nodes() -> _NodeRegistry:
+        """Every DerivedNode currently registered, by node id.
+
+        The default scheduler does not track nodes; production's
+        AsyncRefreshQueue does (used for admin force-regeneration).
+        """
+        return {}
 
     @staticmethod
     def register(node: DerivedNode) -> None:
@@ -56,15 +66,6 @@ class RefreshScheduler:
     @staticmethod
     def unregister(node: DerivedNode) -> None:
         """Called when a DerivedNode is disconnected (cleanup)."""
-
-    @staticmethod
-    def registered_nodes() -> dict[str, DerivedNode]:
-        """Every DerivedNode currently registered, by node id.
-
-        The default scheduler does not track nodes; production's
-        AsyncQueueScheduler does (used for admin force-regeneration).
-        """
-        return {}
 
     @staticmethod
     def schedule(node: DerivedNode) -> None:
@@ -84,8 +85,8 @@ class RefreshScheduler:
         """Called after a node completes refresh (no-op default)."""
 
 
-class AsyncQueueScheduler(RefreshScheduler):
-    """Production scheduler — background ``asyncio.PriorityQueue``.
+class AsyncRefreshQueue(RefreshQueue):
+    """Production refresh queue — background ``asyncio.PriorityQueue``.
 
     When *respect_time* is True (default), events scheduled in the future
     are deferred until their wall-clock time arrives.  When False (test mode),
@@ -109,6 +110,10 @@ class AsyncQueueScheduler(RefreshScheduler):
         flush_all() no-op guard reads it."""
         self._requeue_counts: dict[str, int] = {}
 
+    # Re-queue the deferred event one microsecond after its latest dep so
+    # the dep drains first (event timestamps are float seconds).
+    _REQUEUE_AFTER_DEP = timedelta(microseconds=1)
+
     @override
     def register(self, node: DerivedNode) -> None:
         """Called when a node is created. Schedules it at its stored retry time or immediately."""
@@ -127,7 +132,7 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._registered.pop(node._id, None)
 
     @override
-    def registered_nodes(self) -> dict[str, DerivedNode]:
+    def registered_nodes(self) -> _NodeRegistry:
         """Every DerivedNode currently registered, by node id."""
         return dict(self._registered)
 
@@ -141,8 +146,9 @@ class AsyncQueueScheduler(RefreshScheduler):
         enqueue over instead: the primitive stays single-threaded by
         construction, rather than by every caller remembering.
         """
-        if _processor_loop is not None and threading.current_thread() is not _processor_thread:
-            _processor_loop.call_soon_threadsafe(self._enqueue, node, scheduled_at)
+        loop = _ProcessorRuntime.loop
+        if loop is not None and threading.current_thread() is not current_processor_thread():
+            loop.call_soon_threadsafe(self._enqueue, node, scheduled_at)
             return
         if node._id in self._scheduled:
             return
@@ -237,7 +243,11 @@ class AsyncQueueScheduler(RefreshScheduler):
         )
         queue = self._queue
         assert queue is not None
-        requeued = QueueEvent(scheduled_at=last_dep_at + 1e-6, node_id=event.node_id, node=event.node)
+        requeued = QueueEvent(
+            scheduled_at=last_dep_at + AsyncRefreshQueue._REQUEUE_AFTER_DEP.total_seconds(),
+            node_id=event.node_id,
+            node=event.node,
+        )
         count = self._requeue_counts.get(event.node_id, 0) + 1
         if count > len(self._registered):
             self._requeue_counts.pop(event.node_id, None)
@@ -258,17 +268,11 @@ class AsyncQueueScheduler(RefreshScheduler):
 
             if not self._respect_time or delay <= 0:
                 self._scheduled.pop(event.node_id, None)
-                try:
-                    await event.node.refresh()
-                    if event.node._attempt.pending:
-                        self._requeue_after_deps(event)
-                    else:
-                        self._requeue_counts.pop(event.node_id, None)
-                # lucidlint: ignore broad-except loop boundary — one node failure must not kill the processor
-                except Exception as exc:
+                _, failure = await capture_async(partial(self._settle_event, event))
+                if failure is not None:
                     # One node's failure must not kill the background loop —
                     # log it and move on to the next event.
-                    logger.exception("DAG processor failed for %s: %s", event.node_id, exc)
+                    logger.error("DAG processor failed for %s: %s", event.node_id, failure, exc_info=failure)
                     await asyncio.sleep(0)
                     continue
             else:
@@ -278,32 +282,43 @@ class AsyncQueueScheduler(RefreshScheduler):
                     await asyncio.wait_for(self._wakeup.wait(), timeout=delay)
             await asyncio.sleep(0)
 
+    async def _settle_event(self, event: QueueEvent) -> None:
+        """Refresh the event's node, then settle its requeue bookkeeping."""
+        await event.node.refresh()
+        if event.node._attempt.pending:
+            self._requeue_after_deps(event)
+        else:
+            self._requeue_counts.pop(event.node_id, None)
 
-# Production default — ONE scheduler for every thread: the event loop,
-# the TestClient portal, and the processor thread must all resolve the
-# same instance, or endpoints would schedule into a queue nobody drains.
-# The override is test injection only (isolation fixtures); it is a plain
-# module global because a ContextVar does not cross the portal thread.
-_default_scheduler: RefreshScheduler = AsyncQueueScheduler()
-_override_scheduler: RefreshScheduler | None = None
+
+class SchedulerRuntime:
+    """Process-wide scheduler seam: the production default and the test
+    override. ONE owner for the DI state — the module functions read and
+    write it here. The default must be ONE instance for every thread:
+    the event loop, the TestClient portal, and the processor thread all
+    resolve the same queue, or endpoints would schedule into a queue
+    nobody drains. The override is test injection only (isolation
+    fixtures); it lives here rather than in a ContextVar because a
+    ContextVar does not cross the portal thread."""
+
+    default: RefreshQueue = AsyncRefreshQueue()
+    override: RefreshQueue | None = None
 
 
-def get_scheduler() -> RefreshScheduler:
-    return _override_scheduler if _override_scheduler is not None else _default_scheduler
+def get_scheduler() -> RefreshQueue:
+    return SchedulerRuntime.override if SchedulerRuntime.override is not None else SchedulerRuntime.default
 
 
 # lucidlint: ignore unused-setter test-injection API — isolation_fixtures and dag tests call set_scheduler()
-def set_scheduler(scheduler: RefreshScheduler) -> None:
+def set_scheduler(scheduler: RefreshQueue) -> None:
     """Override the scheduler (used by tests to inject an isolated one)."""
-    global _override_scheduler
-    _override_scheduler = scheduler
+    SchedulerRuntime.override = scheduler
 
 
 # lucidlint: ignore unused test seam — clears the override in isolation fixtures across dag tests
 def reset_scheduler() -> None:
     """Reset to default (clears the override)."""
-    global _override_scheduler
-    _override_scheduler = None
+    SchedulerRuntime.override = None
 
 
 # ── Module-level convenience aliases (delegating to current scheduler) ──
@@ -329,19 +344,35 @@ def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
 # processor owns recompute AND persistence (blocking sqlite3 is harmless
 # here — that is the point). See .kilo/plans/dag-save-queue.md.
 
-_processor_thread: threading.Thread | None = None
-_processor_loop: asyncio.AbstractEventLoop | None = None
-_processor_sched: AsyncQueueScheduler | None = None
-_processor_task: asyncio.Task | None = None
+
+class _ProcessorRuntime:
+    """The DAG processor thread's process-wide state: the background
+    thread, its private loop and drained queue, and the in-flight
+    submission gauge. ONE owner — the processor functions and
+    ``AsyncRefreshQueue._enqueue`` read and write it through this class
+    (the queue and loop are bound to the processor's thread by
+    construction)."""
+
+    thread: threading.Thread | None = None
+    loop: asyncio.AbstractEventLoop | None = None
+    sched: AsyncRefreshQueue | None = None
+    task: asyncio.Task | None = None
+    # Queued submissions not yet applied.  ``stop_processor`` drains the
+    # scheduler queue AND this count: a submission in flight (or one whose
+    # cascade has not been enqueued yet) must land before the process exits,
+    # or a write the user already saw confirmed would vanish.
+    pending_submissions: int = 0
+    submissions_lock = threading.Lock()
+    # The yield granted to an in-flight submission between drain slices —
+    # a responsive idle decision without a busy spin.
+    DRAIN_YIELD = timedelta(seconds=0.01)
 
 
-# lucidlint: ignore unused deliberate test seam asserted by the isolation fixture
-# and the queue tests — production never needs to ask who the processor is.
 def current_processor_thread() -> threading.Thread | None:
     """The processor thread once running; None in tests, lifespan-less
     scripts and startup — single-threaded contexts where mutation is safe
     by definition."""
-    return _processor_thread
+    return _ProcessorRuntime.thread
 
 
 def assert_mutation_allowed() -> None:
@@ -351,7 +382,8 @@ def assert_mutation_allowed() -> None:
     one dangerous case. Startup, scripts and tests never start a
     processor, so they are exempt by construction.
     """
-    if _processor_thread is not None and threading.current_thread() is not _processor_thread:
+    processor = current_processor_thread()
+    if processor is not None and threading.current_thread() is not processor:
         raise RuntimeError(
             "DAG mutation off the processor thread — enqueue work instead "
             "(await run_on_processor(...) from request handlers). See "
@@ -362,45 +394,48 @@ def assert_mutation_allowed() -> None:
 def start_processor() -> None:
     """Start the DAG processor on its own thread (private event loop).
 
-    No-op under ``dag.persistence.testing`` (tests drive the pipeline
+    No-op under ``dag.persistence.Runtime.testing`` (tests drive the pipeline
     synchronously) and when already running.
     """
-    global _processor_thread, _processor_loop, _processor_sched
     # lucidlint: ignore inline-import cycle break — persistence imports this module's scheduler at top
-    from dag.persistence import testing as _testing
+    from dag.persistence import Runtime as _Runtime
 
-    if _testing:
+    if _Runtime.testing:
         logger.debug("DAG processor not started (testing mode)")
         return
-    if _processor_thread is not None and _processor_thread.is_alive():
+    if _ProcessorRuntime.thread is not None and _ProcessorRuntime.thread.is_alive():
         return
     sched = get_scheduler()
-    assert isinstance(sched, AsyncQueueScheduler)
-    _processor_sched = sched
-    _processor_loop = asyncio.new_event_loop()
+    assert isinstance(sched, AsyncRefreshQueue)
+    _ProcessorRuntime.sched = sched
+    loop = asyncio.new_event_loop()
+    _ProcessorRuntime.loop = loop
 
     def _run() -> None:
-        asyncio.set_event_loop(_processor_loop)
+        asyncio.set_event_loop(loop)
 
         async def _main() -> None:
             # Created INSIDE the running loop — a bare loop.create_task()
             # before run_forever() has no running loop and kills the thread.
-            global _processor_task
-            _processor_task = asyncio.create_task(_processor_sched._background_loop())
+            task = asyncio.create_task(sched._background_loop())
+            _ProcessorRuntime.task = task
             with contextlib.suppress(asyncio.CancelledError):
-                await _processor_task
+                await task
 
-        _processor_loop.run_until_complete(_main())
-        _processor_loop.close()
+        loop.run_until_complete(_main())
+        loop.close()
 
-    _processor_thread = threading.Thread(target=_run, name="dag-processor", daemon=True)
-    _processor_thread.start()
-    logger.info("DAG processor thread started (%s)", _processor_thread.name)
+    thread = threading.Thread(target=_run, name="dag-processor", daemon=True)
+    _ProcessorRuntime.thread = thread
+    thread.start()
+    logger.info("DAG processor thread started (%s)", thread.name)
 
 
 def _cancel_background_task() -> None:
-    if _processor_task is not None and not _processor_task.done():
-        _processor_task.cancel()
+    task = _ProcessorRuntime.task
+    if task is not None and not task.done():
+        task.cancel()
+
 
 
 def stop_processor(timeout: float = 10.0) -> int:
@@ -409,52 +444,41 @@ def stop_processor(timeout: float = 10.0) -> int:
     Returns the count of future-scheduled items (retries) abandoned;
     caller logs it — a wedged drain must not hang ``systemctl stop``.
     """
-    global _processor_thread, _processor_loop, _processor_sched
-    if _processor_loop is None or _processor_thread is None:
+    loop = _ProcessorRuntime.loop
+    thread = current_processor_thread()
+    if loop is None or thread is None:
         return 0
-    sched = _processor_sched
-    assert isinstance(sched, AsyncQueueScheduler)
+    sched = _ProcessorRuntime.sched
+    assert isinstance(sched, AsyncRefreshQueue)
 
     async def _drain() -> int:
         while True:
             await sched.process_pending()
-            with _submissions_lock:
-                in_flight = _pending_submissions
+            with _ProcessorRuntime.submissions_lock:
+                in_flight = _ProcessorRuntime.pending_submissions
             if sched._queue.empty() and in_flight == 0:
                 break
             # A submission applies its write and enqueues its cascade; give it
             # a slice before deciding the processor is idle.  Not sleep(0):
             # that spins the loop at full tilt while a submission runs.
-            await asyncio.sleep(_DRAIN_YIELD_S)
+            await asyncio.sleep(_ProcessorRuntime.DRAIN_YIELD.total_seconds())
         return len(sched._scheduled)
 
     abandoned = 0
     try:
-        abandoned = asyncio.run_coroutine_threadsafe(_drain(), _processor_loop).result(timeout=timeout)
+        abandoned = asyncio.run_coroutine_threadsafe(_drain(), loop).result(timeout=timeout)
     # lucidlint: ignore swallow logged above — a wedged drain must not hang systemctl stop
     except concurrent.futures.TimeoutError:
         logger.error("processor drain did not finish within %ss", timeout)
-    _processor_loop.call_soon_threadsafe(_cancel_background_task)
-    _processor_thread.join(timeout=timeout)
-    if _processor_thread.is_alive():
+    loop.call_soon_threadsafe(_cancel_background_task)
+    thread.join(timeout=timeout)
+    if thread.is_alive():
         logger.error("processor thread did not stop within %ss", timeout)
-    _processor_thread = None
-    _processor_loop = None
-    _processor_sched = None
-    _processor_task = None
+    _ProcessorRuntime.thread = None
+    _ProcessorRuntime.loop = None
+    _ProcessorRuntime.sched = None
+    _ProcessorRuntime.task = None
     return abandoned
-
-
-#: Queued submissions not yet applied.  ``stop_processor`` drains the
-#: scheduler queue AND this count: a submission in flight (or one whose
-#: cascade has not been enqueued yet) must land before the process exits,
-#: or a write the user already saw confirmed would vanish.
-#: The yield granted to an in-flight submission between drain slices —
-#: a responsive idle decision without a busy spin.
-_DRAIN_YIELD_S = 0.01
-
-_pending_submissions: int = 0
-_submissions_lock = threading.Lock()
 
 
 def submit_to_processor(fn: Callable[[], Any]) -> None:
@@ -473,36 +497,39 @@ def submit_to_processor(fn: Callable[[], Any]) -> None:
     A failure inside ``fn`` is logged loudly: the producer is long gone by
     then, and a silent failure would mean the write never landed.
     """
-    if _processor_loop is None or threading.current_thread() is _processor_thread:
+    loop = _ProcessorRuntime.loop
+    if loop is None or threading.current_thread() is current_processor_thread():
         _run_and_log(fn)
         return
-    global _pending_submissions
-    with _submissions_lock:
-        _pending_submissions += 1
-    future = asyncio.run_coroutine_threadsafe(_run_maybe_async(fn), _processor_loop)
+    with _ProcessorRuntime.submissions_lock:
+        _ProcessorRuntime.pending_submissions += 1
+    future = asyncio.run_coroutine_threadsafe(_run_maybe_async(fn), loop)
     future.add_done_callback(_submission_finished)
 
 
-def _run_and_log(fn: Callable[[], Any]) -> None:
-    try:
-        result = fn()
-        if inspect.iscoroutine(result):
-            # A single-threaded context has no loop to run it on: queued work
-            # must be synchronous here (the processor path awaits coroutines).
-            result.close()
-            raise RuntimeError("queued work must be synchronous without a processor thread")
+def _run_and_log(fn: Callable[[], Any]) -> bool:
+    """Run ``fn()`` inline; return True when it landed.
 
-    # lucidlint: ignore swallow the producer has already returned — the failing work is logged for the
-    # operator; a raise here would take down the caller long after the fact
-    except Exception:
-        logger.exception("processor work failed (production of a queued write)")
+    A failure is logged loudly (the producer is long gone in the
+    processor path) and surfaced as False so the caller can decide —
+    never a raise into a caller that has moved on.
+    """
+    result, failure = capture(fn)
+    if failure is None and inspect.iscoroutine(result):
+        # A single-threaded context has no loop to run it on: queued work
+        # must be synchronous here (the processor path awaits coroutines).
+        result.close()
+        failure = RuntimeError("queued work must be synchronous without a processor thread")
+    if failure is not None:
+        logger.error("processor work failed (production of a queued write)", exc_info=failure)
+        return False
+    return True
 
 
 def _submission_finished(future: concurrent.futures.Future) -> None:
     """The submitted work is applied (or failed): stop counting it."""
-    global _pending_submissions
-    with _submissions_lock:
-        _pending_submissions -= 1
+    with _ProcessorRuntime.submissions_lock:
+        _ProcessorRuntime.pending_submissions -= 1
     _log_processor_failure(future)
 
 
@@ -523,12 +550,13 @@ async def run_on_processor(fn: Callable[[], Any]) -> Any:
     ``assert_mutation_allowed``). Single-threaded contexts (tests,
     startup, the processor itself) run inline.
     """
-    if _processor_loop is None or threading.current_thread() is _processor_thread:
+    loop = _ProcessorRuntime.loop
+    if loop is None or threading.current_thread() is current_processor_thread():
         result = fn()
         if inspect.isawaitable(result):
             result = await result
         return result
-    return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(_run_maybe_async(fn), _processor_loop))
+    return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(_run_maybe_async(fn), loop))
 
 
 async def _run_maybe_async(fn: Callable[[], Any]) -> Any:

@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, override
 
+import httpx
 from money import Money
 from pint import Quantity
 
@@ -76,6 +77,7 @@ class CommuteLeg:
 
 
 @dataclass(frozen=True)
+    # lucidlint: ignore unused test-exercised seam — the DAG tests construct it directly (review-log)
 class CommuteResult:
     duration: Quantity
     daily_cost: Money | None = None
@@ -158,10 +160,11 @@ class PersonMaxWalkNode(DerivedNode[int]):
                 penalty = getattr(p, "bus_walk_penalty", None)
                 if penalty is not None:
                     return Attempt.succeeded(int(penalty.magnitude))
-                return Attempt.succeeded(30)
-        return Attempt.succeeded(30)
+                return Attempt.succeeded(int(Person.bus_walk_penalty.magnitude))
+        return Attempt.succeeded(int(Person.bus_walk_penalty.magnitude))
 
 
+    # lucidlint: ignore unused test-exercised seam — the DAG tests construct it directly (review-log)
 class WalkLegCheckNode(DerivedNode[bool]):
     def __init__(self, node_id: str, *, transit_node, max_walk: int = 30):
         super().__init__(node_id, bool, (transit_node,))
@@ -554,7 +557,7 @@ class TransitNode(DerivedNode[Commute]):
             return None
         try:
             fallback = await self._transit_route_fn(location_val, poi_val)
-        except Exception as e:
+        except (httpx.HTTPError, KeyError, OSError, ValueError) as e:
             logging.getLogger(__name__).warning("National Rail fallback failed: %s", e)
             self._last_fallback_detail = f"National Rail fallback failed: {e}"
             raise

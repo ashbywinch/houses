@@ -33,21 +33,27 @@ import json
 import sqlite3
 import sys
 import zlib
+from collections.abc import Mapping
 from pathlib import Path
 
 from dag.persistence import read_node_record, record_select_columns
 from houses.model.domain import slugify
 
-DESCRIPTION = "Verify the person-id migration completed (read-only paired check)."
-PERSON_SEGMENT_INDEX = 1  # {rid}/{person}/{label}/{step} — position 2
-MIN_NODE_ID_PARTS = 3  # below this there is no person segment to key
-WORKS_ESTIMATES_SUFFIX = "/works_estimates"
-PERSONS_NODE_ID = "persons"
-EXIT_COMPLETE = 0
-EXIT_INCOMPLETE = 1
-EXIT_UNSCANNABLE = 2
-# The one read-only scan both the versioned-row fold and the works payload need.
-UNREADABLE = (zlib.error, ValueError, AttributeError)
+
+class _PersonIdBackfillCheck:
+    """The paired check's spec: migration output shape, DB node ids, and exit codes."""
+
+    DESCRIPTION = "Verify the person-id migration completed (read-only paired check)."
+    PERSON_SEGMENT_INDEX = 1  # {rid}/{person}/{label}/{step} — position 2
+    MIN_NODE_ID_PARTS = 3  # below this there is no person segment to key
+    WORKS_ESTIMATES_SUFFIX = "/works_estimates"
+    PERSONS_NODE_ID = "persons"
+    EXIT_COMPLETE = 0
+    EXIT_INCOMPLETE = 1
+    EXIT_UNSCANNABLE = 2
+    # The one read-only scan both the versioned-row fold and the works payload need.
+    UNREADABLE = (zlib.error, ValueError, AttributeError)
+
 
 
 @dataclasses.dataclass(frozen=True)
@@ -92,7 +98,7 @@ class Leftovers:
 class Persons:
     """The newest ``persons`` row, decoded."""
 
-    payload: dict
+    payload: Mapping
 
     @property
     def people(self) -> list:
@@ -124,9 +130,9 @@ def _has_person_segment(node_id: str, keys: set[str]) -> bool:
     """True when the person segment still names a person (never a whole-string
     search: a POI or step literally called ``Dad`` is not a person segment)."""
     parts = node_id.split("/")
-    if len(parts) < MIN_NODE_ID_PARTS or not parts[0]:
+    if len(parts) < _PersonIdBackfillCheck.MIN_NODE_ID_PARTS or not parts[0]:
         return False
-    return parts[PERSON_SEGMENT_INDEX] in keys
+    return parts[_PersonIdBackfillCheck.PERSON_SEGMENT_INDEX] in keys
 
 
 def _unwrapped_value(value):
@@ -134,12 +140,11 @@ def _unwrapped_value(value):
     return json.loads(value) if isinstance(value, str) else value
 
 
-# lucidlint: ignore record-shape the record IS the stored wire shape (keys vary per node type)
-def _works_leftovers(record: dict, keys: set[str]) -> Leftovers:
+def _works_leftovers(record: Mapping, keys: set[str]) -> Leftovers:
     """What one ``works_estimates`` record still keys by person name."""
     try:
         value = _unwrapped_value(record.get("value"))
-    except UNREADABLE:
+    except _PersonIdBackfillCheck.UNREADABLE:
         return Leftovers(unreadable=1)
     if not isinstance(value, dict):
         return Leftovers()
@@ -156,12 +161,12 @@ def _row_leftovers(row: sqlite3.Row, keys: set[str]) -> Leftovers:
     except json.JSONDecodeError:
         return Leftovers(node_ids=1 if _has_person_segment(node_id, keys) else 0, unreadable=1)
     works = Leftovers()
-    if node_id.endswith(WORKS_ESTIMATES_SUFFIX):
+    if node_id.endswith(_PersonIdBackfillCheck.WORKS_ESTIMATES_SUFFIX):
         try:
             works = _works_leftovers(read_node_record(row), keys)
-        # lucidlint: ignore swallow this surfaces by RETURN — an unreadable row is counted and makes the
+        
         # check report INCOMPLETE, which is the whole point of not trusting the scan's own silence
-        except UNREADABLE:
+        except _PersonIdBackfillCheck.UNREADABLE:
             works = Leftovers(unreadable=1)
     return works + Leftovers(
         node_ids=1 if _has_person_segment(node_id, keys) else 0,
@@ -175,7 +180,7 @@ def _latest_persons(conn: sqlite3.Connection) -> Persons | None:
     row = conn.execute(
         f"SELECT {selected} FROM node_results WHERE node_id=?"
         " ORDER BY created_at DESC, rowid DESC LIMIT 1",
-        (PERSONS_NODE_ID,),
+        (_PersonIdBackfillCheck.PERSONS_NODE_ID,),
     ).fetchone()
     if row is None:
         return None
@@ -192,14 +197,14 @@ def _scan(conn: sqlite3.Connection, keys: set[str]) -> Leftovers:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=DESCRIPTION)
+    parser = argparse.ArgumentParser(description=_PersonIdBackfillCheck.DESCRIPTION)
     parser.add_argument("--db", required=True, help="sqlite database the migration was applied to")
     args = parser.parse_args()
 
     db = Path(args.db).resolve()
     if not db.is_file():
         print(f"check: database not found: {db}", file=sys.stderr)
-        return EXIT_UNSCANNABLE
+        return _PersonIdBackfillCheck.EXIT_UNSCANNABLE
     # mode=ro: the check must not be able to write, even by accident.
     conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -207,22 +212,22 @@ def main() -> int:
         found = _latest_persons(conn)
         if found is None:
             print("check INCOMPLETE: no persons row — the migration has not run", file=sys.stderr)
-            return EXIT_INCOMPLETE
+            return _PersonIdBackfillCheck.EXIT_INCOMPLETE
         keys = _person_keys(found.people)
         leftovers = _scan(conn, keys) + Leftovers(
             persons_without_id=sum(_lacks_id(person) for person in found.people)
         )
     except sqlite3.Error as exc:
         print(f"check: cannot scan {db} ({exc})", file=sys.stderr)
-        return EXIT_UNSCANNABLE
+        return _PersonIdBackfillCheck.EXIT_UNSCANNABLE
     finally:
         conn.close()
 
     if leftovers.incomplete:
         print(leftovers.reason(), file=sys.stderr)
-        return EXIT_INCOMPLETE
+        return _PersonIdBackfillCheck.EXIT_INCOMPLETE
     print(f"check ok: {len(keys)} name spelling(s) checked, 0 rows still keyed by name")
-    return EXIT_COMPLETE
+    return _PersonIdBackfillCheck.EXIT_COMPLETE
 
 
 if __name__ == "__main__":

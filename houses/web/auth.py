@@ -13,9 +13,10 @@ from __future__ import annotations
 import logging
 import secrets
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from functools import partial
+from typing import Any, TypedDict
 from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
@@ -23,16 +24,17 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.exceptions import TransportError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from dag.guard import capture, capture_async
 from houses.model.domain import person_id_of, slugify
 from houses.services import GoogleUserInfo
 from houses.services_provider import get_services
 from houses.settings import settings
+from serialization import SerializableAsDict
 
 SESSION_MAX_AGE = timedelta(days=30)
 
 
-@dataclass(frozen=True)
-class SessionClaims:
+class SessionClaims(SerializableAsDict):
     """The signed session-cookie claims (its serialized wire shape)."""
 
     email: str
@@ -42,27 +44,8 @@ class SessionClaims:
     impersonating: str | None = None
 
     @classmethod
-
-    # (coding-standards.md)
     def from_dict(cls, data: Mapping[str, Any]) -> SessionClaims:
-        return cls(
-            email=data["email"],
-            name=data["name"],
-            picture=data["picture"],
-            is_superuser=data["is_superuser"],
-            impersonating=data.get("impersonating"),
-        )
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the cookie claims (coding-standards.md)
-        return dict(
-            email=self.email,
-            name=self.name,
-            picture=self.picture,
-            is_superuser=self.is_superuser,
-            impersonating=self.impersonating,
-        )
+        return cls.model_validate(data)
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +56,7 @@ class SessionMint:
     """(user_payload, cookie_value) from _build_session — named so the
     web callback and device-flow endpoint read the fields by meaning."""
 
-    payload: dict[str, Any]
+    payload: dict
     cookie_value: str
 
 
@@ -85,10 +68,10 @@ class _OAuthState:
     created_at: float
 
 
-@dataclass(frozen=True)
-class _SessionStatus:
+class _SessionStatus(TypedDict):
     """The authenticated session-status response (wire shape)."""
 
+    authenticated: bool
     email: str
     name: str
     picture: str
@@ -97,66 +80,38 @@ class _SessionStatus:
     is_superuser: bool
     impersonating: str | None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {
-            "authenticated": True,
-            "email": self.email,
-            "name": self.name,
-            "picture": self.picture,
-            "person": self.person,
-            "person_id": self.person_id,
-            "is_superuser": self.is_superuser,
-            "impersonating": self.impersonating,
-        }
 
-
-@dataclass(frozen=True)
-class _ImpersonateRequest:
-    """The impersonate request body: {person: name | null} (wire shape)."""
-
-    person: str | None
-
-    @classmethod
-
-    # (coding-standards.md)
-    def from_dict(cls, body: Mapping[str, Any]) -> _ImpersonateRequest:
-        return cls(person=body.get("person"))
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        return dict(person=self.person)
-
-
-@dataclass(frozen=True)
-class _ImpersonationResponse:
+class _ImpersonationResponse(TypedDict):
     """The impersonate response envelope: status plus the active impersonation (wire shape)."""
 
+    status: str
     impersonating: str | None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(status="ok", impersonating=self.impersonating)
+
+
 
 
 auth_router = APIRouter(prefix="/api/auth")
 
 # In-memory OAuth state store — maps state_token to its PKCE record.
+
+class _OAuthStateStore:
+    """In-memory OAuth state store: state_token → PKCE record plus its
+    bounds.  Ephemeral — lost on server restart."""
+
+    states: dict[str, _OAuthState] = {}
+    MAX_AGE = timedelta(minutes=10)
+    MAX_ENTRIES = 100
+    STATE_BYTES = 32
 # Ephemeral — lost on server restart.
-_oauth_states: dict[str, _OAuthState] = {}
-_STATE_MAX_AGE = timedelta(minutes=10)
-_STATE_MAX_ENTRIES = 100
-_OAUTH_STATE_BYTES = 32
 
 
 def _sweep_stale_states() -> None:
-    """Remove OAuth state entries older than _STATE_MAX_AGE."""
-    cutoff = datetime.now(UTC).timestamp() - _STATE_MAX_AGE.total_seconds()
-    stale = [k for k, v in _oauth_states.items() if v.created_at < cutoff]
+    """Remove OAuth state entries older than ``_OAuthStateStore.MAX_AGE``."""
+    cutoff = datetime.now(UTC).timestamp() - _OAuthStateStore.MAX_AGE.total_seconds()
+    stale = [k for k, v in _OAuthStateStore.states.items() if v.created_at < cutoff]
     for k in stale:
-        _oauth_states.pop(k, None)
+        _OAuthStateStore.states.pop(k, None)
 
 
 def get_serializer() -> URLSafeTimedSerializer:
@@ -164,9 +119,7 @@ def get_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_secret, salt="auth-session")
 
 
-# lucidlint: ignore record-shape returns the signed session claims parsed from the cookie — serialization boundary
-# (coding-standards.md)
-def get_session_user(request: Request) -> dict[str, Any] | None:
+def get_session_user(request: Request) -> SessionClaims | None:
     """Extract session user info from the signed ``session`` cookie.
 
     Returns ``None`` if the cookie is missing, tampered, or expired.
@@ -179,7 +132,7 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
         claims = SessionClaims.from_dict(get_serializer().loads(cookie, max_age=int(SESSION_MAX_AGE.total_seconds())))
     except (BadSignature, SignatureExpired):
         return None
-    return claims.to_dict()
+    return claims
 
 
 def _person_superuser_flag(email: str, persons_attempt_value: Any) -> bool | None:
@@ -199,36 +152,33 @@ def _person_superuser_flag(email: str, persons_attempt_value: Any) -> bool | Non
     return None
 
 
-# lucidlint: ignore record-shape returns the signed session claims with live superuser state — serialization boundary
-# (coding-standards.md)
-def effective_session_user(request: Request) -> dict[str, Any] | None:
+def effective_session_user(request: Request) -> SessionClaims | None:
     """The session user with is_superuser re-derived from LIVE settings.
 
     The cookie bakes is_superuser at login (30-day validity) — a
     promotion in Settings would otherwise leave the user's existing
     session without the flag until re-login. The cookie still carries
     identity; the privilege is looked up fresh each request and falls
-    back to the cookie snapshot only when settings are unavailable.
+    back to the cookie snapshot only when settings are unavailable; the
+    source read routes through :mod:`dag.guard`, so a settings-source
+    failure degrades instead of failing the request.
     """
     session = get_session_user(request)
     if not session:
         return None
-    try:
-        svc = get_services()
-        persons_attempt = svc.persons_source.latest_attempt()
-        if persons_attempt.succeeded:
-            live = _person_superuser_flag(session.get("email", ""), persons_attempt.value_or_none())
-            if live is not None and live != session.get("is_superuser", False):
-                claims = SessionClaims.from_dict(session)
-                session = replace(claims, is_superuser=live).to_dict()
-    # lucidlint: ignore broad-except live superuser re-derivation failure logs and returns the session unchanged
-    except Exception:
-        logger.exception("Failed to re-derive superuser flag from settings")
+    attempt, failure = capture(lambda: get_services().persons_source.latest_attempt())
+    if failure is not None:
+        logger.warning("Failed to re-derive superuser flag from settings: %s", failure)
         return session
+    if attempt is None or not attempt.succeeded:
+        return session
+    live = _person_superuser_flag(session.email, attempt.value_or_none())
+    if live is not None and live != session.is_superuser:
+        session = session.model_copy(update={"is_superuser": live})
     return session
 
 
-def _linked_person(session: Mapping[str, Any]) -> Any | None:
+def _linked_person(email: str) -> Any | None:
     """The settings Person for the session email, or None while the
     persons source is not yet computed (startup).
 
@@ -239,7 +189,7 @@ def _linked_person(session: Mapping[str, Any]) -> Any | None:
     persons_attempt = get_services().persons_source.latest_attempt()
     if not persons_attempt.succeeded:
         return None
-    folded = session["email"].casefold()
+    folded = email.casefold()
     for p in persons_attempt.value_or_none() or []:
         pe = p.get("email") if isinstance(p, dict) else getattr(p, "email", None)
         if pe is not None and str(pe).casefold() == folded:
@@ -250,19 +200,19 @@ def _linked_person(session: Mapping[str, Any]) -> Any | None:
     )
 
 
-def _current_person_name(session: Mapping[str, Any]) -> str | None:
+def _current_person_name(email: str) -> str | None:
     """The Person display name for the session email (None only while the
     persons source is not yet computed)."""
-    person = _linked_person(session)
+    person = _linked_person(email)
     if person is None:
         return None
     return person.get("name") if isinstance(person, dict) else getattr(person, "name", None)
 
 
-def _current_person_id(session: Mapping[str, Any]) -> str | None:
+def _current_person_id(email: str) -> str | None:
     """The canonical person_id for the session email's linked person
     (None only while the persons source is not yet computed)."""
-    person = _linked_person(session)
+    person = _linked_person(email)
     if person is None:
         return None
     return person_key(person)
@@ -456,7 +406,7 @@ async def login(request: Request):
     Returns JSON with ``auth_url`` (redirect browser to Google).
     """
     _sweep_stale_states()
-    state = secrets.token_urlsafe(_OAUTH_STATE_BYTES)
+    state = secrets.token_urlsafe(_OAuthStateStore.STATE_BYTES)
 
     svc = get_services()
     try:
@@ -469,12 +419,12 @@ async def login(request: Request):
         return {"status": "error", "detail": "PKCE code_verifier not generated"}
 
     # Enforce a hard cap on the in-memory state store to prevent DoS
-    if len(_oauth_states) >= _STATE_MAX_ENTRIES:
+    if len(_OAuthStateStore.states) >= _OAuthStateStore.MAX_ENTRIES:
         _sweep_stale_states()
-    if len(_oauth_states) >= _STATE_MAX_ENTRIES:
+    if len(_OAuthStateStore.states) >= _OAuthStateStore.MAX_ENTRIES:
         return {"status": "error", "detail": "Too many login attempts, try again"}
 
-    _oauth_states[state] = _OAuthState(
+    _OAuthStateStore.states[state] = _OAuthState(
         code_verifier=code_verifier,
         created_at=datetime.now(UTC).timestamp(),
     )
@@ -495,7 +445,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=missing_params")
 
     # Verify and consume state token (prevents CSRF + replay)
-    state_data = _oauth_states.pop(state, None)
+    state_data = _OAuthStateStore.states.pop(state, None)
     if state_data is None:
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=invalid_state")
 
@@ -504,21 +454,20 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=missing_code_verifier")
 
     svc = get_services()
-    try:
-        user = svc.oauth_service.exchange_code(code, code_verifier, state, _oauth_redirect_uri(request))
-        if not user.email_verified:
-            return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
+    user, failure = capture(
+        partial(svc.oauth_service.exchange_code, code, code_verifier, state, _oauth_redirect_uri(request))
+    )
+    if user is None:
+        logger.error("OAuth callback failed", exc_info=failure)
+        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(str(failure)))
+    if not user.email_verified:
+        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 
-        cookie_value = _build_session(user).cookie_value
+    cookie_value = _build_session(user).cookie_value
 
-        response = RedirectResponse(url=f"{settings.frontend_url}/")
-        _set_session_cookie(response, cookie_value, _is_secure(request))
-        return response
-
-    # lucidlint: ignore broad-except OAuth callback failure redirects to the frontend with an auth_error parameter
-    except Exception as e:
-        logger.exception("OAuth callback failed")
-        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(str(e)))
+    response = RedirectResponse(url=f"{settings.frontend_url}/")
+    _set_session_cookie(response, cookie_value, _is_secure(request))
+    return response
 
 
 @auth_router.post("/device")
@@ -558,14 +507,12 @@ async def device(request: Request):
         return JSONResponse(status_code=503, content={"detail": "device client not configured"})
 
     svc = get_services()
-    try:
-        user = await svc.oauth_service.verify_id_token(token)
-    except TransportError as e:
-        logger.warning("Device-flow id_token verification failed (transport): %s", e)
+    user, failure = await capture_async(lambda: svc.oauth_service.verify_id_token(token))
+    if isinstance(failure, TransportError):
+        logger.warning("Device-flow id_token verification failed (transport): %s", failure)
         return JSONResponse(status_code=503, content={"detail": "identity provider unreachable, try again"})
-    # lucidlint: ignore broad-except device-flow id_token verification failure returns a 401 JSON response
-    except Exception as e:
-        logger.warning("Device-flow id_token verification failed: %s", e)
+    if user is None:
+        logger.warning("Device-flow id_token verification failed: %s", failure)
         return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
     if not user.email_verified:
         return JSONResponse(status_code=401, content={"detail": "email not verified"})
@@ -594,27 +541,28 @@ async def me(request: Request):
         return {"authenticated": False}
 
     # Look up associated Person by email
-    person_name = _current_person_name(session)
-    person_id = _current_person_id(session)
+    person_name = _current_person_name(session.email)
+    person_id = _current_person_id(session.email)
 
     # The cookie claim may be a legacy NAME — report the canonical id
     # so the frontend never has to resolve names itself.
     impersonating = None
-    raw = session.get("impersonating")
+    raw = session.impersonating
     if raw:
         persons_attempt = get_services().persons_source.latest_attempt()
         value = persons_attempt.value_or_none() if persons_attempt.succeeded else None
         impersonating = resolve_person_identity(value, raw)
 
     return _SessionStatus(
-        email=session["email"],
-        name=session["name"],
-        picture=session.get("picture", ""),
+        authenticated=True,
+        email=session.email,
+        name=session.name,
+        picture=session.picture,
         person=person_name,
         person_id=person_id,
-        is_superuser=session.get("is_superuser", False),
+        is_superuser=session.is_superuser,
         impersonating=impersonating,
-    ).to_dict()
+    )
 
 
 @auth_router.post("/logout")
@@ -626,9 +574,7 @@ async def logout(request: Request):
 
 
 @auth_router.post("/impersonate")
-# lucidlint: ignore record-shape incoming request body is the caller's wire payload — parsed defensively at the
-# boundary (coding-standards.md)
-async def impersonate(request: Request, body: dict):
+async def impersonate(request: Request, body: Mapping[str, object]):
     """Set or clear impersonation for a superuser.
 
         { "person": "p_ashby" }  # start impersonating (canonical id)
@@ -641,10 +587,10 @@ async def impersonate(request: Request, body: dict):
     session = effective_session_user(request)
     if not session:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if not session.get("is_superuser"):
+    if not session.is_superuser:
         raise HTTPException(status_code=403, detail="Only superusers can impersonate")
 
-    person = _ImpersonateRequest.from_dict(body).person
+    person = body.get("person")
     if person is not None and not isinstance(person, str):
         raise HTTPException(status_code=400, detail="person must be a string or null")
     if person is not None:
@@ -662,13 +608,13 @@ async def impersonate(request: Request, body: dict):
         person = target_id  # the cookie claim is the canonical id
 
     new_cookie = _make_session_cookie(
-        email=session["email"],
-        name=session["name"],
-        picture=session.get("picture", ""),
-        is_superuser=session.get("is_superuser", False),
+        email=session.email,
+        name=session.name,
+        picture=session.picture,
+        is_superuser=session.is_superuser,
         impersonating=person,
     )
 
-    response = JSONResponse(content=_ImpersonationResponse(impersonating=person).to_dict())
+    response = JSONResponse(content=_ImpersonationResponse(status="ok", impersonating=person))
     _set_session_cookie(response, new_cookie, _is_secure(request))
     return response

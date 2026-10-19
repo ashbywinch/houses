@@ -5,7 +5,6 @@ from typing import override
 
 from money import Money
 
-from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.expression import Conditional, Literal
 from dag.node import Node
@@ -57,11 +56,5 @@ class StampDutyNode(DerivedNode[Money]):
     def _get_active_deps(self):
         return (self._price_node, self._status_node) if self._status_node is not None else (self._price_node,)
 
-    @override
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
-    def compute(
-        self,
-        price: Attempt[Money],
-        status: Attempt[str] | None = None,
-    ) -> Attempt[Money]:
-        return self.expression.evaluate()
+
+    compute = DerivedNode.compute  # the expression IS the computation — no forwarding shim

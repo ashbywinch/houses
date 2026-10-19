@@ -68,26 +68,28 @@ def test_layers_build_transit_drive_and_intersection(tmp_path):
         drive_path=tmp_path / "drive_searches.json",
         intersection_path=tmp_path / "intersection.json",
     )
-    assert [layer["name"] for layer in layers] == ["Train: Pimlico & Aldgate", "Drive to Dad", "Where we could live"]
+    assert [layer.name for layer in layers] == ["Train: Pimlico & Aldgate", "Drive to Dad", "Where we could live"]
 
     train = layers[0]
-    assert train["color"] == "#e33"
-    assert len(train["polygons"]) == 2
-    assert train["polygons"][0]["coords"][0] == [51.5, -0.1]
+    assert train.color == "#e33"
+    assert len(train.polygons) == 2
+    assert train.polygons[0].coords[0] == [51.5, -0.1]
 
     drive = layers[1]
-    assert drive["color"] == "#3a3"
-    assert drive["polygons"][0]["url"] == "https://rm/dad"
+    assert drive.color == "#3a3"
+    assert drive.polygons[0].url == "https://rm/dad"
 
     inter = layers[2]
-    assert inter["color"] == "#c90"
-    assert inter["fillOpacity"] == 0.25
-    assert inter["polygons"][0]["name"] == "All commutes"
+    assert inter.color == "#c90"
+    assert inter.fill_opacity == 0.25
+    assert inter.polygons[0].name == "All commutes"
     # Only the intersection ("where we could live") shows by default —
-    # the three isochrones start hidden behind the key.
-    assert inter["visibleByDefault"] is True
-    assert "visibleByDefault" not in layers[0]
-    assert "visibleByDefault" not in layers[1]
+    # the three isochrones start hidden behind the key, and the wire dict
+    # carries the key only for the layer that sets it.
+    assert inter.visible_by_default is True
+    assert "visibleByDefault" not in train.to_dict()
+    assert "visibleByDefault" not in drive.to_dict()
+    assert inter.to_dict()["visibleByDefault"] is True
 
 
 # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)

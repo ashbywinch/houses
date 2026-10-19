@@ -264,8 +264,8 @@ class TestEnrichmentApi:
         await flush_processor()
 
         result = await staleness_check(RID, nodes="best_address")
-        assert result["fresh"]
-        nodes = result["nodes"]
+        assert result.fresh
+        nodes = result.nodes
         assert isinstance(nodes, dict)
         assert not nodes.get("best_address", True)
 
@@ -361,7 +361,7 @@ class TestEnrichmentBootstrap:
         prop = PropertyNodes(RID * 2)
 
         # Create an EnrichedProperty (the old data shape).
-        from houses.property import EnrichedProperty
+        from houses.enriched_property import EnrichedProperty
 
         enriched = EnrichedProperty(
             url="https://rightmove.co.uk/properties/999",
@@ -409,7 +409,7 @@ class TestEnrichmentBootstrap:
             best_address=rm_addr,
         )
 
-        from houses.property import EnrichedProperty
+        from houses.enriched_property import EnrichedProperty
 
         enriched = EnrichedProperty(
             url="",
@@ -457,9 +457,9 @@ class TestEnrichmentBootstrap:
     async def test_scrape_errors_recorded_as_impossible_on_source_nodes(self):
         """A scrape parse error lands on its DAG source node as an impossible
         attempt (the DAG's error mechanism), and a value push supersedes it."""
+        from houses.enriched_property import EnrichedProperty
         from houses.nodes.cutover import push_enriched_property
         from houses.nodes.property_nodes import PropertyNodes
-        from houses.property import EnrichedProperty
 
         prop = PropertyNodes(RID * 3)
         sources = {

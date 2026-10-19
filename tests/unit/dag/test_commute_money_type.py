@@ -16,7 +16,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute, Person, PlaceOfInterest
 
@@ -47,7 +47,7 @@ class _FloatCostNode(DerivedNode[Commute]):
 async def test_float_daily_cost_raises_at_to_json():
     """A Commute with float daily_cost must raise at serialization time,
     NOT silently persist as impossible."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[str]("fdc_src3", str)
     node = _FloatCostNode("fdc_result3", deps=(src,))
@@ -82,7 +82,7 @@ class _ProperNode(DerivedNode[Commute]):
 @pytest.mark.asyncio
 async def test_money_daily_cost_serialises_ok():
     """A Commute with proper Money daily_cost serialises correctly."""
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
 
     src = UserInputNode[str]("pdc_src2", str)
     node = _ProperNode("pdc_result2", deps=(src,))

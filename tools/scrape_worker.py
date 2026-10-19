@@ -31,6 +31,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from dag.guard import capture_async, guarded_async
 from houses.rightmove_scraper import scrape
 
 # lucidlint: ignore private-import cookie mint — only minting entry point; mirrors tools/deploy/install-artifact.sh
@@ -76,16 +77,37 @@ def _app_url() -> str:
     return url.rstrip("/")
 
 
-async def _run_job(client: httpx.AsyncClient, job: ScrapeJob) -> None:
-    """Scrape one claimed job and report the outcome to the queue."""
-    try:
-        prop = await scrape(job.url)
+class _ClaimedJob:
+    """A claimed job and the app client that scrapes and reports it.
+
+    The (client, job) pair is one thing in this worker's domain — the job
+    being worked — so it travels as one object instead of two parameters
+    that always move together.
+
+    Blast radius is ONE claimed job: the scrape, the conversion, and the
+    report POST all route through the guard (dag.guard) — a failure is
+    reported to the queue, or logged when even that POST fails. The worker
+    never raises out of here and never retries: the queue's backoff decides
+    when the job becomes claimable again.
+    """
+
+    def __init__(self, client: httpx.AsyncClient, job: ScrapeJob) -> None:
+        self.client = client
+        self.job = job
+
+    async def run(self) -> None:
+        """Scrape the job and report the outcome; never raises."""
+        await guarded_async(self._scrape_and_report, self._report_failure)
+
+    async def _scrape_and_report(self) -> None:
+        """Scrape the job, convert it, and POST the success report."""
+        prop = await scrape(self.job.url)
         if prop is None:
             raise RuntimeError("scrape returned no data (offline mode / login wall?)")
         if not prop.address:
             raise RuntimeError("no address parsed (Rightmove block/login page?)")
         listing = ScrapedListing(
-            url=prop.url or job.url,
+            url=prop.url or self.job.url,
             address=prop.address,
             postcode=prop.postcode,
             bedrooms=prop.bedrooms,
@@ -93,29 +115,29 @@ async def _run_job(client: httpx.AsyncClient, job: ScrapeJob) -> None:
             latitude=prop.latitude,
             longitude=prop.longitude,
         )
-        resp = await client.post(
+        resp = await self.client.post(
             f"{_app_url()}/api/scrapes/report",
             headers=_headers(),
-            json={"job_id": job.id, "ok": True, "data": listing.__dict__},
+            json={"job_id": self.job.id, "ok": True, "data": listing.__dict__},
         )
         resp.raise_for_status()
-        print(f"scraped {job.rid} ok: {listing.address}")
-    # lucidlint: ignore broad-except boundary — blast radius is one claimed job: any scrape/convert failure is reported
-    except Exception as exc:
-        try:
-            resp = await client.post(
-                f"{_app_url()}/api/scrapes/report",
-                headers=_headers(),
-                json={"job_id": job.id, "ok": False, "error": str(exc)[:500]},
-            )
-            resp.raise_for_status()
-            print(f"scrape failed for {job.rid}: {exc}")
-            return
-        # lucidlint: ignore broad-except boundary — blast radius is one failure-report POST: nothing left to do but log
-        except Exception as report_exc:
-            print(f"FAILED to report job {job.id}: {report_exc}")
-            print(f"scrape failed for {job.rid}: {exc}")
-            return
+        print(f"scraped {self.job.rid} ok: {listing.address}")
+
+    async def _report_failure(self, exc: Exception) -> None:
+        """Report the job's failure; if even that POST fails, log both and give up."""
+        _, report_failure = await capture_async(lambda: self._post_failure_report(exc))
+        if report_failure is not None:
+            print(f"FAILED to report job {self.job.id}: {report_failure}")
+        print(f"scrape failed for {self.job.rid}: {exc}")
+
+    async def _post_failure_report(self, exc: Exception) -> None:
+        """POST the failure report for one job; a non-2xx status raises."""
+        resp = await self.client.post(
+            f"{_app_url()}/api/scrapes/report",
+            headers=_headers(),
+            json={"job_id": self.job.id, "ok": False, "error": str(exc)[:500]},
+        )
+        resp.raise_for_status()
 
 
 async def run_once() -> int:
@@ -127,21 +149,17 @@ async def run_once() -> int:
         if raw is None:
             return 0
         job = ScrapeJob(id=raw["id"], rid=raw["rid"], url=raw["url"])
-        await _run_job(client, job)
+        await _ClaimedJob(client, job).run()
         return 1
 
 
 async def run_loop(interval: float) -> None:
     while True:
-        try:
-            await run_once()
-        # lucidlint: ignore broad-except boundary — blast radius is one poll iteration: the worker must survive any
-        except Exception as exc:
-            print(f"worker error: {exc}")
-            continue
-        finally:
-            # Always sleep — a transient error must not tight-loop the poller.
-            await asyncio.sleep(interval)
+        _, failure = await capture_async(run_once)
+        if failure is not None:
+            print(f"worker error: {failure}")
+        # Always sleep — a transient error must not tight-loop the poller.
+        await asyncio.sleep(interval)
 
 
 def main() -> None:

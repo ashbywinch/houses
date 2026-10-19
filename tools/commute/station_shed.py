@@ -31,24 +31,37 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from dag.persistence import WireRecord
+from pydantic import ValidationError
+
 from houses.geopoint import GeoPoint
 from houses.location import geocode
 from houses.settings import settings
 from houses.tfl_client import TflClient
+from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
 
-# lucidlint: ignore magic-number 4 — DEFAULT_BBOX lon_min −4.0°: coordinate data of the named bbox mapping
-DEFAULT_BBOX = {"lat_min": 50.1, "lat_max": 53.6, "lon_min": -4.0, "lon_max": 2.0}
-INNER_RADIUS_KM = 20.0
-THRESHOLD_MIN = 132
+
+class StationShedConfig:
+    """Constants of the station shed batch (review-log: one config class owns
+    the bbox, thresholds, and version identity)."""
+
+    DEFAULT_BBOX = {"lat_min": 50.1, "lat_max": 53.6, "lon_min": -4.0, "lon_max": 2.0}
+    INNER_RADIUS_KM = 20.0
+    THRESHOLD_MIN = 132
+    ENGINE_VERSION = "station-shed-v1"
+    MINUTES_PER_HOUR = 60.0
+
+
 DEFAULT_CSV = Path("data/stations.csv")
 DEFAULT_OUT = Path("data/commute/station_shed.json")
-ENGINE_VERSION = "station-shed-v1"
-MINUTES_PER_HOUR = 60.0
 
 _POSTCODE_RE = re.compile(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?")
+
+# ── the artifact's records ───────────────────────────────────────────
+
+
+type _ResumeRecords = tuple[set[str], list[ShedRecord]]
 
 
 @dataclass(frozen=True)
@@ -81,9 +94,6 @@ class Station:
     def point(self) -> GeoPoint:
         return GeoPoint(self.lat, self.lon)
 
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
-    def distance_km_to(self, other: GeoPoint) -> float:
-        return self.point.distance_km_to(other)
 
     # ── Routing adapter ──────────────────────────────────────────────
 
@@ -143,7 +153,10 @@ class Station:
         failed route rather than silently extending coverage to the wrong area.
         """
         speed_cap_kmh = 150.0
-        floors = [self.distance_km_to(office.point) / speed_cap_kmh * MINUTES_PER_HOUR for office in offices]
+        floors = [
+            self.point.distance_km_to(office.point) / speed_cap_kmh * StationShedConfig.MINUTES_PER_HOUR
+            for office in offices
+        ]
         if dur_p is not None and dur_p < floors[0]:
             dur_p = None
         if dur_a is not None and dur_a < floors[1]:
@@ -169,7 +182,7 @@ class Station:
         """
         if not ctx.bbox.contains(self.lat, self.lon):
             return None
-        inner = any(self.distance_km_to(office.point) <= ctx.inner_radius_km for office in ctx.offices)
+        inner = any(self.point.distance_km_to(office.point) <= ctx.inner_radius_km for office in ctx.offices)
         if inner:
             return self.record(None, None, kept=True)
         dur_p, dur_a = await asyncio.gather(
@@ -195,9 +208,8 @@ class Office:
     point: GeoPoint
 
 
-@dataclass(frozen=True)
-class ShedRecord(WireRecord):
-    """The wire-format shed record for one station in station_shed.json."""
+class ShedRecord(SerializableAsDict):
+    """One station's row in station_shed.json."""
 
     name: str
     crs: str
@@ -208,75 +220,52 @@ class ShedRecord(WireRecord):
     kept: bool
     routing_error: str | None = None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(
-            name=self.name, crs=self.crs, lat=self.lat, lon=self.lon,
-            duration_pimlico=self.duration_pimlico,
-            duration_aldgate=self.duration_aldgate, kept=self.kept,
-            routing_error=self.routing_error,
-        )
-
-
-@dataclass(frozen=True)
-class ShedMetadata:
+class ShedMetadata(SerializableAsDict):
     """Current-constants metadata for the shed payload."""
 
     threshold_min: int
     destinations: list[str]
-    bbox: dict
+    bbox: dict[str, float]
     inner_radius_km: float
     engine_version: str
     expected_stations: int
     generated_at: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(
-            threshold_min=self.threshold_min, destinations=self.destinations,
-            bbox=self.bbox, inner_radius_km=self.inner_radius_km,
-            engine_version=self.engine_version,
-            expected_stations=self.expected_stations,
-            generated_at=self.generated_at,
-        )
-
-
-@dataclass(frozen=True)
-class ShedConfigSignature:
+class ShedConfigSignature(SerializableAsDict):
     """The config identity a shed was built under."""
 
     engine_version: str
     destinations: list[str]
     threshold_min: int
-    bbox: dict
+    bbox: dict[str, float]
     inner_radius_km: float
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(
-            engine_version=self.engine_version, destinations=self.destinations,
-            threshold_min=self.threshold_min, bbox=self.bbox,
-            inner_radius_km=self.inner_radius_km,
-        )
 
+class ShedPayload(SerializableAsDict):
+    """station_shed.json — the artifact the map reads.
+
+    The payload owns its bytes: ``to_json()`` is the one place the artifact
+    becomes text, so the key order and the indentation live here.
+    """
+
+    metadata: ShedMetadata
+    stations: list[ShedRecord]
+
+    def to_json(self) -> str:
+        return json.dumps(self.model_dump(), indent=2)
 
 def load_stations(csv_path: str | Path) -> list[Station]:
     """Load stations from the repo's stations.csv (name, lat, long, crsCode)."""
-    stations: list[Station] = []
     with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            stations.append(
-                Station(
-                    name=row["stationName"],
-                    crs=row["crsCode"],
-                    lat=float(row["lat"]),
-                    lon=float(row["long"]),
-                )
+        return [
+            Station(
+                name=row["stationName"],
+                crs=row["crsCode"],
+                lat=float(row["lat"]),
+                lon=float(row["long"]),
             )
-    return stations
+            for row in csv.DictReader(f)
+        ]
 
 
 def keep_station(inner: bool, dur_p: int | None, dur_a: int | None, threshold: int) -> bool:
@@ -291,9 +280,9 @@ def keep_station(inner: bool, dur_p: int | None, dur_a: int | None, threshold: i
     return bool(durations) and min(durations) <= threshold
 
 
-# lucidlint: ignore record-shape resumes consume persisted JSON records (coding-standards.md)
-# lucidlint: ignore record-shape shed records are serialized station_shed.json payload (coding-standards.md)
-def _resume_records(existing_records: list[dict] | None, stations: list[Station]) -> tuple[set[str], list[dict]]:
+def _resume_records(
+    existing_records: list[ShedRecord] | None, stations: list[Station]
+) -> _ResumeRecords:
     """Records a resume carries forward, and the CRSes marked done.
 
     Only completed records are done. A record with a routing_error (both
@@ -306,12 +295,12 @@ def _resume_records(existing_records: list[dict] | None, stations: list[Station]
     """
     by_crs = {st.crs: st for st in stations}
     done: set[str] = set()
-    records: list[dict] = []
+    records: list[ShedRecord] = []
     for rec in existing_records or []:
-        st = by_crs.get(rec["crs"])
-        if st is not None and st.lat == rec["lat"] and st.lon == rec["lon"]:
-            if not rec.get("routing_error"):
-                done.add(rec["crs"])
+        st = by_crs.get(rec.crs)
+        if st is not None and st.lat == rec.lat and st.lon == rec.lon:
+            if not rec.routing_error:
+                done.add(rec.crs)
             records.append(rec)
     return done, records
 
@@ -328,15 +317,13 @@ class RoutingContext:
     delay_s: float
 
 
-# lucidlint: ignore record-shape returns the serialized shed records — serialization boundary (coding-standards.md)
-# lucidlint: ignore record-shape return type is the serialized station_shed.json records list (coding-standards.md)
 async def build_shed(
     stations: list[Station],
     ctx: RoutingContext,
     *,
-    existing_records: list[dict] | None = None,
-    checkpoint: Callable[[list[dict], int], None] | None = None,
-) -> list[dict]:
+    existing_records: list[ShedRecord] | None = None,
+    checkpoint: Callable[[list[ShedRecord], int], None] | None = None,
+) -> list[ShedRecord]:
     """Route stations in the box and return shed records.
 
     ``ctx.router`` is ``async (Station, postcode) -> int | None`` (duration
@@ -364,16 +351,16 @@ async def build_shed(
             continue
         # Re-processing a station (routing_error record from a previous run, or
         # moved coords) must REPLACE its old record, not duplicate it.
-        records = [r for r in records if r["crs"] != st.crs]
+        records = [r for r in records if r.crs != st.crs]
         rec = await st.process(ctx)
         if rec is None:
             continue
-        records.append(rec.to_dict())
+        records.append(rec)
         processed += 1
         if checkpoint is not None:
             checkpoint(records, processed)
     # Stable order regardless of resume point: input station order.
-    records.sort(key=lambda r: order.get(r["crs"], len(order)))
+    records.sort(key=lambda r: order.get(r.crs, len(order)))
     return records
 
 
@@ -414,19 +401,17 @@ def build_metadata(offices: list[Office], expected: int, generated_at: str) -> S
     outdated destinations/bbox/threshold values.
     """
     return ShedMetadata(
-        threshold_min=THRESHOLD_MIN,
+        threshold_min=StationShedConfig.THRESHOLD_MIN,
         destinations=[o.postcode for o in offices],
-        bbox=DEFAULT_BBOX,
-        inner_radius_km=INNER_RADIUS_KM,
-        engine_version=ENGINE_VERSION,
+        bbox=StationShedConfig.DEFAULT_BBOX,
+        inner_radius_km=StationShedConfig.INNER_RADIUS_KM,
+        engine_version=StationShedConfig.ENGINE_VERSION,
         expected_stations=expected,
         generated_at=generated_at,
     )
 
 
-# lucidlint: ignore record-shape compares persisted JSON records — serialization boundary (coding-standards.md)
-# lucidlint: ignore record-shape records param is the serialized station_shed.json payload (coding-standards.md)
-def is_complete(existing: list[dict] | None, records: list[dict], expected: int) -> bool:
+def is_complete(existing: list[ShedRecord] | None, records: list[ShedRecord], expected: int) -> bool:
     """True when a resume found every expected station already done.
 
     A killed batch (records < expected) must resume; a run that processed new
@@ -439,7 +424,7 @@ def is_complete(existing: list[dict] | None, records: list[dict], expected: int)
         existing is not None
         and len(records) >= expected
         and records == existing
-        and not any(r.get("routing_error") for r in records)
+        and not any(r.routing_error for r in records)
     )
 
 
@@ -450,17 +435,15 @@ def config_signature(offices: list[Office]) -> ShedConfigSignature:
     would mix with new metadata claiming the new config.
     """
     return ShedConfigSignature(
-        engine_version=ENGINE_VERSION,
+        engine_version=StationShedConfig.ENGINE_VERSION,
         destinations=[o.postcode for o in offices],
-        threshold_min=THRESHOLD_MIN,
-        bbox=DEFAULT_BBOX,
-        inner_radius_km=INNER_RADIUS_KM,
+        threshold_min=StationShedConfig.THRESHOLD_MIN,
+        bbox=StationShedConfig.DEFAULT_BBOX,
+        inner_radius_km=StationShedConfig.INNER_RADIUS_KM,
     )
 
 
-# lucidlint: ignore record-shape resumes compare persisted JSON metadata — serialization boundary (coding-standards.md)
-# lucidlint: ignore record-shape the current config dict is the serialized signature (coding-standards.md)
-def resume_allowed(prev_metadata: dict, current: dict) -> bool:
+def resume_allowed(prev_metadata: ShedMetadata, current: ShedConfigSignature) -> bool:
     """A resume is only safe when the shed was built under the CURRENT config.
 
     Comparing only the engine version lets a config change (destinations,
@@ -468,75 +451,16 @@ def resume_allowed(prev_metadata: dict, current: dict) -> bool:
     keep records routed to the old config while the metadata claims the new
     one. Compare the full config identity.
     """
-    return all(prev_metadata.get(k) == v for k, v in current.items())
-
-
-# lucidlint: ignore record-shape _write_payload serializes these records to station_shed.json (coding-standards.md)
-# lucidlint: ignore record-shape the payload assembly is the serialization boundary (coding-standards.md)
-def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
-    """Write the shed payload atomically — a kill mid-write never corrupts the file."""
-    # lucidlint: ignore record-shape the payload assembly is the serialization boundary (coding-standards.md)
-    payload = {"metadata": metadata, "stations": records}
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
-    os.replace(tmp, path)
+    return all(getattr(prev_metadata, k) == v for k, v in current.model_dump().items())
 
 
 @dataclass(frozen=True)
 class ResumeState:
     """The run's starting point: resumed records and metadata, or an abort exit."""
 
-    existing: list[dict] | None
-    metadata: dict | None
+    existing: list[ShedRecord] | None
+    metadata: ShedMetadata | None
     abort: int | None
-
-
-def _resume_state(out_path: Path, offices: list[Office]) -> ResumeState:
-    """Load the existing shed for resuming.
-
-    Returns a resumable state, an abort exit (config mismatch), or a fresh
-    start (unreadable shed).
-    """
-    try:
-        prev = json.loads(out_path.read_text())
-        if not resume_allowed(prev["metadata"], config_signature(offices).to_dict()):
-            logger.warning(
-                "shed config mismatch: stored metadata %s != current %s — refusing to resume %s",
-                {k: prev["metadata"].get(k) for k in config_signature(offices).to_dict()},
-                config_signature(offices).to_dict(),
-                out_path,
-            )
-            print(
-                f"{out_path} was built under a different config (destinations/threshold/bbox/version) — "
-                "use --force to rebuild",
-                file=sys.stderr,
-            )
-            return ResumeState(None, None, 1)
-        return ResumeState(prev["stations"], prev["metadata"], None)
-    except (json.JSONDecodeError, KeyError, OSError):
-        logger.warning("unreadable shed at %s — starting fresh (corrupt or truncated write?)", out_path)
-        print(f"{out_path} unreadable — starting fresh", file=sys.stderr)
-        return ResumeState(None, None, None)
-
-
-
-def _resume_or_wipe(out_path: Path, offices: list[Office], force: bool) -> ResumeState:
-    """The run's starting point: resumed records + metadata, or a fresh batch.
-
-    ``abort`` is an exit code when the run must stop before routing (e.g. a
-    corrupt existing shed).
-    """
-    if out_path.exists() and not force:
-        resumed = _resume_state(out_path, offices)
-        if resumed.abort is not None:
-            return ResumeState(None, None, resumed.abort)
-        if resumed.existing is not None:
-            print(f"resuming from {out_path} ({len(resumed.existing)} stations already done)")
-        return resumed
-    if out_path.exists() and force:
-        logger.warning("--force: wiping the existing shed at %s", out_path)
-        print("--force: wiping the existing shed", file=sys.stderr)
-    return ResumeState(None, None, None)
 
 
 @dataclass(frozen=True)
@@ -547,26 +471,91 @@ class LimitedStations:
     exit_code: int | None
 
 
-def _limit_stations(stations: list[Station], limit: int, out_path: Path) -> LimitedStations:
-    """Apply --limit, refusing a run that would truncate an existing shed.
+class _ShedFile:
+    """The shed artifact on disk — resume state, atomic writes, and the guards
+    that keep a resume or a ``--limit`` run from silently corrupting it.
 
-    A --limit run would write only the first N stations, silently truncating
-    the existing shed — --force means "re-run everything", never "keep only N".
-    Smoke runs must use a temp --out.
+    Owns the output path and the offices its config signature is checked
+    against, so the file's operations are methods on the state they read
+    instead of module functions threading ``out_path`` through every hop.
     """
-    if limit and out_path.exists():
-        logger.warning(
-            "refusing --limit run: %s already exists and would be truncated to %d stations", out_path, limit
-        )
-        print(
-            f"refusing --limit run: {out_path} already exists and would be truncated — "
-            "use --out with a temp path for smoke tests",
-            file=sys.stderr,
-        )
-        return LimitedStations(stations, 1)
-    if limit:
-        stations = stations[:limit]
-    return LimitedStations(stations, None)
+
+    def __init__(self, path: Path, offices: list[Office]) -> None:
+        self.path: Path = path
+        self._offices: list[Office] = offices
+
+    def resume_or_wipe(self, force: bool) -> ResumeState:
+        """The run's starting point: resumed records + metadata, or a fresh batch.
+
+        ``abort`` is an exit code when the run must stop before routing (e.g. a
+        corrupt existing shed).
+        """
+        if self.path.exists() and not force:
+            resumed = self._resume_state()
+            if resumed.abort is not None:
+                return ResumeState(None, None, resumed.abort)
+            if resumed.existing is not None:
+                print(f"resuming from {self.path} ({len(resumed.existing)} stations already done)")
+            return resumed
+        if self.path.exists() and force:
+            logger.warning("--force: wiping the existing shed at %s", self.path)
+            print("--force: wiping the existing shed", file=sys.stderr)
+        return ResumeState(None, None, None)
+
+    def _resume_state(self) -> ResumeState:
+        """Load the existing shed for resuming.
+
+        Returns a resumable state, an abort exit (config mismatch), or a fresh
+        start (unreadable shed).
+        """
+        signature = config_signature(self._offices)
+        try:
+            prev = ShedPayload(**json.loads(self.path.read_text()))
+            if not resume_allowed(prev.metadata, signature):
+                logger.warning(
+                    "shed config mismatch: stored metadata %s != current %s — refusing to resume %s",
+                    {k: getattr(prev.metadata, k) for k in signature.model_dump()},
+                    signature.model_dump(),
+                    self.path,
+                )
+                print(
+                    f"{self.path} was built under a different config (destinations/threshold/bbox/version) — "
+                    "use --force to rebuild",
+                    file=sys.stderr,
+                )
+                return ResumeState(None, None, 1)
+            return ResumeState(prev.stations, prev.metadata, None)
+        except (json.JSONDecodeError, ValidationError, KeyError, OSError):
+            logger.warning("unreadable shed at %s — starting fresh (corrupt or truncated write?)", self.path)
+            print(f"{self.path} unreadable — starting fresh", file=sys.stderr)
+            return ResumeState(None, None, None)
+
+    def write(self, metadata: ShedMetadata, records: list[ShedRecord]) -> None:
+        """Write the shed payload atomically — a kill mid-write never corrupts the file."""
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(ShedPayload(metadata=metadata, stations=records).to_json())
+        os.replace(tmp, self.path)
+
+    def limit_stations(self, stations: list[Station], limit: int) -> LimitedStations:
+        """Apply --limit, refusing a run that would truncate an existing shed.
+
+        A --limit run would write only the first N stations, silently truncating
+        the existing shed — --force means "re-run everything", never "keep only N".
+        Smoke runs must use a temp --out.
+        """
+        if limit and self.path.exists():
+            logger.warning(
+                "refusing --limit run: %s already exists and would be truncated to %d stations", self.path, limit
+            )
+            print(
+                f"refusing --limit run: {self.path} already exists and would be truncated — "
+                "use --out with a temp path for smoke tests",
+                file=sys.stderr,
+            )
+            return LimitedStations(stations, 1)
+        if limit:
+            stations = stations[:limit]
+        return LimitedStations(stations, None)
 
 
 async def run(argv: list[str] | None = None) -> int:
@@ -581,28 +570,29 @@ async def run(argv: list[str] | None = None) -> int:
 
     out_path = Path(args.out)
     offices = await _geocode_offices()
-    resume = _resume_or_wipe(out_path, offices, args.force)
+    shed_file = _ShedFile(out_path, offices)
+    resume = shed_file.resume_or_wipe(args.force)
     if resume.abort is not None:
         return resume.abort
 
     stations = load_stations(args.csv)
-    limited = _limit_stations(stations, args.limit, out_path)
+    limited = shed_file.limit_stations(stations, args.limit)
     if limited.exit_code is not None:
         return limited.exit_code
     stations = limited.stations
 
-    bbox = BBox(**DEFAULT_BBOX)
+    bbox = BBox(**StationShedConfig.DEFAULT_BBOX)
     expected = sum(1 for st in stations if bbox.contains(st.lat, st.lon))
     # Always rebuild from current constants; preserve only the batch-start
     # timestamp across resumes (a resume must never keep outdated settings).
-    generated_at = resume.metadata["generated_at"] if resume.metadata else datetime.now(UTC).isoformat()
-    metadata = build_metadata(offices, expected, generated_at).to_dict()
+    generated_at = (
+        resume.metadata.generated_at if resume.metadata else datetime.now(UTC).isoformat()
+    ) or datetime.now(UTC).isoformat()
+    metadata = build_metadata(offices, expected, generated_at)
 
-# lucidlint: ignore record-shape checkpoint persists the serialized records — serialization boundary
-# (coding-standards.md)
-    def _checkpoint(records: list[dict], processed: int) -> None:
+    def _checkpoint(records: list[ShedRecord], processed: int) -> None:
         if processed % args.checkpoint_every == 0:
-            _write_payload(out_path, metadata, records)
+            shed_file.write(metadata, records)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     prev_count = len(resume.existing) if resume.existing is not None else 0
@@ -612,8 +602,8 @@ async def run(argv: list[str] | None = None) -> int:
         RoutingContext(
             offices=offices,
             bbox=bbox,
-            inner_radius_km=INNER_RADIUS_KM,
-            threshold=THRESHOLD_MIN,
+            inner_radius_km=StationShedConfig.INNER_RADIUS_KM,
+            threshold=StationShedConfig.THRESHOLD_MIN,
             router=Station.route_duration,
             delay_s=args.delay,
         ),
@@ -622,15 +612,15 @@ async def run(argv: list[str] | None = None) -> int:
     )
     elapsed = time.monotonic() - started
 
-    if is_complete(resume.existing, records, metadata.get("expected_stations", len(records))):
+    if is_complete(resume.existing, records, metadata.expected_stations):
         logger.warning(
             "shed already complete (%d stations) — no stations to process; use --force to re-run", len(records)
         )
         print(f"shed already complete ({len(records)} stations) — use --force to re-run")
         return 0
 
-    _write_payload(out_path, metadata, records)
-    kept = sum(1 for r in records if r["kept"])
+    shed_file.write(metadata, records)
+    kept = sum(1 for r in records if r.kept)
     new = len(records) - prev_count
     print(f"{new} new station(s) processed ({kept} kept of {len(records)}) in {elapsed:.0f}s → {out_path}")
     return 0

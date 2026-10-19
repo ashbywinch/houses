@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, override
 
 from money import Money
+from pydantic import SerializerFunctionWrapHandler, model_serializer
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
@@ -13,13 +15,20 @@ from dag.node import Node
 from houses.commute import CostGroup, LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, PlaceOfInterest
+from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
-MINUTES_PER_HOUR = 60
-GOOD_COMMUTE_MIN = 30
-BRACKNELL_WARN_COMMUTE_MIN = 60
-STANDARD_GOOD_COMMUTE_MIN = 45
-STANDARD_WARN_COMMUTE_MIN = 75
+
+class CommuteBands:
+    """The card's good/warn/bad commute band thresholds and the minute
+    conversions they share — the banding contract the card data layer
+    pinned when it moved out of the web layer."""
+
+    MINUTES_PER_HOUR = 60
+    GOOD_COMMUTE_MIN = 30
+    BRACKNELL_WARN_COMMUTE_MIN = 60
+    STANDARD_GOOD_COMMUTE_MIN = 45
+    STANDARD_WARN_COMMUTE_MIN = 75
 
 
 def transit_legs(commute: Commute | None) -> bool:
@@ -48,6 +57,16 @@ def _has_unpriced_transit(commute: Commute | None) -> bool:
     return any(cg.cost is None and any(leg.mode in _transit_modes for leg in cg.legs) for cg in commute.details or ())
 
 
+def _usable_commute(attempt: Attempt) -> Commute | None:
+    """The commute value when the attempt succeeded into a feasible route."""
+    if not attempt.succeeded:
+        return None
+    val = attempt.value_or_none()
+    if val is None or val.infeasible:
+        return None
+    return val
+
+
 def needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
     """True when the SELECTED commute has unpriced transit legs needing an NR fare.
 
@@ -56,23 +75,18 @@ def needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
     pending), the fare is irrelevant — the fare node must never be
     calculated for a route that wasn't chosen.
     """
-    if not transit.succeeded:
-        return False
-    val = transit.value_or_none()
-    if val is None or val.infeasible:
+    transit_val = _usable_commute(transit)
+    if transit_val is None:
         # No route — nothing to price; never touch .details on an
         # infeasible commute (the accessor raises).
         return False
     if selected is not None:
-        # lucidlint: ignore duplicate-block same success-guard as the transit attempt above — parallel guards on two
-        if not selected.succeeded:
+        sel = _usable_commute(selected)
+        if sel is None or not transit_legs(sel):
             return False
-        sel = selected.value_or_none()
-        if sel is None or sel.infeasible or not transit_legs(sel):
-            return False
-    if val.daily_cost is None or val.daily_cost.amount == 0:
+    if transit_val.daily_cost is None or transit_val.daily_cost.amount == 0:
         return True
-    return _has_unpriced_transit(val)
+    return _has_unpriced_transit(transit_val)
 
 
 # lucidlint: ignore unused card-format helper pinned by the card_data contract tests — the web layer no longer formats
@@ -84,10 +98,10 @@ def format_duration(minutes: int | None) -> str:
     """
     if minutes is None:
         return ""
-    if minutes < MINUTES_PER_HOUR:
+    if minutes < CommuteBands.MINUTES_PER_HOUR:
         return f"{minutes}m"
-    h = minutes // MINUTES_PER_HOUR
-    r = minutes % MINUTES_PER_HOUR
+    h = minutes // CommuteBands.MINUTES_PER_HOUR
+    r = minutes % CommuteBands.MINUTES_PER_HOUR
     return f"{h}h{r}" if r else f"{h}h"
 
 
@@ -96,8 +110,8 @@ def commute_band(minutes: int | None, bracknell: bool = False) -> str:
     single home of the threshold bands; colour and score both encode it."""
     if minutes is None:
         return "unknown"
-    good = GOOD_COMMUTE_MIN if bracknell else STANDARD_GOOD_COMMUTE_MIN
-    warn = BRACKNELL_WARN_COMMUTE_MIN if bracknell else STANDARD_WARN_COMMUTE_MIN
+    good = CommuteBands.GOOD_COMMUTE_MIN if bracknell else CommuteBands.STANDARD_GOOD_COMMUTE_MIN
+    warn = CommuteBands.BRACKNELL_WARN_COMMUTE_MIN if bracknell else CommuteBands.STANDARD_WARN_COMMUTE_MIN
     return "good" if minutes < good else "warn" if minutes <= warn else "bad"
 
 
@@ -173,8 +187,7 @@ class CommuteSelectorInputs:
     drive: Attempt[Commute] | None = None
 
 
-@dataclass(frozen=True)
-class _CommuteSelectorJson:
+class _CommuteSelector(SerializableAsDict):
     """Wire shape of CommuteSelectorNode.to_json — the node record plus
     the selector's ``is_child`` flag. Every listed key is emitted;
     ``error`` only when the attempt is impossible."""
@@ -185,34 +198,18 @@ class _CommuteSelectorJson:
     succeeded: bool
     pending: bool
     impossible: bool
-    error: str | None
     provenance: dict
+    error: str | None = None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        d = dict(status=self.status, value=self.value, is_child=self.is_child)
-        d["succeeded"] = self.succeeded
-        d["pending"] = self.pending
-        d["impossible"] = self.impossible
-        if self.impossible:
-            d["error"] = self.error
-        d["provenance"] = self.provenance
-        return d
-
-
-@dataclass(frozen=True)
-class _CommuteValueJson:
-    """Wire shape of CommuteSelectorNode.to_json_value — the base node
-    record (NodeJson None-omission) with ``is_child`` appended last."""
-
-    base: dict
-    is_child: bool
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-
-        return {**self.base, "is_child": self.is_child}
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Mapping[str, Any]:
+        """``error`` is emitted only for an impossible attempt — the key's
+        presence is the wire contract, so it is dropped when it does not
+        apply."""
+        data = handler(self)
+        if not self.impossible:
+            data.pop("error", None)
+        return data
 
 
 class CommuteSelectorNode(DerivedNode[Commute]):
@@ -272,13 +269,13 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if self._mode_acceptable("transit"):
             deps.append(options.transit_result)
             names.append("transit")
-        # lucidlint: ignore duplicate-block parallel per-mode dep registration — each alternative (walk/drive) gates
-        if options.walk_result is not None and self._mode_acceptable("walk"):
-            deps.append(options.walk_result)
-            names.append("walk")
-        if options.drive_result is not None and self._mode_acceptable("car"):
-            deps.append(options.drive_result)
-            names.append("drive")
+        for dep, mode, name in (
+            (options.walk_result, "walk", "walk"),
+            (options.drive_result, "car", "drive"),
+        ):
+            if dep is not None and self._mode_acceptable(mode):
+                deps.append(dep)
+                names.append(name)
         super().__init__(node_id, Commute, tuple(deps), dep_names=tuple(names))
 
         # Build expression once — cached so last_results persists across calls
@@ -298,6 +295,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
     def _mode_acceptable(self, mode: str) -> bool:
         """Whether ``mode`` may be selected.  Unset = all acceptable."""
         return not self._acceptable_modes or mode in self._acceptable_modes
+
 
     @override
     def _get_active_deps(self) -> tuple[Node, ...]:
@@ -376,27 +374,24 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return result
 
     @override
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     async def to_json(self, dep_attempts=None, active_deps=None) -> dict:
         attempt = await self.attempt()
         value = None
+
         if attempt.succeeded and attempt.value_or_none() is not None:
             try:
                 value = self._adapter.dump_python(attempt.value_or_none(), mode="json")
                 # Rename private _details field back to details for the frontend
                 if isinstance(value, dict) and "_details" in value:
                     value["details"] = value.pop("_details")
-
-            # lucidlint: ignore swallow serialization failure is surfaced by the logger and degrades to None —
-            # a broken custom node must not kill the whole to_json
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 logger.exception("Failed to serialize commute value to JSON")
                 value = None
         error = None
         if attempt.impossible:
             info = attempt.error_info
             error = (info.display_message if info is not None else attempt.error) or attempt.error
-        return _CommuteSelectorJson(
+        return _CommuteSelector(
             status=attempt.status,
             value=value,
             is_child=self.is_child,
@@ -407,13 +402,12 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             provenance=(await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict(),
         ).to_dict()
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
     @override
     async def to_json_value(self) -> dict:
-        result = await super().to_json_value()
-        if "_details" in result:
-            result["details"] = result.pop("_details")
-        return _CommuteValueJson(base=result, is_child=self.is_child).to_dict()
+        """The base node record with the selector's ``is_child`` appended last."""
+        value = await super().to_json_value()
+        value["is_child"] = self.is_child
+        return value
 
 
 class MergeRailFareNode(DerivedNode[Commute]):
@@ -440,6 +434,7 @@ class MergeRailFareNode(DerivedNode[Commute]):
 
     @property
     @override
+    # lucidlint: ignore middle-man framework hook — live-render override for unpersisted provenance (review-log)
     def provenance_formula(self):
         # Never-persisted render (live fallback) — the persist path uses
         # provenance_formula_for with the BOUND attempts.

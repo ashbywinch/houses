@@ -24,7 +24,7 @@ from dag.node import Node
 from houses.nodes.current_home_node import MonthlyBaseline, MonthlySide, as_figure
 
 
-class DeltaVsHomeWire(TypedDict):
+class DeltaVsHome(TypedDict):
     """The delta block as the wire states it: each side's figure, or null."""
 
     couple: MonthlySide | None
@@ -37,7 +37,7 @@ class DeltaVsHomeProvenanceValue:
 
     A value object, like BaselineProvenanceValue: the DAG's projector takes
     any non-dict value object's own ``to_provenance_value()`` and walks its
-    result, which must be plain JSON. The wire block (DeltaVsHomeWire) is a
+    result, which must be plain JSON. The wire block (DeltaVsHome) is a
     separate, wire-format shape.
     """
 
@@ -61,10 +61,10 @@ class DeltaVsHomeValue:
     couple: MonthlySide | None
     others: MonthlySide | None
 
-    def to_wire(self) -> DeltaVsHomeWire:
+    def to_wire(self) -> DeltaVsHome:
         # The side shape is the shared {value, approx} contract (the frontend's
         # MonthlyDeltaSide); DagJSONEncoder projects each MonthlySide to it.
-        return DeltaVsHomeWire(couple=self.couple, others=self.others)
+        return DeltaVsHome(couple=self.couple, others=self.others)
 
     def to_provenance_value(self) -> DeltaVsHomeProvenanceValue:
         """The tree states the per-side deltas as human figures."""
@@ -80,7 +80,7 @@ def _figure_number(figure: Any) -> Decimal | None:
         return None
     try:
         return Decimal(str(as_fig.value))
-    except Exception:
+    except (TypeError, ValueError, ArithmeticError):
         return None
 
 

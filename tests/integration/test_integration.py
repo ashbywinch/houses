@@ -2,7 +2,7 @@
 
 import httpx  # noqa: I001
 import pytest
-from houses.location import OUTCODES_IO_URL, POSTCODES_IO_URL
+from houses.location import _GeocodeApi
 from houses.server import extract_postcode
 
 
@@ -10,7 +10,7 @@ class TestPostcodesIO:
     @pytest.mark.asyncio
     async def test_full_postcode_geocode(self):
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{POSTCODES_IO_URL}/SW1A%201AA")
+            resp = await client.get(f"{_GeocodeApi.POSTCODES_IO_URL}/SW1A%201AA")
         assert resp.status_code == 200
         data = resp.json()
         lat = data["result"]["latitude"]
@@ -21,7 +21,7 @@ class TestPostcodesIO:
     @pytest.mark.asyncio
     async def test_outcode_geocode(self):
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{OUTCODES_IO_URL}/SL6")
+            resp = await client.get(f"{_GeocodeApi.OUTCODES_IO_URL}/SL6")
         assert resp.status_code == 200
         data = resp.json()
         lat = data["result"]["latitude"]

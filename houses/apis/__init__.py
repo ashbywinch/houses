@@ -28,21 +28,29 @@ import, plus the types serialized/consumed across modules.
 
 from __future__ import annotations
 
-from houses.apis.epc import EpcApi, EpcSearchResult
-from houses.apis.google_geocode import GoogleGeocodeApi, GoogleGeocodeParams
-from houses.apis.google_places import (
-    GooglePlacesApi,
-    PlacesCenter,
-    PlacesCircle,
-    PlacesRestriction,
-    PlacesResult,
-    PlacesSearchBody,
-)
-from houses.apis.nominatim import NominatimApi, NominatimParams
-from houses.apis.ors import ORSApi, OrsDirectionsBody, OrsReverseParams, OrsSearchParams
-from houses.apis.overpass import OverpassApi, OverpassElement, OverpassParams, OverpassResponse
+from houses.apis.base_api import BaseApi
+from houses.apis.epc_api import EpcApi
+from houses.apis.epc_search_result import EpcSearchResult
+from houses.apis.fetch_args import FetchArgs
+from houses.apis.google_geocode_api import GoogleGeocodeApi
+from houses.apis.google_geocode_params import GoogleGeocodeParams
+from houses.apis.google_places_api import GooglePlacesApi
+from houses.apis.nominatim_api import NominatimApi
+from houses.apis.nominatim_params import NominatimParams
+from houses.apis.ors_api import ORSApi
+from houses.apis.ors_directions_body import OrsDirectionsBody
+from houses.apis.ors_reverse_params import OrsReverseParams
+from houses.apis.ors_search_params import OrsSearchParams
+from houses.apis.overpass_api import OverpassApi
+from houses.apis.overpass_element import OverpassElement
+from houses.apis.overpass_params import OverpassParams
+from houses.apis.overpass_response import OverpassResponse
+from houses.apis.places_center import PlacesCenter
+from houses.apis.places_circle import PlacesCircle
+from houses.apis.places_restriction import PlacesRestriction
+from houses.apis.places_result import PlacesResult
+from houses.apis.places_search_body import PlacesSearchBody
 from houses.apis.postcodesapi import OUTCODE_RE, PostcodesApi
-from houses.apis.transport import BaseApi, FetchArgs
 
 ors = ORSApi()
 nominatim = NominatimApi()

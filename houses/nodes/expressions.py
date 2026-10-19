@@ -18,8 +18,10 @@ from dag.expression import Expression, Literal, Ref
 from houses.stamp_duty import stamp_duty_land_tax
 
 
+# lucidlint: ignore class-module PMT/StampDutyFn/TaxTier/TieredRate are the mortgage/tax formula surface (review-log)
 class PMT(Expression):
     """Monthly mortgage payment = P × r(1+r)^n / ((1+r)^n − 1)."""
+    MONTHS_PER_YEAR = 12
 
     def __init__(
         self,
@@ -33,31 +35,33 @@ class PMT(Expression):
         self.term_years: Expression = term_years
         self.description: str = description
 
+    @staticmethod
+    def _evaluate_input(expr: Expression, missing: str) -> Attempt:
+        """Evaluate one input into a succeeded attempt carrying its value."""
+        result = expr.evaluate()
+        if not result.succeeded:
+            return Attempt.impossible(result.error or missing)
+        if result.value is None:
+            return Attempt.impossible(missing)
+        return result
+
+
     @override
     def evaluate(self) -> Attempt:
-        p_result = self.principal.evaluate()
-        if not p_result.succeeded:
-            return Attempt.impossible(p_result.error or "principal missing")
-        # lucidlint: ignore duplicate-block parallel validation of three sub-expressions — each input guards its own
-        r_result = self.annual_rate.evaluate()
-        if not r_result.succeeded:
-            return Attempt.impossible(r_result.error or "rate missing")
-        t_result = self.term_years.evaluate()
-        if not t_result.succeeded:
-            return Attempt.impossible(t_result.error or "term missing")
+        p_result = self._evaluate_input(self.principal, "principal missing")
+        r_result = self._evaluate_input(self.annual_rate, "rate missing")
+        t_result = self._evaluate_input(self.term_years, "term missing")
+        for result in (p_result, r_result, t_result):
+            if not result.succeeded:
+                return result  # propagate the first missing/failed input
 
-        p = p_result.value
-        if p is None:
-            return Attempt.impossible("principal missing")
+        p, r_raw, t_raw = p_result.value, r_result.value, t_result.value
+        # The succeeded-loop above already returned on any failure — the
+        # assert exists to narrow the value types for the checker.
+        assert p is not None and r_raw is not None and t_raw is not None
         p = Decimal(str(p.amount)) if isinstance(p, Money) else Decimal(str(p))
-        r_raw = r_result.value
-        if r_raw is None:
-            return Attempt.impossible("rate missing")
-        r = float(r_raw) / 12
-        term = t_result.value
-        if term is None:
-            return Attempt.impossible("term missing")
-        n = int(term) * 12
+        r = float(r_raw) / PMT.MONTHS_PER_YEAR
+        n = int(t_raw) * PMT.MONTHS_PER_YEAR
 
         payment = p / Decimal(str(n)) if r == 0 else p * Decimal(str(r * (1 + r) ** n / ((1 + r) ** n - 1)))
 
@@ -73,14 +77,23 @@ class PMT(Expression):
         lines = list(self.principal.to_formula_lines())
         for rl in self.annual_rate.to_formula_lines():
             r = rate_attempt.value_or_none()
-            value = f"{r} ÷ 12 = {float(r) / 12:.4f}" if rate_attempt.succeeded and r is not None else rl.value
+            value = (
+                f"{r} ÷ 12 = {float(r) / PMT.MONTHS_PER_YEAR:.4f}"
+                if rate_attempt.succeeded and r is not None
+                else rl.value
+            )
             lines.append(FormulaLine(label=rl.label + " ÷ 12", value=value))
         for tl in self.term_years.to_formula_lines():
             t = term_attempt.value_or_none()
-            value = f"{t} × 12 = {int(t) * 12}" if term_attempt.succeeded and t is not None else tl.value
+            value = (
+                f"{t} × 12 = {int(t) * PMT.MONTHS_PER_YEAR}"
+                if term_attempt.succeeded and t is not None
+                else tl.value
+            )
             lines.append(FormulaLine(label=tl.label + " × 12", value=value))
         return lines
 
+    # lucidlint: ignore unused test-exercised seam — the DAG tests construct it directly (review-log)
 class StampDutyFn(Expression):
     """Calculate UK Stamp Duty Land Tax from a property price."""
 
@@ -91,7 +104,7 @@ class StampDutyFn(Expression):
     ):
         self.price: Expression = price
         self.description: str = description
-    # lucidlint: ignore duplicate same evaluate/operand-guard skeleton as the dag.expression operands — the body is UK
+    
     @override
     def evaluate(self) -> Attempt:
         price_result = self.price.evaluate()
@@ -103,12 +116,10 @@ class StampDutyFn(Expression):
 
         try:
             return Attempt.succeeded(stamp_duty_land_tax(price))
-        # lucidlint: ignore broad-except boundary — stamp-duty calculation failure converts to an impossible attempt
-        except Exception as e:
+        except (AttributeError, ArithmeticError, TypeError, ValueError) as e:
             return Attempt.impossible(f"Stamp duty calculation failed: {e}")
-
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
     @override
+    # lucidlint: ignore middle-man protocol/reflected-operator — the Expression formula interface (review-log)
     def to_formula_lines(self) -> list[FormulaLine]:
         return self.price.to_formula_lines()
 
@@ -121,6 +132,8 @@ class TaxTier:
     rate_to: int | Decimal | None
     rate: int | Decimal
 
+
+type _TierTax = tuple[Decimal, Decimal]  # (tax in this tier, cumulative tax incl. it)
 
 class TieredRate(Expression):
     """Marginal tax/rate calculation across multiple bands.
@@ -144,6 +157,7 @@ class TieredRate(Expression):
             TaxTier(1500000, None, Decimal("0.12")),
         ])
     """
+    PERCENT = 100
 
     def __init__(
         self,
@@ -160,8 +174,7 @@ class TieredRate(Expression):
         self.tiers: list[TaxTier] = tiers
         self.description: str = description
 
-    # lucidlint: ignore record-shape (tier, cumulative) tax pair — a NamedTuple is ceremony for a local step
-    def _tax_at(self, price: Decimal, tier_idx: int) -> tuple[Decimal, Decimal]:
+    def _tax_at(self, price: Decimal, tier_idx: int) -> _TierTax:
         """Compute tax for a value in the given tier.
 
         Returns (tax_at_this_tier, cumulative_tax_including_this_tier).
@@ -256,7 +269,7 @@ class TieredRate(Expression):
                             FormulaLine(
                                 label=(
                                     f"  £{prev.rate_from:,.0f} to £{prev.rate_to:,.0f}"
-                                    f" at {float(prev.rate) * 100:.0f}%"
+                                    f" at {float(prev.rate) * TieredRate.PERCENT:.0f}%"
                                 ),
                                 value=self._format_value(Money(str(prev_total), "GBP")),
                             )
@@ -264,7 +277,7 @@ class TieredRate(Expression):
 
                 taxable = price_d - lo_d
                 tier_tax = taxable * Decimal(str(tier.rate))
-                pct = float(tier.rate) * 100
+                pct = float(tier.rate) * TieredRate.PERCENT
                 lines.append(
                     FormulaLine(
                         label=f"£{lo_d:,.0f} to £{price_d:,.0f} at {pct:.0f}%",

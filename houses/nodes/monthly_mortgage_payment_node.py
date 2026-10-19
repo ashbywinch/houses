@@ -4,7 +4,6 @@ from typing import override
 
 from money import Money
 
-from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.expression import Ref
 from houses.nodes.expressions import PMT
@@ -25,12 +24,5 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
             term_years=Ref(self._deps[2]),
         )
 
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
-    @override
-    def compute(
-        self,
-        mortgage_required: Attempt[Money],
-        rate: Attempt,
-        term: Attempt,
-    ) -> Attempt[Money]:
-        return self.expression.evaluate()
+    compute = DerivedNode.compute  # the expression IS the computation — no forwarding shim
+

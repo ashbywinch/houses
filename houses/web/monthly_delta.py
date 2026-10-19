@@ -28,22 +28,23 @@ FastAPI imports so the wire shapes test as plain data.
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
-from typing import Any
+from typing import Any, cast
 
 from houses import property_registry as pr
 from houses.nodes.current_home_node import current_home_node
 
 
-# lucidlint: ignore record-shape the extracted group block IS part of the variable-keyed property payload — passthrough
-# of a wire subsection, not a fixed record shape of its own (coding-standards.md)
 def _group_block(summary: Mapping[str, object]) -> dict | None:
-    """The ``{status, value, ...}`` group dict — top level on property
-    summaries, under ``affordability`` on detail payloads."""
+    """The group's serialized node result — top level on property
+    summaries, under ``affordability`` on detail payloads. The payload
+    carries the group node's own to_json_value wire, so this boundary
+    asserts the shape instead of rebuilding it (a rebuilt copy would
+    swallow the caller's delta)."""
     group = summary.get("group_monthly_cost")
     if group is None:
         affordability = summary.get("affordability")
         group = affordability.get("group_monthly_cost") if isinstance(affordability, dict) else None
-    return group if isinstance(group, dict) else None
+    return cast(dict, group) if isinstance(group, dict) else None
 
 
 async def attach(summary: MutableMapping[str, Any], rid: str) -> MutableMapping[str, Any]:
