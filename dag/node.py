@@ -3,20 +3,19 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 from dag.attempt import Attempt, AttemptError, Provenance
 from dag.expression import Add, Div, Expression, Literal, Mul, Negate, Ref, Sub
 from dag.persistence import latest_node_result, save_node_result
 from dag.signals import Signal
+from serialization import SerializableAsDict, omit_when_none
 
 
-@dataclass
-class NodeValue:
+class NodeValue(SerializableAsDict):
     """The serialized node record served by to_json/to_json_value and
     persisted into node_results. Fields left as None are omitted from the
     serialized dict, so the emitted key set matches the emitting path
@@ -24,21 +23,13 @@ class NodeValue:
 
     status: str
     value: Any = None
-    succeeded: bool | None = None
-    pending: bool | None = None
-    impossible: bool | None = None
-    error: str | None = None
-    error_detail: dict | None = None
-    source_url: str | None = None
-    provenance: dict | None = None
-
-    def to_dict(self) -> dict:
-        d = dict(status=self.status, value=self.value)
-        for k in ("succeeded", "pending", "impossible", "error", "error_detail", "source_url", "provenance"):
-            v = getattr(self, k)
-            if v is not None:
-                d[k] = v
-        return d
+    succeeded: bool | None = Field(default=None, exclude_if=omit_when_none)
+    pending: bool | None = Field(default=None, exclude_if=omit_when_none)
+    impossible: bool | None = Field(default=None, exclude_if=omit_when_none)
+    error: str | None = Field(default=None, exclude_if=omit_when_none)
+    error_detail: dict | None = Field(default=None, exclude_if=omit_when_none)
+    source_url: str | None = Field(default=None, exclude_if=omit_when_none)
+    provenance: dict | None = Field(default=None, exclude_if=omit_when_none)
 
 
 T = TypeVar("T")
