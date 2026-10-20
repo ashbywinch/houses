@@ -19,13 +19,15 @@ import random
 import re
 import socket
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
 from playwright.async_api import async_playwright
+from pydantic import Field
 
 from houses.settings import settings
+from serialization import SerializableAsDict, omit_when_none
 
 logger = logging.getLogger(__name__)
 class _ScrapeConstants:
@@ -155,8 +157,8 @@ def _record_or_set_price(extracted, raw: Any):
     try:
         price = _extract_price(raw, field="price")
     except _PageModelError as e:
-        return replace(extracted, parse_errors={"price": str(e)})
-    return replace(extracted, price=price) if price is not None else extracted
+        return extracted.model_copy(update={"parse_errors": {"price": str(e)}})
+    return extracted.model_copy(update={"price": price}) if price is not None else extracted
 
 
 def _clean_price(raw: Any) -> float | None:
@@ -174,32 +176,24 @@ def _clean_price(raw: Any) -> float | None:
         return None
 
 
-@dataclass(frozen=True)
-class _PropertyExtract:
+class _PropertyExtract(SerializableAsDict):
     """The property fields pulled from a Rightmove page's data sources.
 
-    Only the fields a source actually yields are set; to_dict omits the
-    rest, so the merged extraction keeps each source's key set.
+    Only the fields a source actually yields are set; the dump omits the rest
+    (``omit_when_none``), so the merged extraction keeps each source's key set.
+    ``parse_errors`` is in-memory only — it is not part of the wire.
     """
 
-    address: str | None = None
-    postcode: str | None = None
-    bedrooms: int | None = None
-    price: float | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    parse_errors: dict[str, str] = field(default_factory=dict)
-    """Fields whose page-model STRUCTURE the parser could not traverse —
-    distinct from genuine absence (a field the page simply doesn't carry).
-    A structure mismatch means Rightmove changed the page layout."""
-
-    def to_dict(self) -> dict:
-        d: dict = {}
-        for k in ("address", "postcode", "bedrooms", "price", "latitude", "longitude"):
-            v = getattr(self, k)
-            if v is not None:
-                d[k] = v
-        return d
+    address: str | None = Field(default=None, exclude_if=omit_when_none)
+    postcode: str | None = Field(default=None, exclude_if=omit_when_none)
+    bedrooms: int | None = Field(default=None, exclude_if=omit_when_none)
+    price: float | None = Field(default=None, exclude_if=omit_when_none)
+    latitude: float | None = Field(default=None, exclude_if=omit_when_none)
+    longitude: float | None = Field(default=None, exclude_if=omit_when_none)
+    # Fields whose page-model STRUCTURE the parser could not traverse —
+    # distinct from genuine absence (a field the page simply doesn't carry).
+    # A structure mismatch means Rightmove changed the page layout.
+    parse_errors: dict[str, str] = Field(default_factory=dict, exclude=True)
 
     def to_property(self, url: str) -> RightmoveProperty | None:
         """The property this extraction describes; None when it holds no value."""
@@ -245,9 +239,9 @@ def _extract_field(
     try:
         value = getter()
         if value is not None:
-            return cast(_PropertyExtract, replace(extracted, **{field: value}))  # type: ignore[bad-argument-type]  # dynamic field name, the helper's contract
+            return extracted.model_copy(update={field: value})  # dynamic field name, the helper's contract
     except _PageModelError as e:
-        return replace(extracted, parse_errors={**extracted.parse_errors, field: str(e)})
+        return extracted.model_copy(update={"parse_errors": {**extracted.parse_errors, field: str(e)}})
     return extracted
 
 
@@ -265,10 +259,10 @@ def _extract_pair(
         if pair is not None:
             return cast(
                 _PropertyExtract,
-                replace(extracted, **{field_a: pair[0], field_b: pair[1]}),  # type: ignore[bad-argument-type]  # dynamic field names
+                extracted.model_copy(update={field_a: pair[0], field_b: pair[1]}),  # dynamic field names
             )
     except _PageModelError as e:
-        return replace(extracted, parse_errors={**extracted.parse_errors, field_a: str(e)})
+        return extracted.model_copy(update={"parse_errors": {**extracted.parse_errors, field_a: str(e)}})
     return extracted
 
 
@@ -405,6 +399,7 @@ class _PageHtml:
         self.html = html
         self.page_model = page_model
 
+    # lucidlint: ignore latent-class the fallback walk reads the PAGE (DOM + preloaded state), not only the record
     def to_property(self, url: str) -> RightmoveProperty | None:
         """Extract property data from this page's HTML.
 
@@ -435,11 +430,11 @@ class _PageHtml:
         if result.address is None:
             addr = self._testid_text("address-label")
             if addr:
-                result = replace(result, address=addr)
+                result = result.model_copy(update={"address": addr})
         if result.bedrooms is None:
             beds = self._bedrooms_from_dom()
             if beds is not None:
-                result = replace(result, bedrooms=beds)
+                result = result.model_copy(update={"bedrooms": beds})
 
         return result.to_property(url)
 
@@ -461,9 +456,9 @@ class _PageHtml:
         postcode = addr.get("postalCode", "")
         parts = [p for p in [street, locality, postcode] if p]
         if parts:
-            extracted = replace(extracted, address=", ".join(parts))
+            extracted = extracted.model_copy(update={"address": ", ".join(parts)})
         if postcode:
-            extracted = replace(extracted, postcode=postcode)
+            extracted = extracted.model_copy(update={"postcode": postcode})
 
         offers = data.get("offers") or {}
         extracted = _record_or_set_price(extracted, offers.get("price"))
@@ -472,7 +467,7 @@ class _PageHtml:
         lat = geo.get("latitude")
         lng = geo.get("longitude")
         if lat is not None and lng is not None:
-            extracted = replace(extracted, latitude=float(lat), longitude=float(lng))
+            extracted = extracted.model_copy(update={"latitude": float(lat), "longitude": float(lng)})
 
         return extracted
 
@@ -491,15 +486,15 @@ class _PageHtml:
 
             pd = state.get("propertyData") or state.get("property") or {}
             if pd.get("address"):
-                extracted = replace(extracted, address=pd["address"])
+                extracted = extracted.model_copy(update={"address": pd["address"]})
             if pd.get("bedrooms") is not None:
-                extracted = replace(extracted, bedrooms=int(pd["bedrooms"]))
+                extracted = extracted.model_copy(update={"bedrooms": int(pd["bedrooms"])})
             extracted = _record_or_set_price(extracted, pd.get("price"))
             loc = pd.get("location") or {}
             lat = loc.get("latitude")
             lng = loc.get("longitude")
             if lat is not None and lng is not None:
-                extracted = replace(extracted, latitude=float(lat), longitude=float(lng))
+                extracted = extracted.model_copy(update={"latitude": float(lat), "longitude": float(lng)})
 
             return extracted
 
