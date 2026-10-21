@@ -278,8 +278,8 @@ class CommuteRouter:
         if route is None:
             return self._infeasible_commute("Google Routes API returned no data")
 
-        duration_min = round(route.duration_s / 60)
-        distance_meters = route.distance_meters
+        duration_min = round(route.duration.to("minute").magnitude)
+        assert route.distance is not None, "the walk/drive field mask requests distanceMeters"
 
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
         if mode == "WALK":
@@ -290,7 +290,7 @@ class CommuteRouter:
             )
             daily = Money(amount="0", currency="GBP")
         else:
-            distance_km = distance_meters / 1000
+            distance_km = route.distance.to("km").magnitude
             leg = JourneyLeg(
                 mode=LegMode.DRIVE,
                 duration=Quantity(duration_min, "minute"),
@@ -313,7 +313,10 @@ class CommuteRouter:
                     ),
                 ),
             ),
-            error=f"google_routes_{mode.lower()}: duration={duration_min}min distance={distance_meters}m",
+            error=(
+                f"google_routes_{mode.lower()}: duration={duration_min}min "
+                f"distance={route.distance.to('meter').magnitude:.0f}m"
+            ),
         )
 
     async def transit_route(self, origin: GeoPoint, dest: PlaceOfInterest | str) -> Commute | None:
@@ -346,7 +349,7 @@ class CommuteRouter:
             return None
         # Total from the route's own duration — the sum of per-leg
         # rounded minutes drifts (99.2 → 98 when legs round individually).
-        total_min = round(route.duration_s / 60)
+        total_min = round(route.duration.to("minute").magnitude)
         return Commute(
             person=Person(name="", has_car=False),
             label=dest.label,

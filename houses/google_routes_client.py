@@ -126,22 +126,22 @@ class _Route:
     """A Google Routes route — the {duration, distanceMeters, legs} wire shape."""
 
     duration: str
-    distance_meters: int
+    distance_meters: int | None
     legs: list[_RouteLeg]
 
     @classmethod
     def from_dict(cls, raw: dict) -> _Route:
         return cls(
             duration=raw.get("duration", "0s"),
-            distance_meters=raw.get("distanceMeters", 0),
+            distance_meters=raw.get("distanceMeters"),
             legs=[_RouteLeg.from_dict(leg) for leg in raw.get("legs") or []],
         )
 
 
-def _duration_seconds(duration: str) -> int:
-    """Google states a duration as a ``"123s"`` string; the orchestration
-    wants whole seconds."""
-    return int(str(duration).removesuffix("s"))
+def _duration_quantity(duration: str) -> Quantity:
+    """Google states a duration as a ``"123s"`` string; a quantity carries the
+    unit, so no caller has to know which one it is."""
+    return Quantity(int(str(duration).removesuffix("s")), "second")
 
 
 @dataclass(frozen=True)
@@ -265,8 +265,8 @@ def _transit_legs(route: _Route) -> list[JourneyLeg]:
     legs: list[JourneyLeg] = []
     for leg in route.legs:
         for step in leg.steps:
-            seconds = _duration_seconds(step.static_duration)
-            duration = Quantity(round(Quantity(seconds, "second").to("minute").magnitude), "minute")
+            duration = _duration_quantity(step.static_duration).to("minute")
+            duration = Quantity(round(duration.magnitude), "minute")
             travel_mode = step.travel_mode
             transit_details = step.transit_details
             if travel_mode == "WALK":
@@ -489,8 +489,8 @@ class GoogleRoutesClient:
         if route is None:
             return None
         return Route(
-            duration_s=_duration_seconds(route.duration),
-            distance_meters=route.distance_meters,
+            duration=_duration_quantity(route.duration),
+            distance=Quantity(route.distance_meters, "meter") if route.distance_meters is not None else None,
             legs=tuple(_transit_legs(route)) if transiting else (),
         )
 
@@ -519,7 +519,7 @@ class GoogleRoutesClient:
         route = _first_route(data)
         if route is None:
             return None
-        return BusRoute(duration_s=_duration_seconds(route.duration), stops=_bus_stops(route))
+        return BusRoute(duration=_duration_quantity(route.duration), stops=_bus_stops(route))
 
 
 

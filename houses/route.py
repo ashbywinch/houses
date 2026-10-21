@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pint import Quantity
+
 from houses.commute import JourneyLeg
 
 
@@ -16,6 +18,6 @@ class Route:
     destination, a cost). This is what a router answered for a pair of points,
     before any of that exists."""
 
-    duration_s: int
-    distance_meters: int
+    duration: Quantity
+    distance: Quantity | None = None
     legs: tuple[JourneyLeg, ...] = ()

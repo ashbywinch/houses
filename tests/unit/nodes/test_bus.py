@@ -36,7 +36,7 @@ class TestBusRouteNode:
 
         async def fake_google_routes(*, origin, destination):
             return BusRoute(
-                duration_s=600,
+                duration=Quantity(600, "second"),
                 stops=(
                     TransitStop(
                         departure_name="Stop A",
@@ -96,7 +96,7 @@ class TestBusRouteAcceptsAPlaceDestination:
 
         async def fake_google_routes(*, origin, destination):
             seen["destination"] = destination
-            return BusRoute(duration_s=600, stops=())
+            return BusRoute(duration=Quantity(600, "second"), stops=())
 
         node = BusRouteNode(
             "brp",

@@ -102,7 +102,7 @@ class BusRouteNode(DerivedNode[dict]):
         return Attempt.succeeded(
             _BusRouteValue(
                 bus_stops=bus_stops,
-                duration_minutes=round(Quantity(route.duration_s, "second").to("minute").magnitude),
+                duration_minutes=round(route.duration.to("minute").magnitude),
             ).to_dict()
         )
 
