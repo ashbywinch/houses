@@ -22,7 +22,7 @@ NAPTAN_CACHE = Path("data/bods_stops.csv")
 type _StationGrid = list[list[list[Station]]]
 type _ParsedStop = tuple[str, NetexStop]
 type _ZoneParse = tuple[dict[str, list[str]], dict[str, str]]
-type _DmeParse = tuple[dict[str, dict[str, float]], dict[str, str]]
+type _DmeParse = tuple[ZoneFares, dict[str, str]]
 
 # ── the parser's output records ──────────────────────────────────────
 # Each record's dict IS its wire form: the model declares the key order and
@@ -36,6 +36,23 @@ class ParseResult(SerializableAsDict):
     zone_fares: dict[str, dict[str, float]]
     network_fares: list[NetworkFare]
 
+
+class ZoneFares(dict[str, dict[str, float]]):
+    """The zone-pair fare table: pair key → {fare product → price}.
+
+    The key states the zone pair and the boarding rule (``"Z1:Z2@boarding"``);
+    the inner map holds one price per fare product. A keyed collection that
+    owns its two writes, so no parser section builds the inner map by hand.
+    """
+
+    def put(self, pair: str, product: str, price: float) -> None:
+        """Set one fare product's price for a zone pair."""
+        self.setdefault(pair, {})[product] = price
+
+    def put_if_absent(self, pair: str, product: str, price: float) -> None:
+        """Set the price only when the pair has none for this product yet —
+        the first statement of a fare wins; later sections restate it."""
+        self.setdefault(pair, {}).setdefault(product, price)
 
 def _first_found(*elements):
     for el in elements:
@@ -138,9 +155,9 @@ def load_naptan_stops() -> Mapping[str, tuple[float, float]] | None:
         logger.info("Loaded %d NaPTAN stop coordinates", len(naptan))
         return naptan
 
-    logger.info("Downloading NaPTAN stop data from %s (101MB)", NetexFareParser.NAPTAN_DOWNLOAD)
+    logger.info("Downloading NaPTAN stop data from %s (101MB)", NetexFareDocument.NAPTAN_DOWNLOAD)
     try:
-        resp = httpx.get(NetexFareParser.NAPTAN_DOWNLOAD, timeout=300, follow_redirects=True)
+        resp = httpx.get(NetexFareDocument.NAPTAN_DOWNLOAD, timeout=300, follow_redirects=True)
         resp.raise_for_status()
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
         logger.warning("Failed to download NaPTAN data: %s", e)
@@ -194,7 +211,7 @@ def parse_netex_fares(
     except ET.ParseError as e:
         logger.warning("XML parse error: %s", e)
         return None
-    return NetexFareParser(root, stations, naptan).run()
+    return NetexFareDocument(root, stations, naptan).run()
 
 
 # field-disjoint partition exists to split along; size is a review signal, not a split order (review-log)
@@ -213,13 +230,13 @@ class _StopCoordinates:
                 return _StopCoordinates(lat=coords[0], lon=coords[1])
         return self
 
-# lucidlint: ignore latent-class one parse surface — 27 methods; process-class parser is the domain noun (review-log)
-class NetexFareParser:
-    """One-shot parser for a BODS NeTEx fares XML document.
+# lucidlint: ignore latent-class one parse surface — 27 methods and no field-disjoint partition (review-log, #47)
+class NetexFareDocument:
+    """One BODS NeTEx fares XML document, parsed into its fare records.
 
-    The section parsers are methods cooperating through shared state
-    (stops, zone_fares, dme_zone_pairs, network_fares) and produce the
-    output record set on :meth:`run`.
+    The section parsers are methods cooperating through the document's state
+    (stops, zone_fares, dme_zone_pairs, network_fares) and produce the output
+    record set on :meth:`run`.
     """
 
     NS = {
@@ -245,7 +262,7 @@ class NetexFareParser:
         self.stations: list[Station] = stations
         self.naptan: Mapping[str, tuple[float, float]] | None = naptan
         self.stops: dict[str, NetexStop] = {}
-        self.zone_fares: dict[str, dict[str, float]] = {}
+        self.zone_fares: ZoneFares = ZoneFares()
         self.dme_zone_pairs: dict[str, str] = {}
         self.network_fares: list[NetworkFare] = []
         self._station_grid: _StationGrid | None = None
@@ -355,12 +372,12 @@ class NetexFareParser:
     @staticmethod
     def _stop_coordinates(ssp: ET.Element) -> _StopCoordinates:
         lat_el = _first_found(
-            ssp.find(".//netex:Latitude", NetexFareParser.NS),
-            ssp.find(".//netex:latitude", NetexFareParser.NS),
+            ssp.find(".//netex:Latitude", NetexFareDocument.NS),
+            ssp.find(".//netex:latitude", NetexFareDocument.NS),
         )
         lon_el = _first_found(
-            ssp.find(".//netex:Longitude", NetexFareParser.NS),
-            ssp.find(".//netex:longitude", NetexFareParser.NS),
+            ssp.find(".//netex:Longitude", NetexFareDocument.NS),
+            ssp.find(".//netex:longitude", NetexFareDocument.NS),
         )
         return _StopCoordinates(
             lat=float(lat_el.text) if lat_el is not None and lat_el.text else None,
@@ -467,8 +484,8 @@ class NetexFareParser:
         if price_ref_el is not None:
             price_group_ref = price_ref_el.get("ref", "") or price_ref_el.text or ""
             price = self._find_price_for_group(price_group_ref)
-            if price is not None and normalized_key not in self.zone_fares:
-                self.zone_fares[normalized_key] = {"adult_single": price}
+            if price is not None:
+                self.zone_fares.put_if_absent(normalized_key, "adult_single", price)
 
     def _parse_distance_matrix_prices(self) -> None:
         for dmep in self.root.iter():
@@ -499,10 +516,7 @@ class NetexFareParser:
                 continue
             nk = zone_key.replace("@alighting", "@boarding")
 
-            if nk not in self.zone_fares:
-                self.zone_fares[nk] = {}
-            if "adult_single" not in self.zone_fares[nk]:
-                self.zone_fares[nk]["adult_single"] = price
+            self.zone_fares.put_if_absent(nk, "adult_single", price)
 
     def _collect_stop_coords(
         self, zones: Mapping[str, list[str]], stop_zones: Mapping[str, str]
@@ -589,8 +603,8 @@ class NetexFareParser:
             tag = _unprefixed(child.tag)
             if tag == "Price" or tag == "price":
                 amt_el = _first_found(
-                    child.find(".//netex:Amount", NetexFareParser.NS),
-                    child.find("netex:Amount", NetexFareParser.NS),
+                    child.find(".//netex:Amount", NetexFareDocument.NS),
+                    child.find("netex:Amount", NetexFareDocument.NS),
                 )
                 # one fallback expression: the Amount element's own text, else the Price element's
                 price = _as_float((amt_el if amt_el is not None else child).text)
@@ -630,9 +644,7 @@ class NetexFareParser:
         return f"{sz}:{ez}".replace("@alighting", "@boarding")
 
     def _record_zone_fare(self, key: str, product_type: str, price: float) -> None:
-        if key not in self.zone_fares:
-            self.zone_fares[key] = {}
-        self.zone_fares[key][product_type] = price
+        self.zone_fares.put(key, product_type, price)
 
     def _associate_product_with_zones(self, product: ET.Element, product_type: str, price: float) -> None:
         product_id = self._product_id_of(product)
@@ -748,9 +760,7 @@ class NetexFareParser:
             zone_key = self.dme_zone_pairs.get(dme_ref)
             if zone_key:
                 nk = zone_key.replace("@alighting", "@boarding")
-                if nk not in self.zone_fares:
-                    self.zone_fares[nk] = {}
-                self.zone_fares[nk][ptype] = price
+                self.zone_fares.put(nk, ptype, price)
         elif ptype in ("adult_day", "adult_return"):
             covered_stops = self._collect_network_covered_stops()
             if covered_stops:
