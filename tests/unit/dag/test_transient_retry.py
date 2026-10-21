@@ -17,7 +17,6 @@ from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.scheduler import AsyncRefreshQueue, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
-from houses.helpers import is_transient_error
 
 
 @pytest.mark.asyncio
@@ -104,7 +103,7 @@ class _CatchAndDecideNode(DerivedNode[str]):
     def compute(self, src: Attempt[str]) -> Attempt[str]:
         if self.error_to_raise is not None:
             exc = self.error_to_raise
-            if is_transient_error(exc):
+            if self._is_transient_error(exc):
                 self.schedule_retry(self._retry_delay_from(exc))
                 return Attempt.pending()
             return Attempt.impossible(f"{self._id}: {exc}")

@@ -127,21 +127,3 @@ async def test_school_node_output_has_url():
         assert val.get("ofsted") == "Good"
     finally:
         _sp.reset(token)
-
-
-@pytest.mark.asyncio
-async def test_transit_node_accepts_geopoint_dest():
-    """TransitNode must accept GeoPoint as destination (school location)."""
-    from money import Money
-    from pint import Quantity
-
-    from houses.nodes.transit import CommuteResult
-
-    # CommuteResult itself should accept a GeoPoint as destination reference
-    cr = CommuteResult(
-        duration=Quantity(22, "minute"),
-        daily_cost=Money("0", "GBP"),
-        label="Test School",
-        mode="walk",
-    )
-    assert cr.mode == "walk"

@@ -19,7 +19,7 @@ from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.nodes.commute import commute_colour, format_duration
+from houses.nodes.commute import commute_colour
 from houses.nodes.property_nodes import PropertyNodes, PropertySummary
 from houses.property_registry import register_property
 from houses.web.api_router import _score_from_summary
@@ -140,32 +140,6 @@ class TestCommuteColour:
     def test_none_returns_muted(self):
         assert commute_colour(None, bracknell=False) == "muted"
 
-
-class TestFormatDuration:
-    """format_duration() replaced the old ``_dur`` helper.
-
-    Frontend still formats commute durations in ``PropertyCard.vue`` via
-    ``commuteDuration()``, but the API response includes raw minutes.
-    This helper is used internally in the DAG pipeline.
-    """
-
-    def test_none_returns_empty(self):
-        assert format_duration(None) == ""
-
-    def test_under_one_hour(self):
-        assert format_duration(32) == "32m"
-
-    def test_exact_one_hour(self):
-        assert format_duration(60) == "1h"
-
-    def test_one_hour_with_minutes(self):
-        assert format_duration(90) == "1h30"
-
-    def test_two_hours_exact(self):
-        assert format_duration(120) == "2h"
-
-    def test_two_hours_with_minutes(self):
-        assert format_duration(145) == "2h25"
 
 
 class TestOfstedColour:

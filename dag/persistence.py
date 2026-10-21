@@ -1,13 +1,12 @@
 """Generic persistence layer for DAG nodes.
 
-Stores versioned source values and resolved derived values in SQLite.
-Serialises complex types via TypeAdapter with ``_type``/``_module`` markers.
+Stores versioned source values and resolved derived values in SQLite: the
+row's plain keys map to columns, the rest to an ``extra_json`` blob.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import importlib
 import json
 import logging
 import sqlite3
@@ -22,7 +21,6 @@ from typing import Any, ClassVar, TypedDict, cast, override
 
 from money import Money as _Money
 from pint import Quantity
-from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -452,52 +450,6 @@ def close_db() -> None:
         _connection_cache.conn = None
 
 
-# lucidlint: ignore unused deliberate test seam — round-trip primitives driven directly by test_persistence.py;
-def _serialize_value(val: Any) -> str | None:
-    if val is None:
-        return None
-    if isinstance(val, bool):
-        return json.dumps(val)
-    if isinstance(val, str):
-        if not val:
-            return ""
-        return json.dumps(val)
-    if isinstance(val, (int, float)):
-        return str(val)
-    try:
-        ta = TypeAdapter(type(val))
-        d = ta.dump_python(val)
-        if isinstance(d, dict):
-            d["_type"] = type(val).__name__
-            d["_module"] = type(val).__module__
-        return json.dumps(d)
-    except (TypeError, ValueError):
-        # A value the type adapter or json.dumps cannot express: log the
-        # type and re-raise — a result is never persisted silently.
-        logger.exception("Failed to serialize %s", type(val).__name__)
-        raise
-
-
-# lucidlint: ignore unused deliberate test seam — round-trip primitives driven directly by test_persistence.py;
-def _deserialize_value(raw: str | None) -> Any:
-    if raw is None:  # was: if not raw — empty string "" should not be treated as None
-        return None
-    try:
-        d = json.loads(raw)
-    except (ValueError, TypeError):
-        return raw
-    if isinstance(d, dict) and "_type" in d and "_module" in d:
-        try:
-            mod = importlib.import_module(d["_module"])
-            cls = getattr(mod, d["_type"])
-            fields = {k: v for k, v in d.items() if not k.startswith("_")}
-            return cls(**fields)
-        except (ImportError, AttributeError, TypeError, ValueError):
-            # An unimportable/unknown _type or a row that no longer
-            # constructs: log it and re-raise, never decode silently.
-            logger.exception("Failed to deserialize %s", d.get("_type", "unknown"))
-            raise
-    return d
 
 
 _code_version_ensured: set[str] = set()

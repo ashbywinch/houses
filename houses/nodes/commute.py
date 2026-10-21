@@ -88,21 +88,6 @@ def needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
     return _has_unpriced_transit(transit_val)
 
 
-# lucidlint: ignore unused card-format helper pinned by the card_data contract tests — the web layer no longer formats
-def format_duration(minutes: int | None) -> str:
-    """Match the old ``houses.web.card_data._dur`` format.
-
-    Returns ``""`` for ``None``, ``"9m"`` for <60, ``"1h2"`` (no space),
-    ``"2h"`` for exact hours.
-    """
-    if minutes is None:
-        return ""
-    if minutes < CommuteBands.MINUTES_PER_HOUR:
-        return f"{minutes}m"
-    h = minutes // CommuteBands.MINUTES_PER_HOUR
-    r = minutes % CommuteBands.MINUTES_PER_HOUR
-    return f"{h}h{r}" if r else f"{h}h"
-
 
 def commute_band(minutes: int | None, bracknell: bool = False) -> str:
     """'good'/'warn'/'bad' band of a commute ('unknown' for None) — the

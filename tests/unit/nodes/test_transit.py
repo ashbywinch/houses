@@ -99,28 +99,6 @@ class TestTransitNode:
         assert "HTTP 404" in a.error_info.message  # internal message keeps the raw error for logs
 
 
-class TestWalkLegCheckNode:
-    @pytest.mark.asyncio
-    async def test_false_when_no_transit(self):
-        from houses.commute import CostGroup
-        from houses.nodes.transit import WalkLegCheckNode
-
-        transit = UserInputNode[Commute]("transit_w", Commute)
-        commute = Commute(
-            person=Person("Simon", has_car=True),
-            label="Office",
-            destination=PlaceOfInterest("Office", "SW1V 2QQ"),
-            duration=Quantity(30, "minute"),
-            daily_cost=Money("0", "GBP"),
-            _details=(CostGroup(legs=(), operator="", cost=None),),  # no legs → no walk
-        )
-        node = WalkLegCheckNode("wlc", transit_node=transit, max_walk=30)
-        transit.push(commute, "test")
-        await flush_processor()
-        a = await node.attempt()
-        assert a.succeeded
-        assert a.value_or_none() is False
-
 
 class TestTransitNodeJson:
     @pytest.mark.asyncio

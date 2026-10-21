@@ -7,14 +7,11 @@ from __future__ import annotations
 
 import json
 import zlib
-from dataclasses import dataclass
 
 import pytest
 
 from dag import persistence as per
 from dag.persistence import (
-    _deserialize_value,
-    _serialize_value,
     latest_node_result,
     property_created_at,
     save_node_result,
@@ -22,54 +19,6 @@ from dag.persistence import (
 
 RID = "prop123"
 
-
-class TestSerialisation:
-    def test_string_roundtrip(self):
-        s = _serialize_value("hello")
-        assert _deserialize_value(s) == "hello"
-
-    def test_string_json_literal_roundtrip(self):
-        for raw in ("true", "false", "null", "42", "3.14"):
-            s = _serialize_value(raw)
-            assert _deserialize_value(s) == raw, f"'{raw}' roundtrip failed"
-
-    def test_int_roundtrip(self):
-        s = _serialize_value(42)
-        assert _deserialize_value(s) == 42
-
-    def test_float_roundtrip(self):
-        s = _serialize_value(3.14)
-        assert _deserialize_value(s) == 3.14
-
-    def test_none_serialises_to_none(self):
-        assert _serialize_value(None) is None
-
-    def test_complex_type_serialisation(self):
-        @dataclass
-        class Point:
-            x: int
-            y: int
-
-        s = _serialize_value(Point(x=1, y=2))
-        assert s is not None
-        d = json.loads(s)
-        assert d["x"] == 1
-        assert d["y"] == 2
-
-    def test_complex_type_deserialises_fails_fast(self):
-        """Complex types with unresolvable _type/_module raise instead of silent fallback."""
-        import pytest
-
-        s = '{"x": 3, "y": 4, "_type": "Point", "_module": "__main__"}'
-        with pytest.raises(AttributeError):
-            _deserialize_value(s)
-
-    def test_empty_string_roundtrips(self):
-        """Empty string should round-trip as empty string, not None."""
-        assert _deserialize_value("") == ""
-
-    def test_none_string_preserved_as_string(self):
-        assert _deserialize_value("None") == "None"
 
 
 class TestNodeResults:

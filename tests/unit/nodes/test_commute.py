@@ -29,14 +29,11 @@ def _mw(value: int):
     return node
 
 
-def _succeeded_walk_check(val: bool = False) -> DerivedNode:
-    """Build a minimal walk-check node whose ``_attempt`` is already resolved."""
-    from houses.nodes.transit import WalkLegCheckNode
-
-    t = UserInputNode[dict]("_wc_t", dict)
-    w = WalkLegCheckNode("_wc", transit_node=t)
-    w._attempt = Attempt.succeeded(val)
-    return w
+def _succeeded_walk_check(val: bool = False) -> UserInputNode[bool]:
+    """A resolved walk-check input, as the pipeline wires one per person."""
+    node = UserInputNode[bool]("_wc", bool)
+    node._value = val  # the input node's own state: attempt() reads it
+    return node
 
 
 class TestCommuteSelectorNode:
@@ -700,59 +697,6 @@ class TestMergeRailFareNode:
         # Walk cost should remain £0 (no transit legs to replace)
         assert float(val.daily_cost.amount) == 0, f"Expected £0, got £{val.daily_cost.amount}"
 
-
-class TestWalkLegCheckNode:
-    """Direct WalkLegCheckNode tests."""
-
-    @pytest.mark.asyncio
-    async def test_walk_less_than_max(self):
-        from houses.commute import CostGroup
-        from houses.nodes.transit import WalkLegCheckNode
-
-        walk_leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(10, "minute"))
-        transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
-        transit_commute = Commute(
-            person=transit_commute.person,
-            label=transit_commute.label,
-            destination=transit_commute.destination,
-            duration=transit_commute.duration,
-            daily_cost=transit_commute.daily_cost,
-            mode=transit_commute.mode,
-            _details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
-        )
-        transit = UserInputNode[Commute]("transit_wl", Commute)
-        node = WalkLegCheckNode("walk_check_wl", transit_node=transit, max_walk=30)
-        transit.push(transit_commute)
-        await flush_processor()
-
-        a = await node.attempt()
-        assert a.succeeded
-        assert a.value is False
-
-    @pytest.mark.asyncio
-    async def test_walk_exceeds_max(self):
-        from houses.commute import CostGroup
-        from houses.nodes.transit import WalkLegCheckNode
-
-        walk_leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(45, "minute"))
-        transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
-        transit_commute = Commute(
-            person=transit_commute.person,
-            label=transit_commute.label,
-            destination=transit_commute.destination,
-            duration=transit_commute.duration,
-            daily_cost=transit_commute.daily_cost,
-            mode=transit_commute.mode,
-            _details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
-        )
-        transit = UserInputNode[Commute]("transit_we", Commute)
-        node = WalkLegCheckNode("walk_check_we", transit_node=transit, max_walk=30)
-        transit.push(transit_commute)
-        await flush_processor()
-
-        a = await node.attempt()
-        assert a.succeeded
-        assert a.value is True
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

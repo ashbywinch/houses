@@ -13,7 +13,6 @@ from pint import Quantity
 from dag.attempt import Attempt, AttemptError, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.commute import LegMode
 from houses.commute_router import CommuteRouter as _CommuteRouter
 from houses.geopoint import GeoPoint
 from houses.location import extract_postcode
@@ -64,30 +63,7 @@ def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class CommuteLeg:
-    """One segment of a commute, carrying TfL line / route name where available."""
 
-    mode: str  # walk, bus, tube, train, dlr, overground, drive, cycle, park
-    duration: Quantity
-    line_name: str = ""  # e.g. "Bakerloo", "Great Western Railway"
-    destination: str = ""  # e.g. "Oxford Circus", "Paddington"
-    cost: Money | None = None  # attributed cost (parking fees, etc.)
-    operator: str = ""  # operator name for cost-bearing legs, e.g. "ParkCo"
-
-
-@dataclass(frozen=True)
-    # lucidlint: ignore unused test-exercised seam — the DAG tests construct it directly (review-log)
-class CommuteResult:
-    duration: Quantity
-    daily_cost: Money | None = None
-    label: str = ""
-    mode: str = "transit"
-    details: tuple[CommuteLeg, ...] = ()
-    route_description: str = ""
-    is_child: bool = False
-    source_url: str = ""
-    destination_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -164,25 +140,6 @@ class PersonMaxWalkNode(DerivedNode[int]):
         return Attempt.succeeded(int(Person.bus_walk_penalty.magnitude))
 
 
-    # lucidlint: ignore unused test-exercised seam — the DAG tests construct it directly (review-log)
-class WalkLegCheckNode(DerivedNode[bool]):
-    def __init__(self, node_id: str, *, transit_node, max_walk: int = 30):
-        super().__init__(node_id, bool, (transit_node,))
-        self._max_walk: int = max_walk
-
-    @override
-    def compute(self, transit: Attempt[Commute]) -> Attempt[bool]:
-        if not transit.succeeded:
-            return Attempt.succeeded(value=False)
-        val = transit.value_or_none()
-        if val is None:
-            return Attempt.succeeded(value=False)
-        if val.details and val.details[0].legs:
-            first_leg = val.details[0].legs[0]
-            walk_time = int(first_leg.duration.magnitude) if first_leg.mode == LegMode.WALK else 0
-        else:
-            walk_time = 0
-        return Attempt.succeeded(walk_time > self._max_walk)
 
 
 class WalkNode(DerivedNode[Commute]):

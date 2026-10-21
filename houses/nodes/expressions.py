@@ -15,7 +15,6 @@ from money import Money
 
 from dag.attempt import Attempt, FormulaLine
 from dag.expression import Expression, Literal, Ref
-from houses.stamp_duty import stamp_duty_land_tax
 
 
 # lucidlint: ignore class-module PMT/StampDutyFn/TaxTier/TieredRate are the mortgage/tax formula surface (review-log)
@@ -92,36 +91,6 @@ class PMT(Expression):
             )
             lines.append(FormulaLine(label=tl.label + " × 12", value=value))
         return lines
-
-    # lucidlint: ignore unused test-exercised seam — the DAG tests construct it directly (review-log)
-class StampDutyFn(Expression):
-    """Calculate UK Stamp Duty Land Tax from a property price."""
-
-    def __init__(
-        self,
-        price: Expression,
-        description: str = "UK Stamp Duty Land Tax — a one-off tax paid when buying a property",
-    ):
-        self.price: Expression = price
-        self.description: str = description
-    
-    @override
-    def evaluate(self) -> Attempt:
-        price_result = self.price.evaluate()
-        if not price_result.succeeded:
-            return price_result
-        price = price_result.value_or_none()
-        if price is None:
-            return Attempt.impossible("No price available for stamp duty calculation")
-
-        try:
-            return Attempt.succeeded(stamp_duty_land_tax(price))
-        except (AttributeError, ArithmeticError, TypeError, ValueError) as e:
-            return Attempt.impossible(f"Stamp duty calculation failed: {e}")
-    @override
-    # lucidlint: ignore middle-man protocol/reflected-operator — the Expression formula interface (review-log)
-    def to_formula_lines(self) -> list[FormulaLine]:
-        return self.price.to_formula_lines()
 
 @dataclass(frozen=True)
 class TaxTier:

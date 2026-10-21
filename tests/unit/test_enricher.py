@@ -14,7 +14,6 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import DerivedNode
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
@@ -910,13 +909,10 @@ class TestParkAndRide:
         assert "walk 7m" in summary
 
 
-def _succeeded_walk_check(val: bool = False) -> DerivedNode:
-    """Build a minimal walk-check node whose ``_attempt`` is already resolved."""
-    from dag.attempt import Attempt
+def _succeeded_walk_check(val: bool = False) -> UserInputNode[bool]:
+    """A resolved walk-check input, as the pipeline wires one per person."""
     from dag.user_input_node import UserInputNode
-    from houses.nodes.transit import WalkLegCheckNode
 
-    t = UserInputNode[dict]("_wc_t", dict)
-    w = WalkLegCheckNode("_wc", transit_node=t, max_walk=30)
-    w._attempt = Attempt.succeeded(val)
-    return w
+    node = UserInputNode[bool]("_wc", bool)
+    node._value = val  # the input node's own state: attempt() reads it
+    return node
