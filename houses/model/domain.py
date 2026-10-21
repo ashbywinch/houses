@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import ClassVar
+from typing import ClassVar, TypedDict
 
 from money import Money
 from pint import Quantity
@@ -82,24 +82,16 @@ class HomeCoOwner:
     share: int
 
 
-@dataclass(frozen=True)
-class _PersonProvenance:
-    """Wire shape of a person's provenance projection — the identity-
-    relevant fields; money fields render through their canonical string
-    form via the generic projector."""
+class _PersonProvenance(TypedDict):
+    """A person's provenance projection — the identity-relevant fields;
+    money fields render through their canonical string form via the generic
+    projector (dag/measurement.py's MeasurementProvenanceValue is the same
+    named-wire pattern)."""
 
     name: str
     has_car: bool
     is_child: bool
     places: list[str]
-
-    def to_dict(self) -> dict:
-        return dict(
-            name=self.name,
-            has_car=self.has_car,
-            is_child=self.is_child,
-            places=self.places,
-        )
 
 
 @dataclass(frozen=True)
@@ -140,7 +132,7 @@ class Person:
     # the slug fallback is migration-only, never a new identity.
     person_id: str = ""
 
-    def to_provenance_value(self) -> dict:
+    def to_provenance_value(self) -> _PersonProvenance:
         """JSON-safe projection for provenance display.
 
         Keeps the identity-relevant fields; money fields render through
@@ -151,7 +143,7 @@ class Person:
             has_car=self.has_car,
             is_child=self.is_child,
             places=[p.to_provenance_value() for p in self.places_of_interest],
-        ).to_dict()
+        )
 
 
 def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:

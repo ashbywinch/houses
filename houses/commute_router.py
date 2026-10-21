@@ -71,7 +71,7 @@ class _Waypoint(SerializableAsDict):
     address: str = ""
 
     @model_serializer(mode="wrap")
-    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict:
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Mapping[str, Any]:
         """Exactly one of coordinate/address goes on the wire: Google rejects a
         waypoint carrying both, so the address key is dropped when a coordinate
         is given, and the coordinate block when it is not."""
