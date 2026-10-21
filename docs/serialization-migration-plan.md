@@ -54,12 +54,14 @@ owner calls:
   `signal.py`/`slot.py`/`connection.py`; the Google Routes client, its interface
   and its private wire records live in `google_routes_client.py`, with the
   options record in its own module and the wire knowledge moved out of
-  `CommuteRouter` and `BusRouteNode`). That split exposed a **tool gap**, filed
-  as [lucidlint#52](https://github.com/ashbywinch/lucidlint/issues/52): the
-  multi-class arm reports a module's own DI interface (a `Protocol` satisfied by
-  the namesake class and test doubles) as a misplaced class; that one site keeps
-  a marker citing the issue. The six remaining family files (area, bus, location,
-  schools, expressions, property_nodes) stand as recorded.
+  `CommuteRouter` and `BusRouteNode`; the three projections the client returns
+  are one class per module). That split exposed two **tool gaps**, both filed as
+  [lucidlint#52](https://github.com/ashbywinch/lucidlint/issues/52): the
+  multi-class arm reports a module's own DI interface as a misplaced class, and
+  `class_module_findings` exempts any module containing a module-level `def`, so
+  a file's verdict flips when an unrelated helper moves. The silent file today is
+  silent via the second quirk. The six remaining family files (area, bus,
+  location, schools, expressions, property_nodes) stand as recorded.
 - **inline-import ×5** — every why is "cycle break", which the 2026-08-22 scope
   decision explicitly rejects ("break cycles by interface extraction"); fixing
   means an interface module for the DAG's `persistence ↔ scheduler ↔

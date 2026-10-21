@@ -733,7 +733,11 @@ suite stayed green throughout.
   by the namesake class and by test doubles), although the single-class arm's
   message carries the "closely related models" exception the standard states.
   https://github.com/ashbywinch/lucidlint/issues/52 — filed 2026-10-21 with a
-  ten-line repro. The site carries a marker citing this issue until it lands.
+  ten-line repro. **No marker sits on the site**: the file is silent today only
+  because of the *second* quirk reported in the same issue — `class_module_findings`
+  exempts any module that contains a module-level `def` (`has_module_fns`), and
+  `google_routes_client.py` now has parse helpers. Verified A/B: a module with a
+  misplaced class fails, and the same module plus one helper passes.
 
 
 **`duplicate-module` (4 suppressions)** — the request DTOs in `houses/apis/` are
@@ -999,11 +1003,15 @@ suppress/mark only (a) **private** classes — which the rule already skips — 
 (b) **interfaces whose only implementations are the namesake class and test
 doubles**. Public dataclasses do NOT qualify: they get their own module.
 
-**The tool gap the split exposed — filed 2026-10-21 as
-[lucidlint#52](https://github.com/ashbywinch/lucidlint/issues/52)**, with a
-ten-line repro (a `Protocol` + its class in one module): the multi-class arm
-reports the module's own DI interface as a misplaced class. The site keeps a
-marker citing the issue until it lands.
+**The tool gaps the split exposed — filed 2026-10-21 as
+[lucidlint#52](https://github.com/ashbywinch/lucidlint/issues/52)**: (1) the
+multi-class arm reports the module's own DI interface (a `Protocol` satisfied by
+the namesake class and test doubles) as a misplaced class; (2) `class_module_findings`
+exempts **any** module containing a module-level `def` (`has_module_fns`), so a
+file's verdict flips when an unrelated helper moves in or out — verified A/B and
+reported in the same issue. No marker is needed today: `google_routes_client.py`
+is silent via quirk (2), which is exactly why the quirk is worth fixing before
+trusting that silence.
 
 The remaining six sites are still family files (area, bus, location, schools,
 expressions, property_nodes) whose verdicts stand as recorded: splitting each
