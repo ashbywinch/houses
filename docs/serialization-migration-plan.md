@@ -11,11 +11,11 @@ file is only the plan.
   exemption). On the identical pre-migration tree that is **24 fails → 15**
   (9 `record-shape` sites clear), with **no new finding** and **no marker gone
   stale** (175 comment-suppressed on both sides).
-- `make lucidlint` → **13 actions = 12 `record-shape` (fail) + 1 warning**
+- `make lucidlint` → **5 actions = 4 `record-shape` (fail) + 1 warning**
   (`middle-man` on `serialization/__init__.py:122` — deliberate, lucidlint#44).
-  The `bulk-suppression` census warning is gone: no signal is suppressed at
-  ≥10 sites any more (`latent-class` 8, `record-shape` 7).
-- 1842 tests pass; `make typecheck-py` → 0 errors, no baseline file;
+  All 4 fails are in `serialization/__init__.py`; the `bulk-suppression` census
+  warning is gone (no signal suppressed at ≥10 sites).
+- 1843 tests pass; `make typecheck-py` → 0 errors, no baseline file;
   `make lint-check` and `ruff check scripts/` clean.
 - Byte oracle: `pytest tests/unit/test_zzz_serialization_oracle.py`, then diff
   the 7 captures against `/tmp/ll-goldens/*.gold` → **identical** after masking
@@ -33,48 +33,90 @@ file is only the plan.
 | 4 | `_GoogleClientConfig` is a `SerializableAsDict` whose one wrap serializer emits `{"web": …}`; the `_GoogleClient` TypedDict twin deleted | finding gone, no new one; `to_dict()` still returns the library's config object |
 | 6 (arm 3) | `_with_coordinates` names the pair once; the `model_copy` update dict is the record's own wire, not a constant-key literal | both findings gone; no `Coordinates`/`*Wire` mirror invented |
 
-## Remaining — 12 fails, every one blocked on a tool bug
+## Remaining — 4 fails, all in `serialization/__init__.py`
 
 Left visible, no marker: the code is correct and a marker here is the excuse
 pattern the review log exists to prevent.
 
 ```
-dag/attempt.py:436,618              #46 — a typed map of records as a parameter
-dag/derived_node.py:649,811,1033    #42 residue — a -> dict helper, not an export edge
-houses/commute_router.py:74         #42 residue — a wrap serializer's -> dict
-houses/model/domain.py:143          #42 residue — to_provenance_value is not an export name
-houses/nodes/petrol.py:201          #42 residue — the _enrich_json parameter arm
-serialization/__init__.py:50,70,75,122  #42 residue — PlainSerializer targets + the base's to_dict
+serialization/__init__.py:50:12   _money_wire's {amount, currency} literal
+serialization/__init__.py:70      _quantity_wire returns dict[str, Any]
+serialization/__init__.py:75:12   _quantity_wire's {value, unit} literal
+serialization/__init__.py:122     SerializableAsDict.to_dict returns dict[str, Any]
 ```
+
+Both are **rule-versus-doctrine divergences, not code defects**, so clearing
+them means moving the tool's rules:
+
+1. **The literal arm fires inside a field serializer.** `_money_wire` and
+   `_quantity_wire` are `PlainSerializer` targets; the doctrine is explicit
+   that third-party types (`money.Money`, `pint.Quantity`) get a serialiser on
+   the field that carries them, "never a class beside them" — and `MoneyJson`
+   is named in the ruling as a class that was **deleted**. The tool's advice
+   ("make a class with these fields") is the one shape the doctrine forbids.
+2. **The return arm fires on the boundary-record base.** `to_dict` on
+   `SerializableAsDict` delegates to `self.model_dump(...)`; the class declares
+   no fields by design, so the export exemption (#42) does not reach it — the
+   fix's own commit message keeps this case firing on purpose ("a to_dict on a
+   class declaring no field"). Every subclass that declares fields names the
+   shape, so the base is the mechanism, not a lost shape.
+
+Proposed tool rules (both narrow, both implementable in the scanner):
+exempt a literal inside a function referenced by `PlainSerializer` /
+`BeforeValidator` / `AfterValidator` or decorated `field_serializer` /
+`model_serializer` (a serialization edge owns the shape it emits); and exempt
+a `to_dict`/`to_json*` method whose body has no dict literal and returns a call
+on `self` (the base delegates to its own `model_dump` — the shape is named by
+the subclasses).
 
 The merged #42 fix is **narrower than the issue's report**: it exempts a
 `to_dict`/`to_json*`-named method whose enclosing class declares fields that
-cover the literal's keys, so the 9 sites it cleared are exactly those
+cover the literal's keys, so the 9 sites it cleared were exactly those
 (`dag/node.py:267,287`, `dag/derived_node.py:1044,1050`,
 `houses/model/domain.py:96,97`, `houses/nodes/commute.py:377,406`,
-`houses/services.py:111`). Everything else in the family still fires; #42 stays
-open upstream for them.
+`houses/services.py:111`).
 
-### Blocked, with the evidence
+### Cleared in code this pass (the plan's own residue)
 
-- **Item 5** (`dag/attempt.py:436,618`) — lucidlint#46 is open and no fix is on
-  master: `git log 5c893cbc..2bc734f` is the #42 fix plus two
-  docs-enumeration commits. The values are records, so the rule's collection
-  class has no operations to own; the two sites stay visible.
-- **Item 7** — lucidlint#47 is open, so the six class-size markers stay. The
-  seventh (`scripts/parse_netex_fares.py:216`) is **load-bearing for a failing**
-  `process-class` on `NetexFareParser`: deleting it re-exposes a fail that #47
-  does not cover. Clearing that finding means modelling the NeTEx parse data as
-  classes first (the rule's own three-part test) — a slice of its own, and
-  pointless to land before #47, because the marker still has to suppress the
-  size signal.
-- **Item 6's residue** — the 12 fails listed above.
+| Site | Shape it took |
+|---|---|
+| `dag/attempt.py:436,618` (#46) | `ProvenanceSources(dict[str, Provenance])` — the named keyed collection, with the stored-block parse (`from_dict`) on it |
+| `dag/derived_node.py:649,811,1033` | `NodeValue` models the lifecycle keys (`retry_at`/`retry_count`/`stale`); `to_node_value`/`_wire_value` are the builders; `_safe_result`/`_build_provenance` return records, `_persist` dumps at the persistence edge |
+| `houses/nodes/petrol.py:201`, `houses/nodes/commute.py` | each node's own row is a `NodeValue` subclass (`_SchoolCommuteRow`, `_CommuteSelectorRow`) named by `wire_type`; `_enrich_json` sets the record's fields |
+| `houses/commute_router.py:74` | the wrap serializer's return is `Mapping[str, Any]` (the repo's own convention for wrap serializers) |
+| `houses/model/domain.py:143` | `Person.to_provenance_value() -> _PersonProvenance` — the projection is a named `TypedDict` wire (the `MeasurementProvenanceValue` pattern), so `to_dict` is gone |
+
+**The oracle caught the one regression this pass made**: `_safe_result` called
+`to_node_value`, which bypassed `CommuteSelectorNode.to_json`'s value
+projection, so the persisted commute row stored `_details` instead of
+`details`. Fixed by making the projection a seam (`Node._wire_value`) that both
+paths go through — the goldens are identical again.
+
+### Item 7 — measured, then left for the tool
+
+The seven class-size markers are **warnings, not fails**: deleting
+`houses/commute_router.py`'s marker and re-running the gate reports
+`[warn][latent-class] … a large class; split it ONLY where the partition rule
+finds field-disjoint method groups` and the fail count is unchanged (12 at the
+time). So the six markers are not load-bearing for the gate; they are deleted
+when #47 lands, which is what removes the finding rather than the marker.
+
+The seventh (`scripts/parse_netex_fares.py:216`) is different: it also
+suppresses a **failing** `process-class` on `NetexFareParser`, whose name ends
+in an enumerated process word. The rule's own three-part test is a judgement
+the scanner cannot make — the domain calls this component a parser, and the
+data it operates on is already mostly classes (`NetexStop`, `NetworkFare`,
+`ParseResult`), with `zone_fares: dict[str, dict[str, float]]` the remaining raw
+shape. Clearing it therefore means either modelling that shape and renaming the
+class, or a tool exemption for a name the domain owns — an owner call, not a
+mechanical edit, and the marker must stay until it is made.
 
 ## Order (for what is left)
 
-Nothing here is actionable until the tool moves. When it does: re-run the gate
-first (a bump can clear sites and stale markers at once — that is how the 9
-above went), then work what is left in the order the residue above is listed.
+The 4 remaining fails need the two tool rules above. Item 7's seventh needs the
+owner's call on `NetexFareParser`. When the tool moves: re-run the gate first (a
+bump can clear sites and stale markers at once — that is how the 9 above went),
+then work what is left in the order listed.
 
 
 ## Acceptance for every item

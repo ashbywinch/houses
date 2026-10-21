@@ -878,3 +878,46 @@ Still blocked, unchanged: **#46** (the two `dag/attempt.py` sites) and **#47**
 (the seven class-size markers; the seventh is load-bearing for a failing
 `process-class` on `NetexFareParser`, which needs the parse data modelled as
 classes first).
+
+
+### The unblock pass (2026-10-21, same day): 12 fails → 4, all of them the tool's
+
+The plan's blocked residue was worked rather than parked, and the residue turned
+out to be code-shaped after all — **12 fails → 4**, every one of the 8 in the
+repo's own shapes:
+
+| Site | Shape |
+|---|---|
+| `dag/attempt.py:436,618` (#46) | `ProvenanceSources(dict[str, Provenance])` — the named keyed collection, with the stored-block parse (`from_dict`) on it |
+| `dag/derived_node.py:649,811,1033` | `NodeValue` models the lifecycle keys; `to_node_value`/`_wire_value` are the builders; `_safe_result`/`_build_provenance` return records and `_persist` dumps at the persistence edge |
+| `houses/nodes/petrol.py:201`, `houses/nodes/commute.py` | each node's own row is a `NodeValue` subclass (`_SchoolCommuteRow`, `_CommuteSelectorRow`) named by `wire_type`; `_enrich_json` sets the record's fields |
+| `houses/commute_router.py:74` | the wrap serializer's return is `Mapping[str, Any]` (the repo's own convention for wrap serializers) |
+| `houses/model/domain.py:143` | `Person.to_provenance_value() -> _PersonProvenance`, a named `TypedDict` wire (the `MeasurementProvenanceValue` pattern) — `to_dict` deleted |
+
+Two lessons worth more than the finding count:
+
+- **A new builder seam bypasses every subclass override of the old one.** Moving
+  the persist path from `to_json()` to `to_node_value()` silently dropped
+  `CommuteSelectorNode`'s value projection: the persisted commute row stored
+  `_details` where the wire states `details`. The **byte oracle caught it in one
+  run** (`dag_rows.json` → `.test_shape/1/Bracknell/commute.value`) and nothing
+  else did — 1843 tests were green. The fix is the seam the override belonged
+  on: `Node._wire_value(attempt)`, which both paths now go through. Any future
+  builder seam must grep for overrides of the method it replaces.
+- **The class-size findings are warnings, not fails.** Deleting
+  `houses/commute_router.py`'s marker and re-running the gate reports
+  `[warn][latent-class]` and leaves the fail count unchanged — so the six
+  markers #47 covers are not load-bearing for the gate at all, and the plan's
+  premise that they move the failing count was wrong. They stay (they record a
+  probed verdict) until #47 removes the finding itself.
+
+**What is left is the tool's, not the code's**: the 4 fails in
+`serialization/__init__.py` are `_money_wire`/`_quantity_wire` (a
+`PlainSerializer` target's wire literal, where the ruling forbids a class
+beside the third-party type — `MoneyJson` is named as deleted) and
+`SerializableAsDict.to_dict` (the boundary-record base, whose subclasses name
+the shape). Two narrow rule changes would clear them: exempt literals inside a
+function referenced by `PlainSerializer`/`BeforeValidator`/`AfterValidator` or
+decorated `field_serializer`/`model_serializer`, and exempt a `to_dict` whose
+body has no literal and returns a call on `self`. #47 and the
+`NetexFareParser` `process-class` (a name the domain owns) remain owner calls.
