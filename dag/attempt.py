@@ -433,7 +433,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         url: str = "",
         source_type: SourceType | None = None,
         formula: Formula | None = None,
-        sources: dict[str, Provenance] | None = None,
+        sources: ProvenanceSources | None = None,
     ) -> Provenance:
         """This attempt's provenance: its own status, error and value.
 
@@ -615,7 +615,7 @@ class Provenance(SerializableAsDict):
         return cls(label=label, url=url)
 
     @classmethod
-    def composite(cls, label: str, sources: dict[str, Provenance], url: str = "") -> Provenance:
+    def composite(cls, label: str, sources: ProvenanceSources, url: str = "") -> Provenance:
         """Create a Provenance with dependency sub-sources."""
         return cls(label=label, sources=sources, url=url)
 
@@ -653,5 +653,21 @@ class Provenance(SerializableAsDict):
             formula=formula_obj,
             status=str(data.get("status", "")),
             error=str(data.get("error", "")),
-            sources={k: cls.from_dict(v) for k, v in (data.get("sources") or {}).items()},
+            sources=ProvenanceSources.from_dict(data.get("sources")),
         )
+
+
+class ProvenanceSources(dict[str, Provenance]):
+    """The dependency subtrees a provenance tree hangs under, keyed by the
+    name the parent states for that dep.
+
+    A named keyed collection: the map travels as ONE thing (a bare
+    ``dict[str, Provenance]`` says nothing at the call site), and the parse of
+    a stored ``sources`` block lives here, beside ``Provenance.from_dict``,
+    rather than at each reader.
+    """
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any] | None) -> ProvenanceSources:
+        """Parse a stored ``sources`` block (the frozen-row round trip)."""
+        return cls({name: Provenance.from_dict(entry) for name, entry in (raw or {}).items()})

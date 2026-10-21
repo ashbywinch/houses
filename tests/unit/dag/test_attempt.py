@@ -136,10 +136,10 @@ class TestProvenance:
         assert p.label == "Rightmove"
 
     def test_composite(self):
-        from dag.attempt import Provenance
+        from dag.attempt import Provenance, ProvenanceSources
 
         inner = Provenance(label="inner")
-        outer = Provenance.composite("outer", {"dep": inner})
+        outer = Provenance.composite("outer", ProvenanceSources(dep=inner))
         assert outer.label == "outer"
         assert outer.sources["dep"].label == "inner"
 
@@ -158,9 +158,9 @@ class TestProvenance:
         assert d == {"label": "test", "description": "hello"}
 
     def test_to_dict_with_sources(self):
-        from dag.attempt import Provenance
+        from dag.attempt import Provenance, ProvenanceSources
 
         inner = Provenance(label="inner")
-        outer = Provenance.composite("outer", {"dep": inner})
+        outer = Provenance.composite("outer", ProvenanceSources(dep=inner))
         d = outer.to_dict()
         assert d == {"label": "outer", "sources": {"dep": {"label": "inner"}}}
