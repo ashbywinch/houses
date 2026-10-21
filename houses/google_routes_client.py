@@ -20,10 +20,13 @@ from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
 from dag.http_error import HttpError
 from houses import apigw
 from houses.api_cache import CacheRequest, cached_async_client
+from houses.bus_route import BusRoute
 from houses.commute import JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
+from houses.google_route import GoogleRoute
 from houses.google_routes_options import GoogleRoutesOptions
 from houses.settings import settings
+from houses.transit_stop import TransitStop
 from serialization import SerializableAsDict, omit_when_none, optional_parse
 
 
@@ -255,35 +258,6 @@ class _RouteStopDetails:
             arrival_stop=_RouteStop.from_dict(raw.get("arrivalStop") or {}),
         )
 
-
-@dataclass(frozen=True)
-class GoogleRoute:
-    """One Google route as the orchestration needs it: the whole route's
-    duration and distance, plus its transit legs as journey legs."""
-
-    duration_s: int
-    distance_meters: int
-    legs: tuple[JourneyLeg, ...] = ()
-
-
-@dataclass(frozen=True)
-class TransitStop:
-    """One bus step's stops, as Google states them (names + coordinates)."""
-
-    departure_name: str
-    arrival_name: str
-    departure_lat: float | None
-    departure_lon: float | None
-    arrival_lat: float | None
-    arrival_lon: float | None
-
-
-@dataclass(frozen=True)
-class BusRoute:
-    """A Google TRANSIT route restricted to its BUS steps."""
-
-    duration_s: int
-    stops: tuple[TransitStop, ...]
 
 
 def _transit_legs(route: _Route) -> list[JourneyLeg]:

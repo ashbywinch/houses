@@ -14,9 +14,9 @@ from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
+from houses.bus_route import BusRoute
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
-from houses.google_routes_client import BusRoute
 from houses.model.domain import Commute, PlaceOfInterest
 from houses.settings import settings
 from serialization import MoneyValue, SerializableAsDict

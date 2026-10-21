@@ -27,8 +27,9 @@ def _mw(value: int):
 class TestBusRouteNode:
     @pytest.mark.asyncio
     async def test_returns_dict_when_location_ok(self):
-        from houses.google_routes_client import BusRoute, TransitStop
+        from houses.bus_route import BusRoute
         from houses.nodes.bus import BusRouteNode
+        from houses.transit_stop import TransitStop
 
         loc = UserInputNode[GeoPoint]("loc_br", GeoPoint)
         dest = UserInputNode[str]("dest_br", str)
@@ -84,7 +85,7 @@ class TestBusRouteAcceptsAPlaceDestination:
 
     @pytest.mark.asyncio
     async def test_plans_by_the_place_address(self):
-        from houses.google_routes_client import BusRoute
+        from houses.bus_route import BusRoute
         from houses.model.domain import PlaceOfInterest
         from houses.nodes.bus import BusRouteNode
 
