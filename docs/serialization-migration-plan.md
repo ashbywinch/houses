@@ -50,27 +50,29 @@ Eight were wrong (dead code kept alive by its own tests) and are deleted; the
 rest stand on checkable reasons, with two marked **weak** there and left as
 owner calls:
 
-- **class-module** — two of the eight are resolved (`signals.py` split into
-  `signal.py`/`slot.py`/`connection.py`; the Google Routes client, its interface
-  and its private wire records live in `google_routes_client.py`, with the
-  options record in its own module and the wire knowledge moved out of
-  `CommuteRouter` and `BusRouteNode`; the three projections the client returns
-  are one class per module). That split exposed two **tool gaps**, both filed as
+- **class-module** — **resolved**: all eight markers are gone. `signals.py` →
+  `signal.py`/`slot.py`/`connection.py`; `commute_router.py` → the Google Routes
+  client, its interface and its private wire records in
+  `google_routes_client.py`, the options in its own module, the three returned
+  projections one per module, with the wire knowledge moved out of
+  `CommuteRouter` and `BusRouteNode`; and the six family files → 22 one-class
+  modules named after their class. See the review log for the `duplicate-module`
+  lesson that shaped the split. The work exposed two **tool gaps**, both filed as
   [lucidlint#52](https://github.com/ashbywinch/lucidlint/issues/52): the
   multi-class arm reports a module's own DI interface as a misplaced class, and
   `class_module_findings` exempts any module containing a module-level `def`, so
-  a file's verdict flips when an unrelated helper moves. The silent file today is
-  silent via the second quirk. The six remaining family files (area, bus,
-  location, schools, expressions, property_nodes) stand as recorded.
-- **inline-import ×5** — every why is "cycle break", which the 2026-08-22 scope
-  decision explicitly rejects ("break cycles by interface extraction"); fixing
-  means an interface module for the DAG's `persistence ↔ scheduler ↔
-  derived_node` triangle.
+  a file's verdict flips when an unrelated helper moves.
+- **inline-import** — **resolved**: all five sites are gone by the leaf-module
+  route the 2026-08-22 decision prescribes (`dag/processor.py` for the DAG
+  triangle; `houses/apcoa_rates.py` for the houses↔scripts cycle; the
+  `services_provider` leaf made `houses/services.py`'s import safe to hoist).
 
-Plus two product calls: `scripts/parse_netex_fares.py:216` (`NetexFareParser`'s
-failing `process-class` — a name the domain owns) and
-`houses/nodes/bootstrap.py:150` (`bootstrap_from_row`, the sheet-import entry
-point with no caller at all — dead weight or an unwired feature).
+Also resolved: `houses/nodes/bootstrap.py::bootstrap_from_row` is **deleted**
+(there is no sheet import; the live `load_property_nodes_from_db`
+path is now tested directly). `scripts/parse_netex_fares.py` is also
+**resolved**: `NetexFareParser` → `NetexFareDocument`, its `zone_fares` modelled
+as `ZoneFares` (a keyed collection owning its writes), so the `process-class`
+fail is gone and only the size warning's marker remains.
 
 `long-param-list` was fixed (2026-10-21): `api_fetch` takes its `FetchArgs`.
 

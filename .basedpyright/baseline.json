@@ -1218,56 +1218,6 @@
                 }
             }
         ],
-        "./houses/sheets/formulas.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 43,
-                    "endColumn": 57,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./houses/sheets/named_ranges.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 65,
-                    "endColumn": 79,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./houses/sheets/row.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 61,
-                    "endColumn": 75,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./houses/sheets/tab.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 55,
-                    "endColumn": 73,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./houses/sheets/view.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 43,
-                    "endColumn": 57,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./houses/tfl_client.py": [
             {
                 "code": "reportArgumentType",

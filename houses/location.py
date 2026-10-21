@@ -485,8 +485,8 @@ def upgrade_address(address: str, postcode: str) -> str:
 
     The DAG's postcode node derives from the best address, so a
     separately-known postcode (scrape/payload field) must be folded INTO
-    the address — the address stays the single fact (bootstrap loads and
-    enrichment paths both use this).
+    the address — the address stays the single fact (the scrape and add
+    paths in ``houses.server`` call this).
     """
     if not address or not postcode:
         return address

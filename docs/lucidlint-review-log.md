@@ -985,18 +985,37 @@ does not survive the re-read.
   that matters is `tmp_path` + the cache/DB fixtures). **Stands**, now
   checkable.
 
-#### class-module — 8 sites, two resolved and one tool gap
+#### class-module — 8 sites — **resolved, plus two tool gaps**
 
-`nodes/area.py:13`, `nodes/bus.py:66`, `nodes/location.py:17`,
-`nodes/schools.py:39`, `nodes/expressions.py:20`, `commute_router.py:40`,
-`signals.py:8`, `nodes/property_nodes.py:58`.
+**Resolved (2026-10-21)**. Three groups:
 
-**Resolved (2026-10-21)**: `signals.py` split into `signal.py` / `slot.py` /
-`connection.py` (the handle now holds its teardown, so the imports are acyclic),
-and `commute_router.py` split so the Google Routes client, its interface and its
-private wire records live in `google_routes_client.py` (the options record gets
-its own module — a public dataclass is not exempt), with the wire knowledge moved
-out of `CommuteRouter` and `BusRouteNode` entirely. Markers deleted.
+1. `signals.py` → `signal.py` / `slot.py` / `connection.py` (the handle now holds
+   its teardown, so the imports are acyclic).
+2. `commute_router.py` → the Google Routes client, its interface
+   (`GoogleRoutesClientLike`) and its private wire records in
+   `google_routes_client.py`, the options record in its own module, the three
+   projections the client returns one class per module (`route.py`,
+   `transit_stop.py`, `bus_route.py`), and the wire knowledge moved out of
+   `CommuteRouter` and `BusRouteNode` entirely.
+3. The six family files → 22 modules, one public class per module, named after it
+   (`walkability_node`, `nearest_town_node`, `town_desc_node`, `town_node`;
+   `bus_route_node`, `bods_fare_node`, `bus_leg_augment_node`; `pmt`, `tax_tier`,
+   `tiered_rate`; `best_address_node`, `postcode_node`, `best_location_node`;
+   `school_acceptance_node`, `nearest_school_node`, `school_location_node`;
+   `property_view`, `property_summary`, `property_detail`, `school_entry`,
+   `schools_block`, `triage_block`). All eight markers deleted.
+
+**The lesson the splits paid for:** one module per *wire shape* is not the same
+as one module per class. The first cut created eleven single-TypedDict modules
+and the gate answered with six `duplicate-module` fails — sibling small
+TypedDicts of near-equal size are structurally identical to the rule. So a
+private wire block that only one document emits now lives *privately in that
+document* (the standard's "closely related small dataclasses" case), and only
+the shapes both documents carry (the school entry, the schools block, the triage
+block) are public modules. Making that honest moved the document assembly out of
+`PropertyNodes` into `property_summary(nodes)` / `property_detail(nodes, svc)`,
+and made the four commute-projection helpers public on `PropertyNodes` (the
+recorded "private-import — renamed public" precedent). Wire bytes unchanged.
 
 **Owner ruling on what the class-module exemption may cover** (2026-10-21):
 suppress/mark only (a) **private** classes — which the rule already skips — and
@@ -1017,17 +1036,24 @@ The remaining six sites are still family files (area, bus, location, schools,
 expressions, property_nodes) whose verdicts stand as recorded: splitting each
 family is a module-per-class change with no behavioural gain. **Owner call.**
 
-#### inline-import — 5 sites — **weak**
+#### inline-import — 5 sites — **resolved (2026-10-21)**
 
-`dag/persistence.py:538`, `dag/scheduler.py:224,400`, `services.py:429`,
-`scripts/sync_parking_rates.py:332`. Every why is "cycle break", and the standing
-scope decision (2026-08-22) says exactly the opposite: *"circular-import
-avoidance is not a justification — break cycles by interface extraction"*. The
-0.4.0 sweep honoured that for two cycles; the `services_provider` fix that
-"held" is a third. Fixing these means an interface/leaf module for the DAG's
-`persistence ↔ scheduler ↔ derived_node` triangle (and for
-`location ↔ services`, `houses ↔ scripts`). **Owner call** — it is the DAG
-core's import graph, and the sweep chose to leave it.
+All five are gone, by the leaf-module route the 2026-08-22 decision prescribes:
+
+- **The DAG triangle** (`dag/persistence.py:538`, `dag/scheduler.py:224,400`):
+  the processor-thread state moved to a leaf, `dag/processor.py`
+  (`ProcessorRuntime`, `current_processor_thread`, `assert_mutation_allowed`), so
+  persistence imports the guard from the leaf and scheduler imports persistence
+  and the leaf at module top; scheduler's `isinstance(dep, DerivedNode)` in the
+  re-queue path was redundant (`self._scheduled` only holds queued nodes), so the
+  `derived_node` import went with it. No re-exports; every importer repointed.
+- **`houses/services.py:429`**: `services_provider` has been a leaf since the
+  0.6.7 fix, so the top-level import is safe (aliased to avoid shadowing the
+  method name).
+- **`scripts/sync_parking_rates.py:332`**: the three pure helpers
+  (`extract_daily_rate_from_tariff`, `make_slug`, `city_slugs`) moved to
+  `houses/apcoa_rates.py`; `houses/apcoa_scraper` and the script both import the
+  leaf, so the houses↔scripts cycle is gone and the script's import is at the top.
 
 #### long-param-list — 1 site — **weak**
 

@@ -2,7 +2,7 @@
 
 **For:** developers adding/maintaining DAG nodes in `houses/nodes/`.
 
-The `dag/` package is a reactive directed acyclic graph: when a leaf changes, every downstream node recomputes and persists. API surface (node classes, `Attempt`, expressions, scheduler) lives in the code — `dag/node.py`, `dag/attempt.py`, `dag/expression.py`, `dag/derived_node.py`, `dag/scheduler.py`. Use the code-review graph (`file_summary` / `children_of`) or read those files for signatures.
+The `dag/` package is a reactive directed acyclic graph: when a leaf changes, every downstream node recomputes and persists. API surface (node classes, `Attempt`, expressions, scheduler, the processor thread's state and mutation guard) lives in the code — `dag/node.py`, `dag/attempt.py`, `dag/expression.py`, `dag/derived_node.py`, `dag/scheduler.py`, `dag/processor.py`. Use the code-review graph (`file_summary` / `children_of`) or read those files for signatures.
 
 This doc records the **rules and conventions** that aren't discoverable from the code.
 
@@ -573,9 +573,9 @@ Rules (every one is enforced — guard messages cite this section):
 
 1. **Mutate DAG state only on the processor.** Request handlers mutate
    via `await run_on_processor(...)`; direct `push`/`refresh`/persistence
-   off the processor raises (`assert_mutation_allowed`). Startup,
-   scripts and tests never start a processor, so they are exempt by
-   construction — no flags to juggle.
+   off the processor raises (`assert_mutation_allowed`, in
+   `dag/processor.py`). Startup, scripts and tests never start a
+   processor, so they are exempt by construction — no flags to juggle.
 2. **Never mutate a value in place — replace it.** Nodes hold frozen
    dataclasses / Pydantic models and swap whole values (`self._value =
    ...`). That is what makes lock-free reads from the event loop safe:

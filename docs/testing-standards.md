@@ -4,7 +4,7 @@ Test conventions for the property enrichment engine. Supplementary to `docs/codi
 
 ## Organization
 
-Test files mirror the module under test (`houses/nodes/area.py` → `tests/unit/nodes/test_area.py`); functions describe behaviour (`test_walk_selected_when_fastest`, `test_empty_comment_rejected`); classes group scenarios per method/state. `tests/helpers.py` holds fakes; `tests/unit/isolation_fixtures.py` holds DB isolation.
+Test files mirror the module under test (`houses/nodes/petrol.py` → `tests/unit/nodes/test_petrol.py`); functions describe behaviour (`test_walk_selected_when_fastest`, `test_empty_comment_rejected`); classes group scenarios per method/state. `tests/helpers.py` holds fakes; `tests/unit/isolation_fixtures.py` holds DB isolation.
 
 ## Deterministic tests
 

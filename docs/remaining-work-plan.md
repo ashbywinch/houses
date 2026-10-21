@@ -15,8 +15,8 @@ P1–P13).
   tested, and pushed on `feat/settings-screen` (PR #53).
 - The architecture test was fixed (it was vacuous: `./`-anchored globs
   never matched archunitpython's absolute paths); `PMT`, `StampDutyFn`,
-  `TieredRate` moved out of `dag/expression.py` into
-  `houses/nodes/expressions.py`. `dag/` is now houses-agnostic.
+  `TieredRate` moved out of `dag/expression.py` into `houses/nodes/`
+  (`pmt.py`, `tax_tier.py`, `tiered_rate.py`). `dag/` is now houses-agnostic.
 - Usability walkthrough run 2 (round-2 findings) drove the work above;
   run 3's de-primed two-phase walk produced a fresh findings set (C2–C11
   below). The two-phase prompt lives at
@@ -116,7 +116,7 @@ Workstreams (each red/green):
   globs — they make the check vacuous. Sanity rule: verify a known
   violation goes red before trusting a green architecture test.
 - `dag/` must stay houses-agnostic: new domain expressions belong in
-  `houses/nodes/expressions.py`, not `dag/expression.py`.
+  `houses/nodes/` (`pmt.py`, `tax_tier.py`, `tiered_rate.py`), not `dag/expression.py`.
 
 ## Part D — What-if / scenario evaluation (IMPLEMENTED 2026-08-06)
 
@@ -765,7 +765,7 @@ manual scheduling, side memory) is an antipattern — fix the deps. No
   (`houses/nodes/transit.py`); `commute_pipeline_builder.py` no longer
   drops the node, so a car flip never rebuilds the graph.
 - **Wave 2.2 — acceptable as a persons-sourced dep: done.**
-  `SchoolAcceptanceNode` (`houses/nodes/schools.py`) is a dependency of
+  `SchoolAcceptanceNode` (`houses/nodes/school_acceptance_node.py`) is a dependency of
   the school nodes; a filter edit recomputes the lookup.
 - **Wave 2.3 — bound max_walk in the selector choose: done (main).**
   `commute.py` reads `inputs.max_walk.value_or_none()`.
