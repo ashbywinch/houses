@@ -20,11 +20,15 @@ import dataclasses
 from collections.abc import Callable, Mapping
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any, TypedDict, TypeVar
 
 from money import Money
 from pint import Quantity
 from pydantic import BaseModel, BeforeValidator, ConfigDict, PlainSerializer
+
+type RecordWire = dict[str, Any]
+"""A record's wire: the dict a client, a cache key or ``json.dumps`` takes, and
+the shape every boundary record's ``to_dict`` returns."""
 
 _GBP_SCALE = Decimal("0.01")
 
@@ -45,9 +49,20 @@ def _money_amount_str(m: Money) -> str:
     return str(m.amount.quantize(_GBP_SCALE))
 
 
-def _money_wire(m: Money) -> dict[str, str]:
-    """The money wire shape: a canonical 2-dp amount plus currency."""
-    return {"amount": _money_amount_str(m), "currency": m.currency}
+class MoneyWire(TypedDict):
+    """The money wire shape: a canonical 2-dp amount plus currency.
+
+    Named, so the field serialiser's output and its ``return_type`` are the
+    same declaration — a key rename cannot drift silently.
+    """
+
+    amount: str
+    currency: str
+
+
+def _money_wire(m: Money) -> MoneyWire:
+    """Money as its wire: the canonical 2-dp amount plus currency."""
+    return MoneyWire(amount=_money_amount_str(m), currency=m.currency)
 
 
 def _money_from_wire(value: Any) -> Any:
@@ -61,18 +76,27 @@ def _money_from_wire(value: Any) -> Any:
 type MoneyValue = Annotated[
     Money,
     BeforeValidator(_money_from_wire),
-    PlainSerializer(_money_wire, return_type=dict[str, str]),
+    PlainSerializer(_money_wire, return_type=MoneyWire),
 ]
 """A Money field that reads and writes ``{amount, currency}`` — the
 serialiser lives on the type, so no parallel record is needed."""
 
 
-def _quantity_wire(q: Quantity) -> dict[str, Any]:
+class QuantityWire(TypedDict):
+    """The quantity wire shape: a number plus its unit."""
+
+    value: int | float
+    unit: str
+
+
+def _quantity_wire(q: Quantity) -> QuantityWire:
     """The quantity wire shape: a number plus its unit — exactly what
     ``DagJSONEncoder`` writes for a Quantity, so a payload and a stored row
     spell a duration the same way."""
     magnitude = float(q.magnitude)
-    return {"value": int(magnitude) if magnitude == int(magnitude) else magnitude, "unit": str(q.units)}
+    return QuantityWire(
+        value=int(magnitude) if magnitude == int(magnitude) else magnitude, unit=str(q.units)
+    )
 
 
 def _quantity_from_wire(value: Any) -> Any:
@@ -86,7 +110,7 @@ def _quantity_from_wire(value: Any) -> Any:
 type QuantityValue = Annotated[
     Quantity,
     BeforeValidator(_quantity_from_wire),
-    PlainSerializer(_quantity_wire, return_type=dict[str, Any]),
+    PlainSerializer(_quantity_wire, return_type=QuantityWire),
 ]
 """A Quantity field that reads and writes ``{value, unit}``."""
 
@@ -110,16 +134,19 @@ class SerializableAsDict(BaseModel):
     """A record whose dict IS its wire form — the base for every boundary
     record, inbound (FastAPI dumps it) and outbound (we do).
 
-    ``to_dict()`` is the one place the record becomes the dict a client, a
-    cache key, or ``json.dumps`` takes. Third-party field types (Money,
-    Quantity) are arbitrary to pydantic and need ``arbitrary_types_allowed``;
-    aliased fields stay settable by their python name, so a builder reads like
-    the domain (``point_lat=…`` for a wire key of ``point.lat``).
+    ``to_dict()`` is the one place the record becomes the wire a client, a
+    cache key, or ``json.dumps`` takes. It is declared ``RecordWire``: named,
+    because every boundary record's serialiser returns it, and mutable, because
+    the web layer patches a payload at its projection boundary. Third-party
+    field types (Money, Quantity) are arbitrary to pydantic and need
+    ``arbitrary_types_allowed``; aliased fields stay settable by their python
+    name, so a builder reads like the domain (``point_lat=…`` for a wire key of
+    ``point.lat``).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> RecordWire:
         return self.model_dump(by_alias=True)
 
 
