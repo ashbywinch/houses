@@ -2,10 +2,12 @@
 
 Records every lucidlint finding we did **not** fix outright, and why — plus
 what lucidlint missed and where the tool cost us time. Current state:
-**lucidlint 0.6.7 — 35 open `record-shape`**: the tool bug in
-[lucidlint#42](#tool-bugs-filed-open), plus the DAG's deliberately dict-like node
-values — plus four `duplicate-module` markers; the owner rulings
-behind them are in
+**lucidlint 0.6.7 @`2bc734f` — 12 open `record-shape` (fail) + 1 `middle-man`
+warning**, all deliberately visible: the tool bugs in
+[lucidlint#42 / #46](#tool-bugs-filed-open) — #42's merged fix is narrower than
+its report, see the 2026-10-21 section below — plus the DAG's deliberately
+dict-like node values; four `duplicate-module` markers stand on their recorded
+ruling in
 [§Serialisation migration](#serialisation-migration-owner-ruling-2026-10-17-one-type-per-thing).
 Before that: the 0.6.7 sweep (2026-10-08) and the 0.4.0 sweep (2026-08-30,
 **0 open actions, empty baseline**). Every remaining diagnostic carries a per-site
@@ -814,3 +816,65 @@ Two warnings remain, both deliberate: the **census** fires because
 *no blanket config ignores — per-site treatment only*, so the per-site markers
 stand; and the **middle-man** warning on the base's `to_dict` is left visible
 on purpose (lucidlint#44).
+
+
+### The serialization-plan pass (2026-10-21): the pin moves, five items land
+
+The plan (`serialization-migration-plan.md`) was implemented: order items 1-4
+and item 6's third arm in code, plus the pin bump item 6 was waiting on. Gate:
+**13 actions = 12 `record-shape` + 1 `middle-man` warning** (from 26 = 24 + 2),
+1842 tests, typecheck clean, and the byte oracle identical on all 7 captures.
+
+**The pin: `5c893cbc` → `2bc734f`** (PR #43, the #42 export exemption).
+Measured A/B on one clean worktree at `813c43e6`, both tools, same tree:
+
+| | old pin | master |
+|---|---|---|
+| findings | 26 (24 fail + 2 warn) | 17 (15 fail + 2 warn) |
+| comment-suppressed | 175 | 175 |
+
+Nine `record-shape` sites clear, no new finding appears, and **no marker goes
+stale** — the exemption only removes findings, so the risk was a marker left
+suppressing nothing; the unchanged census proves none was. What clears is
+exactly the export-edge arm: `to_dict`/`to_json*`-named methods whose enclosing
+class declares fields covering the literal's keys (`dag/node.py:267,287`,
+`dag/derived_node.py:1044,1050`, `houses/model/domain.py:96,97`,
+`houses/nodes/commute.py:377,406`, `houses/services.py:111`). **The fix is
+narrower than #42's report**: a `-> dict` helper that is not an export name, a
+module-level serializer target (`_money_wire`, `_quantity_wire`), a wrap
+serializer's `-> dict`, and the parameter arm all still fire. #42 stays open
+upstream for those; the 12 residue sites carry no marker on purpose.
+
+**Items 1-4, 6's third arm** (per-file evidence in the plan): the cache seam is
+a `CacheRequest` class (five methods, the four threaded parameters as its
+state; keys byte-identical — 13 shapes checked against the old `_make_key`, and
+the committed fixture cache still resolves); `ParkingRateSync` owns the parking
+sync's run; the group block is rebuilt as `dag.node.NodeValue` and written back;
+`_GoogleClientConfig` is a boundary record with one wrap serializer and its
+TypedDict twin is deleted; `_with_coordinates` names the coordinate pair once.
+
+Probes worth not re-deriving:
+
+- **A tuple return annotation still trips `record-shape`.** The first attempt at
+  the group block returned `tuple[NodeValue, MutableMapping[str, Any]] | None`
+  — the tool still reports the method, with `MutableMapping[str, Any]`,
+  `dict[str, Any]`, even `object` in the tuple, and with the body reduced to
+  `return None` (annotation-driven, not body-driven). The shape that clears:
+  return the SLOT (the mapping that owns the key) from one helper, and read the
+  wire back out of that same slot key.
+- **`NodeValue.to_dict()` alone is not byte-identical to a node's served wire.**
+  A settled derived node's wire is the dump PLUS the lifecycle keys
+  `DerivedNode._enrich_json` appends (`retry_at`/`retry_count`/`stale`);
+  `model_validate` ignores extras, so replacing the wire outright drops them.
+  Lay the rebuilt wire OVER the block's own (`{**wire, **record.to_dict()}`) —
+  the key set and order stay the block's, the values become the record's.
+- **The census warning is gone as a side effect.** It fires per signal
+  suppressed at >=10 sites; after this pass the counts are `latent-class` 8 and
+  `record-shape` 7, so the warning the 0.6.7 section called deliberate is no
+  longer reported. The `middle-man` warning on the base's `to_dict` remains
+  (lucidlint#44).
+
+Still blocked, unchanged: **#46** (the two `dag/attempt.py` sites) and **#47**
+(the seven class-size markers; the seventh is load-bearing for a failing
+`process-class` on `NetexFareParser`, which needs the parse data modelled as
+classes first).
