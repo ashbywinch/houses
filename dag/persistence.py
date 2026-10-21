@@ -22,6 +22,8 @@ from typing import Any, ClassVar, TypedDict, cast, override
 from money import Money as _Money
 from pint import Quantity
 
+from dag.processor import assert_mutation_allowed
+
 logger = logging.getLogger(__name__)
 
 
@@ -535,9 +537,6 @@ def save_node_result(
     thread (or a single-threaded context — startup, tests, scripts);
     see docs/dag-library.md → 'Thread rules'.
     """
-    # lucidlint: ignore inline-import cycle break — scheduler imports this module's writers at top
-    from dag.scheduler import assert_mutation_allowed
-
     assert_mutation_allowed()
     if not _table_exists("node_results"):
         init_db()

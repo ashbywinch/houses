@@ -14,7 +14,8 @@ import pytest
 
 import dag.persistence as per
 import houses.database as db
-from dag.scheduler import AsyncRefreshQueue, current_processor_thread, set_scheduler
+from dag.processor import current_processor_thread
+from dag.scheduler import AsyncRefreshQueue, set_scheduler
 
 
 @pytest.fixture(autouse=True)

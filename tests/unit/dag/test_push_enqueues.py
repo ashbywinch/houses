@@ -19,6 +19,7 @@ threadless.
 
 from __future__ import annotations
 
+import dag.processor as processor
 import dag.scheduler as sched
 from dag.user_input_node import UserInputNode
 
@@ -66,4 +67,4 @@ def test_queued_work_is_synchronous_without_a_processor_thread():
     ran: list[str] = []
     sched.submit_to_processor(lambda: ran.append("done"))
     assert ran == ["done"]
-    assert sched.current_processor_thread() is None
+    assert processor.current_processor_thread() is None

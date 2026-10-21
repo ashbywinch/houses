@@ -16,7 +16,8 @@ from dag.attempt import Attempt, AttemptError, Provenance, SourceType, project_v
 from dag.eval_context import staged_attempt
 from dag.node import Node
 from dag.persistence import MoneyEncoding, QuantityEncoding, latest_node_result
-from dag.scheduler import assert_mutation_allowed, submit_to_processor
+from dag.processor import assert_mutation_allowed
+from dag.scheduler import submit_to_processor
 
 logger = logging.getLogger(__name__)
 

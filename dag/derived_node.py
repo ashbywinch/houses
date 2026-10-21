@@ -30,7 +30,8 @@ from dag.expression import Expression
 from dag.guard import capture_async, guarded
 from dag.node import Node, NodeValue
 from dag.persistence import latest_node_provenance
-from dag.scheduler import assert_mutation_allowed, get_scheduler
+from dag.processor import assert_mutation_allowed
+from dag.scheduler import get_scheduler
 from dag.slot import Slot
 
 logger = logging.getLogger(__name__)
