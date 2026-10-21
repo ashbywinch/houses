@@ -20,7 +20,7 @@ class TestWalkCommuteFailsFast:
         """_google_routes_post must raise ValueError when Google API key is missing."""
         import asyncio
 
-        from houses.commute_router import GoogleRoutesClient, _LatLng, _RoutesBody, _Waypoint
+        from houses.google_routes_client import GoogleRoutesClient, _LatLng, _RoutesBody, _Waypoint
         from houses.settings import settings
 
         client = GoogleRoutesClient()
@@ -641,7 +641,13 @@ class TestGoogleRoutesPostReturn:
     async def test_returns_data_on_cache_miss(self):
         from unittest.mock import AsyncMock
 
-        from houses.commute_router import GoogleRoutesClient, GoogleRoutesOptions, _LatLng, _RoutesBody, _Waypoint
+        from houses.google_routes_client import (
+            GoogleRoutesClient,
+            GoogleRoutesOptions,
+            _LatLng,
+            _RoutesBody,
+            _Waypoint,
+        )
 
 
         fake_resp = AsyncMock()

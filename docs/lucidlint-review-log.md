@@ -975,18 +975,51 @@ does not survive the re-read.
   that matters is `tmp_path` + the cache/DB fixtures). **Stands**, now
   checkable.
 
-#### class-module — 8 sites — **weak**
+#### class-module — 8 sites, two resolved and one tool gap
 
 `nodes/area.py:13`, `nodes/bus.py:66`, `nodes/location.py:17`,
 `nodes/schools.py:39`, `nodes/expressions.py:20`, `commute_router.py:40`,
-`signals.py:8`, `nodes/property_nodes.py:58`. Each is a *family* file holding
-several cohesive classes (area: walkability/nearest-town/town-desc/town; signals:
-three mutually recursive primitives), so the rule's "create or rename" cannot
-apply — but the written standard (`coding-standards.md`:97) says each class in
-its own module, with an exception only for "closely related small dataclasses",
-and these are behaviour classes. The sweep's verdict was "one compact family
-file". Fixing means splitting each family into a module per class (8 files → ~30)
-or overruling the standard for node families. **Owner call.**
+`signals.py:8`, `nodes/property_nodes.py:58`.
+
+**Resolved (2026-10-21)**: `signals.py` split into `signal.py` / `slot.py` /
+`connection.py` (the handle now holds its teardown, so the imports are acyclic),
+and `commute_router.py` split into `google_routes_client.py` (the client, its
+options, its protocol and its private wire records) plus the router alone. Both
+markers are deleted; the census went 8 → 6.
+
+**The tool gap the second split exposed** (draft, **unfiled** — needs the
+owner's go-ahead for the GitHub write):
+
+> **class-module: the multi-class arm ignores the standard's "closely related
+> types" exception**
+>
+> `houses/google_routes_client.py` holds `GoogleRoutesClient` (the namesake),
+> `GoogleRoutesOptions` (a four-field frozen dataclass that exists only for that
+> client) and `GoogleRoutesClientLike` (the `Protocol` the namesake class
+> satisfies). The rule reports:
+>
+> *"module '…/google_routes_client.py' holds the classes GoogleRoutesOptions,
+> GoogleRoutesClientLike, GoogleRoutesClient but GoogleRoutesOptions,
+> GoogleRoutesClientLike don't match the file's name — each public class belongs
+> in a file named after it"*
+>
+> The single-class arm's message carries an exception — *"(exception: closely
+> related models)"* — and the multi-class arm neither carries nor honours it,
+> although `docs/coding-standards.md`:97 states the same exception: *"a module
+> grouping closely related small dataclasses (e.g. `models.py` with several
+> handful-of-fields, no-behaviour models sharing one reason to change)"*.
+> Splitting this file further produces `google_routes_options.py` and
+> `google_routes_client_like.py` — a 20-line module for the interface of the
+> class next door.
+>
+> Suggested fix: in the multi-class arm, do not report a public class that is
+> (a) a small no-behaviour dataclass/TypedDict, or (b) a `Protocol` whose only
+> implementation is the namesake class in the same module — and carry the
+> single-class arm's exception text into the multi-class message.
+
+The remaining six sites are still family files (area, bus, location, schools,
+expressions, property_nodes) whose verdicts stand as recorded: splitting each
+family is a module-per-class change with no behavioural gain. **Owner call.**
 
 #### inline-import — 5 sites — **weak**
 

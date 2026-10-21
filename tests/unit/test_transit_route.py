@@ -519,7 +519,7 @@ class TestTflCachedApiCall4xx:
 
 
 class _FakeRoutesClient:
-    """RoutesPostClient stub returning a canned Google TRANSIT route."""
+    """GoogleRoutesClientLike stub returning a canned Google TRANSIT route."""
 
     def __init__(self, payload):
         self.payload = payload

@@ -759,7 +759,8 @@ class TestBusRouteNodeAgainstRealTransport:
 
     @pytest.mark.asyncio
     async def test_bus_stops_parsed_through_real_transport(self):
-        from houses.commute_router import CommuteRouter, GoogleRoutesClient
+        from houses.commute_router import CommuteRouter
+        from houses.google_routes_client import GoogleRoutesClient
         from houses.nodes.bus import BusRouteNode
         from houses.settings import settings
 

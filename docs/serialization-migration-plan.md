@@ -44,28 +44,32 @@ Any]` for the boundary-record base (named, and still mutable: the web layer
 patches a payload at its projection boundary). The tool was not edited, and the
 docstrings state the contracts rather than a suppression.
 
-What is left is **exemptions, not failures** — 164 per-site markers, audited one
-at a time in
+What is left is **exemptions, not failures** — audited one site at a time in
 [lucidlint-review-log.md](./lucidlint-review-log.md) → *The exemption audit*.
 Eight were wrong (dead code kept alive by its own tests) and are deleted; the
-rest stand on checkable reasons, with three marked **weak** there and left as
+rest stand on checkable reasons, with two marked **weak** there and left as
 owner calls:
 
-- **class-module ×8** — family files (area, bus, location, schools, expressions,
-  signals, property_nodes, commute_router) versus the written "each class in its
-  own module"; fixing means splitting each family.
+- **class-module** — two of the eight are resolved (`signals.py` split into
+  `signal.py`/`slot.py`/`connection.py`; `commute_router.py` split so the Google
+  Routes client, its options, its protocol and its private wire records share
+  `google_routes_client.py`). That second split exposed a **tool gap**: the
+  multi-class arm ignores the standard's own "closely related types" exception,
+  so it reports the options dataclass and the protocol beside the class they
+  serve. Issue drafted in the log, **unfiled** pending the owner's go-ahead. The
+  six remaining family files (area, bus, location, schools, expressions,
+  property_nodes) stand as recorded.
 - **inline-import ×5** — every why is "cycle break", which the 2026-08-22 scope
   decision explicitly rejects ("break cycles by interface extraction"); fixing
   means an interface module for the DAG's `persistence ↔ scheduler ↔
   derived_node` triangle.
-- **long-param-list ×1** (`apigw.api_fetch`, 9 parameters, one caller) — the
-  doctrine's param object here would have ≥5 fields and no methods (tripping
-  `record-shape`), so the fix is a small design.
 
 Plus two product calls: `scripts/parse_netex_fares.py:216` (`NetexFareParser`'s
 failing `process-class` — a name the domain owns) and
 `houses/nodes/bootstrap.py:150` (`bootstrap_from_row`, the sheet-import entry
 point with no caller at all — dead weight or an unwired feature).
+
+`long-param-list` was fixed (2026-10-21): `api_fetch` takes its `FetchArgs`.
 
 The merged #42 fix is **narrower than the issue's report**: it exempts a
 `to_dict`/`to_json*`-named method whose enclosing class declares fields that
