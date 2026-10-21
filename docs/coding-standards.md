@@ -48,7 +48,7 @@ A record that crosses a boundary — an HTTP response, a websocket message, an
 outbound request to another service, a persisted DAG row, a committed artifact
 — **is a class that carries its own serialization**, not a dict and not a
 parallel class beside the domain type. Inherit
-`houses.web.json_utils.SerializableAsDict`, declare the fields, and delete any
+`serialization.SerializableAsDict`, declare the fields, and delete any
 `to_dict` you were about to write: the base supplies it
 (`model_dump(by_alias=True)`), plus the config these records need
 (`arbitrary_types_allowed` for `Money`/`Quantity`, `populate_by_name` for
@@ -81,7 +81,7 @@ governs:**
 error: str | None = Field(default=None, exclude_if=omit_when_none)
 ```
 
-`omit_when_none` / `omit_when_empty` (both in `houses/web/json_utils.py`) are
+`omit_when_none` / `omit_when_empty` (both in `serialization/__init__.py`) are
 the two conditions in use. Reach for a whole-record
 `@model_serializer(mode="wrap")` **only when the structure itself changes**, not
 just which keys appear — a Google Routes waypoint is either

@@ -667,14 +667,14 @@ it, and why findings in this family are *not* fixed:
   again.
 - **Third-party types** (`money.Money`, `pint.Quantity`) get a serialiser on the
   field that carries them (`MoneyValue` / `QuantityValue` in
-  `houses/web/json_utils.py`), never a class beside them.
+  `serialization/__init__.py`), never a class beside them.
 - **Mirror classes are deleted, not renamed.** The `*Json`/`*Wire` suffix is
   gone repo-wide (82 classes), and every class whose only job was to hold a wire
   shape was deleted rather than converted: `MoneyJson`, `NodeJson`,
   `_WalkToTown`, `_StopFare`, `_PetrolAugment` — plus the pattern that keeps
   recurring, **a record whose one method unwraps the dict it holds**
   (`api_cache._UrlQuery`, `commute._CommuteValue`).
-- `SerializableAsDict` (`houses/web/json_utils.py`) is the one base for boundary
+- `SerializableAsDict` (`serialization/__init__.py`) is the one base for boundary
   records, both directions. How to write one is in
   [coding-standards.md](coding-standards.md) → *Boundary records*, the single
   source for aliases, the two field conditions, and when a wrap serializer is
@@ -717,6 +717,15 @@ suite stayed green throughout.
   encapsulation (a library base, a Protocol implementation, a call that fixes an
   argument): https://github.com/ashbywinch/lucidlint/issues/44, filed with a
   verified repro.
+- **lucidlint#46** — `record-shape` fires on a typed map of records
+  (`dict[str, Provenance]`) passed to a function, even one that only counts it;
+  the value type is the noun and the operations do not belong to the collection.
+  Filed with a repro. Two sites: `dag/attempt.py:436,618` (method parameters).
+- **lucidlint#47** — `god-class` is a **failing** action even when the partition
+  rule finds no seam (`seam_members: []`), while its own message says size alone
+  is a review signal; the only way to pass is to suppress it, and ten
+  suppressions then trip the census. Seven markers sit on it. Filed with the
+  probe that shows `seam_members: []`.
 
 
 **`duplicate-module` (4 suppressions)** — the request DTOs in `houses/apis/` are
