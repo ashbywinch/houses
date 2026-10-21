@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 
 from houses import apigw
+from houses.apigw import FetchArgs
 from houses.apis.base_api import BaseApi
-from houses.apis.fetch_args import FetchArgs
 from houses.apis.google_geocode_params import GoogleGeocodeParams
 from houses.geopoint import GeoPoint
 from houses.settings import settings

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from houses import apigw
+from houses.apigw import FetchArgs
 from houses.apis.base_api import BaseApi
-from houses.apis.fetch_args import FetchArgs
 from houses.apis.nominatim_params import NominatimParams
 from houses.geopoint import GeoPoint
 

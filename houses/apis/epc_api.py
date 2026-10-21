@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from houses import apigw
+from houses.apigw import FetchArgs
 from houses.apis.base_api import BaseApi
 from houses.apis.epc_search_result import EpcSearchResult
-from houses.apis.fetch_args import FetchArgs
 from houses.settings import settings
 from serialization import SerializableAsDict
 

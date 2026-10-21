@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from houses import apigw
-from houses.apis.fetch_args import FetchArgs
+from houses.apigw import FetchArgs
 
 
 class BaseApi:
@@ -21,16 +21,6 @@ class BaseApi:
         raise — the DAG classifier owns those decisions.
         """
         try:
-            return await apigw.api_fetch(
-                req.method,
-                req.url,
-                api=self.profile,
-                params=req.params,
-                body=req.body,
-                headers=req.headers,
-                wire_params=req.wire_params,
-                _client_factory=req._client_factory,
-                _no_cache=req.no_cache,
-            )
+            return await apigw.api_fetch(req, api=self.profile)
         except apigw.DailyQuotaError:
             return None

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from houses import apigw
+from houses.apigw import FetchArgs
 from houses.apis.base_api import BaseApi
-from houses.apis.fetch_args import FetchArgs
 from houses.apis.overpass_element import OverpassElement
 from houses.apis.overpass_params import OverpassParams
 from houses.apis.overpass_response import OverpassResponse

@@ -28,10 +28,10 @@ import, plus the types serialized/consumed across modules.
 
 from __future__ import annotations
 
+from houses.apigw import FetchArgs
 from houses.apis.base_api import BaseApi
 from houses.apis.epc_api import EpcApi
 from houses.apis.epc_search_result import EpcSearchResult
-from houses.apis.fetch_args import FetchArgs
 from houses.apis.google_geocode_api import GoogleGeocodeApi
 from houses.apis.google_geocode_params import GoogleGeocodeParams
 from houses.apis.google_places_api import GooglePlacesApi

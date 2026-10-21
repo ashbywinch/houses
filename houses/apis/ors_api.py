@@ -8,8 +8,8 @@ import httpx
 from pint import Quantity
 
 from houses import apigw
+from houses.apigw import FetchArgs
 from houses.apis.base_api import BaseApi
-from houses.apis.fetch_args import FetchArgs
 from houses.apis.ors_directions_body import OrsDirectionsBody
 from houses.apis.ors_reverse_params import OrsReverseParams
 from houses.apis.ors_search_params import OrsSearchParams

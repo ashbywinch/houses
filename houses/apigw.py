@@ -18,9 +18,9 @@ It gives you, for free:
 Using it is "pick a profile constant, one call":
 
     data = await api_fetch(
-        "POST", ORS_DIRECTIONS, api=ORS,
-        body=payload,
-        headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
+        FetchArgs("POST", ORS_DIRECTIONS, body=payload,
+                  headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"}),
+        api=ORS,
     )
 
 Adding a NEW API = one ``ApiProfile(...)`` constant below. No pacing,
@@ -97,6 +97,24 @@ GOV_EPC = ApiProfile(pace_s=0.5)
 OVERPASS = ApiProfile(pace_s=0.5)
 
 
+@dataclass(frozen=True)
+class FetchArgs:
+    """One guarded external call: what to send and where.
+
+    The transport's parameter object — every API class builds exactly one of
+    these, then :func:`api_fetch` paces it, caches it and classifies its
+    failures. It lives here, with the call it describes, so the API layer
+    depends on the transport and never the reverse.
+    """
+
+    method: str
+    url: str
+    params: Any = None
+    body: Any = None
+    headers: dict[str, str] | None = None
+    wire_params: dict[str, str] | None = None
+    _client_factory: Any = None
+    no_cache: bool = False
 def _as_dict(obj: Any):
     """SerializableAsDict record or plain dict — the record's ``to_dict`` is the
     single serializer; callers never hand-build wire dicts in API classes."""
@@ -200,21 +218,10 @@ class ApiGate:
 GATE = ApiGate()
 
 
-# lucidlint: ignore long-param-list flat signature is the ease-of-use contract — no param object per call (review-log)
-async def api_fetch(
-    method: str,
-    url: str,
-    *,
-    api: ApiProfile,
-    params: Any = None,
-    body: Any = None,
-    headers: dict[str, str] | None = None,
-    wire_params: dict[str, str] | None = None,
-    _client_factory=None,
-    _no_cache: bool = False,
-) -> Any:
+async def api_fetch(req: FetchArgs, *, api: ApiProfile) -> Any:
     """Fetch a guarded external API call: cache, pace, quota, classify.
 
+    ``req`` is the caller's :class:`FetchArgs` — what to send and where.
     Return the JSON body, or raise a typed error: ``DailyQuotaError``
     (permanent) or the original ``httpx`` error (429/5xx stay transient
     for the DAG; other statuses are permanent). Not JSON? Use
@@ -226,15 +233,15 @@ async def api_fetch(
     await GATE.pace(api)
 
     async def _fetch() -> Any:
-        factory = _client_factory or cached_async_client
+        factory = req._client_factory or cached_async_client
         async with factory(timeout=api.timeout_s) as client:
             try:
                 resp = await client.request(
-                    method,
-                    url,
-                    params={**(_as_dict(params) or {}), **(wire_params or {})},
-                    json=_as_dict(body),
-                    headers=headers,
+                    req.method,
+                    req.url,
+                    params={**(_as_dict(req.params) or {}), **(req.wire_params or {})},
+                    json=_as_dict(req.body),
+                    headers=req.headers,
                 )
             except httpx.HTTPStatusError as e:
                 # the raised path: a quota status inside the error flips the
@@ -242,7 +249,7 @@ async def api_fetch(
                 if api.is_quota(e.response.status_code):
                     GATE.mark_quota_exhausted(api)
                     raise DailyQuotaError(
-                        f"{api}: HTTP {e.response.status_code} (daily quota) for {url}"
+                        f"{api}: HTTP {e.response.status_code} (daily quota) for {req.url}"
                     ) from e
                 raise GatewayHttpError(
                     str(e), request=e.request, response=e.response,
@@ -250,7 +257,7 @@ async def api_fetch(
                 ) from e
             if api.is_quota(resp.status_code):
                 GATE.mark_quota_exhausted(api)
-                raise DailyQuotaError(f"{api}: HTTP {resp.status_code} (daily quota) for {url}")
+                raise DailyQuotaError(f"{api}: HTTP {resp.status_code} (daily quota) for {req.url}")
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
@@ -260,4 +267,6 @@ async def api_fetch(
                 ) from e
             return resp.json()
 
-    return await CacheRequest(method, url, params=params, body=body).fetch(_fetch, no_store=_no_cache)
+    return await CacheRequest(req.method, req.url, params=req.params, body=req.body).fetch(
+        _fetch, no_store=req.no_cache
+    )
