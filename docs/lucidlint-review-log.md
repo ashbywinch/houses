@@ -880,7 +880,7 @@ Still blocked, unchanged: **#46** (the two `dag/attempt.py` sites) and **#47**
 classes first).
 
 
-### The unblock pass (2026-10-21, same day): 12 fails → 4, all of them the tool's
+### The unblock pass (2026-10-21, same day): 12 fails → 4
 
 The plan's blocked residue was worked rather than parked, and the residue turned
 out to be code-shaped after all — **12 fails → 4**, every one of the 8 in the
@@ -911,13 +911,226 @@ Two lessons worth more than the finding count:
   premise that they move the failing count was wrong. They stay (they record a
   probed verdict) until #47 removes the finding itself.
 
-**What is left is the tool's, not the code's**: the 4 fails in
-`serialization/__init__.py` are `_money_wire`/`_quantity_wire` (a
-`PlainSerializer` target's wire literal, where the ruling forbids a class
-beside the third-party type — `MoneyJson` is named as deleted) and
-`SerializableAsDict.to_dict` (the boundary-record base, whose subclasses name
-the shape). Two narrow rule changes would clear them: exempt literals inside a
-function referenced by `PlainSerializer`/`BeforeValidator`/`AfterValidator` or
-decorated `field_serializer`/`model_serializer`, and exempt a `to_dict` whose
-body has no literal and returns a call on `self`. #47 and the
-`NetexFareParser` `process-class` (a name the domain owns) remain owner calls.
+**The 4 that remained** were first recorded here as "the tool's, not the code's"
+— that was **wrong**. They were fixed the same day by naming the shapes the rule
+asks for, without touching the tool: `MoneyWire`/`QuantityWire` TypedDicts built
+with keyword construction (the pattern this log already lists as scanner-clean)
+and `type RecordWire = dict[str, Any]` for the boundary-record base — named, and
+still mutable, because the web layer patches a payload at its projection
+boundary. Gate: **0 fails**. The lesson: "the doctrine forbids the rule's
+suggestion" is not the same as "there is no honest shape"; check the
+annotation-level answer before calling a finding unfixable.
+
+
+### The exemption audit (2026-10-21): every remaining site, one at a time
+
+The tool was **not** edited. The last four failures were fixed in code by naming
+the shapes the rule asks for (`MoneyWire`/`QuantityWire` TypedDicts built with
+keyword construction; `type RecordWire = dict[str, Any]` for the boundary-record
+base — named, and still mutable, because the web layer patches a payload at its
+projection boundary). Gate: **0 fails**.
+
+Every remaining suppression was then re-read against its code. Eight were
+**wrong** — they kept dead code alive — and are deleted with their tests:
+
+| Deleted | Why it was not a seam |
+|---|---|
+| `dag/persistence.py::_serialize_value`/`_deserialize_value` | the `_type`/`_module` marker codec is unreachable: `record_columns` + `DagJSONEncoder` write plain JSON. Their two test files (`dag/test_persistence.py`, `unit/test_persistence.py`) asserted the dead encoding; the live round-trips in the latter are kept, re-stated on the stored dict |
+| `houses/helpers.py::is_transient_error` (whole module) | a fork of the retry policy whose only caller was a test; the test now calls `DerivedNode._is_transient_error` → `classify_exception`, the single source of truth |
+| `houses/nodes/commute.py::format_duration` | "the web layer no longer formats" — and nothing else called it; the frontend formats |
+| `houses/nodes/expressions.py::StampDutyFn` | superseded by `StampDutyNode`'s `TieredRate` table (which carries provenance) |
+| `houses/stamp_duty.py::stamp_duty_land_tax` | a second copy of the statutory bands, reachable only from `StampDutyFn` — a drift risk, deleted with it |
+| `houses/nodes/transit.py::CommuteResult` + `CommuteLeg` | superseded by `Commute`; the one test using it was a tautology (it built the record and asserted a field) |
+| `houses/nodes/transit.py::WalkLegCheckNode` | superseded by `BusRouteNode._walk_too_long`; the pipeline tests' walk-check double is now a `UserInputNode[bool]` |
+
+One citation was **uncheckable** and is now written down: the `fakefs` markers
+cited `docs/testing-standards.md`, which said nothing about the filesystem. The
+policy (real `tmp_path`, no pyfakefs, and why) is now a section there.
+
+What follows is the rest, by signal. A verdict is "stands" only where the reason
+is checkable from the code or a written decision; **weak** marks a reason that
+does not survive the re-read.
+
+#### fakefs — 89 sites
+
+- **4 file-level markers** (`tests/unit/test_deploy_run_migrations.py:22`,
+  `test_deploy_migrations_list.py:23`, `test_deploy_allowlist.py:15`,
+  `nodes/test_works_equity_mortgage.py:3`): subprocess interop against a real
+  sqlite file / a stub `sudo` on PATH. The rule's own message carves this out
+  ("when the code under test needs real FS semantics — subprocess interop,
+  symlinks, C-level I/O like sqlite3"). **Stands.**
+- **5 sites whose test body touches no filesystem** —
+  `nodes/test_commute_pipeline_rebuild.py:112` (pure in-memory pipeline rebuild),
+  `test_parse_netex_fares.py:107,132,149,202` (in-memory XML strings),
+  `test_property_registry.py:34` (an in-memory registry). Read line by line: no
+  `tmp_path`, no `open`, no `Path`. The detector is keying on the module or a
+  fixture, so the finding is a false positive at these sites. **Stands** (and is
+  worth a tool bug if it recurs).
+- **80 sites**: real-FS tests isolated by `tmp_path`, writing CSV/JSON/HTML with
+  `open`/`write_text`/`csv.writer`, plus `test_docs_links.py:32` (reads the
+  repo's own docs on purpose) and the e2e Playwright ones. pyfakefs would work
+  for the plain file I/O — the reason not to is the house decision, now written
+  in `docs/testing-standards.md` → *Real filesystem, not pyfakefs* (sqlite3 is
+  C-level I/O, Playwright and subprocesses need a real FS, and the isolation
+  that matters is `tmp_path` + the cache/DB fixtures). **Stands**, now
+  checkable.
+
+#### class-module — 8 sites — **weak**
+
+`nodes/area.py:13`, `nodes/bus.py:66`, `nodes/location.py:17`,
+`nodes/schools.py:39`, `nodes/expressions.py:20`, `commute_router.py:40`,
+`signals.py:8`, `nodes/property_nodes.py:58`. Each is a *family* file holding
+several cohesive classes (area: walkability/nearest-town/town-desc/town; signals:
+three mutually recursive primitives), so the rule's "create or rename" cannot
+apply — but the written standard (`coding-standards.md`:97) says each class in
+its own module, with an exception only for "closely related small dataclasses",
+and these are behaviour classes. The sweep's verdict was "one compact family
+file". Fixing means splitting each family into a module per class (8 files → ~30)
+or overruling the standard for node families. **Owner call.**
+
+#### inline-import — 5 sites — **weak**
+
+`dag/persistence.py:538`, `dag/scheduler.py:224,400`, `services.py:429`,
+`scripts/sync_parking_rates.py:332`. Every why is "cycle break", and the standing
+scope decision (2026-08-22) says exactly the opposite: *"circular-import
+avoidance is not a justification — break cycles by interface extraction"*. The
+0.4.0 sweep honoured that for two cycles; the `services_provider` fix that
+"held" is a third. Fixing these means an interface/leaf module for the DAG's
+`persistence ↔ scheduler ↔ derived_node` triangle (and for
+`location ↔ services`, `houses ↔ scripts`). **Owner call** — it is the DAG
+core's import graph, and the sweep chose to leave it.
+
+#### long-param-list — 1 site — **weak**
+
+`houses/apigw.py:203` `api_fetch(method, url, *, api, params, body, headers,
+wire_params, _client_factory, _no_cache)` — 9 parameters, one caller
+(`apis/base_api.py`), so "the flat signature is the ease-of-use contract" does
+not hold. The doctrine's answer elsewhere is a parameter object, and here the
+honest one is a class owning the guarded fetch — whose constructor then has the
+same nine parameters, or a record with ≥5 fields and no methods, which trips
+`record-shape` instead. **Owner call** (the fix is a small design, not a rename).
+
+#### latent-class — 8 sites
+
+All warnings, not fails, and every one probed with `seam_members: []`:
+`attempt.py:283` (Attempt), `derived_node.py:336` (DerivedNode),
+`commute_router.py:286` (CommuteRouter, 17 methods over 584 lines),
+`bus_journey.py:111` (BusJourneyRegistry), `tfl_client.py:434` (TflClient),
+`nodes/property_nodes.py:205` (PropertyNodes), `scripts/parse_netex_fares.py:216`
+(NetexFareParser — also a failing `process-class` on a name the domain owns:
+owner call), `rightmove_scraper.py:417` (`to_property`, whose advice is to move
+the computation onto the record — it reads the page's DOM and preloaded state,
+so it cannot). **Stands** (filed as lucidlint#47).
+
+#### middle-man — 7 sites
+
+`dag/measurement.py:105,111,118,125` (`__add__`/`__sub__`/`__mul__`/`__truediv__`
+— each implements a protocol over the one `_binop`),
+`nodes/commute.py:392` and `nodes/petrol.py:126` (`provenance_formula` — a
+framework hook the DAG calls, deliberately not inlined),
+`services.py:565` (`enrich` — the echo keeps the DI slot for `RailFareNode`).
+**Stands** (filed as lucidlint#44); the eighth was deleted with `StampDutyFn`.
+
+#### record-shape — 7 sites
+
+`dag/attempt.py:310,486` (wire-format dicts at the serialization boundary —
+the coding-standards exception), `tests/unit/test_deploy_allowlist.py:30` (a
+subprocess env), `tests/unit/test_add_property_flow.py:34`,
+`tests/unit/test_scrape_queue.py:36,43` (sqlite row projections and a claim
+response — test fixtures of wire shapes),
+`tests/integration/test_park_and_ride.py:26` (a provider payload fixture).
+**Stands.**
+
+#### magic-number — 5 sites
+
+`scripts/parse_netex_fares.py:233` (the bounding-box west edge — the value IS
+the data), `houses/apcoa_scraper.py:115` (a tariff-scan cap),
+`houses/tfl_client.py:42`, `scripts/download_rail_fares.py:64`,
+`scripts/extract_rail_fares.py:80` (the pence-per-pound factor, which the money
+doctrine keeps in the money layer: `Money` owns unit math). **Stands.**
+
+#### broad-except — 5 sites
+
+`dag/guard.py:23,36,57,80` (`capture`/`guarded_async`/`capture_async` — the
+never-raise boundary whose whole contract is returning the failure to the
+caller) and `dag/derived_node.py:685` (`refresh` — compute is subclass code;
+failures become pending/impossible). Each returns or records the failure; none
+swallows. **Stands.**
+
+#### special-case — 4 sites
+
+`houses/location.py:218` (`gp=None` is the geocoder cascade signal),
+`houses/scrape_queue.py:144` (a missing job row IS the absent case),
+`houses/tfl_client.py:565` (a sentinel in the national-rail disambiguation),
+`scripts/parse_netex_fares.py:335` (`_first_found`'s None is the shared
+contract). **Stands.**
+
+#### private-import — 4 sites
+
+`scripts/check_restart.py:16` and `scripts/extract_bus_fares.py:26` (intra-package
+helpers inside a one-shot script package), `tools/scrape_worker.py:37` and
+`tests/unit/test_add_property_flow.py:18` (the cookie-minting entry point, one
+per package). **Stands.**
+
+#### loop-pipeline — 4 sites
+
+`tools/commute/drive_isochrone.py:878`, `tools/commute/intersection.py:386`,
+`tools/commute/combined_map.py:143` (group-by accumulation — no comprehension
+form, and `groupby` would re-sort), `houses/web/settings_payload.py:162` (the
+loop enriches each serialized POI in place; no collection is built).
+**Stands.**
+
+#### duplicate-module — 4 sites
+
+`houses/apis/overpass_params.py:1`, `places_center.py:1`, `places_circle.py:1`,
+`places_restriction.py:1` — the request DTOs are one class + one docstring + N
+fields each *by design*; "reconcile the copies" is not actionable across
+different request shapes. **Stands.**
+
+#### data-clump — 3 sites
+
+`houses/epc.py:209` (`(address, certs)` travel together), `houses/walkability.py:103`
+(`(lat, lng)` is `enrich_walkability`'s public signature),
+`houses/tfl_client.py:352` (the three leg-label inputs travel together through
+the mode dispatch map). **Stands.**
+
+#### unused-setter — 2 sites
+
+`dag/scheduler.py:312` (`set_scheduler`), `houses/api_cache.py:62`
+(`set_cache_dir`) — test-injection APIs called from the isolation fixtures; the
+rule counts production references only. **Stands.**
+
+#### unused — 2 sites
+
+`dag/scheduler.py:318` (`reset_scheduler`) — a test seam the dag fixtures call to
+clear the override; the alternative is tests poking `SchedulerRuntime.override`
+directly. **Stands.** `houses/nodes/bootstrap.py:150` (`bootstrap_from_row`) —
+the sheet-import entry point, with **no production caller at all** (startup uses
+`load_property_nodes_from_db`; the `houses/sheets/` layer has no callers either).
+This is not dead weight but an unwired feature: deleting it deletes the import
+path's tests, wiring it is a product decision. **Owner call.**
+
+#### swallow — 2 sites
+
+`dag/scheduler.py:470` (`submit_to_processor` — a wedged drain must not hang
+`systemctl stop`), `dag/scheduler.py:540` (`run_on_processor` — the log IS the
+delivery surface for a queued callback's failure). Both log; the rule wants a
+control-flow exit (quirk 1). **Stands.**
+
+#### duplicate-block — 2 sites
+
+`houses/location.py:476` (the outcode tier intentionally mirrors the
+full-postcode tier — a two-tier cascade), `houses/nodes/property_nodes.py:235`
+(extracting a helper/loop was probed: it re-fires or drops the types).
+**Stands.**
+
+#### static-husk — 1 site
+
+`houses/apcoa_scraper.py:43` (`ApcoaScraper` is the seam type `car_park` injects
+— one parse surface). **Stands.**
+
+#### duplicate — 1 site
+
+`houses/rail_fare_registry.py:91` — a deliberate mirror of
+`get_bus_fare_reader`'s lazy-singleton idiom (a warning, and the shape is the
+house idiom). **Stands.**

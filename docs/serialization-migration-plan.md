@@ -11,12 +11,14 @@ file is only the plan.
   exemption). On the identical pre-migration tree that is **24 fails → 15**
   (9 `record-shape` sites clear), with **no new finding** and **no marker gone
   stale** (175 comment-suppressed on both sides).
-- `make lucidlint` → **5 actions = 4 `record-shape` (fail) + 1 warning**
-  (`middle-man` on `serialization/__init__.py:122` — deliberate, lucidlint#44).
-  All 4 fails are in `serialization/__init__.py`; the `bulk-suppression` census
-  warning is gone (no signal suppressed at ≥10 sites).
-- 1843 tests pass; `make typecheck-py` → 0 errors, no baseline file;
-  `make lint-check` and `ruff check scripts/` clean.
+- `make lucidlint` → **1 action = 0 fails + 1 warning** (`middle-man` on
+  `serialization/__init__.py:149` — deliberate, lucidlint#44). The
+  `bulk-suppression` census warning is gone, and every `record-shape` site the
+  plan listed is closed — the last four by naming their wires (`MoneyWire`,
+  `QuantityWire`, `RecordWire`), not by editing the tool.
+- 1812 tests pass (39 dead-code tests deleted with the code they pinned);
+  `make typecheck-py` → 0 errors, no baseline file; `make lint-check` and
+  `ruff check scripts/` clean.
 - Byte oracle: `pytest tests/unit/test_zzz_serialization_oracle.py`, then diff
   the 7 captures against `/tmp/ll-goldens/*.gold` → **identical** after masking
   the volatile fields (`api.json`, `dag_rows.json`, `node_json`,
@@ -33,41 +35,37 @@ file is only the plan.
 | 4 | `_GoogleClientConfig` is a `SerializableAsDict` whose one wrap serializer emits `{"web": …}`; the `_GoogleClient` TypedDict twin deleted | finding gone, no new one; `to_dict()` still returns the library's config object |
 | 6 (arm 3) | `_with_coordinates` names the pair once; the `model_copy` update dict is the record's own wire, not a constant-key literal | both findings gone; no `Coordinates`/`*Wire` mirror invented |
 
-## Remaining — 4 fails, all in `serialization/__init__.py`
+## Remaining — 0 fails
 
-Left visible, no marker: the code is correct and a marker here is the excuse
-pattern the review log exists to prevent.
+The plan's list is closed. The last four (`serialization/__init__.py`) were
+fixed by naming the wires the rule asks for — `MoneyWire` and `QuantityWire`
+TypedDicts built with keyword construction, and `type RecordWire = dict[str,
+Any]` for the boundary-record base (named, and still mutable: the web layer
+patches a payload at its projection boundary). The tool was not edited, and the
+docstrings state the contracts rather than a suppression.
 
-```
-serialization/__init__.py:50:12   _money_wire's {amount, currency} literal
-serialization/__init__.py:70      _quantity_wire returns dict[str, Any]
-serialization/__init__.py:75:12   _quantity_wire's {value, unit} literal
-serialization/__init__.py:122     SerializableAsDict.to_dict returns dict[str, Any]
-```
+What is left is **exemptions, not failures** — 164 per-site markers, audited one
+at a time in
+[lucidlint-review-log.md](./lucidlint-review-log.md) → *The exemption audit*.
+Eight were wrong (dead code kept alive by its own tests) and are deleted; the
+rest stand on checkable reasons, with three marked **weak** there and left as
+owner calls:
 
-Both are **rule-versus-doctrine divergences, not code defects**, so clearing
-them means moving the tool's rules:
+- **class-module ×8** — family files (area, bus, location, schools, expressions,
+  signals, property_nodes, commute_router) versus the written "each class in its
+  own module"; fixing means splitting each family.
+- **inline-import ×5** — every why is "cycle break", which the 2026-08-22 scope
+  decision explicitly rejects ("break cycles by interface extraction"); fixing
+  means an interface module for the DAG's `persistence ↔ scheduler ↔
+  derived_node` triangle.
+- **long-param-list ×1** (`apigw.api_fetch`, 9 parameters, one caller) — the
+  doctrine's param object here would have ≥5 fields and no methods (tripping
+  `record-shape`), so the fix is a small design.
 
-1. **The literal arm fires inside a field serializer.** `_money_wire` and
-   `_quantity_wire` are `PlainSerializer` targets; the doctrine is explicit
-   that third-party types (`money.Money`, `pint.Quantity`) get a serialiser on
-   the field that carries them, "never a class beside them" — and `MoneyJson`
-   is named in the ruling as a class that was **deleted**. The tool's advice
-   ("make a class with these fields") is the one shape the doctrine forbids.
-2. **The return arm fires on the boundary-record base.** `to_dict` on
-   `SerializableAsDict` delegates to `self.model_dump(...)`; the class declares
-   no fields by design, so the export exemption (#42) does not reach it — the
-   fix's own commit message keeps this case firing on purpose ("a to_dict on a
-   class declaring no field"). Every subclass that declares fields names the
-   shape, so the base is the mechanism, not a lost shape.
-
-Proposed tool rules (both narrow, both implementable in the scanner):
-exempt a literal inside a function referenced by `PlainSerializer` /
-`BeforeValidator` / `AfterValidator` or decorated `field_serializer` /
-`model_serializer` (a serialization edge owns the shape it emits); and exempt
-a `to_dict`/`to_json*` method whose body has no dict literal and returns a call
-on `self` (the base delegates to its own `model_dump` — the shape is named by
-the subclasses).
+Plus two product calls: `scripts/parse_netex_fares.py:216` (`NetexFareParser`'s
+failing `process-class` — a name the domain owns) and
+`houses/nodes/bootstrap.py:150` (`bootstrap_from_row`, the sheet-import entry
+point with no caller at all — dead weight or an unwired feature).
 
 The merged #42 fix is **narrower than the issue's report**: it exempts a
 `to_dict`/`to_json*`-named method whose enclosing class declares fields that
