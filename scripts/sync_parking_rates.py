@@ -16,7 +16,6 @@ import argparse
 import asyncio
 import csv
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
@@ -25,6 +24,8 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
 
 from dag.guard import capture_async
+from houses.apcoa_rates import city_slugs, extract_daily_rate_from_tariff
+from houses.apcoa_scraper import apcoa_location_urls
 
 logger = logging.getLogger(__name__)
 
@@ -58,91 +59,6 @@ class _SyncSelection:
     crs: str | None = None
     missing: bool = False
     force: bool = False
-
-
-def extract_daily_rate_from_tariff(tariff_text: str) -> float | None:
-    """Extract the weekday daily parking rate from APCOA tariff text.
-
-    Handles several formats:
-    - "Daily Rate: £X.XX" (Woking, Fleet)
-    - "Daily Rate before 12pm: £X.XX" (Bourne End)
-    - "Up to 24 hours £X.XX" (Didcot Foxhall)
-    - Multi-line tariff from the Monday-Friday section.
-
-    Returns:
-        float — the daily rate in GBP
-        None — if no rate could be confidently extracted
-
-    Designed as a pure function — no I/O, no side effects. Testable
-    with fixture files containing ``Parking tariff`` section text.
-    """
-    # The caller already extracts the relevant section from the page.
-    # The text may or may not start with "Parking tariff".
-    tariff_start = tariff_text.find("Parking tariff")
-    if tariff_start < 0:
-        tariff_start = tariff_text.find("Pricing and payment")
-    if tariff_start < 0:
-        return None
-    tariff = tariff_text[tariff_start:]
-
-    # Isolate the Monday-Friday block (ends before Saturday or weeklies).
-    # "Sunday" is too broad (matches "Monday - Sunday"), so we only
-    # anchor on "Saturday" which cleanly separates weekday from weekend.
-    mf_end = len(tariff)
-    for marker in ["Saturday", "Weekly\n", "Monthly\n", "Season Ticket"]:
-        idx = tariff.find(marker)
-        if idx >= 0 and idx < mf_end:
-            mf_end = idx
-    mf = tariff[:mf_end]
-
-    # Check for "Permit Holders Only" — no daily rate available
-    if re.search(r"Permit\s*Holders?\s*Only", mf, re.IGNORECASE):
-        return None
-
-    # Strategy 1 then 2: explicit "Daily Rate: £X.XX" (handles "before 12pm"
-    # qualifiers), then "Up to 24 hours £X.XX" / "Up to 24 hours: £X.XX".
-    for pattern in (
-        r"Daily\s*Rate\s*\S*?\s*:?\s*£(\d+\.\d{2})",
-        r"(?:Up\s*to\s*)?24\s*hours?\s*:?\s*£(\d+\.\d{2})",
-    ):
-        m = re.search(pattern, mf, re.IGNORECASE)
-        if m:
-            return float(m.group(1))
-
-    # Strategy 3: extract all £X.XX prices, take the highest (likely daily max)
-    prices = [float(p) for p in re.findall(r"£(\d+\.\d{2})", mf)]
-    if prices:
-        max_price = max(prices)
-        if max_price > 0:
-            return max_price
-
-    return None
-
-
-def make_slug(name: str) -> str:
-    """Convert a station name to an APCOA URL slug."""
-    slug = name.lower()
-    slug = slug.replace("'", "").replace("&", "and")
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    return slug.strip("-")
-
-
-def city_slugs(station_name: str) -> list[str]:
-    """Generate candidate city slugs for APCOA URL construction.
-
-    Tries the full station name first (e.g. 'Bourne End' →
-    'bourne-end'), then falls back to the first word
-    (e.g. 'Didcot Parkway' → 'didcot').
-    """
-    name = station_name.strip()
-    full = make_slug(name)
-    first = make_slug(name.split()[0])
-    candidates = [full]
-    if first != full:
-        candidates.append(first)
-    return candidates
-
-
 
 
 def load_stations() -> list[_StationRecord]:
@@ -327,11 +243,6 @@ async def find_station_rate(page, station_name: str) -> float | None:
     Tries candidate direct URLs first. If none work, falls back
     to the city listing page to find station car park URLs.
     """
-    # houses.apcoa_scraper imports this module's slug helpers, so importing it
-    # at module level would close the cycle — the URL-shape helper comes in here.
-    # lucidlint: ignore inline-import deferred to break the houses↔scripts cycle (review-log)
-    from houses.apcoa_scraper import apcoa_location_urls
-
     # Try direct URLs first
     rate = await _try_urls(page, apcoa_location_urls(station_name))
     if rate is not None:

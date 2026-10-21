@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import TypedDict
 
-from scripts.sync_parking_rates import city_slugs, extract_daily_rate_from_tariff, make_slug
+from houses.apcoa_rates import city_slugs, extract_daily_rate_from_tariff, make_slug
 
 
 class ApcoaPage(TypedDict):

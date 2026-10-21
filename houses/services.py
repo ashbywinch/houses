@@ -31,7 +31,15 @@ from houses.council_tax import lookup_council_tax
 from houses.council_tax_info import CouncilTaxInfo
 from houses.epc import lookup_epc
 from houses.geopoint import GeoPoint
-from houses.location import WalkabilityFns, find_nearest_town_name, geocode, geocode_address
+from houses.location import (
+    WalkabilityFns,
+    find_nearest_town_name,
+    geocode,
+    geocode_address,
+)
+from houses.location import (
+    reverse_geocode_postcode as _reverse_geocode_postcode,
+)
 from houses.model.domain import Commute, Person
 from houses.nodes.settings import PersonsSourceNode, make_default_persons, make_default_thresholds
 from houses.nodes.settings import SettingsNode as SettingsInputNode
@@ -426,10 +434,7 @@ class _DefaultGeocoder:
         return await find_nearest_town_name(lat, lon)
 
     async def reverse_geocode_postcode(self, lat: float, lon: float) -> Attempt[str]:
-        # lucidlint: ignore inline-import cycle break — location imports this module's services_provider at top
-        from houses.location import reverse_geocode_postcode as _reverse
-
-        postcode = await _reverse(lat, lon, services=self._services)
+        postcode = await _reverse_geocode_postcode(lat, lon, services=self._services)
         if postcode:
             return Attempt.succeeded(postcode)
         return Attempt.impossible("no postcode found for coordinates")
