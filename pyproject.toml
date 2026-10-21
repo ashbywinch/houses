@@ -36,7 +36,10 @@ dev = [
     "pyrefly>=1.2.0",
     "coverage>=7.0.0",
     "httpx>=0.28.0",
-    "lucidlint @ git+https://github.com/ashbywinch/lucidlint.git@5c893cbc572e2b9fd45b98a7cdbb02d49f85292e",
+    # Pinned to master past the #42 fix (PR #43: exempt a to_dict/to_json method's
+    # own shape when the enclosing class declares the keys). See
+    # docs/lucidlint-review-log.md → *Tool bugs filed*.
+    "lucidlint @ git+https://github.com/ashbywinch/lucidlint.git@2bc734fd2830c5e5c8e59c5728b4dce6c544c77f",
     "libcst>=1.9.0",
 ]  # Architecture testing (ArchUnit-style rules for Python imports)
 
