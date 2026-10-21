@@ -23,8 +23,8 @@ from houses.api_cache import CacheRequest, cached_async_client
 from houses.bus_route import BusRoute
 from houses.commute import JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
-from houses.google_route import GoogleRoute
 from houses.google_routes_options import GoogleRoutesOptions
+from houses.route import Route
 from houses.settings import settings
 from houses.transit_stop import TransitStop
 from serialization import SerializableAsDict, omit_when_none, optional_parse
@@ -338,7 +338,7 @@ class GoogleRoutesClientLike(Protocol):
 
     async def post_route(
         self, *, origin: str | GeoPoint, destination: str | GeoPoint, travel_mode: str, timeout: float
-    ) -> GoogleRoute | None: ...
+    ) -> Route | None: ...
 
     async def post_bus_route(self, *, origin: str, destination: str) -> BusRoute | None: ...
 
@@ -458,7 +458,7 @@ class GoogleRoutesClient:
         destination: str | GeoPoint,
         travel_mode: str,
         timeout: float,
-    ) -> GoogleRoute | None:
+    ) -> Route | None:
         """One route for the orchestration: the route's own duration and
         distance, plus its legs as journey legs when it is a transit route.
 
@@ -488,7 +488,7 @@ class GoogleRoutesClient:
         route = _first_route(data)
         if route is None:
             return None
-        return GoogleRoute(
+        return Route(
             duration_s=_duration_seconds(route.duration),
             distance_meters=route.distance_meters,
             legs=tuple(_transit_legs(route)) if transiting else (),
