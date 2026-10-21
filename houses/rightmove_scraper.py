@@ -18,7 +18,7 @@ import logging
 import random
 import re
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -386,6 +386,21 @@ def _merge_missing(result: _PropertyExtract, source: _PropertyExtract) -> _Prope
     )
 
 
+def _with_coordinates(
+    extracted: _PropertyExtract, geo: Mapping[str, Any] | None
+) -> _PropertyExtract:
+    """The coordinate pair a page's geo block carries — both fields or neither."""
+    if not geo:
+        return extracted
+    lat = geo.get("latitude")
+    lng = geo.get("longitude")
+    if lat is None or lng is None:
+        return extracted
+    return extracted.model_copy(
+        update=_PropertyExtract(latitude=float(lat), longitude=float(lng)).to_dict()
+    )
+
+
 class _PageHtml:
     """One Rightmove page: its HTML plus the ``window.__PAGE_MODEL``
     extraction, read across the sources Rightmove ships the property in.
@@ -463,11 +478,7 @@ class _PageHtml:
         offers = data.get("offers") or {}
         extracted = _record_or_set_price(extracted, offers.get("price"))
 
-        geo = data.get("geo") or {}
-        lat = geo.get("latitude")
-        lng = geo.get("longitude")
-        if lat is not None and lng is not None:
-            extracted = extracted.model_copy(update={"latitude": float(lat), "longitude": float(lng)})
+        extracted = _with_coordinates(extracted, data.get("geo"))
 
         return extracted
 
@@ -490,11 +501,7 @@ class _PageHtml:
             if pd.get("bedrooms") is not None:
                 extracted = extracted.model_copy(update={"bedrooms": int(pd["bedrooms"])})
             extracted = _record_or_set_price(extracted, pd.get("price"))
-            loc = pd.get("location") or {}
-            lat = loc.get("latitude")
-            lng = loc.get("longitude")
-            if lat is not None and lng is not None:
-                extracted = extracted.model_copy(update={"latitude": float(lat), "longitude": float(lng)})
+            extracted = _with_coordinates(extracted, pd.get("location"))
 
             return extracted
 
