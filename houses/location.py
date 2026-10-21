@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
 from typing import Any
@@ -14,14 +14,13 @@ import httpx
 from dag.attempt import Attempt
 from dag.guard import capture_async
 from houses import apis
-from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.api_cache import CacheRequest, cached_async_client
 from houses.apis.ors_api import ORSApi
 from houses.apis.ors_reverse_params import OrsReverseParams
 from houses.geopoint import GeoPoint
 from houses.ors_endpoints import PELIAS_REVERSE
 from houses.services_provider import get_services
 from houses.settings import settings
-from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +71,8 @@ class ReverseGeocodeOptions:
     """
 
     api_key: str | None = None
-    get_cached_fn: Callable[[str, str, SerializableAsDict | None, str | None], dict[str, Any] | None] | None = None
-    set_cached_fn: Callable[[str, str, SerializableAsDict | None, str | None, dict[str, Any]], None] | None = None
+    get_cached_fn: Callable[[CacheRequest], Mapping[str, Any] | None] | None = None
+    set_cached_fn: Callable[[CacheRequest, Mapping[str, Any]], None] | None = None
     client_factory: Callable[..., AbstractAsyncContextManager[Any]] | None = None
 
 
@@ -379,11 +378,12 @@ async def find_nearest_town_name(
     if api_key:
         headers["Authorization"] = api_key
 
-    get_cached_fn = options.get_cached_fn or get_cached
-    set_cached_fn = options.set_cached_fn or set_cached
+    get_cached_fn = options.get_cached_fn or CacheRequest.cached
+    set_cached_fn = options.set_cached_fn or CacheRequest.store
     client_factory = options.client_factory or cached_async_client
 
-    cached = get_cached_fn("GET", rev_url, params, None)
+    call = CacheRequest("GET", rev_url, params)
+    cached = get_cached_fn(call)
     if cached is not None:
         data = cached
     else:
@@ -393,7 +393,7 @@ async def find_nearest_town_name(
                 resp = await client.get(rev_url, params=params.to_dict(), headers=headers or None)
                 resp.raise_for_status()
                 payload = resp.json()
-            set_cached_fn("GET", rev_url, params, None, payload)
+            set_cached_fn(call, payload)
             return payload
 
         payload, failure = await capture_async(

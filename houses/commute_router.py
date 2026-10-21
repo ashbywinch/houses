@@ -23,7 +23,7 @@ from dag.attempt import Attempt
 from dag.guard import capture_async, guarded_async
 from dag.http_error import HttpError
 from houses import apigw
-from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.api_cache import CacheRequest, cached_async_client
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -265,7 +265,8 @@ class GoogleRoutesClient:
         # transport edge; legacy raw-dict callers pass through unchanged (coding-standards.md)
         payload = body.to_dict() if hasattr(body, "to_dict") else body
         key = json.dumps(payload, sort_keys=True)
-        cached = get_cached("POST", self.GOOGLE_ROUTES_URL, None, key)
+        call = CacheRequest("POST", self.GOOGLE_ROUTES_URL, body=key)
+        cached = call.cached()
         if cached is not None:
             return cached
 
@@ -277,7 +278,7 @@ class GoogleRoutesClient:
                 raise HttpError(GoogleRoutesClient.HTTP_TOO_MANY_REQUESTS, "rate limited", headers=dict(resp.headers))
             self._raise_with_body(resp)
             data = resp.json()
-            (options.set_cached_fn or set_cached)("POST", self.GOOGLE_ROUTES_URL, None, key, data)
+            (options.set_cached_fn or CacheRequest.store)(call, data)
             return data
 
 

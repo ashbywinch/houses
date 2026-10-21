@@ -18,7 +18,7 @@ from pydantic import Field, field_serializer
 from dag.attempt import Attempt
 from dag.http_error import HttpError
 from houses import apigw
-from houses.api_cache import CacheEnvelope, cached_async_client, evict_cached, get_cached, set_cached
+from houses.api_cache import CacheEnvelope, CacheRequest, cached_async_client
 from houses.car_park import ApcoaCarParkLookup, CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.location import geocode, geocode_address
@@ -428,7 +428,7 @@ class ParkingCostResult:
 def _evict_transient_entry(url: str, request: SerializableAsDict | Mapping[str, Any]) -> None:
     """Drop a cached transient error response so the route is re-fetched."""
     logger.warning("evicting cached transient error response for %s", url)
-    evict_cached("GET", url, request, None)
+    CacheRequest("GET", url, request).evict()
 
 
 # lucidlint: ignore latent-class --json reports signal god-class with seam_members=[] — no field-disjoint group exists
@@ -855,7 +855,8 @@ class TflClient:
         ``to_dict()`` is called ONCE here, at the httpx/cache-key edge) or
         the tube-fare params, which ARE the wire dict."""
         params = request.to_dict() if not isinstance(request, Mapping) else request
-        cached = get_cached("GET", url, request)
+        call = CacheRequest("GET", url, request)
+        cached = call.cached()
         if cached is not None:
             if "_cached_status" in cached:
                 entry = CacheEnvelope.from_dict(cached)
@@ -900,27 +901,15 @@ class TflClient:
             # hits. NEVER cache transient errors (429, 5xx): a cached outage
             # body would poison the route and make retries non-genuine.
             if resp.status_code < TflClient.HTTP_3XX_START:
-                set_cached("GET", url, request, None, data)
+                call.store(data)
             elif TflClient.HTTP_3XX_START <= resp.status_code < TflClient.HTTP_4XX_START:
-                set_cached(
-                    "GET",
-                    url,
-                    request,
-                    None,
-                    CacheEnvelope(status=resp.status_code, body=data).to_dict(),
-                )
+                call.store(CacheEnvelope(status=resp.status_code, body=data).to_dict())
             elif resp.status_code == TflClient.HTTP_NOT_FOUND:
                 # 404 "cannot route this station" is genuinely deterministic —
                 # re-hitting the endpoint for the same impossible request
                 # wastes calls. Every OTHER 4xx is transient-ish (401/403 key
                 # expiry, 409 planner outage) and must not poison the cache.
-                set_cached(
-                    "GET",
-                    url,
-                    request,
-                    None,
-                    CacheEnvelope(status=TflClient.HTTP_NOT_FOUND, body=data).to_dict(),
-                )
+                call.store(CacheEnvelope(status=TflClient.HTTP_NOT_FOUND, body=data).to_dict())
             if resp.status_code == TflClient.HTTP_TOO_MANY_REQUESTS or (
                 TflClient.HTTP_5XX_START <= resp.status_code < TflClient.HTTP_5XX_END
             ):

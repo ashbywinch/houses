@@ -484,6 +484,7 @@ class TestTflCachedApiCall4xx:
         from unittest.mock import AsyncMock, patch
 
         from dag.http_error import HttpError
+        from houses.api_cache import CacheRequest
         from houses.tfl_client import TflClient
 
         fake_resp = AsyncMock()
@@ -500,9 +501,9 @@ class TestTflCachedApiCall4xx:
                 return False
 
         with (
-            patch("houses.tfl_client.get_cached", return_value=None),
+            patch.object(CacheRequest, "cached", return_value=None),
             patch("houses.tfl_client.cached_async_client", return_value=_FakeCM()),
-            patch("houses.tfl_client.set_cached"),
+            patch.object(CacheRequest, "store"),
         ):
             try:
                 await TflClient._cached_api_call(

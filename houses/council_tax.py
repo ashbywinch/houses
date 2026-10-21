@@ -21,7 +21,7 @@ from dag.measurement import Measurement
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
 from houses.annexe_dwelling import AnnexeDwelling
-from houses.api_cache import cached_sync_client, get_cached, set_cached
+from houses.api_cache import CacheRequest, cached_sync_client
 from houses.council_tax_info import CouncilTaxInfo
 from serialization import SerializableAsDict, omit_when_none
 
@@ -273,7 +273,7 @@ def _lookup_yearly_cost(
     Returns a ``Money`` in GBP, or ``None`` if no rate could be found.
 
     CivAccount is called via ``cached_sync_client`` which automatically
-    caches every response to disk — no manual ``get_cached``/``set_cached``
+    caches every response to disk — no manual ``CacheRequest.cached``/``store``
     needed.
 
     ``load_rates_fn`` and ``client_factory`` are DI seams (tests inject
@@ -355,8 +355,9 @@ class CachedVOAClient:
             await self._inner.__aexit__(*args)
 
     async def fetch_page(self, postcode: str, page: int = 0):
-        key = f"voa/{postcode.strip().upper()}"
-        cached = get_cached("GET", key)
+        url = f"voa/{postcode.strip().upper()}"
+        call = CacheRequest("GET", url)
+        cached = call.cached()
         if cached is not None:
             rows = [_VoaRow.from_dict(r) for r in cached.get("rows", [])]
             return type("Page", (), {"rows": rows})()
@@ -371,7 +372,7 @@ class CachedVOAClient:
             ).to_dict()
             for r in result.rows
         ]
-        set_cached("GET", key, None, None, {"rows": rows})
+        call.store({"rows": rows})
         return result
 async def _fetch_voa_results(
     postcode: str,

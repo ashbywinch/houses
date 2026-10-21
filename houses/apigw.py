@@ -3,7 +3,7 @@
 Every external call in this codebase should go through :func:`api_fetch`.
 It gives you, for free:
 
-* **disk caching** (the existing ``with_cache`` rules: 2xx/3xx/404 cached,
+* **disk caching** (the ``CacheRequest`` rules: 2xx/3xx/404 cached,
   transient 4xx/5xx never),
 * **per-API pacing** (a minimum interval between calls — ORS's free tier
   answers the daily quota with 403 and the per-minute limit with 429, so
@@ -41,7 +41,7 @@ from typing import Any
 
 import httpx
 
-from houses.api_cache import cached_async_client, with_cache
+from houses.api_cache import CacheRequest, cached_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,7 @@ async def api_fetch(
     Return the JSON body, or raise a typed error: ``DailyQuotaError``
     (permanent) or the original ``httpx`` error (429/5xx stay transient
     for the DAG; other statuses are permanent). Not JSON? Use
-    ``with_cache`` directly and call ``_pace``/``mark_quota_exhausted``
+    ``CacheRequest.fetch`` directly and call ``_pace``/``mark_quota_exhausted``
     yourself — the guard helpers are still one line each.
     """
     if GATE.quota_exhausted(api):
@@ -260,6 +260,4 @@ async def api_fetch(
                 ) from e
             return resp.json()
 
-    return await with_cache(
-        method, url, params=params, body=body, fetch=_fetch, no_store=_no_cache
-    )
+    return await CacheRequest(method, url, params=params, body=body).fetch(_fetch, no_store=_no_cache)

@@ -227,7 +227,7 @@ class TestGenerateTownDescription:
                     request=httpx.Request("POST", url),
                 )
 
-        async def _fake_cache(method, url, *, body=None, fetch=None, **k):
+        async def _fake_cache(_call, fetch, **k):
             assert fetch is not None
             return await fetch()
 
@@ -269,7 +269,7 @@ class TestGenerateTownDescription:
                     request=httpx.Request("POST", url),
                 )
 
-        async def _fake_cache(method, url, *, body=None, fetch=None, **k):
+        async def _fake_cache(_call, fetch, **k):
             assert fetch is not None
             return await fetch()
 
@@ -307,7 +307,7 @@ class TestGenerateTownDescription:
                     request=httpx.Request("POST", url),
                 )
 
-        async def _fake_cache(method, url, *, body=None, fetch=None, **k):
+        async def _fake_cache(_call, fetch, **k):
             assert fetch is not None
             return await fetch()
 

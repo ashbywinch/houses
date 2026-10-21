@@ -19,7 +19,7 @@ from dag.guard import capture_async
 from houses import apis
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
-from houses.api_cache import get_cached
+from houses.api_cache import CacheRequest
 from houses.apis.epc_search_result import EpcSearchResult
 from houses.settings import settings
 from serialization import SerializableAsDict
@@ -144,7 +144,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
     pc = postcode.strip().upper()
     params = _EpcSearchParams(postcode=pc, page_size=50)
 
-    cached = get_cached("GET", _EpcEndpoints.SEARCH_URL, params)
+    cached = CacheRequest("GET", _EpcEndpoints.SEARCH_URL, params).cached()
     if cached is not None:
         certs = cached.get("data", [])
         return _match_cert(certs, building_id, address)

@@ -6,14 +6,14 @@ cache is persistent across server restarts.
 
 Usage in enrichment functions::
 
-    from houses.api_cache import get_cached, set_cached
+    from houses.api_cache import CacheRequest
 
-    key = ("GET", url, params, None)
-    cached = get_cached(*key)
+    call = CacheRequest("GET", url, params=params)
+    cached = call.cached()
     if cached:
         return cached
     ...
-    set_cached(*key, resp.json())
+    call.store(resp.json())
 """
 
 from __future__ import annotations
@@ -22,7 +22,8 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, override
 from urllib.parse import parse_qs, unquote, urlparse
@@ -80,8 +81,8 @@ class CacheEnvelope(SerializableAsDict):
 def _wire_params(params: SerializableAsDict | Mapping[str, Any] | None) -> _WireFragment | None:
     """Serialise a request record exactly once, at the cache-key edge.
 
-    The cache seams take the caller's request RECORD (``SerializableAsDict``) or a
-    plain wire dict: records serialize via ``to_dict()`` here, never in the
+    ``CacheRequest`` takes the caller's request RECORD (``SerializableAsDict``)
+    or a plain wire dict: records serialize via ``to_dict()`` here, never in the
     callers. Plain dicts are the wire already; falsy values are dropped to
     mirror httpx (the transport omits them from the query, so the cache
     identity must match what is actually on the wire).
@@ -97,48 +98,95 @@ def _wire_params(params: SerializableAsDict | Mapping[str, Any] | None) -> _Wire
     # check should be what makes that true.
     return wire or None
 
-# lucidlint: ignore latent-class probed: 3+ fns sharing 2 params; CacheRequest re-fires first-arg; API is cross-module
-def _make_key(method: str, url: str, params: SerializableAsDict | Mapping[str, Any] | None, body: str | None) -> str:
-    parts = [method.upper(), url]
-    wire = _wire_params(params)
-    if wire:
-        parts.append(json.dumps(wire, sort_keys=True))
-    if body:
-        parts.append(body)
-    raw = "::".join(parts)
-    return hashlib.sha256(raw.encode()).hexdigest()[:32]
-
 
 def _cache_path(key: str) -> Path:
     return _CacheRuntime.CACHE_DIR / f"{key}.json"
 
-def get_cached(
-    method: str,
-    url: str,
-    params: SerializableAsDict | Mapping[str, Any] | None = None,
-    body: str | None = None,
-) -> Mapping[str, Any] | None:
-    """Return the cached JSON response for a request, or ``None``.
 
-    ``params`` is the caller's request record — serialized once at the
+@dataclass(frozen=True)
+class CacheRequest:
+    """One cached API request: the identity the disk cache keys on.
+
+    ``params``/``body`` are the caller's boundary record or the wire form
+    already on the request; a record is serialised ONCE here, at the
     cache-key edge.
     """
-    path = _cache_path(_make_key(method, url, params, body))
-    if path.exists():
-        return json.loads(path.read_text())
-    return None
 
-def set_cached(
-    method: str,
-    url: str,
-    params: SerializableAsDict | Mapping[str, Any] | None,
-    body: str | None,
-    data: Mapping[str, Any],
-) -> None:
-    """Store a JSON response so future identical requests skip the API."""
-    _CacheRuntime.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = _cache_path(_make_key(method, url, params, body))
-    path.write_text(json.dumps(_scrub_secrets(data)))
+    method: str
+    url: str
+    params: SerializableAsDict | Mapping[str, Any] | None = None
+    body: SerializableAsDict | Mapping[str, Any] | str | None = None
+
+    def key(self) -> str:
+        """The sha256 cache key: ``method``/``url`` plus the serialised parts.
+
+        ``params`` goes through ``_wire_params``; a record or mapping ``body``
+        the same way, while a ``str`` body IS the wire and is appended as-is.
+        Each part is omitted when empty, so the key stays byte-identical to
+        the one the pre-class functions built — the committed caches stay warm.
+        """
+        parts = [self.method.upper(), self.url]
+        wire = _wire_params(self.params)
+        if wire:
+            parts.append(json.dumps(wire, sort_keys=True))
+        body = self._body_wire()
+        if body:
+            parts.append(body)
+        raw = "::".join(parts)
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+    def _body_wire(self) -> str | None:
+        """The body's wire form: a ``str`` body IS the wire already; a record
+        or mapping serialises through ``_wire_params`` with sorted keys."""
+        if isinstance(self.body, str):
+            return self.body
+        if self.body:
+            return json.dumps(_wire_params(self.body), sort_keys=True)
+        return None
+
+    def cached(self) -> Mapping[str, Any] | None:
+        """Return the cached JSON response for this request, or ``None``.
+
+        ``params`` is the caller's request record — serialized once at the
+        cache-key edge.
+        """
+        path = _cache_path(self.key())
+        if path.exists():
+            return json.loads(path.read_text())
+        return None
+
+    def store(self, data: Mapping[str, Any]) -> None:
+        """Store a JSON response so future identical requests skip the API."""
+        _CacheRuntime.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _cache_path(self.key()).write_text(json.dumps(_scrub_secrets(data)))
+
+    def evict(self) -> None:
+        """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
+        _cache_path(self.key()).unlink(missing_ok=True)
+
+    async def fetch(
+        self, fetch: Callable[[], Awaitable[Mapping[str, Any]]], *, no_store: bool = False
+    ) -> Mapping[str, Any]:
+        """Check disk cache first; on miss call ``fetch``, cache result, return.
+
+        ``fetch`` is an async callable that returns the parsed JSON dict.
+        Example::
+
+            data = await CacheRequest("GET", url, params=params).fetch(lambda: resp.json())
+
+        ``params``/``body`` are the caller's request records — serialized once
+        at the cache-key edge; legacy plain dicts pass through unchanged.
+        """
+        if no_store:
+            # test-injection seam (``_no_cache``), the DI sibling of a client
+            # factory: call the fetch without reading or writing the disk cache
+            return await fetch()
+        cached = self.cached()
+        if cached is not None:
+            return cached
+        data = await fetch()
+        self.store(data)
+        return data
 
 
 def _scrub_secrets(obj: Any, secret_key_value: str | None = None) -> Any:
@@ -176,45 +224,6 @@ def _cached_secret_key() -> str:
         _CacheRuntime.TFL_KEY_VALUE = settings.tfl_api_key
     return _CacheRuntime.TFL_KEY_VALUE
 
-def evict_cached(
-    method: str, url: str, params: SerializableAsDict | Mapping[str, Any] | None, body: str | None
-) -> None:
-    """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
-    _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
-
-
-# lucidlint: ignore long-param-list the flat signature is this helper's ease-of-use contract (cache callers)
-async def with_cache(
-    method: str,
-    url: str,
-    params: SerializableAsDict | Mapping[str, Any] | None = None,
-    body: SerializableAsDict | Mapping[str, Any] | None = None,
-    *,
-    fetch,
-    no_store: bool = False,
-) -> Mapping[str, Any]:
-    """Check disk cache first; on miss call ``fetch``, cache result, return.
-
-    ``fetch`` is an async callable that returns the parsed JSON dict.
-    Example::
-
-        data = await with_cache("GET", url, params=params, fetch=lambda: resp.json())
-
-    ``params``/``body`` are the caller's request records — serialized once
-    at the cache-key edge; legacy plain dicts pass through unchanged.
-    """
-    body_str = json.dumps(_wire_params(body), sort_keys=True) if body else None
-    if no_store:
-        # test-injection seam (``_no_cache``), the DI sibling of a client
-        # factory: call the fetch without reading or writing the disk cache
-        return await fetch()
-    cached = get_cached(method, url, params, body_str)
-    if cached is not None:
-        return cached
-    data = await fetch()
-    set_cached(method, url, params, body_str, data)
-    return data
-
 
 class CachingTransport(httpx.AsyncBaseTransport):
     """httpx async transport that checks the disk cache before making HTTP calls.
@@ -226,7 +235,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
     cached — retries stay genuine and a cached outage body can't poison a route.
 
     Stores raw response bodies (not wrapped) so that enrichment functions
-    using ``get_cached`` directly remain compatible.
+    using ``CacheRequest.cached`` directly remain compatible.
     """
 
     def __init__(self, inner: httpx.AsyncBaseTransport | None = None):
@@ -235,8 +244,8 @@ class CachingTransport(httpx.AsyncBaseTransport):
     @override
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         parsed = urlparse(str(request.url))
-        # Key space is UNIFIED with the callers' direct get_cached/set_cached
-        # calls: the decoded URL (httpx percent-encodes path spaces) with
+        # Key space is UNIFIED with the callers' direct CacheRequest calls:
+        # the decoded URL (httpx percent-encodes path spaces) with
         # app_key stripped. Before this, the transport keyed the encoded URL
         # with auth params — a parallel key space where every response was
         # stored twice and each layer was blind to the other's entries.
@@ -249,7 +258,8 @@ class CachingTransport(httpx.AsyncBaseTransport):
         params = query
         body = request.content.decode() if request.content else None
 
-        cached = get_cached(request.method, url_path, params, body)
+        call = CacheRequest(request.method, url_path, params, body)
+        cached = call.cached()
         if cached is not None:
             status = cached.get("_cached_status") if isinstance(cached, dict) else None
             raw_status = cached.get("httpStatusCode") if isinstance(cached, dict) else None
@@ -260,7 +270,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
                 # Legacy poisoned entry: auth failures, planner outages, rate
                 # limits and server errors cached before the whitelist rule.
                 # Evict so retries stay genuine.
-                evict_cached(request.method, url_path, params, body)
+                call.evict()
                 cached = None
             elif isinstance(cached, dict) and "_cached_status" in cached:
                 # Wrapped deterministic non-2xx — serve with its REAL status
@@ -276,18 +286,12 @@ class CachingTransport(httpx.AsyncBaseTransport):
         try:
             data = response.json()
             if response.is_success:
-                set_cached(request.method, url_path, params, body, data)
+                call.store(data)
             elif (
                 _CacheRuntime.HTTP_3XX_START <= response.status_code < _CacheRuntime.HTTP_3XX_END
                 or response.status_code == _CacheRuntime.HTTP_NOT_FOUND
             ):
-                set_cached(
-                    request.method,
-                    url_path,
-                    params,
-                    body,
-                    CacheEnvelope(status=response.status_code, body=data).to_dict(),
-                )
+                call.store(CacheEnvelope(status=response.status_code, body=data).to_dict())
         # A cache-write failure must never break the request.
         except (OSError, TypeError, ValueError) as e:
             logger.debug("response not cached (%s): %s", url_path, e)

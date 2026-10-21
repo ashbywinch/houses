@@ -631,7 +631,7 @@ class TestAddressWaypoint:
 class TestGoogleRoutesPostReturn:
     """_google_routes_post must return the response data on cache miss.
 
-    Regression: the function called set_cached() but never returned
+    Regression: the function stored the response but never returned
     `data`, so every uncached Google Routes POST returned None and the
     caller reported "Google Routes returned no data" even when the API
     succeeded.
@@ -677,7 +677,7 @@ class TestGoogleRoutesPostReturn:
         assert result == {"routes": [{"duration": "600s"}]}, (
             f"Expected response data to be returned, got {result!r}"
         )
-        assert len(set_cached_calls) == 1, "set_cached must be called on cache miss"
+        assert len(set_cached_calls) == 1, "the cache store must be called on cache miss"
 
 
 class TestGoogleRouteCommuteErrorReason:

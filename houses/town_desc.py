@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 import httpx
 
 from dag.attempt import Attempt
-from houses.api_cache import cached_async_client, with_cache
+from houses.api_cache import CacheRequest, cached_async_client
 from houses.settings import settings
 from serialization import SerializableAsDict
 
@@ -74,19 +74,22 @@ async def generate_town_description(
     postcode: str,
     *,
     client_factory: Callable[..., AbstractAsyncContextManager[Any]] | None = None,
-    with_cache_fn: Callable[..., Awaitable[Mapping[str, Any]]] | None = None,
+    with_cache_fn: (
+        Callable[[CacheRequest, Callable[[], Awaitable[Mapping[str, Any]]]], Awaitable[Mapping[str, Any]]] | None
+    ) = None,
 ) -> Attempt[str]:
     """Generate a one-sentence neighbourhood description via the LLM API.
 
     ``client_factory`` and ``with_cache_fn`` are test seams defaulting to
-    the module implementations, so tests never monkeypatch module globals.
+    ``cached_async_client``/``CacheRequest.fetch``, so tests never monkeypatch
+    module globals.
     """
     key = town_name.strip().lower()
     if key in _TownDescGateway._CACHE:
         return Attempt.succeeded(_TownDescGateway._CACHE[key])
 
     client_factory = client_factory or cached_async_client
-    with_cache_fn = with_cache_fn or with_cache
+    with_cache_fn = with_cache_fn or CacheRequest.fetch
 
     try:
         body = _ChatBody(
@@ -128,7 +131,8 @@ async def generate_town_description(
             resp.raise_for_status()
             return resp.json()
 
-        result = await with_cache_fn("POST", url, body=body, fetch=_fetch)
+        call = CacheRequest("POST", url, body=body)
+        result = await with_cache_fn(call, _fetch)
         choices = result.get("choices") or []
         if not choices:
             # A gateway/model misroute answers without a choices array: name the
