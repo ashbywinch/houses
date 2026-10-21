@@ -750,6 +750,32 @@ serializers that return a dict by definition, and the remaining per-file records
 `services` 1, `monthly_delta` 1).
 
 
+### The ten class-signal suppressions, probed (2026-10-21)
+
+Ten `# lucidlint: ignore …` comments sit on class-size signals, and the census
+warns because of them. Each marker was probed this time — the marker removed in
+a copy, the tool re-run, `seam_members` read — rather than trusted:
+
+| Site | Signal the tool reports | `seam_members` | Verdict |
+|---|---|---|---|
+| `commute_router`, `tfl_client`, `property_nodes`, `bus_journey`, `derived_node`, `attempt`, `parse_netex_fares` | `god-class` | `[]` | **nothing to fix** — no field-disjoint group, and the tool's own message says size alone is not a split order. Filed as **lucidlint#47** |
+| `api_cache._make_key` and its four siblings | `data-clump` | `['body', 'method', 'params', 'url']` | **real seam** — four parameters threaded through five functions are one thing: the request's identity. Fix: a `CacheRequest` record, and the five seams take it |
+| `sync_parking_rates.main` | `assembly-class` | `[]` | **real seam** — `main` threads `args` through four functions; a class in waiting |
+| `rightmove_scraper.to_property` | `feature-envy` | `[]` | **nothing to fix** — the advice is to move the computation onto the record, but it reads the page (DOM + preloaded state), so it cannot live there |
+
+Two facts worth keeping:
+
+- The census's "`latent-class` suppressed at 10 sites" is an artefact of our own
+  comment text: the ten markers sit on **four different signals**
+  (`god-class`, `data-clump`, `feature-envy`, `assembly-class`) because a
+  marker's kind name need not match the finding's signal. The count is not a
+  count of one rule.
+- The `api_cache` marker's why records a *reason not to fix* — the earlier probe
+  declined because a `CacheRequest` "re-fires first-arg". That is the pattern to
+  stop: a marker is the last resort after a probe, never a place to park the
+  next finding.
+
+
 ### The serialization seam moved to its own library (owner ruling, 2026-10-17)
 
 The DAG conversion could not start: `tests/unit/dag/test_architecture.py`
