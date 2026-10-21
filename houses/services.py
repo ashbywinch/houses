@@ -13,13 +13,14 @@ import asyncio
 import dataclasses
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol, TypedDict, cast
+from typing import Any, ClassVar, Protocol, cast
 
 from google.auth.exceptions import TransportError
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from google.oauth2 import id_token as google_id_token
 from google_auth_oauthlib.flow import Flow
+from pydantic import SerializerFunctionWrapHandler, model_serializer
 
 import houses.transit_route as _transit_route
 from dag.attempt import Attempt
@@ -44,6 +45,7 @@ from houses.stations import Station, StationRegistry
 from houses.tfl_client import TflClient
 from houses.town_desc import generate_town_description
 from houses.walkability import Walkability, enrich_walkability
+from serialization import SerializableAsDict
 
 # ── Protocols ──────────────────────────────────────────────────────────
 
@@ -87,8 +89,13 @@ class SchoolLookupService(Protocol):
     async def school_commute(postcode: str, school: School) -> Commute | None: ...
 
 
-class _GoogleClient(TypedDict):
-    """The ``web`` block google_auth_oauthlib expects."""
+class _GoogleClientConfig(SerializableAsDict):
+    """The Google OAuth web-client config google_auth_oauthlib expects.
+
+    The library's config object nests the client's five fields under ``web`` —
+    a change of STRUCTURE, not of a key, so the whole record serialises through
+    one wrap serializer (coding-standards.md → *Boundary records*).
+    """
 
     client_id: str
     client_secret: str
@@ -96,28 +103,10 @@ class _GoogleClient(TypedDict):
     token_uri: str
     redirect_uris: list[str]
 
-
-@dataclass(frozen=True)
-class _GoogleClientConfig:
-    """Google OAuth web-client config for google_auth_oauthlib (its library
-    expects exactly this nesting)."""
-
-    client_id: str
-    client_secret: str
-    auth_uri: str
-    token_uri: str
-    redirect_uris: list[str]
-
-    def to_dict(self) -> dict:
-        return dict(
-            web=_GoogleClient(
-                client_id=self.client_id,
-                client_secret=self.client_secret,
-                auth_uri=self.auth_uri,
-                token_uri=self.token_uri,
-                redirect_uris=self.redirect_uris,
-            )
-        )
+    @model_serializer(mode="wrap")
+    def _as_client_config(self, handler: SerializerFunctionWrapHandler) -> Mapping[str, Any]:
+        """The library's ``{"web": {...}}`` config object."""
+        return {"web": handler(self)}
 
 
 @dataclass(frozen=True)
