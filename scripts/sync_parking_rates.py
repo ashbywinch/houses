@@ -17,6 +17,7 @@ import asyncio
 import csv
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
@@ -48,6 +49,15 @@ class _StationRecord(TypedDict):
 
     stationName: str
     crs: str
+
+
+@dataclass(frozen=True)
+class _SyncSelection:
+    """The CLI's station selection: which stations one run processes."""
+
+    crs: str | None = None
+    missing: bool = False
+    force: bool = False
 
 
 def extract_daily_rate_from_tariff(tariff_text: str) -> float | None:
@@ -165,19 +175,6 @@ def load_existing_rates() -> dict[str, float | None]:
             else:
                 rates[crs] = None
     return rates
-
-
-def write_rates(all_stations: list[_StationRecord], rates: dict[str, float | None]) -> None:
-    _ApcoaRates.PARKING_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with _ApcoaRates.PARKING_CSV.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["station_name", "crs", "daily_cost_gbp"])
-        for s in sorted(all_stations, key=lambda x: x["crs"]):
-            crs = s["crs"]
-            cost = rates.get(crs)
-            val = f"{cost:.2f}" if cost is not None else ""
-            writer.writerow([s["stationName"], crs, val])
-    logger.info("Wrote %d rates to %s", len(rates), _ApcoaRates.PARKING_CSV)
 
 
 async def find_station_urls(page, station_name: str) -> list[str]:
@@ -367,86 +364,110 @@ async def find_station_rate(page, station_name: str) -> float | None:
     return None
 
 
-async def _process_station(page, name: str, crs: str, rate_map: dict[str, float | None]) -> None:
-    """Fetch and record one station's daily rate; failures record None.
+class ParkingRateSync:
+    """One run of the APCOA parking-rate sync: the stations it processes and
+    the rate map it builds for the parking-rates CSV."""
 
-    One station is one unit of work: any failure is logged and recorded as
-    None, and the sync continues with the rest.
-    """
-    rate, failure = await capture_async(lambda: find_station_rate(page, name))
-    if failure is not None:
-        logger.warning("Failed to process %s (%s): %s", name, crs, failure)
-        rate_map[crs] = None
-        return
-    rate_map[crs] = rate
-    if rate is None:
-        logger.info("  → %s: no rate found", name)
+    def __init__(self, selection: _SyncSelection) -> None:
+        self.selection = selection
+        self.all_stations: list[_StationRecord] = []
+        self.rate_map: dict[str, float | None] = {}
 
+    async def run(self) -> None:
+        """Scrape the stations this run selected, checkpointing the CSV."""
+        self.all_stations = load_stations()
+        self.rate_map = load_existing_rates()
+        stations = self._select_stations()
+        stations = self._filter_missing(stations)
 
-def _select_stations(args, all_stations: list[_StationRecord]) -> list[_StationRecord]:
-    if args.crs:
-        target = {c.strip().upper() for c in args.crs.split(",")}
-        return [s for s in all_stations if s["crs"] in target]
-    return list(all_stations)
-
-
-def _filter_missing(
-    args,
-    stations: list[_StationRecord],
-    existing: dict[str, float | None],
-) -> list[_StationRecord]:
-    if not args.missing:
-        return stations
-    filtered = [s for s in stations if s["crs"] not in existing or existing.get(s["crs"]) is None]
-    logger.info("Filtered to %d missing stations", len(filtered))
-    return filtered
-
-
-# lucidlint: ignore latent-class main is the one-shot sync's thin CLI shell — threads args, no reuse axis (review-log)
-async def main():
-    parser = argparse.ArgumentParser(description="Sync parking rates from APCOA via Playwright")
-    parser.add_argument("--crs", help="Comma-separated CRS codes to process")
-    parser.add_argument("--missing", action="store_true", help="Only stations not yet in CSV")
-    parser.add_argument("--force", action="store_true", help="Re-process stations already in CSV")
-    args = parser.parse_args()
-    all_stations = load_stations()
-
-    stations = _select_stations(args, all_stations)
-    existing = load_existing_rates()
-    stations = _filter_missing(args, stations, existing)
-
-    # Build the master rate map from existing + new
-    rate_map: dict[str, float | None] = dict(existing)
-
-    async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
             )
-        )
-        page = await context.new_page()
+            page = await context.new_page()
+            processed = await self._scrape(page, stations)
 
+        self._write_rates()
+        found = sum(1 for v in self.rate_map.values() if v is not None)
+        logger.info("Done. Processed %d stations. %d have rates.", processed, found)
+
+    def _select_stations(self) -> list[_StationRecord]:
+        """--crs narrows the run to those CRS codes; otherwise every station."""
+        crs = self.selection.crs
+        if not crs:
+            return list(self.all_stations)
+        target = {c.strip().upper() for c in crs.split(",")}
+        return [s for s in self.all_stations if s["crs"] in target]
+
+    def _filter_missing(self, stations: list[_StationRecord]) -> list[_StationRecord]:
+        """--missing drops the stations whose rate the run already has."""
+        if not self.selection.missing:
+            return stations
+        filtered = [s for s in stations if self.rate_map.get(s["crs"]) is None]
+        logger.info("Filtered to %d missing stations", len(filtered))
+        return filtered
+
+    async def _scrape(self, page, stations: list[_StationRecord]) -> int:
+        """Fetch each station's rate in turn, checkpointing every few stations."""
         processed = 0
-        for s in stations:
-            crs = s["crs"]
-            name = s["stationName"]
+        for station in stations:
+            crs = station["crs"]
+            name = station["stationName"]
 
-            if not args.force and crs in rate_map and rate_map[crs] is not None:
-                logger.info("Skipping %s (%s) — already have £%.2f", name, crs, rate_map[crs])
+            if not self.selection.force and self.rate_map.get(crs) is not None:
+                logger.info("Skipping %s (%s) — already have £%.2f", name, crs, self.rate_map[crs])
                 continue
 
             logger.info("Processing %s (%s)...", name, crs)
             if processed > 0:
                 await asyncio.sleep(_ApcoaRates.REQUEST_DELAY_SECONDS)
-            await _process_station(page, name, crs, rate_map)
+            await self._process_station(page, name, crs)
 
             processed += 1
             if processed % _ApcoaRates.CHECKPOINT_INTERVAL == 0:
-                write_rates(all_stations, rate_map)
+                self._write_rates()
+        return processed
 
-    write_rates(all_stations, rate_map)
-    found = sum(1 for v in rate_map.values() if v is not None)
-    logger.info("Done. Processed %d stations. %d have rates.", processed, found)
+    async def _process_station(self, page, name: str, crs: str) -> None:
+        """Fetch and record one station's daily rate; failures record None.
+
+        One station is one unit of work: any failure is logged and recorded as
+        None, and the sync continues with the rest.
+        """
+        rate, failure = await capture_async(lambda: find_station_rate(page, name))
+        if failure is not None:
+            logger.warning("Failed to process %s (%s): %s", name, crs, failure)
+            self.rate_map[crs] = None
+            return
+        self.rate_map[crs] = rate
+        if rate is None:
+            logger.info("  → %s: no rate found", name)
+
+    def _write_rates(self) -> None:
+        """Rewrite the parking-rates CSV from the run's stations and rate map."""
+        _ApcoaRates.PARKING_CSV.parent.mkdir(parents=True, exist_ok=True)
+        with _ApcoaRates.PARKING_CSV.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["station_name", "crs", "daily_cost_gbp"])
+            for station in sorted(self.all_stations, key=lambda x: x["crs"]):
+                crs = station["crs"]
+                cost = self.rate_map.get(crs)
+                val = f"{cost:.2f}" if cost is not None else ""
+                writer.writerow([station["stationName"], crs, val])
+        logger.info("Wrote %d rates to %s", len(self.rate_map), _ApcoaRates.PARKING_CSV)
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser(description="Sync parking rates from APCOA via Playwright")
+    parser.add_argument("--crs", help="Comma-separated CRS codes to process")
+    parser.add_argument("--missing", action="store_true", help="Only stations not yet in CSV")
+    parser.add_argument("--force", action="store_true", help="Re-process stations already in CSV")
+    args = parser.parse_args()
+    selection = _SyncSelection(crs=args.crs, missing=args.missing, force=args.force)
+    await ParkingRateSync(selection).run()
 
 
 if __name__ == "__main__":
