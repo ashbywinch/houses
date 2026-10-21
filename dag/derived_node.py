@@ -24,13 +24,14 @@ from dag.attempt import (
     classify_exception,
     project_value,
 )
+from dag.connection import Connection
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
 from dag.guard import capture_async, guarded
 from dag.node import Node, NodeValue
 from dag.persistence import latest_node_provenance
 from dag.scheduler import assert_mutation_allowed, get_scheduler
-from dag.signals import Connection, Slot
+from dag.slot import Slot
 
 logger = logging.getLogger(__name__)
 

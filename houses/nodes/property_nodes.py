@@ -13,7 +13,8 @@ from dag.node import Node, NodeValue
 from dag.persistence import property_created_at
 from dag.regenerate import schedule_code_stale_nodes
 from dag.scheduler import get_scheduler
-from dag.signals import Signal, Slot
+from dag.signal import Signal
+from dag.slot import Slot
 from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
 from houses.model.domain import person_id_of

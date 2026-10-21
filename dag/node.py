@@ -11,7 +11,7 @@ from pydantic import Field, TypeAdapter
 from dag.attempt import Attempt, AttemptError, Provenance
 from dag.expression import Add, Div, Expression, Literal, Mul, Negate, Ref, Sub
 from dag.persistence import latest_node_result, save_node_result
-from dag.signals import Signal
+from dag.signal import Signal
 from serialization import SerializableAsDict, omit_when_none
 
 

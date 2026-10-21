@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.signals import Slot
+from dag.slot import Slot
 from houses.geopoint import GeoPoint
 from houses.location import extract_postcode
 from houses.model.geo import is_single_property_address

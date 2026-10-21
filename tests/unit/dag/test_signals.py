@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dag.signals import Signal, Slot
+from dag.signal import Signal
+from dag.slot import Slot
 
 
 class TestSignal:
