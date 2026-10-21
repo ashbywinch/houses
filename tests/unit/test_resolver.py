@@ -6,6 +6,7 @@ Restored from 52f3fb1^ and rewritten to target the DAG-based
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import override
 
 import pytest
@@ -103,6 +104,19 @@ class TestDerivedNodeStaleness:
 
         j = await node.to_json()
         assert j["stale"] is False
+        # The lifecycle keys are declared on the wire record (NodeValue), so the
+        # emitted order is the record's field order: the base keys, then the
+        # lifecycle. A node's own extension (PetrolCostAugmentNode's is_child)
+        # is declared on its subclass and follows.
+        assert list(j) == ["status", "value", "succeeded", "pending", "impossible", "provenance", "stale"]
+
+        # A retry in flight states both retry keys, before ``stale``.
+        node._retry_at = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
+        node._retry_count = 2
+        assert list(await node.to_json()) == [
+            "status", "value", "succeeded", "pending", "impossible", "provenance",
+            "retry_at", "retry_count", "stale",
+        ]
 
         # Change dep without flushing — node should report stale
         src.push(8, "test")

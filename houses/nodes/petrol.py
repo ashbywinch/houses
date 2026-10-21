@@ -10,16 +10,18 @@ household finances.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import override
+from typing import cast, override
 
 from money import Money
 from pint import Quantity
+from pydantic import Field
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
-from dag.node import Node
+from dag.node import Node, NodeValue
 from houses.commute import JourneyLeg, LegMode
 from houses.model.domain import Commute, person_id_of
+from serialization import omit_when_none
 
 
 def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float) -> Money | None:
@@ -77,6 +79,15 @@ class PersonPetrolMpgNode(DerivedNode[int]):
         return Attempt.succeeded(self.DEFAULT_PETROL_MPG)
 
 
+class _SchoolCommuteRow(NodeValue):
+    """A school-commute row's wire: the entry-level ``is_child`` flag the card
+    classifies on. It must hold before the pipeline has priced (and if it never
+    does) — the value only carries it once it exists, so it is a row key, not a
+    value key."""
+
+    is_child: bool | None = Field(default=None, exclude_if=omit_when_none)
+
+
 class PetrolCostAugmentNode(DerivedNode[Commute]):
     """Adds fuel cost for drive legs based on settings.
 
@@ -86,6 +97,8 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
     # Drive-time → distance estimation for legs that carry no distance.
     MINUTES_PER_HOUR = 60.0
     AVERAGE_DRIVE_SPEED_KMH = 48.0
+
+    wire_type = _SchoolCommuteRow
 
     def __init__(
         self,
@@ -198,7 +211,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         return Attempt.succeeded(new_commute)
 
     @override
-    def _enrich_json(self, result: dict) -> None:
+    def _enrich_json(self, result: NodeValue) -> None:
         """Append the entry-level ``is_child`` flag to the row.
 
         The card classifies a row as a child's school commute from the
@@ -207,4 +220,8 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         """
         super()._enrich_json(result)
         value = self._attempt.value_or_none() if self._attempt.succeeded else None
-        result["is_child"] = bool(value.is_child) if value is not None else self._is_child
+        # The node's own wire type: the builder constructs ``wire_type``, so the
+        # row this method is handed IS a _SchoolCommuteRow.
+        cast(_SchoolCommuteRow, result).is_child = (
+            bool(value.is_child) if value is not None else self._is_child
+        )

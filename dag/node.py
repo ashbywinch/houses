@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 from pydantic import Field, TypeAdapter
 
@@ -30,6 +30,13 @@ class NodeValue(SerializableAsDict):
     error_detail: dict | None = Field(default=None, exclude_if=omit_when_none)
     source_url: str | None = Field(default=None, exclude_if=omit_when_none)
     provenance: dict | None = Field(default=None, exclude_if=omit_when_none)
+    # DerivedNode's lifecycle keys. The wire carries them (appended after the
+    # base dump, which is why they are declared last — the record's field order
+    # IS the wire's key order), so the record models them and no node has to
+    # patch keys onto a dict it does not own.
+    retry_at: str | None = Field(default=None, exclude_if=omit_when_none)
+    retry_count: int | None = Field(default=None, exclude_if=omit_when_none)
+    stale: bool | None = Field(default=None, exclude_if=omit_when_none)
 
 
 T = TypeVar("T")
@@ -197,6 +204,11 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
     # of Pydantic schemas at startup (~19s, 5GB for 6000 nodes).
     _adapter_cache: dict[type, TypeAdapter] = {}
 
+    #: The record this node's wire is built from. A node whose wire carries
+    #: keys of its own (PetrolCostAugmentNode's ``is_child``) declares its
+    #: subclass, so the extension is modelled once instead of patched on.
+    wire_type: ClassVar[type[NodeValue]] = NodeValue
+
     #: Optional app-layer role for refresh routing. The library never
     #: interprets it — a host application sets it at construction (e.g.
     #: "property", "settings") and its refresh hook dispatches on it,
@@ -262,13 +274,25 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         """
         return att.value
 
-    async def to_json(
-        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
+    async def to_node_value(
+        self,
+        dep_attempts: list[Attempt] | None = None,
+        active_deps: tuple[Node, ...] | None = None,
+        *,
+        provenance: bool = True,
+    ) -> NodeValue:
+        """This node's wire record — the shape ``to_json``/``to_json_value`` dump.
+
+        The builder is the seam: a subclass whose wire carries keys of its own
+        declares ``wire_type`` and extends the record (DerivedNode's lifecycle
+        keys, PetrolCostAugmentNode's ``is_child``), so no caller has to patch
+        keys onto a dict it does not own. ``provenance=False`` skips the
+        expensive tree build (the bulk-list path).
+        """
         attempt = await self.attempt()
-        rec = NodeValue(
+        rec = self.wire_type(
             status=attempt.status,
-            value=self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
+            value=self._wire_value(attempt),
             succeeded=attempt.succeeded,
             pending=attempt.pending,
             impossible=attempt.impossible,
@@ -280,9 +304,25 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
                 rec.error_detail = info.to_dict()
         if self._source_url:
             rec.source_url = self._source_url
-        if not attempt.pending:
+        if provenance and not attempt.pending:
             rec.provenance = (await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
-        return rec.to_dict()
+        return rec
+
+    def _wire_value(self, attempt: Attempt[Any]) -> Any:
+        """The value as the wire states it.
+
+        The base dumps the typed value. A node whose value is a machine dict
+        (CommuteSelectorNode's breakdown, with its private ``_details`` field
+        renamed for the frontend) projects it here, so the projection holds on
+        the serve path AND the persist path — one place, not one per caller.
+        """
+        return self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None
+
+    async def to_json(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> dict:
+        """The node's wire: ``to_node_value``, dumped."""
+        return (await self.to_node_value(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
 
     async def to_json_value(self) -> dict:
         """Like to_json() but skips the expensive provenance tree build.
@@ -290,20 +330,7 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         Returns status, value, and metadata only — no ``provenance`` field.
         Use this for bulk-list endpoints where provenance is not needed.
         """
-        attempt = await self.attempt()
-        rec = NodeValue(
-            status=attempt.status,
-            value=self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
-            succeeded=attempt.succeeded,
-            pending=attempt.pending,
-            impossible=attempt.impossible,
-        )
-        if attempt.impossible:
-            info = attempt.error_info
-            rec.error = (info.display_message if info is not None else attempt.error) or attempt.error
-        if self._source_url:
-            rec.source_url = self._source_url
-        return rec.to_dict()
+        return (await self.to_node_value(provenance=False)).to_dict()
 
     def _impossible(self, dep_attempts: _DepAttemptMap, extra: str = "") -> Attempt[T]:
         parts = [self._id]

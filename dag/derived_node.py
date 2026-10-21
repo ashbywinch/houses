@@ -19,6 +19,7 @@ from dag.attempt import (
     AttemptError,
     Formula,
     Provenance,
+    ProvenanceSources,
     SourceType,
     classify_exception,
     project_value,
@@ -635,37 +636,36 @@ class DerivedNode(Node[T], Generic[T]):
             self._retry_count += 1
         return min(timedelta(seconds=delay_sec), DerivedNode.BACKOFF_CAP)
 
-    async def _error_result_dict(self, status: str, exc: Exception) -> NodeValue:
+    async def _error_result(self, status: str, exc: Exception) -> NodeValue:
         return NodeValue(
             status=status,
             value=None,
             error=f"{self._id}: {exc}",
             error_detail=AttemptError.from_exception(str(exc), exc, source=self._id).to_dict(),
-            provenance=await self._build_provenance_dict(),
+            provenance=(await self._build_provenance()).to_dict(),
         )
 
-    async def _safe_result_dict(
+    async def _safe_result(
         self, status: str, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
-        """Serialize for persistence, degrading to an error result on failure.
+    ) -> NodeValue:
+        """The node's wire record for persistence, degrading to an error result.
 
         Passing the bound attempts makes this the PERSIST path: the
         provenance tree is built fresh from this evaluation (never the
         frozen serve of the previous row).
         """
         result, failure = await capture_async(
-            lambda: self.to_json(dep_attempts=dep_attempts, active_deps=active_deps)
+            lambda: self.to_node_value(dep_attempts=dep_attempts, active_deps=active_deps)
         )
         if failure is None:
-            return cast(dict, result)
+            return cast(NodeValue, result)
         logger.debug(
-            "%s: to_json failed; persisting an error result for status %r: %s",
+            "%s: to_node_value failed; persisting an error result for status %r: %s",
             self._id,
             status,
             failure,
         )
-        error_rec = await self._error_result_dict(status, failure)
-        return error_rec.to_dict()
+        return await self._error_result(status, failure)
 
     async def _compute_attempt(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Attempt:
         """Run compute, converting failures into pending/impossible Attempts.
@@ -806,16 +806,16 @@ class DerivedNode(Node[T], Generic[T]):
             return
         await self._complete_refresh(result, dep_attempts, active_deps, origin_stamps)
 
-    async def _build_provenance_dict(
+    async def _build_provenance(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
-        """Build provenance dict for persistence, with a fallback if build_provenance() fails."""
+    ) -> Provenance:
+        """Build this node's provenance record, with a fallback if the build fails."""
         prov, failure = await capture_async(
             lambda: self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
         )
         if failure is not None:
-            return dict(label="")
-        return cast(Provenance, prov).to_dict()
+            return Provenance(label="")
+        return cast(Provenance, prov)
 
     @override
     async def build_provenance(
@@ -852,7 +852,7 @@ class DerivedNode(Node[T], Generic[T]):
         is a plain walk (used by leaves and by direct callers).
         """
         deps = tuple(active_deps) if active_deps is not None else self._get_active_deps()
-        sources: dict[str, Provenance] = {}
+        sources = ProvenanceSources()
         for i, dep in enumerate(deps):
             att = bound[i] if bound is not None and i < len(bound) else None
             sources[dep._id] = await self._dep_provenance(dep, att)
@@ -933,8 +933,8 @@ class DerivedNode(Node[T], Generic[T]):
         (2026-09-19: stamp-stale geocode nodes re-enqueued every sweep).
         """
         self._computed_at = datetime.now(UTC)
-        result_dict = await self._safe_result_dict(status, dep_attempts, active_deps)
-        self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
+        record = await self._safe_result(status, dep_attempts, active_deps)
+        self._persist(record.to_dict(), dep_timestamps, code_version=self._current_code_version())
 
     async def _dep_provenance(self, dep: Node, att: Attempt | None = None) -> Provenance:
         """One dependency's subtree, degraded on failure.
@@ -1030,27 +1030,27 @@ class DerivedNode(Node[T], Generic[T]):
         """
         return self.provenance_formula
 
-    def _enrich_json(self, result: dict) -> None:
-        """Add DerivedNode lifecycle fields to a base serialization dict."""
+    def _enrich_json(self, result: NodeValue) -> None:
+        """Add DerivedNode's lifecycle keys to the node's wire record."""
         if self._retry_at is not None:
-            result["retry_at"] = self._retry_at.isoformat()
-            result["retry_count"] = self._retry_count
+            result.retry_at = self._retry_at.isoformat()
+            result.retry_count = self._retry_count
         if not self._attempt.pending:
-            result["stale"] = self._is_stale()
+            result.stale = self._is_stale()
 
     @override
-    async def to_json(
-        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
-        result = await super().to_json(dep_attempts=dep_attempts, active_deps=active_deps)
-        self._enrich_json(result)
-        return result
-
-    @override
-    async def to_json_value(self) -> dict:
-        result = await super().to_json_value()
-        self._enrich_json(result)
-        return result
+    async def to_node_value(
+        self,
+        dep_attempts: list[Attempt] | None = None,
+        active_deps: tuple[Node, ...] | None = None,
+        *,
+        provenance: bool = True,
+    ) -> NodeValue:
+        rec = await super().to_node_value(
+            dep_attempts=dep_attempts, active_deps=active_deps, provenance=provenance
+        )
+        self._enrich_json(rec)
+        return rec
 
     @staticmethod
     def _assert_deps_succeeded(**deps: Attempt) -> None:
