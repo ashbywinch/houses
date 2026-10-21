@@ -18,9 +18,9 @@ from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _sqlite_memory,
 )
 
-# Prevent BusRouteNode from making real Google Routes API calls in unit tests.
-# bus.py sets _default_google_routes_post = _router._google_routes_post at
-# import time; this override must run after that import but before any test.
+# No unit test may let BusRouteNode post to the real Google Routes API: the
+# pipeline builder injects the client's bus-route seam, and this class default
+# covers every node built without one.
 BusRouteNode._default_google_routes_post = None
 
 

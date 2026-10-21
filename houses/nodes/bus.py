@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import Any, override
+from typing import override
 
 from money import Money
 from pint import Quantity
-from pydantic import Field
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -16,28 +15,11 @@ from dag.node import Node
 from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.commute_router import CommuteRouter
 from houses.geopoint import GeoPoint
-from houses.google_routes_client import GoogleRoutesOptions
+from houses.google_routes_client import BusRoute
 from houses.model.domain import Commute, PlaceOfInterest
 from houses.settings import settings
 from serialization import MoneyValue, SerializableAsDict
-
-
-class _TransitPreferences(SerializableAsDict):
-    """The Google Routes transitPreferences block (request wire shape)."""
-
-    routing_preference: str = Field(alias="routingPreference")
-
-
-class _RoutesBody(SerializableAsDict):
-    """A Google Routes TRANSIT directions POST body (request wire shape)."""
-
-    origin: Mapping[str, Any]
-    destination: Mapping[str, Any]
-    travel_mode: str = Field(alias="travelMode")
-    transit_preferences: _TransitPreferences = Field(alias="transitPreferences")
-    compute_alternative_routes: bool = Field(alias="computeAlternativeRoutes")
 
 
 class _BusStop(SerializableAsDict):
@@ -68,10 +50,12 @@ class _BodsFareValue(SerializableAsDict):
 class BusRouteNode(DerivedNode[dict]):
     """Find a bus alternative via Google Routes TRANSIT."""
 
-    _default_google_routes_post: Callable | None = None
+    _default_google_routes_post: Callable[..., Awaitable[BusRoute | None]] | None = None
 
     def __init__(self, node_id: str, *, best_location, poi, _google_routes_post=None):
-        self._google_routes_post: Callable | None = _google_routes_post or self._default_google_routes_post
+        self._google_routes_post: Callable[..., Awaitable[BusRoute | None]] | None = (
+            _google_routes_post or self._default_google_routes_post
+        )
         super().__init__(node_id, dict, (best_location, poi))
 
     @override
@@ -98,57 +82,27 @@ class BusRouteNode(DerivedNode[dict]):
             return Attempt.impossible("no destination address for this journey")
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
 
-        body = _RoutesBody(
-            origin=CommuteRouter._address_waypoint(origin_str).to_dict(),
-            destination=CommuteRouter._address_waypoint(dest_str).to_dict(),
-            travel_mode="TRANSIT",
-            transit_preferences=_TransitPreferences(routing_preference="less_walking"),
-            compute_alternative_routes=False,
-        ).to_dict()
-        data = await grp(
-            body,
-            "routes.duration,routes.legs",
-            options=GoogleRoutesOptions(timeout=15.0),
-        )
-        if data is None:
-            # No body is a "no bus route" answer, not a failure — the
-            # bus augment treats an empty route as pass-through.
+        route = await grp(origin=origin_str, destination=dest_str)
+        if route is None or not route.stops:
+            # No bus on this journey is a "no bus route" answer, not a
+            # failure — the bus augment treats an empty route as pass-through.
             return Attempt.succeeded(_BusRouteValue(bus_stops=[], duration_minutes=0).to_dict())
 
-        routes = data.get("routes", [])
-        if not routes:
-            return Attempt.succeeded(_BusRouteValue(bus_stops=[], duration_minutes=0).to_dict())
-
-        leg = routes[0].get("legs", [{}])[0]
-        steps = leg.get("steps", [])
-        bus_stops = []
-        for s in steps:
-            if s.get("travelMode") != "TRANSIT":
-                continue
-            td = s.get("transitDetails", {})
-            if td.get("transitLine", {}).get("vehicle", {}).get("type") != "BUS":
-                continue
-            dep = td.get("stopDetails", {}).get("departureStop", {})
-            arr = td.get("stopDetails", {}).get("arrivalStop", {})
-            bus_stops.append(
-                _BusStop(
-                    departure_name=dep.get("name", ""),
-                    arrival_name=arr.get("name", ""),
-                    departure_lat=dep.get("location", {}).get("latLng", {}).get("latitude"),
-                    departure_lon=dep.get("location", {}).get("latLng", {}).get("longitude"),
-                    arrival_lat=arr.get("location", {}).get("latLng", {}).get("latitude"),
-                    arrival_lon=arr.get("location", {}).get("latLng", {}).get("longitude"),
-                )
+        bus_stops = [
+            _BusStop(
+                departure_name=stop.departure_name,
+                arrival_name=stop.arrival_name,
+                departure_lat=stop.departure_lat,
+                departure_lon=stop.departure_lon,
+                arrival_lat=stop.arrival_lat,
+                arrival_lon=stop.arrival_lon,
             )
-
-        if not bus_stops:
-            return Attempt.succeeded(_BusRouteValue(bus_stops=[], duration_minutes=0).to_dict())
-
-        duration_sec = int(routes[0].get("duration", "0s").removesuffix("s"))
+            for stop in route.stops
+        ]
         return Attempt.succeeded(
             _BusRouteValue(
                 bus_stops=bus_stops,
-                duration_minutes=round(Quantity(duration_sec, "second").to("minute").magnitude),
+                duration_minutes=round(Quantity(route.duration_s, "second").to("minute").magnitude),
             ).to_dict()
         )
 

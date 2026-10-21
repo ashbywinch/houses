@@ -51,14 +51,15 @@ rest stand on checkable reasons, with two marked **weak** there and left as
 owner calls:
 
 - **class-module** — two of the eight are resolved (`signals.py` split into
-  `signal.py`/`slot.py`/`connection.py`; `commute_router.py` split so the Google
-  Routes client, its options, its protocol and its private wire records share
-  `google_routes_client.py`). That second split exposed a **tool gap**: the
-  multi-class arm ignores the standard's own "closely related types" exception,
-  so it reports the options dataclass and the protocol beside the class they
-  serve. Issue drafted in the log, **unfiled** pending the owner's go-ahead. The
-  six remaining family files (area, bus, location, schools, expressions,
-  property_nodes) stand as recorded.
+  `signal.py`/`slot.py`/`connection.py`; the Google Routes client, its interface
+  and its private wire records live in `google_routes_client.py`, with the
+  options record in its own module and the wire knowledge moved out of
+  `CommuteRouter` and `BusRouteNode`). That split exposed a **tool gap**, filed
+  as [lucidlint#52](https://github.com/ashbywinch/lucidlint/issues/52): the
+  multi-class arm reports a module's own DI interface (a `Protocol` satisfied by
+  the namesake class and test doubles) as a misplaced class; that one site keeps
+  a marker citing the issue. The six remaining family files (area, bus, location,
+  schools, expressions, property_nodes) stand as recorded.
 - **inline-import ×5** — every why is "cycle break", which the 2026-08-22 scope
   decision explicitly rejects ("break cycles by interface extraction"); fixing
   means an interface module for the DAG's `persistence ↔ scheduler ↔

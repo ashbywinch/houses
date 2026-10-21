@@ -21,17 +21,7 @@ from dag.guard import capture_async, guarded_async
 from dag.http_error import HttpError
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
-from houses.google_routes_client import (
-    GoogleRoutesClient,
-    GoogleRoutesClientLike,
-    GoogleRoutesOptions,
-    _LatLng,
-    _Route,
-    _RoutesBody,
-    _RoutesResponse,
-    _RouteTransitLine,
-    _Waypoint,
-)
+from houses.google_routes_client import GoogleRoutesClient, GoogleRoutesClientLike
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.services_provider import get_services
 from houses.settings import settings
@@ -74,8 +64,6 @@ class CommuteRouter:
         )
         self._tfl_transit_fn: Callable[..., Awaitable[Attempt[Commute]]] = tfl_transit_fn or self._tfl_transit_commute
         self._congestion_fn: Callable[[str | GeoPoint], bool] = congestion_fn or self.in_congestion_zone
-
-    GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 
     # Congestion zone — central London postcode outcodes never worth driving to
     _CONGESTION_OUTCODES: frozenset[str] = frozenset(
@@ -170,9 +158,10 @@ class CommuteRouter:
 
     @property
     def google_routes_post(self):
-        """The bus node's HTTP seam — passed into BusRouteNode by the
-        pipeline builder (tests override it via the services router)."""
-        return self._google_routes_client.post
+        """The bus node's route seam — the client's ``post_bus_route``,
+        passed into BusRouteNode by the pipeline builder (tests override it
+        via the services router)."""
+        return self._google_routes_client.post_bus_route
 
     @staticmethod
     def _extract_outcode(text: str) -> str | None:
@@ -220,28 +209,6 @@ class CommuteRouter:
         if oc:
             return oc.startswith(("E", "EC", "N", "NW", "SE", "SW", "W", "WC"))
         return False
-
-    @staticmethod
-    def _parse_coord(loc: str) -> _Waypoint | None:
-        """Parse a ``"lat,lon"`` string into a location waypoint, else None."""
-        try:
-            lat, lon = loc.split(",", 1)
-            return _Waypoint(location=_LatLng(latitude=float(lat), longitude=float(lon)))
-        except (ValueError, TypeError):
-            return None
-
-
-    @staticmethod
-    def _address_waypoint(loc: str | GeoPoint) -> _Waypoint:
-        """Build a Google Routes waypoint from a postcode string or GeoPoint."""
-        if isinstance(loc, GeoPoint):
-            return _Waypoint(location=_LatLng(latitude=loc.lat, longitude=loc.lon))
-        # If the string looks like "lat,lon", parse it as a location waypoint
-        if "," in loc:
-            waypoint = CommuteRouter._parse_coord(loc)
-            if waypoint is not None:
-                return waypoint
-        return _Waypoint(address=loc)
 
     # ------------------------------------------------------------------
     # Walking — Google Routes walking mode
@@ -294,32 +261,25 @@ class CommuteRouter:
                         f"straight-line distance {dist_km:.1f} km exceeds {max_walk_km:.1f} km"
                     )
 
-        body = _RoutesBody(
-            origin=self._address_waypoint(origin),
-            destination=self._address_waypoint(dest),
-            travel_mode=mode,
-        )
-        mask = "routes.duration,routes.distanceMeters,routes.legs"
-        # A failure keeps the reason — _raise_with_body appends the response
-        # body (e.g. "400 … LatLng cannot be specified as an Address Waypoint").
-        data, failure = await capture_async(
-            lambda: self._google_routes_client.post(
-                body, mask, options=GoogleRoutesOptions(timeout=15.0 if mode == "DRIVE" else 10.0)
+        # A failure keeps the reason — the client appends the response body
+        # to an HTTP error (e.g. "400 … LatLng cannot be specified as an
+        # Address Waypoint").
+        route, failure = await capture_async(
+            lambda: self._google_routes_client.post_route(
+                origin=origin,
+                destination=dest,
+                travel_mode=mode,
+                timeout=15.0 if mode == "DRIVE" else 10.0,
             )
         )
         if failure is not None:
             return Attempt.impossible(f"Google Routes API request failed for {mode}: {failure}")
 
-        if data is None:
+        if route is None:
             return self._infeasible_commute("Google Routes API returned no data")
 
-        routes = _RoutesResponse.from_dict(data).routes
-        if not routes:
-            return self._infeasible_commute("Google Routes returned no routes")
-
-        duration_sec = int(routes[0].duration.rstrip("s"))
-        duration_min = round(duration_sec / 60)
-        distance_meters = routes[0].distance_meters
+        duration_min = round(route.duration_s / 60)
+        distance_meters = route.distance_meters
 
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
         if mode == "WALK":
@@ -355,29 +315,6 @@ class CommuteRouter:
             ),
             error=f"google_routes_{mode.lower()}: duration={duration_min}min distance={distance_meters}m",
         )
-    # National Rail operators that serve London → their London terminus.
-    # The Google Routes TRANSIT response omits stop names, so the
-    # fallback journey names its last rail leg from this map — RailFareNode
-    # then finds the terminal and prices the journey (LON-group fallback
-    # covers operators whose per-terminal fare is missing).  Unmapped
-    # operators leave the leg unnamed; the commute stays unpriced rather
-    # than carrying a guessed cost.
-    _NR_LONDON_TERMINUS: dict[str, str] = {
-        "GWR": "London Paddington Rail Station",
-        "Great Western Railway": "London Paddington Rail Station",
-        "LNER": "London Kings Cross Rail Station",
-        "London North Eastern Railway": "London Kings Cross Rail Station",
-        "Avanti West Coast": "London Euston Rail Station",
-        "South Western Railway": "London Waterloo Rail Station",
-        "SWR": "London Waterloo Rail Station",
-        "Southern": "London Bridge Rail Station",
-        "Southeastern": "London Victoria Rail Station",
-        "Thameslink": "London Blackfriars Rail Station",
-        "Greater Anglia": "London Liverpool Street Rail Station",
-        "Chiltern Railways": "London Marylebone Rail Station",
-        "c2c": "London Fenchurch Street Rail Station",
-        "East Midlands Railway": "London St Pancras International Rail Station",
-    }
 
     async def transit_route(self, origin: GeoPoint, dest: PlaceOfInterest | str) -> Commute | None:
         """National Rail fallback routing via Google Routes TRANSIT.
@@ -394,32 +331,22 @@ class CommuteRouter:
         """
         if isinstance(dest, str):
             dest = PlaceOfInterest(label="", address=dest)
-        body = _RoutesBody(
-            origin=self._address_waypoint(origin),
-            destination=self._address_waypoint(dest.address),
-            travel_mode="TRANSIT",
-        )
-        mask = (
-            "routes.duration,routes.legs.steps.travelMode,"
-            "routes.legs.steps.staticDuration,routes.legs.steps.transitDetails"
-        )
-        data, failure = await capture_async(
-            lambda: self._google_routes_client.post(body, mask, options=GoogleRoutesOptions(timeout=15.0))
+        route, failure = await capture_async(
+            lambda: self._google_routes_client.post_route(
+                origin=origin,
+                destination=dest.address,
+                travel_mode="TRANSIT",
+                timeout=15.0,
+            )
         )
         if failure is not None:
             logger.warning("Google transit fallback failed for %s: %s", origin, failure)
             return None
-        if not data:
-            return None
-        routes = _RoutesResponse.from_dict(data).routes
-        if not routes:
-            return None
-        legs = self._transit_legs(routes[0])
-        if not legs:
+        if route is None or not route.legs:
             return None
         # Total from the route's own duration — the sum of per-leg
         # rounded minutes drifts (99.2 → 98 when legs round individually).
-        total_min = round(int(str(routes[0].duration).rstrip("s")) / 60)
+        total_min = round(route.duration_s / 60)
         return Commute(
             person=Person(name="", has_car=False),
             label=dest.label,
@@ -427,47 +354,8 @@ class CommuteRouter:
             duration=Quantity(total_min, "minute"),
             daily_cost=Money(amount="0", currency="GBP"),
             mode="transit",
-            _details=(CostGroup(legs=tuple(legs), operator="TfL", cost=None),),
+            _details=(CostGroup(legs=route.legs, operator="TfL", cost=None),),
         )
-
-    def _transit_legs(self, route: _Route) -> list[JourneyLeg]:
-        """Parse a Google Routes TRANSIT route into journey legs."""
-        legs: list[JourneyLeg] = []
-        for leg in route.legs:
-            for step in leg.steps:
-                seconds = int(str(step.static_duration).rstrip("s"))
-                duration = Quantity(round(Quantity(seconds, "second").to("minute").magnitude), "minute")
-                travel_mode = step.travel_mode
-                transit_details = step.transit_details
-                if travel_mode == "WALK":
-                    legs.append(JourneyLeg(mode=LegMode.WALK, duration=duration))
-                    continue
-                if travel_mode == "TRANSIT":
-                    line = transit_details.transit_line if transit_details else None
-                    mode = self._transit_leg_mode(line)
-                    line_name = (line.name_short or line.name or "") if line else ""
-                    agencies = [agency.name or "" for agency in line.agencies] if line else []
-                    end_station = self._NR_LONDON_TERMINUS.get(agencies[0], "") if agencies else ""
-                    legs.append(
-                        JourneyLeg(
-                            mode=mode,
-                            duration=duration,
-                            line_name=line_name,
-                            end_station=end_station,
-                        )
-                    )
-        return legs
-
-    @staticmethod
-    def _transit_leg_mode(line: _RouteTransitLine | None) -> LegMode:
-        """Classify a transit leg from its line/agency (the API gates
-        vehicle type).  TfL-run lines are tube when named, bus when
-        numbered; anything else on the national network is a train."""
-        name = (line.name_short or line.name or "").strip() if line else ""
-        agencies = [agency.name or "" for agency in line.agencies] if line else []
-        if any("Transport for London" in a for a in agencies):
-            return LegMode.BUS if name.isdigit() else LegMode.TUBE
-        return LegMode.TRAIN
 
     # ------------------------------------------------------------------
     # Transit — TfL via TflClient (London area)

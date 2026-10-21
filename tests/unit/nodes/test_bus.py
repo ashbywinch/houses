@@ -27,41 +27,26 @@ def _mw(value: int):
 class TestBusRouteNode:
     @pytest.mark.asyncio
     async def test_returns_dict_when_location_ok(self):
+        from houses.google_routes_client import BusRoute, TransitStop
         from houses.nodes.bus import BusRouteNode
 
         loc = UserInputNode[GeoPoint]("loc_br", GeoPoint)
         dest = UserInputNode[str]("dest_br", str)
 
-        async def fake_google_routes(body, field_mask, **kw):
-            return {
-                "routes": [
-                    {
-                        "duration": "600s",
-                        "legs": [
-                            {
-                                "steps": [
-                                    {
-                                        "travelMode": "TRANSIT",
-                                        "transitDetails": {
-                                            "transitLine": {"vehicle": {"type": "BUS"}},
-                                            "stopDetails": {
-                                                "departureStop": {
-                                                    "name": "Stop A",
-                                                    "location": {"latLng": {"latitude": 51.5, "longitude": -0.1}},
-                                                },
-                                                "arrivalStop": {
-                                                    "name": "Stop B",
-                                                    "location": {"latLng": {"latitude": 51.51, "longitude": -0.11}},
-                                                },
-                                            },
-                                        },
-                                    },
-                                ]
-                            }
-                        ],
-                    }
-                ],
-            }
+        async def fake_google_routes(*, origin, destination):
+            return BusRoute(
+                duration_s=600,
+                stops=(
+                    TransitStop(
+                        departure_name="Stop A",
+                        arrival_name="Stop B",
+                        departure_lat=51.5,
+                        departure_lon=-0.1,
+                        arrival_lat=51.51,
+                        arrival_lon=-0.11,
+                    ),
+                ),
+            )
 
         node = BusRouteNode(
             "br",
@@ -74,6 +59,19 @@ class TestBusRouteNode:
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
+        assert a.value_or_none() == {
+            "bus_stops": [
+                {
+                    "departure_name": "Stop A",
+                    "arrival_name": "Stop B",
+                    "departure_lat": 51.5,
+                    "departure_lon": -0.1,
+                    "arrival_lat": 51.51,
+                    "arrival_lon": -0.11,
+                }
+            ],
+            "duration_minutes": 10,
+        }, "the row keeps Google's stops and the route's duration in minutes"
 
 
 class TestBusRouteAcceptsAPlaceDestination:
@@ -86,6 +84,7 @@ class TestBusRouteAcceptsAPlaceDestination:
 
     @pytest.mark.asyncio
     async def test_plans_by_the_place_address(self):
+        from houses.google_routes_client import BusRoute
         from houses.model.domain import PlaceOfInterest
         from houses.nodes.bus import BusRouteNode
 
@@ -94,9 +93,9 @@ class TestBusRouteAcceptsAPlaceDestination:
 
         seen: dict = {}
 
-        async def fake_google_routes(body, field_mask, **kw):
-            seen["body"] = body
-            return {"routes": [{"duration": "600s", "legs": [{"steps": []}]}]}
+        async def fake_google_routes(*, origin, destination):
+            seen["destination"] = destination
+            return BusRoute(duration_s=600, stops=())
 
         node = BusRouteNode(
             "brp",
@@ -113,6 +112,9 @@ class TestBusRouteAcceptsAPlaceDestination:
 
         a = await node.attempt()
         assert a.succeeded, f"bus planning failed for a PlaceOfInterest destination: {a.error}"
+        assert seen["destination"] == "Eastgate House, 40 Dukes Place, London EC3A 7LP", (
+            "the node must plan by the place's address"
+        )
 
     @pytest.mark.asyncio
     async def test_an_empty_place_address_is_an_error_not_a_crash(self):
@@ -122,7 +124,7 @@ class TestBusRouteAcceptsAPlaceDestination:
         loc = UserInputNode[GeoPoint]("loc_brp2", GeoPoint)
         dest = UserInputNode[PlaceOfInterest]("dest_brp2", PlaceOfInterest)
 
-        async def fake_google_routes(body, field_mask, **kw):
+        async def fake_google_routes(*, origin, destination):
             raise AssertionError("no request should be made without a destination address")
 
         node = BusRouteNode(

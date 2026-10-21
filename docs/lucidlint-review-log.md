@@ -728,6 +728,12 @@ suite stayed green throughout.
   is a review signal; the only way to pass is to suppress it, and ten
   suppressions then trip the census. Seven markers sit on it. Filed with the
   probe that shows `seam_members: []`.
+- **lucidlint#52** — `class-module`'s multi-class arm reports a module that holds
+  its namesake class plus that class's own DI interface (a `Protocol` satisfied
+  by the namesake class and by test doubles), although the single-class arm's
+  message carries the "closely related models" exception the standard states.
+  https://github.com/ashbywinch/lucidlint/issues/52 — filed 2026-10-21 with a
+  ten-line repro. The site carries a marker citing this issue until it lands.
 
 
 **`duplicate-module` (4 suppressions)** — the request DTOs in `houses/apis/` are
@@ -983,39 +989,21 @@ does not survive the re-read.
 
 **Resolved (2026-10-21)**: `signals.py` split into `signal.py` / `slot.py` /
 `connection.py` (the handle now holds its teardown, so the imports are acyclic),
-and `commute_router.py` split into `google_routes_client.py` (the client, its
-options, its protocol and its private wire records) plus the router alone. Both
-markers are deleted; the census went 8 → 6.
+and `commute_router.py` split so the Google Routes client, its interface and its
+private wire records live in `google_routes_client.py` (the options record gets
+its own module — a public dataclass is not exempt), with the wire knowledge moved
+out of `CommuteRouter` and `BusRouteNode` entirely. Markers deleted.
 
-**The tool gap the second split exposed** (draft, **unfiled** — needs the
-owner's go-ahead for the GitHub write):
+**Owner ruling on what the class-module exemption may cover** (2026-10-21):
+suppress/mark only (a) **private** classes — which the rule already skips — and
+(b) **interfaces whose only implementations are the namesake class and test
+doubles**. Public dataclasses do NOT qualify: they get their own module.
 
-> **class-module: the multi-class arm ignores the standard's "closely related
-> types" exception**
->
-> `houses/google_routes_client.py` holds `GoogleRoutesClient` (the namesake),
-> `GoogleRoutesOptions` (a four-field frozen dataclass that exists only for that
-> client) and `GoogleRoutesClientLike` (the `Protocol` the namesake class
-> satisfies). The rule reports:
->
-> *"module '…/google_routes_client.py' holds the classes GoogleRoutesOptions,
-> GoogleRoutesClientLike, GoogleRoutesClient but GoogleRoutesOptions,
-> GoogleRoutesClientLike don't match the file's name — each public class belongs
-> in a file named after it"*
->
-> The single-class arm's message carries an exception — *"(exception: closely
-> related models)"* — and the multi-class arm neither carries nor honours it,
-> although `docs/coding-standards.md`:97 states the same exception: *"a module
-> grouping closely related small dataclasses (e.g. `models.py` with several
-> handful-of-fields, no-behaviour models sharing one reason to change)"*.
-> Splitting this file further produces `google_routes_options.py` and
-> `google_routes_client_like.py` — a 20-line module for the interface of the
-> class next door.
->
-> Suggested fix: in the multi-class arm, do not report a public class that is
-> (a) a small no-behaviour dataclass/TypedDict, or (b) a `Protocol` whose only
-> implementation is the namesake class in the same module — and carry the
-> single-class arm's exception text into the multi-class message.
+**The tool gap the split exposed — filed 2026-10-21 as
+[lucidlint#52](https://github.com/ashbywinch/lucidlint/issues/52)**, with a
+ten-line repro (a `Protocol` + its class in one module): the multi-class arm
+reports the module's own DI interface as a misplaced class. The site keeps a
+marker citing the issue until it lands.
 
 The remaining six sites are still family files (area, bus, location, schools,
 expressions, property_nodes) whose verdicts stand as recorded: splitting each

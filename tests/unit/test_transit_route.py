@@ -1,8 +1,11 @@
 """Tests for transit_route.py — TfL tube leg fare lookup."""
 
+from typing import override
+
 import pytest
 from money import Money
 
+from houses.google_routes_client import GoogleRoutesClient
 from houses.stations import Station
 from houses.tfl_client import _JourneyParams
 
@@ -518,19 +521,23 @@ class TestTflCachedApiCall4xx:
                 assert "route planner unavailable" in str(e)
 
 
-class _FakeRoutesClient:
-    """GoogleRoutesClientLike stub returning a canned Google TRANSIT route."""
+class _FakeRoutesClient(GoogleRoutesClient):
+    """The real client with only its HTTP answer faked — the router's seam is
+    ``post_route``, so a canned payload arrives through the real parse."""
 
     def __init__(self, payload):
+        super().__init__()
         self.payload = payload
-        self.posted = []
 
+    @override
     async def post(self, body, field_mask, *, options=None):
-        self.posted.append((body, field_mask))
         return self.payload
 
 
-class _RaisingRoutesClient:
+class _RaisingRoutesClient(GoogleRoutesClient):
+    """The real client whose HTTP layer is down — the seam raises."""
+
+    @override
     async def post(self, body, field_mask, *, options=None):
         raise RuntimeError("google down")
 
