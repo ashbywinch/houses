@@ -272,7 +272,7 @@ class TestDriveCommuteAlwaysHasCost:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.geopoint import GeoPoint
-        from houses.nodes.bus import BusLegAugmentNode  # noqa: F401
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode  # noqa: F401
         from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.transit import DriveNode, RouteOptions

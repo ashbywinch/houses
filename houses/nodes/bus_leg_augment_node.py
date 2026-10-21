@@ -1,8 +1,7 @@
-"""DAG nodes for bus route lookup, fare lookup, and walk-to-bus replacement."""
+"""Replace a too-long walk leg with a bus leg (or the whole journey)."""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import override
 
@@ -12,139 +11,9 @@ from pint import Quantity
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.bus_fare_reader import get_bus_fare_reader
-from houses.bus_journey import cheapest_round_trip
-from houses.bus_route import BusRoute
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.geopoint import GeoPoint
-from houses.model.domain import Commute, PlaceOfInterest
+from houses.model.domain import Commute
 from houses.settings import settings
-from serialization import MoneyValue, SerializableAsDict
-
-
-class _BusStop(SerializableAsDict):
-    """Wire shape of one bus-stop entry in the serialized node value."""
-
-    departure_name: str
-    arrival_name: str
-    departure_lat: float | None
-    departure_lon: float | None
-    arrival_lat: float | None
-    arrival_lon: float | None
-
-
-class _BusRouteValue(SerializableAsDict):
-    """Wire shape of the BusRouteNode value persisted to the DAG store."""
-
-    bus_stops: list[_BusStop]
-    duration_minutes: int
-
-
-class _BodsFareValue(SerializableAsDict):
-    """Wire shape of the BodsFareNode value persisted to the DAG store:
-    the cheapest round-trip fare for each departure stop."""
-
-    stop_fares: dict[str, MoneyValue]
-
-# lucidlint: ignore class-module one bus-pipeline slice — route lookup, fare lookup, walk-leg (review-log)
-class BusRouteNode(DerivedNode[dict]):
-    """Find a bus alternative via Google Routes TRANSIT."""
-
-    _default_google_routes_post: Callable[..., Awaitable[BusRoute | None]] | None = None
-
-    def __init__(self, node_id: str, *, best_location, poi, _google_routes_post=None):
-        self._google_routes_post: Callable[..., Awaitable[BusRoute | None]] | None = (
-            _google_routes_post or self._default_google_routes_post
-        )
-        super().__init__(node_id, dict, (best_location, poi))
-
-    @override
-    async def compute(self, location: Attempt, dest: Attempt) -> Attempt[dict]:
-        loc = location.value_or_none()
-        dest_val = dest.value_or_none()
-        if not loc or not dest_val:
-            return self._impossible(dict(zip(("location", "dest"), (location, dest), strict=True)))
-
-        grp = self._google_routes_post
-        if grp is None:
-            return Attempt.impossible("Google Routes posting function not configured")
-
-        # The pipeline feeds this node the destination as the household
-        # settings define it — a PlaceOfInterest — as well as a bare
-        # address or a point, depending on the caller.
-        if isinstance(dest_val, PlaceOfInterest):
-            dest_str = dest_val.address
-        elif isinstance(dest_val, str):
-            dest_str = dest_val
-        else:
-            dest_str = f"{dest_val.lat},{dest_val.lon}"
-        if not dest_str:
-            return Attempt.impossible("no destination address for this journey")
-        origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
-
-        route = await grp(origin=origin_str, destination=dest_str)
-        if route is None or not route.stops:
-            # No bus on this journey is a "no bus route" answer, not a
-            # failure — the bus augment treats an empty route as pass-through.
-            return Attempt.succeeded(_BusRouteValue(bus_stops=[], duration_minutes=0).to_dict())
-
-        bus_stops = [
-            _BusStop(
-                departure_name=stop.departure_name,
-                arrival_name=stop.arrival_name,
-                departure_lat=stop.departure_lat,
-                departure_lon=stop.departure_lon,
-                arrival_lat=stop.arrival_lat,
-                arrival_lon=stop.arrival_lon,
-            )
-            for stop in route.stops
-        ]
-        return Attempt.succeeded(
-            _BusRouteValue(
-                bus_stops=bus_stops,
-                duration_minutes=round(route.duration.to("minute").magnitude),
-            ).to_dict()
-        )
-
-
-class BodsFareNode(DerivedNode[dict]):
-    """Look up BODS bus fares for the stops found by BusRouteNode."""
-
-    def __init__(self, node_id: str, *, bus_route_node):
-        super().__init__(node_id, dict, (bus_route_node,))
-
-    @override
-    @staticmethod
-    def compute(route: Attempt[dict]) -> Attempt[dict]:
-        route_val = route.value_or_none()
-        if route_val is None:
-            return Attempt.impossible("no bus route data")
-
-        bus_stops = route_val.get("bus_stops", [])
-        if not bus_stops:
-            return Attempt.succeeded(_BodsFareValue(stop_fares={}).to_dict())
-
-        reader = get_bus_fare_reader()
-        stop_fares: dict[str, Money] = {}
-        for stop in bus_stops:
-            dep_name = stop.get("departure_name", "")
-            arr_name = stop.get("arrival_name", "")
-            dep_point = (
-                GeoPoint(stop["departure_lat"], stop["departure_lon"])
-                if stop.get("departure_lat") is not None
-                else None
-            )
-            arr_point = (
-                GeoPoint(stop["arrival_lat"], stop["arrival_lon"])
-                if stop.get("arrival_lat") is not None
-                else None
-            )
-            fares = reader.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
-            cheapest = cheapest_round_trip(fares, reader.national_max_single)
-            if cheapest is not None:
-                stop_fares[dep_name] = cheapest
-
-        return Attempt.succeeded(_BodsFareValue(stop_fares=stop_fares).to_dict())
 
 
 class BusLegAugmentNode(DerivedNode[Commute]):

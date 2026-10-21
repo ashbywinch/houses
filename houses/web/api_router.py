@@ -34,7 +34,9 @@ from houses.model.domain import (
     person_id_of,
 )
 from houses.nodes.commute import commute_band
-from houses.nodes.property_nodes import PropertyNodes, PropertySummary, PropertyView
+from houses.nodes.property_nodes import PropertyNodes
+from houses.nodes.property_summary import PropertySummary
+from houses.nodes.property_view import PropertyView
 from houses.nodes.settings_node import SettingsNode
 from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services

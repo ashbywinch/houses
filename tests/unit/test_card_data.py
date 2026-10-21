@@ -20,7 +20,8 @@ from dag.scheduler import flush_processor
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.commute import commute_colour
-from houses.nodes.property_nodes import PropertyNodes, PropertySummary
+from houses.nodes.property_nodes import PropertyNodes
+from houses.nodes.property_summary import PropertySummary
 from houses.property_registry import register_property
 from houses.web.api_router import _score_from_summary
 from tests.helpers import make_services

@@ -4,13 +4,15 @@ from dag.if_then_else_node import IfThenElseNode
 from dag.if_then_else_options import IfThenElseOptions
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute, effective_acceptable_modes, person_id_of
-from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
+from houses.nodes.bods_fare_node import BodsFareNode
+from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
+from houses.nodes.bus_route_node import BusRouteNode
 from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode, needs_rail_fare
 from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
 from houses.nodes.park_and_ride_options import ParkAndRideOptions
 from houses.nodes.petrol import PersonPetrolMpgNode, PetrolCostAugmentNode
 from houses.nodes.rail_fare_node import RailFareNode
-from houses.nodes.schools import SchoolLocationNode
+from houses.nodes.school_location_node import SchoolLocationNode
 from houses.nodes.transit import (
     DestinationAddressNode,
     DestinationPlaceNode,

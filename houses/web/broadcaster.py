@@ -19,7 +19,7 @@ from fastapi import WebSocket
 
 from dag.guard import capture_async
 from houses.nodes.current_home_node import CurrentHomeNode
-from houses.nodes.property_nodes import PropertySummary
+from houses.nodes.property_summary import PropertySummary
 from houses.services_provider import get_services
 from houses.web.monthly_delta import attach as attach_monthly_delta
 from houses.web.settings_payload import SettingsPayload, settings_payload

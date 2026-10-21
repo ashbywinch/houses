@@ -6,7 +6,7 @@ from money import Money
 
 from dag.derived_node import DerivedNode
 from dag.expression import Ref
-from houses.nodes.expressions import PMT
+from houses.nodes.pmt import PMT
 
 
 class MonthlyMortgagePaymentNode(DerivedNode[Money]):

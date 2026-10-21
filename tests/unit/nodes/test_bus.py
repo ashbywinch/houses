@@ -28,7 +28,7 @@ class TestBusRouteNode:
     @pytest.mark.asyncio
     async def test_returns_dict_when_location_ok(self):
         from houses.bus_route import BusRoute
-        from houses.nodes.bus import BusRouteNode
+        from houses.nodes.bus_route_node import BusRouteNode
         from houses.transit_stop import TransitStop
 
         loc = UserInputNode[GeoPoint]("loc_br", GeoPoint)
@@ -87,7 +87,7 @@ class TestBusRouteAcceptsAPlaceDestination:
     async def test_plans_by_the_place_address(self):
         from houses.bus_route import BusRoute
         from houses.model.domain import PlaceOfInterest
-        from houses.nodes.bus import BusRouteNode
+        from houses.nodes.bus_route_node import BusRouteNode
 
         loc = UserInputNode[GeoPoint]("loc_brp", GeoPoint)
         dest = UserInputNode[PlaceOfInterest]("dest_brp", PlaceOfInterest)
@@ -120,7 +120,7 @@ class TestBusRouteAcceptsAPlaceDestination:
     @pytest.mark.asyncio
     async def test_an_empty_place_address_is_an_error_not_a_crash(self):
         from houses.model.domain import PlaceOfInterest
-        from houses.nodes.bus import BusRouteNode
+        from houses.nodes.bus_route_node import BusRouteNode
 
         loc = UserInputNode[GeoPoint]("loc_brp2", GeoPoint)
         dest = UserInputNode[PlaceOfInterest]("dest_brp2", PlaceOfInterest)
@@ -175,7 +175,7 @@ class _StubFareReader(BusJourneyRegistry):
 class TestBodsFareNode:
     @pytest.mark.asyncio
     async def test_succeeds_with_empty_route(self):
-        from houses.nodes.bus import BodsFareNode
+        from houses.nodes.bods_fare_node import BodsFareNode
 
         route = UserInputNode[dict]("route_bf", dict)
         node = BodsFareNode("bf", bus_route_node=route)
@@ -188,7 +188,7 @@ class TestBodsFareNode:
     @pytest.mark.asyncio
     async def test_looks_up_fares_for_stops(self):
         """BodsFareNode returns stop fares for bus stops in the route."""
-        from houses.nodes.bus import BodsFareNode
+        from houses.nodes.bods_fare_node import BodsFareNode
         from houses.services_provider import _request_services
         from tests.helpers import make_services
 
@@ -232,7 +232,7 @@ class TestBusLegAugmentNode:
         """max_walk_node is optional — the dep_names must shrink with the
         deps, not force a 4-vs-3 ValueError at construction."""
         from houses.model.domain import Commute
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_nmw", Commute)
         route = UserInputNode[dict]("r_bl_nmw", dict)
@@ -254,7 +254,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_short", Commute)
         route = UserInputNode[dict]("r_bl_short", dict)
@@ -292,7 +292,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_nobus", Commute)
         route = UserInputNode[dict]("r_bl_nobus", dict)
@@ -334,7 +334,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_repl", Commute)
         route = UserInputNode[dict]("r_bl_repl", dict)
@@ -412,7 +412,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_nw", Commute)
         route = UserInputNode[dict]("r_bl_nw", dict)
@@ -481,7 +481,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_under", Commute)
         route = UserInputNode[dict]("r_bl_under", dict)
@@ -539,7 +539,7 @@ class TestBusLegAugmentInfeasible:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         class _FixedCommute(DerivedNode[Commute]):
             def __init__(self, node_id: str, commute: Commute):
@@ -598,7 +598,7 @@ class TestBusFallbackForNoTflRoute:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         class _FixedTransit(DerivedNode[Commute]):
             def __init__(self, node_id: str, commute: Commute):
@@ -676,7 +676,7 @@ class TestBusAugmentLateRoute:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         class _FixedTransit(DerivedNode[Commute]):
             def __init__(self, node_id: str, commute: Commute):
@@ -764,7 +764,7 @@ class TestBusRouteNodeAgainstRealTransport:
     async def test_bus_stops_parsed_through_real_transport(self):
         from houses.commute_router import CommuteRouter
         from houses.google_routes_client import GoogleRoutesClient
-        from houses.nodes.bus import BusRouteNode
+        from houses.nodes.bus_route_node import BusRouteNode
         from houses.settings import settings
 
         payload = {
@@ -863,7 +863,7 @@ class TestBoundMaxWalkInCompute:
         from dag.attempt import Attempt
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_bm", Commute)
         route = UserInputNode[dict]("r_bl_bm", dict)

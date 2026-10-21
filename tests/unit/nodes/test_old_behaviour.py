@@ -27,7 +27,7 @@ class TestSchoolNodes:
     async def test_secondary_calls_find_nearest_with_correct_params(self):
         from dag.user_input_node import UserInputNode
         from houses.geopoint import GeoPoint
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         addr = UserInputNode[str]("addr", str)
@@ -58,7 +58,7 @@ class TestSchoolNodes:
     async def test_primary_calls_find_nearest_with_boys_and_age_7(self):
         from dag.user_input_node import UserInputNode
         from houses.geopoint import GeoPoint
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         addr = UserInputNode[str]("addr", str)
@@ -151,7 +151,7 @@ class TestTownNode:
     @pytest.mark.asyncio
     async def test_returns_town_from_address(self):
         from dag.user_input_node import UserInputNode
-        from houses.nodes.area import TownNode
+        from houses.nodes.town_node import TownNode
 
         addr = UserInputNode[str]("addr", str)
         node = TownNode("tn", best_address=addr)
@@ -166,7 +166,7 @@ class TestTownNode:
     @pytest.mark.asyncio
     async def test_fails_without_address(self):
         from dag.user_input_node import UserInputNode
-        from houses.nodes.area import TownNode
+        from houses.nodes.town_node import TownNode
 
         addr = UserInputNode[str]("addr2", str)
         node = TownNode("tn2", best_address=addr)

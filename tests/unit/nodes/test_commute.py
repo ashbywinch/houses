@@ -1955,7 +1955,7 @@ class TestZeroTripsNotCommuted:
         # the pipeline exists (structure is per destination)…
         assert "simon/Bracknell" in prop.commute_selectors
         # …but the pill is omitted for a 0-trip destination
-        assert prop._commuted_destinations() == {"simon/Pimlico"}
+        assert prop.commuted_destinations() == {"simon/Pimlico"}
 
     def test_commuted_destinations_excludes_zero_weeks(self):
         from houses.nodes.property_nodes import PropertyNodes
@@ -1980,7 +1980,7 @@ class TestZeroTripsNotCommuted:
         register_property("42424248", prop)
         assert "simon/Bracknell" in prop.commute_selectors
         # zero weeks a year is not commuted either: no pill for Pimlico
-        assert prop._commuted_destinations() == {"simon/Bracknell"}
+        assert prop.commuted_destinations() == {"simon/Bracknell"}
 
 
 class TestCongestionZoneAndProvenanceFrequency:

@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from houses.nodes.property_nodes import PropertyDetail, PropertySummary, PropertyView
+from houses.nodes.property_detail import PropertyDetail
+from houses.nodes.property_summary import PropertySummary
+from houses.nodes.property_view import PropertyView
 from houses.server import app
 from houses.services_provider import _request_services as _sp
 from houses.services_provider import get_services

@@ -1,10 +1,12 @@
+"""Nearest-school lookup for one stage, with its wire shape."""
+
 from __future__ import annotations
 
-from typing import Any, override
+from typing import override
 
 from pydantic import SerializerFunctionWrapHandler, model_serializer
 
-from dag.attempt import Attempt, SourceType, project_value
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geopoint import GeoPoint
@@ -35,36 +37,6 @@ class _School(SerializableAsDict):
             d.pop("lat", None)
             d.pop("lon", None)
         return d
-
-# lucidlint: ignore class-module one compact school-family node file — acceptance/nearest/location (review-log)
-class SchoolAcceptanceNode(DerivedNode[tuple[str, ...]]):
-    """The acceptable school genders for the first child person — a
-    PERSONS-SOURCED dep, never a constructor snapshot, so a filter edit
-    (acceptable_schools change) recomputes the school lookup instead of
-    freezing the acceptance set at property construction (Part F 2.2)."""
-
-    provenance_source_type = SourceType.USER
-
-    def __init__(self, node_id: str, *, persons_source: Node):
-        super().__init__(node_id, tuple[str, ...], (persons_source,))
-        self.display_name: str = "School acceptance"
-
-    @override
-    async def compute(self, persons: Attempt) -> Attempt[tuple[str, ...]]:
-        val = persons.value_or_none() or []
-        for p in val:
-            if getattr(p, "is_child", False):
-                return Attempt.succeeded(tuple(p.acceptable_schools))
-        return Attempt.succeeded(("mixed",))
-
-    @override
-    def provenance_display_value(self, att) -> Any:
-        # A raw string list reads as machine data in the tree;
-        # "mixed, boys, girls" is the human form. The value stays a
-        # tuple in the DAG — only its provenance rendering changes.
-        if att.succeeded and isinstance(att.value, tuple):
-            return ", ".join(project_value(v) for v in att.value)
-        return att.value
 
 
 class NearestSchoolNode(DerivedNode[dict]):
@@ -128,40 +100,3 @@ class NearestSchoolNode(DerivedNode[dict]):
                 lon=school.coords.lon if school.coords else None,
             ).to_dict()
         )
-
-
-
-
-class SchoolLocationNode(DerivedNode[str]):
-    """The school's ADDRESS (name + postcode) as the route destination.
-
-    The walk/transit route planners need a geocodable destination string;
-    the address is what the legs should display — never a bare lat/lon.
-    """
-
-    def __init__(self, node_id: str, *, school_node):
-        super().__init__(node_id, str, (school_node,))
-
-    @override
-    def compute(self, school: Attempt[dict]) -> Attempt[str]:
-        if not school.succeeded:
-            return self._impossible({"school_node": school})
-        val = school.value_or_none()
-        if not val:
-            return Attempt.impossible("school has no details")
-        # The address captured when the school was first found from the
-        # data — the destination the legs display, never a bare lat/lon.
-        # The school name leads, joined with a comma: the leg info shows
-        # "School Name, Street, Town, Postcode".
-        name = (val.get("name") or "").strip()
-        full = (val.get("full_address") or "").strip()
-        if name and full:
-            return Attempt.succeeded(f"{name}, {full}")
-        if full:
-            return Attempt.succeeded(full)
-        postcode = val.get("postcode") or ""
-        if name and postcode:
-            return Attempt.succeeded(f"{name}, {postcode}")
-        if "lat" in val and "lon" in val:
-            return Attempt.succeeded(f"{val['lat']},{val['lon']}")
-        return Attempt.impossible("school has no address or coordinates")

@@ -553,7 +553,7 @@ class TestCouncilTaxNodeProvenance:
             # The postcode is a projection of the address (PostcodeNode)
             # — the node-level test feeds the real derivation chain, not
             # a detached postcode input.
-            from houses.nodes.location import PostcodeNode
+            from houses.nodes.postcode_node import PostcodeNode
 
             postcode = PostcodeNode("ct/pc", best_address=addr)
 

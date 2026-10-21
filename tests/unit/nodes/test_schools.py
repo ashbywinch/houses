@@ -35,7 +35,7 @@ def _fake_svc():
 
 @pytest.mark.asyncio
 async def test_primary_school_impossible_without_location():
-    from houses.nodes.schools import NearestSchoolNode
+    from houses.nodes.nearest_school_node import NearestSchoolNode
 
     loc = UserInputNode[GeoPoint]("loc_ps", GeoPoint)
     addr = UserInputNode[str]("addr_ps", str)
@@ -49,7 +49,7 @@ async def test_primary_school_impossible_without_location():
 
 @pytest.mark.asyncio
 async def test_secondary_school_impossible_without_location():
-    from houses.nodes.schools import NearestSchoolNode
+    from houses.nodes.nearest_school_node import NearestSchoolNode
 
     loc = UserInputNode[GeoPoint]("loc_ss", GeoPoint)
     addr = UserInputNode[str]("addr_ss", str)
@@ -64,7 +64,7 @@ async def test_secondary_school_impossible_without_location():
 @pytest.mark.asyncio
 async def test_school_location_node_fails_without_school():
     from dag.user_input_node import UserInputNode
-    from houses.nodes.schools import SchoolLocationNode
+    from houses.nodes.school_location_node import SchoolLocationNode
 
     school = UserInputNode[dict]("sn", dict)
     node = SchoolLocationNode("sln", school_node=school)
@@ -77,7 +77,7 @@ async def test_school_location_node_prefers_full_address_over_latlon():
     """Regression: the school walk destination was a bare 'lat,lon'.
     The destination must be the school NAME joined with the address
     captured when the school was first found — never coordinates."""
-    from houses.nodes.schools import SchoolLocationNode
+    from houses.nodes.school_location_node import SchoolLocationNode
 
     school = UserInputNode[dict]("sn_addr", dict)
     node = SchoolLocationNode("sln_addr", school_node=school)
@@ -100,7 +100,7 @@ async def test_school_location_node_prefers_full_address_over_latlon():
 @pytest.mark.asyncio
 async def test_school_location_node_falls_back_to_name_postcode():
     """No full_address → name + postcode (still readable, not lat/lon)."""
-    from houses.nodes.schools import SchoolLocationNode
+    from houses.nodes.school_location_node import SchoolLocationNode
 
     school = UserInputNode[dict]("sn_np", dict)
     node = SchoolLocationNode("sln_np", school_node=school)
@@ -115,7 +115,7 @@ async def test_school_location_node_falls_back_to_name_postcode():
 async def test_secondary_school_returns_impossible_when_no_school_found():
     """When school lookup returns None, secondary school must return
     Attempt.impossible (not crash with AttributeError)."""
-    from houses.nodes.schools import NearestSchoolNode
+    from houses.nodes.nearest_school_node import NearestSchoolNode
     from houses.services_provider import _request_services as _sp
     from tests.helpers import FakeSchoolLookup, make_services
 
@@ -137,7 +137,7 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
 @pytest.mark.asyncio
 async def test_primary_school_returns_impossible_when_no_school_found():
     """Primary school must return Attempt.impossible when lookup returns None."""
-    from houses.nodes.schools import NearestSchoolNode
+    from houses.nodes.nearest_school_node import NearestSchoolNode
     from houses.services_provider import _request_services as _sp
     from tests.helpers import FakeSchoolLookup, make_services
 
@@ -224,7 +224,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_primary_school_uses_custom_acceptable(self):
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -257,7 +257,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_secondary_school_uses_custom_acceptable(self):
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -290,7 +290,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_primary_school_default_acceptable_is_mixed(self):
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -320,7 +320,7 @@ class TestSchoolNodeAcceptable:
 
     @pytest.mark.asyncio
     async def test_secondary_school_default_acceptable_is_mixed(self):
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -998,7 +998,7 @@ class TestSchoolErrorPropagation:
 
     @pytest.mark.asyncio
     async def test_propagates_geocode_failure(self):
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -1026,7 +1026,7 @@ class TestSchoolErrorPropagation:
 
     @pytest.mark.asyncio
     async def test_no_school_has_sensible_message(self):
-        from houses.nodes.schools import NearestSchoolNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import FakeSchoolLookup, make_services
 
@@ -1052,7 +1052,8 @@ class TestSchoolAcceptanceDep:
 
     @pytest.mark.asyncio
     async def test_acceptable_edit_recomputes_lookup(self):
-        from houses.nodes.schools import NearestSchoolNode, SchoolAcceptanceNode
+        from houses.nodes.nearest_school_node import NearestSchoolNode
+        from houses.nodes.school_acceptance_node import SchoolAcceptanceNode
         from houses.school_gender import SchoolGender
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services

@@ -10,7 +10,7 @@ import pytest
 
 from dag.scheduler import flush_processor
 from houses.api_cache import set_cache_dir
-from houses.nodes.bus import BusRouteNode
+from houses.nodes.bus_route_node import BusRouteNode
 from tests.helpers import FakeSchoolLookup, make_services
 from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _inject_test_scheduler,

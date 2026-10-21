@@ -8,7 +8,8 @@ from decimal import Decimal
 from money import Money
 
 from dag.attempt import Attempt
-from houses.nodes.expressions import TaxTier, TieredRate
+from houses.nodes.tax_tier import TaxTier
+from houses.nodes.tiered_rate import TieredRate
 
 
 @dataclass

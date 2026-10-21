@@ -9,7 +9,7 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.expression import Conditional, Literal, Ref
-from houses.nodes.expressions import PMT
+from houses.nodes.pmt import PMT
 
 # ── Test helper: a minimal node-like object ──
 
