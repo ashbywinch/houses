@@ -82,15 +82,30 @@ LAN_IP := $(shell ip -4 route get 1 2>/dev/null | awk '{print $$7; exit}')
 
 _PORT_CHECK = if lsof -ti :$(1) >/dev/null 2>&1; then echo "${YELLOW}Port $(1) already in use — use 'make stop' first${NC}"; exit 1; fi
 
-run: setup
+# Self-signed dev TLS cert for the sslip.io host. Chrome's HTTPS-Upgrades
+# upgrades a typed hostname and does NOT fall back to plain HTTP, so the
+# dev app must speak TLS on the hostname (IP addresses are exempt, which is
+# why the LAN IP kept working while the hostname did not). Certs are
+# machine-local (gitignored); `make gen-certs` regenerates them.
+gen-certs:
+	@mkdir -p houses/frontend/certs
+	@openssl req -x509 -newkey rsa:2048 -nodes \
+		-keyout houses/frontend/certs/dev.key \
+		-out houses/frontend/certs/dev.crt -days 825 \
+		-subj "/CN=$(LAN_IP).sslip.io" \
+		-addext "subjectAltName=DNS:$(LAN_IP).sslip.io,DNS:*.sslip.io,IP:$(LAN_IP)" 2>/dev/null
+	@echo "${GREEN}✓ Dev TLS cert generated for $(LAN_IP).sslip.io${NC}"
+	@echo "${YELLOW}  Browsers warn once about the self-signed cert — accept it.${NC}"
+
+run: setup gen-certs
 	@if [ -z "$(LAN_IP)" ]; then echo "${RED}Could not detect LAN IP${NC}"; exit 1; fi
 	@$(call _PORT_CHECK,8765)
 	@$(call _PORT_CHECK,5173)
-	@echo "${YELLOW}Backend: http://$(LAN_IP):8765  Frontend: http://$(LAN_IP).sslip.io:5173${NC}"
+	@echo "${YELLOW}Backend: http://$(LAN_IP):8765  Frontend: https://$(LAN_IP).sslip.io:5173${NC}"
 	@mkdir -p .logs
-	@cd houses/frontend && HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
+	@cd houses/frontend && HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=https://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=https://$(LAN_IP).sslip.io:5173 \
 		nohup npm run dev > "$(CURDIR)/.logs/frontend.log" 2>&1 & echo $$! > "$(CURDIR)/.logs/frontend.pid"
-	@HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
+	@HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=https://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=https://$(LAN_IP).sslip.io:5173 \
 		nohup $(UV) run python -m houses > .logs/backend.log 2>&1 & echo $$! > .logs/backend.pid
 
 stop:

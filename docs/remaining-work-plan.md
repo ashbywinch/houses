@@ -718,21 +718,23 @@ missing piece on pyrefly instead — and it works:
   `@override` fails the gate. `make check` 7.7s; `make test` green.
   (pyrefly's `--check-all` = 4,224 errors of unannotated-internals
   noise — rejected.)
-- **Dev-server scheme: plain HTTP on :5173 — the HTTPS experiment was
-  reverted.** The saga: the phone browser's HTTPS-First mode auto-upgraded
-  `http://192.168.1.251.sslip.io:5173` to https against the plain-http
-  vite server → `ERR_SSL_PROTOCOL_ERROR`. The attempted fix — a
-  self-signed cert served via `vite server.https` — made vite
-  **HTTPS-ONLY** on :5173, so every http bookmark/URL (what `make run`
-  prints) got `ERR_EMPTY_RESPONSE` (browser connects, vite doesn't speak
-  HTTP on that port, connection closed). Lesson: `server.https` REPLACES
-  http, it doesn't add https. Reverted to plain HTTP: vite.config.ts has
-  no `server.https`, `make run` prints http URLs, `make gen-certs` and
-  the certs dir removed. HTTPS-First browsers fall back to http against
-  a plain-http server (the designed behavior). If a phone hard-fails,
-  the switch is the browser's "Always use secure connections" — not the
-  app. Real HTTPS for the dev box would need a reverse proxy (Caddy/
-  nginx) with a trusted cert — not worth it for dev.
+- **Dev-server scheme: HTTPS on :5173, restored 2026-10-22.** The 2026-08-08
+  experiment (self-signed cert via `vite server.https`) was reverted because
+  `server.https` REPLACES http, so every http bookmark got
+  `ERR_EMPTY_RESPONSE`. That revert rested on a premise that no longer holds:
+  *"HTTPS-First browsers fall back to http against a plain-http server"* —
+  Chrome's HTTPS-Upgrades now upgrades a typed **hostname** and does not fall
+  back, while **IP addresses are exempt**. That is exactly the split seen on
+  the phone: `http://192.168.1.251:5173` loads, the `*.sslip.io` hostname
+  fails, and the Google OAuth callback — which Google only accepts as
+  `https://` (or loopback) — could never complete on the plain-http hostname.
+  So `make gen-certs` + `vite server.https` + `https://` URLs in `make run`
+  are back (cert SANs: `<LAN-IP>.sslip.io`, `*.sslip.io`, the LAN IP), the
+  backend runs with `HOUSES_PUBLIC_URL=https://<LAN-IP>.sslip.io:5173`, and the
+  browser accepts the self-signed cert once. The cost the revert objected to
+  is real and accepted: an `http://` URL to :5173 now gets no reply — use the
+  printed `https://` one. The Google client needs
+  `https://<LAN-IP>.sslip.io:5173/api/auth/callback` registered.
 
 ## Verification
 
