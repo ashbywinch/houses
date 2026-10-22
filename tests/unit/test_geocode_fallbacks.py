@@ -127,3 +127,40 @@ def test_google_street_result_is_a_location():
 def test_google_without_results_is_not_a_location():
     assert GoogleGeocodeResult.from_response({"results": []}).location() is None
     assert GoogleGeocodeResult.from_response(None).location() is None
+
+
+def test_pelias_town_name_is_the_locality():
+    answer = PeliasSearchResult.from_response(
+        {"features": [{"properties": {"locality": "Didcot", "layer": "locality"}}]}
+    )
+
+    assert answer.town_name() == "Didcot"
+
+
+def test_pelias_town_name_falls_back_to_the_borough():
+    """For a point in London the settlement is the borough, not a locality."""
+    answer = PeliasSearchResult.from_response(
+        {"features": [{"properties": {"borough": "Merton", "layer": "borough"}}]}
+    )
+
+    assert answer.town_name() == "Merton"
+
+
+def test_pelias_town_name_is_none_for_a_fallback():
+    answer = PeliasSearchResult.from_response(
+        {
+            "features": [
+                {
+                    "properties": {
+                        "name": "United Kingdom",
+                        "locality": None,
+                        "layer": "country",
+                        "match_type": "fallback",
+                    }
+                }
+            ]
+        }
+    )
+
+    assert answer.town_name() is None
+    assert PeliasSearchResult.from_response({"features": []}).town_name() is None

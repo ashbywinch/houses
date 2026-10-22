@@ -17,6 +17,7 @@ from houses import apis
 from houses.api_cache import CacheRequest, cached_async_client
 from houses.apis.ors_api import ORSApi
 from houses.apis.ors_reverse_params import OrsReverseParams
+from houses.apis.pelias_search_result import PeliasSearchResult
 from houses.geopoint import GeoPoint
 from houses.ors_endpoints import PELIAS_REVERSE
 from houses.services_provider import get_services
@@ -404,13 +405,9 @@ async def find_nearest_town_name(
             return Attempt.impossible(f"reverse geocode failed: {failure}")
         data = payload if payload is not None else {}
 
-    features = data.get("features", [])
-    if not features:
+    town = PeliasSearchResult.from_response(data).town_name()
+    if town is None:
         return Attempt.impossible("no town found for coordinates")
-    props = features[0].get("properties", {})
-    town = props.get("locality") or props.get("borough")
-    if not town:
-        return Attempt.impossible("no town name in geocode response")
     return Attempt.succeeded(town)
 
 

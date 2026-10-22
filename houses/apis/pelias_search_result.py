@@ -43,3 +43,19 @@ class PeliasSearchResult:
             lng, lat = feature["geometry"]["coordinates"]
             return GeoPoint(lat, lng)
         return None
+
+    def town_name(self) -> str | None:
+        """The settlement this answer names; ``None`` = it named no town.
+
+        The reverse lookup's answer: Pelias labels a point with the locality
+        (a town) or the borough (a London borough). A fallback names the
+        country, so it is skipped here the same way ``location()`` skips it.
+        """
+        for feature in self.features:
+            properties = feature.get("properties") or {}
+            if properties.get("match_type") == "fallback" or properties.get("layer") in NON_PLACE_LAYERS:
+                continue
+            town = properties.get("locality") or properties.get("borough")
+            if town:
+                return str(town)
+        return None
