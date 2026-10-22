@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import NotRequired, TypedDict, cast
 
 from houses import apigw
 from houses.apigw import FetchArgs
@@ -12,6 +13,32 @@ from houses.geopoint import GeoPoint
 from houses.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+class _GoogleLocation(TypedDict):
+    """A Google result's point."""
+
+    lat: float
+    lng: float
+
+
+class _GoogleGeometry(TypedDict):
+    location: _GoogleLocation
+
+
+class _GoogleResult(TypedDict):
+    """One Google geocode result: its point and what kind of place it is."""
+
+    types: list[str]
+    geometry: _GoogleGeometry
+    formatted_address: NotRequired[str]
+
+
+class _GoogleResponse(TypedDict):
+    """A Google geocode response: its status and results, best first."""
+
+    results: list[_GoogleResult]
+    status: NotRequired[str]
 
 
 class GoogleGeocodeApi(BaseApi):
@@ -44,8 +71,19 @@ class GoogleGeocodeApi(BaseApi):
                 (data or {}).get("error_message", ""),
             )
             return None
-        results = data.get("results") or []
-        if not results:
-            return None
-        loc = results[0]["geometry"]["location"]
-        return GeoPoint(loc["lat"], loc["lng"])
+        return self._first_usable_result(cast(_GoogleResponse, data))
+
+    @staticmethod
+    def _first_usable_result(data: _GoogleResponse) -> GeoPoint | None:
+        """Google's first result that is a real place; ``None`` = next provider.
+
+        An address Google cannot resolve comes back as the country itself —
+        ``types: ["country", "political"]``, formatted_address "United Kingdom"
+        — centred on the GB centroid, which is not a location.
+        """
+        for result in data.get("results") or []:
+            if "country" in result["types"]:
+                continue
+            loc = result["geometry"]["location"]
+            return GeoPoint(loc["lat"], loc["lng"])
+        return None
