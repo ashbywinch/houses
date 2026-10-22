@@ -45,17 +45,38 @@ async def isolated_cache(tmp_path):
     api_cache.set_cache_dir(previous)
 
 
-class _FakeInner(httpx.AsyncBaseTransport):
-    """Records requests; returns a canned response — no network."""
+class _StreamingBody(httpx.AsyncByteStream):
+    """The body a real HTTP transport hands back: a stream, not a read buffer."""
 
-    def __init__(self, response: httpx.Response):
-        self.response = response
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    @override
+    async def __aiter__(self):
+        yield self._body
+
+
+class _FakeInner(httpx.AsyncBaseTransport):
+    """Records requests; returns a canned response — no network.
+
+    The response is STREAMED, like a real transport's: handing back a pre-read
+    ``httpx.Response`` lets a caller ``.json()`` it without awaiting ``aread()``,
+    which a real transport refuses — that fake hid a live bug once.
+    """
+
+    def __init__(self, response: httpx.Response) -> None:
+        self._status = response.status_code
+        self._body = response.content
         self.requests: list[httpx.Request] = []
 
     @override
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        return self.response
+        return httpx.Response(
+            self._status,
+            stream=_StreamingBody(self._body),
+            headers={"content-type": "application/json"},
+        )
 
 
 # ── transport: legacy wrapped entries ───────────────────────────────

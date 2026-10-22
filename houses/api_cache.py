@@ -284,6 +284,10 @@ class CachingTransport(httpx.AsyncBaseTransport):
         # their status. 401/403 (key expiry), 409 (planner outage), 429 and 5xx
         # are transient and must never poison the cache.
         try:
+            # A transport hands back a STREAMING response; .json() raises
+            # ResponseNotRead until it is read. Read it here, inside the
+            # cache-write guard, so a read failure can never break the request.
+            await response.aread()
             data = response.json()
             if response.is_success:
                 call.store(data)
