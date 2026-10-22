@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 
 import httpx
 from pint import Quantity
@@ -76,12 +77,16 @@ KNOWN_COUNTIES = frozenset(
 )
 class _WalkabilityLimits:
     """Walkability enrichment tunables: the HTTP retry band for API
-    calls and the plausibility bound on walk times."""
+    calls, the plausibility bound on walk times, and the shape of the
+    amenities summary (how many places it names, where a placeless one
+    sorts)."""
 
     HTTP_TOO_MANY_REQUESTS = 429
     HTTP_5XX_START = 500
     HTTP_5XX_END = 600
     MAX_PLAUSIBLE_WALK_MINUTES = 180
+    SUMMARY_PLACES = 5
+    NO_POINT_SORT_KEY = 999
 
 
 # walking pace as a Quantity — the km→minutes math goes through pint
@@ -182,49 +187,37 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
     return places
 
 
-def _format_places(places: list[apis.PlacesResult], lat: float, lng: float) -> str:
-    """Format Google Places results into a human-readable string."""
-    if not places:
-        return ""
-    origin = GeoPoint(lat, lng)
-    hits = []
-    for place in places:
-        if not place.is_destination():
+def _amenity_summary(origin: GeoPoint, named: Iterable[tuple[str, GeoPoint | None]]) -> str:
+    """The nearest destinations as one line: nearest first, at most five.
+
+    Both sources — Google Places and the Overpass fallback — agree on how a
+    place becomes a line, and differ only in where its name and point come
+    from. A place with no point cannot be timed, so it sorts last.
+    """
+    hits: list[tuple[int, str]] = []
+    for name, point in named:
+        if point is None:
+            hits.append((_WalkabilityLimits.NO_POINT_SORT_KEY, name))
             continue
-        point = place.location
-        if point is not None:
-            dist_km = origin.distance_km_to(point)
-            # GeoPoint.distance_km_to is a bare-km wire value; the pace math
-            # is pint, and the minutes int is the serialization boundary
-            walk_minutes_q = (Quantity(dist_km, "km") / WALKING_SPEED).to("minute")
-            walk_min = max(1, round(walk_minutes_q.magnitude))
-            hits.append((walk_min, f"{place.name} ({walk_min}m)"))
-        else:
-            hits.append((999, place.name))
+        # GeoPoint.distance_km_to is a bare-km wire value; the pace math is
+        # pint, and the minutes int is the serialization boundary
+        walk_minutes_q = (Quantity(origin.distance_km_to(point), "km") / WALKING_SPEED).to("minute")
+        walk_min = max(1, round(walk_minutes_q.magnitude))  # one step away is still a minute
+        hits.append((walk_min, f"{name} ({walk_min}m)"))
     hits.sort(key=lambda x: x[0])
-    return " | ".join(name for _, name in hits[:5])
+    return " | ".join(name for _, name in hits[: _WalkabilityLimits.SUMMARY_PLACES])
+
+
+def _format_places(places: list[apis.PlacesResult], lat: float, lng: float) -> str:
+    """The amenities summary from Google Places — destinations only."""
+    destinations = ((place.name, place.location) for place in places if place.is_destination())
+    return _amenity_summary(GeoPoint(lat, lng), destinations)
 
 
 def _format_overpass(data: apis.OverpassResponse, lat: float, lng: float) -> str:
-    """Format Overpass API response into a human-readable string."""
-    elements = data.elements
-    origin = GeoPoint(lat, lng)
-    hits = []
-    for element in elements:
-        name = element.tags.get("name", "")
-        if not name:
-            continue
-        e_lat = element.latitude or (element.center[0] if element.center else None)
-        e_lng = element.longitude or (element.center[1] if element.center else None)
-        if e_lat is not None and e_lng is not None:
-            dist_km = origin.distance_km_to(GeoPoint(e_lat, e_lng))
-            walk_minutes_q = (Quantity(dist_km, "km") / WALKING_SPEED).to("minute")
-            walk_min = max(1, round(walk_minutes_q.magnitude))
-            hits.append((walk_min, f"{name} ({walk_min}m)"))
-        else:
-            hits.append((999, name))
-    hits.sort(key=lambda x: x[0])
-    return " | ".join(name for _, name in hits[:5])
+    """The amenities summary from the Overpass fallback — named elements only."""
+    named = ((name, element.location()) for element in data.elements if (name := element.tags.get("name", "")))
+    return _amenity_summary(GeoPoint(lat, lng), named)
 
 
 def _plausible_walk(minutes) -> bool:

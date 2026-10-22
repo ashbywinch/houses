@@ -141,3 +141,26 @@ def test_format_places_names_destinations_only() -> None:
     assert "Lidl" in text
     assert "Didcot Parkway" not in text
     assert "Didcot" not in text
+
+
+def test_format_overpass_names_named_elements_only() -> None:
+    """The fallback summary drops nameless elements and cannot time a point it lacks."""
+    from houses.apis.overpass_element import OverpassElement
+    from houses.apis.overpass_response import OverpassResponse
+    from houses.geopoint import GeoPoint
+    from houses.walkability import _format_overpass
+
+    here = GeoPoint(lat=51.6102143, lon=-1.2528258)
+    data = OverpassResponse(
+        elements=[
+            OverpassElement(tags={"name": "Lidl"}, latitude=here.lat, longitude=here.lon, center=None),
+            OverpassElement(tags={}, latitude=here.lat, longitude=here.lon, center=None),
+            OverpassElement(tags={"name": "Far Park"}, latitude=None, longitude=None, center=None),
+        ]
+    )
+
+    text = _format_overpass(data, here.lat, here.lon)
+
+    assert "Lidl (1m)" in text  # at the origin: the floor is a minute, never 0
+    assert "Far Park" in text  # named but untimed, so it sorts last
+    assert text.count("|") == 1  # the nameless element is dropped
