@@ -1,4 +1,4 @@
-"""The schools section of both property documents (primary and secondary)."""
+"""The schools section of both property payloads (primary and secondary)."""
 
 from __future__ import annotations
 

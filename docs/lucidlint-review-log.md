@@ -1005,17 +1005,30 @@ does not survive the re-read.
    `property_view`, `property_summary`, `property_detail`, `school_entry`,
    `schools_block`, `triage_block`). All eight markers deleted.
 
-**The lesson the splits paid for:** one module per *wire shape* is not the same
-as one module per class. The first cut created eleven single-TypedDict modules
-and the gate answered with six `duplicate-module` fails — sibling small
-TypedDicts of near-equal size are structurally identical to the rule. So a
-private wire block that only one document emits now lives *privately in that
-document* (the standard's "closely related small dataclasses" case), and only
-the shapes both documents carry (the school entry, the schools block, the triage
-block) are public modules. Making that honest moved the document assembly out of
-`PropertyNodes` into `property_summary(nodes)` / `property_detail(nodes, svc)`,
-and made the four commute-projection helpers public on `PropertyNodes` (the
-recorded "private-import — renamed public" precedent). Wire bytes unchanged.
+**The lesson the splits paid for — and the exact rule that taught it.** The first
+cut made one module per nested payload block, eleven of them, and the gate
+answered with six `duplicate-module` fails. The mechanism, read from
+`collect_skeleton_modules`/`duplicate_module_findings` and reproduced on a
+ten-line pair:
+
+- a file's **module** identity is its whole AST as identifier-normalised
+  bigrams, and two modules pair on that measure alone (no constants check);
+- a **class** identity needs ≥12 bigrams in the class body and pairs only when
+  the two classes' constants are identical — which is why a one-block module never
+  reaches the class arm;
+- so eleven files with the same imports, a docstring and one same-sized
+  `TypedDict` were **100% similar** to each other, and the tool said "a fork".
+
+That is a false positive on small record modules — the blocks are distinct
+records, not copies. The honest response is not eleven near-identical files: a
+private block that only one payload carries now sits in that payload's module
+(the standard's "closely related small dataclasses … sharing one reason to
+change"), and only the three blocks both payloads carry — the school entry, the
+schools block, the triage block — are public one-class modules. Making that
+honest moved the summary/detail assembly out of `PropertyNodes` into
+`property_summary(nodes)` / `property_detail(nodes, svc)`, and made the four
+commute-projection helpers public on `PropertyNodes` (the recorded
+"private-import — renamed public" precedent). Bytes served unchanged.
 
 **Owner ruling on what the class-module exemption may cover** (2026-10-21):
 suppress/mark only (a) **private** classes — which the rule already skips — and

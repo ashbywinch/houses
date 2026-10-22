@@ -1,4 +1,4 @@
-"""The triage section both property documents carry."""
+"""The triage section both property payloads carry."""
 
 from __future__ import annotations
 

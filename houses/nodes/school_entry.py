@@ -1,4 +1,4 @@
-"""The per-stage school wrapper both property documents carry."""
+"""The per-stage school wrapper both property payloads carry."""
 
 from __future__ import annotations
 

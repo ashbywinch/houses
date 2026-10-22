@@ -70,9 +70,11 @@ owner calls:
 Also resolved: `houses/nodes/bootstrap.py::bootstrap_from_row` is **deleted**
 (there is no sheet import; the live `load_property_nodes_from_db`
 path is now tested directly). `scripts/parse_netex_fares.py` is also
-**resolved**: `NetexFareParser` → `NetexFareDocument`, its `zone_fares` modelled
-as `ZoneFares` (a keyed collection owning its writes), so the `process-class`
-fail is gone and only the size warning's marker remains.
+**resolved**: `NetexFareParser` → `_NetexFares` (the fares of one NeTEx file;
+private, because the module's surface is `parse_netex_fares` and the records it
+returns), its `zone_fares` modelled as `ZoneFares` (a keyed collection owning its
+writes), so the `process-class` fail is gone and only the size warning's marker
+remains.
 
 `long-param-list` was fixed (2026-10-21): `api_fetch` takes its `FetchArgs`.
 

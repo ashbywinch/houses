@@ -29,7 +29,7 @@ type _DmeParse = tuple[ZoneFares, dict[str, str]]
 # the nested records, and ``to_dict`` comes from the boundary base.
 
 class ParseResult(SerializableAsDict):
-    """The parser's output record for one NeTEx document."""
+    """The parser's output record for one NeTEx fares file."""
 
     stop_zones: dict[str, str]
     stop_coords: list[StopCoord]
@@ -155,9 +155,9 @@ def load_naptan_stops() -> Mapping[str, tuple[float, float]] | None:
         logger.info("Loaded %d NaPTAN stop coordinates", len(naptan))
         return naptan
 
-    logger.info("Downloading NaPTAN stop data from %s (101MB)", NetexFareDocument.NAPTAN_DOWNLOAD)
+    logger.info("Downloading NaPTAN stop data from %s (101MB)", _NetexFares.NAPTAN_DOWNLOAD)
     try:
-        resp = httpx.get(NetexFareDocument.NAPTAN_DOWNLOAD, timeout=300, follow_redirects=True)
+        resp = httpx.get(_NetexFares.NAPTAN_DOWNLOAD, timeout=300, follow_redirects=True)
         resp.raise_for_status()
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
         logger.warning("Failed to download NaPTAN data: %s", e)
@@ -211,7 +211,7 @@ def parse_netex_fares(
     except ET.ParseError as e:
         logger.warning("XML parse error: %s", e)
         return None
-    return NetexFareDocument(root, stations, naptan).run()
+    return _NetexFares(root, stations, naptan).run()
 
 
 # field-disjoint partition exists to split along; size is a review signal, not a split order (review-log)
@@ -231,12 +231,13 @@ class _StopCoordinates:
         return self
 
 # lucidlint: ignore latent-class one parse surface — 27 methods and no field-disjoint partition (review-log, #47)
-class NetexFareDocument:
-    """One BODS NeTEx fares XML document, parsed into its fare records.
+class _NetexFares:
+    """The fares of one BODS NeTEx file: stops, zone pairs and products.
 
-    The section parsers are methods cooperating through the document's state
-    (stops, zone_fares, dme_zone_pairs, network_fares) and produce the output
-    record set on :meth:`run`.
+    The section parsers are methods cooperating through this state (stops,
+    zone_fares, dme_zone_pairs, network_fares) and produce the output record
+    set on :meth:`run`. Private: the module's surface is ``parse_netex_fares``
+    and the records it returns.
     """
 
     NS = {
@@ -372,12 +373,12 @@ class NetexFareDocument:
     @staticmethod
     def _stop_coordinates(ssp: ET.Element) -> _StopCoordinates:
         lat_el = _first_found(
-            ssp.find(".//netex:Latitude", NetexFareDocument.NS),
-            ssp.find(".//netex:latitude", NetexFareDocument.NS),
+            ssp.find(".//netex:Latitude", _NetexFares.NS),
+            ssp.find(".//netex:latitude", _NetexFares.NS),
         )
         lon_el = _first_found(
-            ssp.find(".//netex:Longitude", NetexFareDocument.NS),
-            ssp.find(".//netex:longitude", NetexFareDocument.NS),
+            ssp.find(".//netex:Longitude", _NetexFares.NS),
+            ssp.find(".//netex:longitude", _NetexFares.NS),
         )
         return _StopCoordinates(
             lat=float(lat_el.text) if lat_el is not None and lat_el.text else None,
@@ -603,8 +604,8 @@ class NetexFareDocument:
             tag = _unprefixed(child.tag)
             if tag == "Price" or tag == "price":
                 amt_el = _first_found(
-                    child.find(".//netex:Amount", NetexFareDocument.NS),
-                    child.find("netex:Amount", NetexFareDocument.NS),
+                    child.find(".//netex:Amount", _NetexFares.NS),
+                    child.find("netex:Amount", _NetexFares.NS),
                 )
                 # one fallback expression: the Amount element's own text, else the Price element's
                 price = _as_float((amt_el if amt_el is not None else child).text)

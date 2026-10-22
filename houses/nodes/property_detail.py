@@ -1,4 +1,4 @@
-"""One property's full detail document — every section the page renders."""
+"""One property's full detail payload — every section the page renders."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ class _SettingsBlock(TypedDict, total=False):
 
 
 class PropertyDetail(SerializableAsDict):
-    """One property's full detail document — every section the page renders."""
+    """One property's full detail payload — every section the page renders."""
 
     rid: str
     best_address: Any
@@ -104,7 +104,7 @@ class PropertyDetail(SerializableAsDict):
 
 
 async def property_detail(nodes: PropertyNodes, svc: Services) -> PropertyDetail:
-    """Build the detail document from a property's node container.
+    """Build the detail payload from a property's node container.
 
     The commute entries follow the summary's projection (name/label keys,
     one entry per destination that happens); the settings section carries

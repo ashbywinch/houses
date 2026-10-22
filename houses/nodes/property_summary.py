@@ -42,7 +42,7 @@ class PropertySummary(SerializableAsDict):
 
 
 async def property_summary(nodes: PropertyNodes) -> PropertySummary:
-    """Build the summary document from a property's node container.
+    """Build the summary payload from a property's node container.
 
     The commute entries are the wire projection of the live selectors: only
     a destination that actually happens gets an entry (trips and weeks both
