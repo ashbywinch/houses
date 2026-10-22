@@ -189,28 +189,18 @@ def _format_places(places: list[apis.PlacesResult], lat: float, lng: float) -> s
     origin = GeoPoint(lat, lng)
     hits = []
     for place in places:
-        place_types = set(place.types)
-        if place_types & {
-            "transit_station",
-            "bus_stop",
-            "bus_station",
-            "locality",
-            "administrative_area_level_3",
-            "administrative_area_level_4",
-        }:
+        if not place.is_destination():
             continue
-        name = place.name
-        place_lat = place.latitude
-        place_lng = place.longitude
-        if place_lat is not None and place_lng is not None:
-            dist_km = origin.distance_km_to(GeoPoint(place_lat, place_lng))
+        point = place.location
+        if point is not None:
+            dist_km = origin.distance_km_to(point)
             # GeoPoint.distance_km_to is a bare-km wire value; the pace math
             # is pint, and the minutes int is the serialization boundary
             walk_minutes_q = (Quantity(dist_km, "km") / WALKING_SPEED).to("minute")
             walk_min = max(1, round(walk_minutes_q.magnitude))
-            hits.append((walk_min, f"{name} ({walk_min}m)"))
+            hits.append((walk_min, f"{place.name} ({walk_min}m)"))
         else:
-            hits.append((999, name))
+            hits.append((999, place.name))
     hits.sort(key=lambda x: x[0])
     return " | ".join(name for _, name in hits[:5])
 

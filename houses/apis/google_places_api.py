@@ -52,16 +52,4 @@ class GooglePlacesApi(BaseApi):
         data = await self._fetch(req)
         if not data:
             return []
-        results = []
-        for p in data.get("places", []):
-            loc = p.get("location") or {}
-            name = (p.get("displayName") or {}).get("text", "")
-            results.append(
-                PlacesResult(
-                    name=name,
-                    latitude=loc.get("latitude"),
-                    longitude=loc.get("longitude"),
-                    types=p.get("types", []),
-                )
-            )
-        return results
+        return [PlacesResult.from_place(place) for place in data.get("places", [])]

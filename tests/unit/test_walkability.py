@@ -121,3 +121,23 @@ class TestExtractTown:
         assert result.walk_to_town is not None
         assert result.walk_to_town.magnitude == 10
         assert not rev_called, "Reverse geocode should NOT be called when address works"
+
+
+def test_format_places_names_destinations_only() -> None:
+    """The amenities string names places you walk TO, not hubs or areas."""
+    from houses.apis.places_result import PlacesResult
+    from houses.geopoint import GeoPoint
+    from houses.walkability import _format_places
+
+    here = GeoPoint(lat=51.6102143, lon=-1.2528258)
+    places = [
+        PlacesResult(name="Lidl", location=here, types=["supermarket"]),
+        PlacesResult(name="Didcot Parkway", location=GeoPoint(lat=51.61, lon=-1.24), types=["transit_station"]),
+        PlacesResult(name="Didcot", location=GeoPoint(lat=51.6, lon=-1.25), types=["locality"]),
+    ]
+
+    text = _format_places(places, here.lat, here.lon)
+
+    assert "Lidl" in text
+    assert "Didcot Parkway" not in text
+    assert "Didcot" not in text
