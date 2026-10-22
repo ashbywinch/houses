@@ -17,6 +17,7 @@ import httpx
 from dag.attempt import Attempt
 from dag.guard import capture_async
 from houses import apis
+from houses.address_utils import POSTCODE_RE
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
 from houses.api_cache import CacheRequest
@@ -129,6 +130,9 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
     e.g. ``"address matched multiple properties"``, ``"no matching
     certificate for this address"``, or ``"no certificates found"``.
 
+    ``postcode`` must be complete: the register refuses an outward code, so
+    a partial one returns ``impossible`` without a request.
+
     When ``address`` is provided, filters the API results to match
     the building identifier (number or name) against ``addressLine1``
     in each certificate. The specific reason from ``_match_cert`` is
@@ -142,6 +146,14 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         return Attempt.impossible("address has no building identifier")
 
     pc = postcode.strip().upper()
+    # The EPC register needs a FULL postcode: an outward code (or none) is
+    # refused here rather than at the API, which answers a bare 400 Bad
+    # Request that names nothing.  Before the cache, so a doomed key is never
+    # looked up or sent.
+    if not pc:
+        return Attempt.impossible("address has no postcode")
+    if not POSTCODE_RE.fullmatch(pc):
+        return Attempt.impossible(f"address has no full postcode ({pc})")
     params = _EpcSearchParams(postcode=pc, page_size=50)
 
     cached = CacheRequest("GET", _EpcEndpoints.SEARCH_URL, params).cached()

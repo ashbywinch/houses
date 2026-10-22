@@ -222,10 +222,36 @@ async def test_no_certificates_returns_impossible(_mock_http_requests):
         lambda url: "get-energy-performance-data" in str(url),
         lambda request: Response(200, json={"data": []}),
     )
-    band = await lookup_epc("SL6")
+    band = await lookup_epc("SL6 1AA")
 
     assert band.impossible
     assert band.error == "no certificates found"
+
+
+@pytest.mark.asyncio
+async def test_outcode_returns_impossible_without_calling_the_api():
+    """The EPC register needs a FULL postcode.
+
+    An outward code must never be sent — the live API answers 400 Bad Request
+    (four properties sat on that error), which tells the user nothing. The
+    reason names the real gap instead, and no request is spent on a call that
+    cannot succeed.
+    """
+
+    def handler(request):
+        raise AssertionError("Should not be called")
+
+    original_init = AsyncClient.__init__
+
+    def patched_init(self, **kwargs):
+        kwargs["transport"] = MockTransport(handler)
+        original_init(self, **kwargs)
+
+    with patch.object(AsyncClient, "__init__", patched_init):
+        band = await lookup_epc("HP13")
+
+    assert band.impossible
+    assert band.error == "address has no full postcode (HP13)"
 
 
 @pytest.mark.asyncio
