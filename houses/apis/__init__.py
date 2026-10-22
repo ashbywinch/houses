@@ -34,6 +34,7 @@ from houses.apis.epc_api import EpcApi
 from houses.apis.epc_search_result import EpcSearchResult
 from houses.apis.google_geocode_api import GoogleGeocodeApi
 from houses.apis.google_geocode_params import GoogleGeocodeParams
+from houses.apis.google_geocode_result import GoogleGeocodeResult
 from houses.apis.google_places_api import GooglePlacesApi
 from houses.apis.nominatim_api import NominatimApi
 from houses.apis.nominatim_params import NominatimParams
@@ -45,6 +46,7 @@ from houses.apis.overpass_api import OverpassApi
 from houses.apis.overpass_element import OverpassElement
 from houses.apis.overpass_params import OverpassParams
 from houses.apis.overpass_response import OverpassResponse
+from houses.apis.pelias_search_result import PeliasSearchResult
 from houses.apis.places_center import PlacesCenter
 from houses.apis.places_circle import PlacesCircle
 from houses.apis.places_restriction import PlacesRestriction
@@ -67,9 +69,11 @@ __all__ = [
     "FetchArgs",
     "GoogleGeocodeApi",
     "GoogleGeocodeParams",
+    "GoogleGeocodeResult",
     "GooglePlacesApi",
     "NominatimApi",
     "NominatimParams",
+    "PeliasSearchResult",
     "ORSApi",
     "OUTCODE_RE",
     "OrsDirectionsBody",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import NotRequired, TypedDict, cast
 
 import httpx
 from pint import Quantity
@@ -14,6 +13,7 @@ from houses.apis.base_api import BaseApi
 from houses.apis.ors_directions_body import OrsDirectionsBody
 from houses.apis.ors_reverse_params import OrsReverseParams
 from houses.apis.ors_search_params import OrsSearchParams
+from houses.apis.pelias_search_result import PeliasSearchResult
 from houses.geopoint import GeoPoint
 from houses.ors_endpoints import ORS_DIRECTIONS, PELIAS_REVERSE, PELIAS_SEARCH
 from houses.settings import settings
@@ -21,32 +21,6 @@ from houses.settings import settings
 logger = logging.getLogger(__name__)
 
 
-class _PeliasGeometry(TypedDict):
-    """A Pelias feature's point, ``[lon, lat]``."""
-
-    coordinates: list[float]
-
-
-class _PeliasProperties(TypedDict):
-    """The pedigree of a Pelias feature — what makes it a place, or not."""
-
-    match_type: NotRequired[str]
-    layer: NotRequired[str]
-    name: NotRequired[str]
-    country: NotRequired[str]
-    confidence: NotRequired[float]
-    accuracy: NotRequired[str]
-
-
-class _PeliasFeature(TypedDict):
-    geometry: _PeliasGeometry
-    properties: _PeliasProperties
-
-
-class _PeliasResponse(TypedDict):
-    """A Pelias search/reverse response: the features it offers, best first."""
-
-    features: list[_PeliasFeature]
 
 
 
@@ -88,27 +62,7 @@ class ORSApi(BaseApi):
         data = await self._fetch(req)
         if not data:
             return None
-        return self._first_usable_feature(cast(_PeliasResponse, data))
-
-    @staticmethod
-    def _first_usable_feature(data: _PeliasResponse) -> GeoPoint | None:
-        """The first Pelias feature that is a real place; ``None`` = next provider.
-
-        Pelias answers an address it cannot resolve with its own "United
-        Kingdom" fallback — ``match_type="fallback"``, ``layer="country"``,
-        confidence 0.1 — always at the same point (54.75844,-2.69531). That is
-        not a location: accepting it put a Didcot property in Cumbria, whose
-        nearest station was Lazonby and which therefore had no rail fare to
-        London. Unresolved means the NEXT provider, never a country centroid.
-        """
-        for feature in data.get("features") or []:
-            props = feature["properties"]
-            if props.get("match_type") == "fallback" or props.get("layer") == "country":
-                logger.debug("Pelias returned its 'United Kingdom' fallback — trying the next geocoder")
-                continue
-            lng, lat = feature["geometry"]["coordinates"]
-            return GeoPoint(lat, lng)
-        return None
+        return PeliasSearchResult.from_response(data).location()
 
     async def reverse_geocode(self, lat: float, lng: float, *, _client_factory=None) -> GeoPoint | None:
         """Nearest settlement centre from coordinates."""
@@ -130,7 +84,7 @@ class ORSApi(BaseApi):
         data = await self._fetch(req)
         if not data:
             return None
-        return self._first_usable_feature(data)
+        return PeliasSearchResult.from_response(data).location()
 
     async def directions(
         self,
