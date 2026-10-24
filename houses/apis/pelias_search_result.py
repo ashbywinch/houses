@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from houses.apis.response_rows import rows_under
 from houses.geopoint import GeoPoint
 
 # The layer that means "not a place": Pelias's country itself.
@@ -29,8 +30,7 @@ class PeliasSearchResult:
     @classmethod
     def from_response(cls, response: Any) -> PeliasSearchResult:
         """Read a Pelias response body."""
-        features = response.get("features") if isinstance(response, dict) else None
-        return cls(features=features or [])
+        return cls(features=rows_under(response, "features"))
 
     def location(self) -> GeoPoint | None:
         """The first place here that is a real place; ``None`` = try the next geocoder."""

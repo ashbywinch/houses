@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from houses.apis.response_rows import rows_under
 from houses.geopoint import GeoPoint
 
 # Google's "not a place" result type: the country itself.
@@ -26,8 +27,7 @@ class GoogleGeocodeResult:
     @classmethod
     def from_response(cls, response: Any) -> GoogleGeocodeResult:
         """Read a Google geocode response body."""
-        results = response.get("results") if isinstance(response, dict) else None
-        return cls(results=results or [])
+        return cls(results=rows_under(response, "results"))
 
     def location(self) -> GeoPoint | None:
         """The first place here that is a real place; ``None`` = try the next geocoder."""
