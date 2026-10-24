@@ -164,15 +164,18 @@ async def _broadcaster() -> None:
 async def _push_or_mark(rid: str) -> bool:
     """Push one property's summary; mark the rid stale when it fails.
 
-    Returns True when the push landed — the caller sweeps the other
-    cards only after a landed push (a failed one is already marked).
+    Returns False only when the push failed — the caller sweeps the other
+    cards after a push that did not fail.
     """
-    summary, failure = await capture_async(partial(_push_summary, rid))
+    _, failure = await capture_async(partial(_push_summary, rid))
     if failure is not None:
         _mark_broadcast_failed(rid, failure)
         return False
-    if summary is not None:
-        _BroadcastState.stale_push_rids.discard(rid)
+    # The marker means "this card's figures are old, re-fetch". A landed push
+    # clears it, and so does a property that vanished while it was queued: the
+    # marker names a card that no longer exists, so keeping it would leave the
+    # listing telling the frontend to fetch something that is gone.
+    _BroadcastState.stale_push_rids.discard(rid)
     return True
 
 

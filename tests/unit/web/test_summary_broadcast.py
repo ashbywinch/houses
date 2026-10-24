@@ -408,3 +408,48 @@ async def test_failed_push_marks_the_rid_stale_on_the_listing_wire():
     finally:
         bcast._push_summary = cast(Any, real_push)
         await _stop_broadcasts(fake, task)
+
+
+@pytest.mark.asyncio
+async def test_vanished_property_clears_the_stale_marker():
+    """A property that vanishes while it is queued has no card left to mark.
+
+    The marker means "the figures on this card are old, re-fetch". Once the
+    property is gone there is nothing to re-fetch, so the marker must go with
+    it — otherwise the listing keeps telling the frontend to fetch a property
+    that no longer exists.
+    """
+    import houses.web.broadcaster as bcast
+
+    rid = "vanished-rid"
+    await _prime_property(rid)
+    fake = _FakeWsClient()
+    bcast._BroadcastState.websocket_clients.add(cast(Any, fake))
+    real_push = bcast._push_summary
+
+    async def boom(_rid: str):
+        raise RuntimeError("summary build failed")
+
+    bcast._push_summary = cast(Any, boom)
+    task = asyncio.create_task(bcast._broadcaster())
+    try:
+        bcast._BroadcastState.queue.put_nowait(rid)
+        for _ in range(50):
+            if rid in bcast.stale_push_rids():
+                break
+            await asyncio.sleep(0.05)
+        assert rid in bcast.stale_push_rids(), "precondition: the failed push marked it"
+
+        async def vanished(_rid: str):
+            return None
+
+        bcast._push_summary = cast(Any, vanished)
+        bcast._BroadcastState.queue.put_nowait(rid)
+        for _ in range(50):
+            if rid not in bcast.stale_push_rids():
+                break
+            await asyncio.sleep(0.05)
+        assert rid not in bcast.stale_push_rids(), "a vanished property must not keep its marker"
+    finally:
+        bcast._push_summary = cast(Any, real_push)
+        await _stop_broadcasts(fake, task)
