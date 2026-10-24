@@ -567,7 +567,6 @@ class _DefaultRailFare:
     def __init__(self, enrich_fn=None):
         self._enrich = enrich_fn or _default_rail_fare_enrich
 
-    # lucidlint: ignore middle-man NR fares are handled by RailFareNode — the echo keeps the DI slot (review-log)
     async def enrich(
         self,
         enabled: set[str] | None,

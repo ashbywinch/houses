@@ -631,7 +631,7 @@ requires-dist = [
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.13" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "libcst", marker = "extra == 'dev'", specifier = ">=1.9.0" },
-    { name = "lucidlint", marker = "extra == 'dev'", git = "https://github.com/ashbywinch/lucidlint.git?rev=2bc734fd2830c5e5c8e59c5728b4dce6c544c77f" },
+    { name = "lucidlint", marker = "extra == 'dev'", git = "https://github.com/ashbywinch/lucidlint.git?rev=bcfe0d42df17c4d0ff0b40f494e4318918f4b6cf" },
     { name = "money", specifier = ">=1.3.0" },
     { name = "pint", specifier = ">=0.25.3" },
     { name = "playwright", specifier = ">=1.50.0" },
@@ -842,8 +842,8 @@ wheels = [
 
 [[package]]
 name = "lucidlint"
-version = "0.6.7"
-source = { git = "https://github.com/ashbywinch/lucidlint.git?rev=2bc734fd2830c5e5c8e59c5728b4dce6c544c77f#2bc734fd2830c5e5c8e59c5728b4dce6c544c77f" }
+version = "0.6.9"
+source = { git = "https://github.com/ashbywinch/lucidlint.git?rev=bcfe0d42df17c4d0ff0b40f494e4318918f4b6cf#bcfe0d42df17c4d0ff0b40f494e4318918f4b6cf" }
 dependencies = [
     { name = "libcst" },
 ]

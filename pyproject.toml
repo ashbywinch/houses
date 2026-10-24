@@ -36,10 +36,12 @@ dev = [
     "pyrefly>=1.2.0",
     "coverage>=7.0.0",
     "httpx>=0.28.0",
-    # Pinned to master past the #42 fix (PR #43: exempt a to_dict/to_json method's
-    # own shape when the enclosing class declares the keys). See
+    # Pinned to 0.6.9 (bcfe0d42), which lands the three findings this repo's
+    # residue waited on: #46 (a read-only map parameter whose value class the
+    # module declares), #47 (the god-class size signal is gone), #52 (a Protocol
+    # the module's namesake class inherits). See
     # docs/lucidlint-review-log.md → *Tool bugs filed*.
-    "lucidlint @ git+https://github.com/ashbywinch/lucidlint.git@2bc734fd2830c5e5c8e59c5728b4dce6c544c77f",
+    "lucidlint @ git+https://github.com/ashbywinch/lucidlint.git@bcfe0d42df17c4d0ff0b40f494e4318918f4b6cf",
     "libcst>=1.9.0",
 ]  # Architecture testing (ArchUnit-style rules for Python imports)
 

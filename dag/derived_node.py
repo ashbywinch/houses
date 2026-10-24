@@ -335,7 +335,7 @@ def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None
             f"the compute signature have drifted. Declare dep_names or fix the deps."
         )
 
-# lucidlint: ignore latent-class cohesive node type — every method reads _deps/_attempt; no field-disjoint seam
+
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
 

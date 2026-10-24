@@ -122,10 +122,14 @@ mechanical edit, and the marker must stay until it is made.
 
 ## Order (for what is left)
 
-The 4 remaining fails need the two tool rules above. Item 7's seventh needs the
-owner's call on `NetexFareParser`. When the tool moves: re-run the gate first (a
-bump can clear sites and stale markers at once — that is how the 9 above went),
-then work what is left in the order listed.
+The plan's fails are all cleared. What is left is tool-side, and the tool has
+moved: **0.6.9** (`bcfe0d42`) lands the three findings this residue waited on —
+#46 (a read-only map parameter whose value class the module declares), #47 (the
+god-class size signal is dropped as a finding with no action) and #52 (a
+Protocol the module's namesake class inherits). The pin in `pyproject.toml` is
+bumped to it; **re-run the gate, then delete the markers whose findings it
+clears** — a bump clears sites and stale markers at once, which is how the 9
+above went. Nothing here is blocked on a design call any more.
 
 
 ## Acceptance for every item

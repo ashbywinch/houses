@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 type _TiebreakKey = tuple[int, float]  # (no-cost-first flag, duration minutes)
 
 
-# lucidlint: ignore latent-class probed: size warning only; no field-disjoint seam (4 wiring fields shared by all 17)
 class CommuteRouter:
     """Aggregates all commute-routing logic: walk, transit, drive, and bus fallback."""
     # Congestion-zone and Greater-London bounding boxes — coordinate data,

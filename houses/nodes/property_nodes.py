@@ -61,7 +61,7 @@ type ProvenanceMap = dict[str, ProvenanceTree]
 # (the construction invariant materialises them; see _EMPTY_VALID_INPUT_DEFAULTS).
 type _EmptyValidDefaults = dict[str, Callable[[], Any]]
 
-# lucidlint: ignore latent-class no field-disjoint partition — 13 methods, one property-wiring contract (review-log)
+
 class PropertyNodes:
     """Holds all DAG node references for one property.
 

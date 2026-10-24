@@ -108,7 +108,7 @@ def _zone_pair_key(dep_zone: str, arr_zone: str) -> str:
 # Registry
 # ---------------------------------------------------------------------------
 
-# lucidlint: ignore latent-class probed: size warning only; no field-disjoint seam (_data shared by all match steps)
+
 class BusJourneyRegistry:
     """Lazy-loaded registry of bus fare zone data.
 

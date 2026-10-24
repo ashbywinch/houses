@@ -102,27 +102,23 @@ class Measurement(Generic[T]):
             _combine(err, self.value, m.value, self.stddev, m.stddev),
         )
 
-    # lucidlint: ignore middle-man __add__ implements the + protocol — _binop is its one implementation
     def __add__(self, other: Any) -> Measurement:
         return self._binop(other, _add, _add)
     def __radd__(self, other: Any) -> Measurement:
         return Measurement(other) + self  # addition is commutative
 
-    # lucidlint: ignore middle-man __sub__ implements the - protocol — _binop is its one implementation
     def __sub__(self, other: Any) -> Measurement:
         return self._binop(other, _sub, _sub)
 
     def __rsub__(self, other: Any) -> Measurement:
         return Measurement(other) - self
 
-    # lucidlint: ignore middle-man __mul__ implements the * protocol — _binop is its one implementation
     def __mul__(self, other: Any) -> Measurement:
         return self._binop(other, _mul, _mul)
 
     def __rmul__(self, other: Any) -> Measurement:
         return Measurement(other) * self  # multiplication is commutative
 
-    # lucidlint: ignore middle-man __truediv__ implements the / protocol — _binop is its one implementation; the dunder
     def __truediv__(self, other: Any) -> Measurement:
         return self._binop(other, _truediv, _truediv)
 

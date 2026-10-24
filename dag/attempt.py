@@ -280,7 +280,6 @@ class _AttemptMeta(type):
         raise AttributeError("Cannot set 'impossible' — reserved by Attempt constructor/property")
 
 
-# lucidlint: ignore latent-class cohesive core value type — constructors, serialization, and provenance methods all
 class Attempt[T](metaclass=_AttemptMeta):
     """Three-state result: succeeded / pending / impossible.
 
