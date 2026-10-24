@@ -1,6 +1,4 @@
-# lucidlint: ignore bulk-suppression per-site whys are the mandated pattern (review-log scope decision 5: no config
 """Intersection — where EVERY commute works, i.e. where to buy a house.
-
 ANDs the toolchain's sheds on one common grid:
 
 - the **transit shed** (Pimlico & Aldgate) — the same station-catchment
@@ -26,51 +24,78 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
 from pint import Quantity
+from pydantic import ValidationError
 
 from houses.geopoint import GeoPoint
 from tools.commute.drive_isochrone import (
-    GB_BBOX,
     grid_cell_centers,
     outer_loop,
     point_in_polygon,
     region_bbox,
     retained_components,
+    search_geometry_issues,
+    validate_committed_payload,
 )
 from tools.commute.payload_checks import existing_payload, fail, same_payload
-from tools.commute.rightmove_url import build_search_url, parse_search_url
+from tools.commute.rightmove_url import build_search_url
 from tools.commute.searches import IntersectionOptions
+from tools.commute.station_shed import ShedPayload, ShedRecord
 from tools.commute.tile import Grid, GridCell, Rect, rasterize
-from tools.commute.units import KM
+from tools.commute.units import Units
 
 logger = logging.getLogger(__name__)
 
-ENGINE_VERSION = "intersection-v1"
+class IntersectionConfig:
+    """Constants of the intersection build (review-log: one config class owns
+    the engine identity and the grid/transit tunables)."""
+
+    ENGINE_VERSION = "intersection-v1"
+    DEFAULT_CELL_KM = 4.0  # same as the drive grids
+    TRANSIT_BUFFER_KM = 5.0  # same catchment radius the transit shed rasterizes
+    MAX_VERTICES = 500
+    POLYLINE_DECIMALS = 5
+    MIN_POLYGON_VERTICES = 4
+    ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
+    DEFAULT_CELL_KM_Q = DEFAULT_CELL_KM * Units.KM
+    DEFAULT_BUFFER_KM_Q = TRANSIT_BUFFER_KM * Units.KM
+
+
 DEFAULT_SHED = Path("data/commute/station_shed.json")
 DEFAULT_DRIVE_RAW = Path("data/commute/drive_isochrone.json")
 DEFAULT_DRIVE_SEARCHES = Path("data/commute/drive_searches.json")
 DEFAULT_OUT = Path("data/commute/intersection.json")
-DEFAULT_CELL_KM = 4.0  # same as the drive grids
-TRANSIT_BUFFER_KM = 5.0  # same catchment radius the transit shed rasterizes
-MAX_VERTICES = 500
-POLYLINE_DECIMALS = 5
-MIN_POLYGON_VERTICES = 4
-ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
 
-DEFAULT_CELL_KM_Q = DEFAULT_CELL_KM * KM
-DEFAULT_BUFFER_KM_Q = TRANSIT_BUFFER_KM * KM
 
 # Committed-payload wire shapes (coding-standards.md) — named so signatures say
 # which payload flows where; the consumed fields are records, the rest mappings.
-ShedPayload = dict[str, Any]
-PolygonsByLabel = dict[str, list[list[GeoPoint]]]
-SearchRecord = dict[str, Any]
-IntersectionPayload = dict[str, Any]
+
+
+type PolygonsByLabel = dict[str, list[list[GeoPoint]]]
+
+
+class SearchRecord(TypedDict, total=False):
+    """One intersection.json search entry — the wire shape."""
+
+    id: str
+    name: str
+    polygon: list[tuple[float, float]]
+    filters: Filters
+    rightmove_url: str
+    threshold_min: int
+
+
+class IntersectionPayload(TypedDict, total=False):
+    """intersection.json — the wire shape."""
+
+    metadata: IntersectionMetadata
+    searches: list[SearchRecord]
 
 
 class DriveRegionPayload(TypedDict, total=False):
@@ -127,6 +152,29 @@ class DriveSearchesPayload(TypedDict, total=False):
     metadata: dict[str, Any]
     searches: list[DriveSearchPayload]
 
+
+class Filters(TypedDict, total=False):
+    """Rightmove filter keys as serialized into a search record (wire shape)."""
+
+    min_beds: int
+    property_type: str
+
+
+class IntersectionMetadata(TypedDict, total=False):
+    """The metadata block as serialized into intersection.json (wire shape)."""
+
+    engine_version: str
+    profile: str
+    threshold_min: int
+    cell_km: float
+    transit_buffer_km: float
+    sources: list[str]
+    generated_at: str
+    count: int
+
+
+type _ShedPolygon = list[GeoPoint]  # one shed outline loop
+
 @dataclass(frozen=True)
 class _SearchFilters:
     """Rightmove filter keys as serialized into a search record (wire shape)."""
@@ -134,10 +182,8 @@ class _SearchFilters:
     min_beds: int
     property_type: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
-        return dict(min_beds=self.min_beds, property_type=self.property_type)
+    def to_dict(self) -> Filters:
+        return Filters(min_beds=self.min_beds, property_type=self.property_type)
 
 
 @dataclass(frozen=True)
@@ -151,10 +197,8 @@ class _IntersectionSearch:
     rightmove_url: str
     threshold_min: int
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
-        return dict(
+    def to_dict(self) -> SearchRecord:
+        return SearchRecord(
             id=self.id,
             name=self.name,
             polygon=self.polygon,
@@ -177,10 +221,8 @@ class _IntersectionMetadata:
     generated_at: str
     count: int
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
-        return dict(
+    def to_dict(self) -> IntersectionMetadata:
+        return IntersectionMetadata(
             engine_version=self.engine_version,
             profile=self.profile,
             threshold_min=self.threshold_min,
@@ -199,13 +241,13 @@ class _IntersectionPayload:
     metadata: _IntersectionMetadata
     searches: list[_IntersectionSearch]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned (coding-standards.md)
-        return dict(metadata=self.metadata.to_dict(), searches=[s.to_dict() for s in self.searches])
+    def to_dict(self) -> IntersectionPayload:
+        return IntersectionPayload(
+            metadata=self.metadata.to_dict(), searches=[s.to_dict() for s in self.searches]
+        )
 
 
-def common_grid(drive_raw: DriveRawPayload, cell_km: Quantity = DEFAULT_CELL_KM_Q) -> Grid:
+def common_grid(drive_raw: DriveRawPayload, cell_km: Quantity = IntersectionConfig.DEFAULT_CELL_KM_Q) -> Grid:
     """One grid over the overlap of the driving regions.
 
     The intersection is a subset of every drive region, so cells outside the
@@ -213,7 +255,7 @@ def common_grid(drive_raw: DriveRawPayload, cell_km: Quantity = DEFAULT_CELL_KM_
     ``cell_km`` is a pint Quantity; payload distances are bare numbers (the
     wire format), restored to units here.
     """
-    region_km = drive_raw["metadata"]["region_km"] * KM
+    region_km = drive_raw["metadata"]["region_km"] * Units.KM
     boxes = [region_bbox(d["lat"], d["lon"], region_km) for d in drive_raw["destinations"]]
     if not boxes:
         raise ValueError("no drive destinations — nothing to intersect")
@@ -228,55 +270,23 @@ def common_grid(drive_raw: DriveRawPayload, cell_km: Quantity = DEFAULT_CELL_KM_
     return Grid.from_cell_km(bbox, cell_km.to("km").magnitude)
 
 
-# lucidlint: ignore record-shape incoming wire payload — station records parsed defensively (coding-standards.md)
 def transit_cells(
-    kept_stations: list[dict], grid: Grid, buffer_km: Quantity = DEFAULT_BUFFER_KM_Q
+    kept_stations: list[ShedRecord], grid: Grid, buffer_km: Quantity = IntersectionConfig.DEFAULT_BUFFER_KM_Q
 ) -> set[GridCell]:
     """Cells whose nearest point is within ``buffer_km`` of a kept station.
 
     Exactly the predicate the transit toolchain rasterizes (``tile.rasterize``)
     — a kept cell means a house in it is within the walk/bus-to-station radius.
     """
-    return rasterize([GeoPoint(s["lat"], s["lon"]) for s in kept_stations], buffer_km.to("km").magnitude, grid)
+    return rasterize([GeoPoint(s.lat, s.lon) for s in kept_stations], buffer_km.to("km").magnitude, grid)
 
 
-# lucidlint: ignore record-shape shed polygons — homogeneous point collections, not field-wise records
-def drive_cells(polygons: list[list[GeoPoint]], grid: Grid) -> set[GridCell]:
+def drive_cells(polygons: list[_ShedPolygon], grid: Grid) -> set[GridCell]:
     """Cells whose centre lies inside any of the destination's shed polygons."""
     if not polygons:
         return set()
     cells = grid_cell_centers(grid)
     return {cell for cell in cells if any(point_in_polygon(cell.lat, cell.lon, p) for p in polygons)}
-
-
-def _group_drive_polygons(drive_searches: DriveSearchesPayload) -> PolygonsByLabel:
-    """Shed polygons per drive destination (a shed may be several loops)."""
-    by_label: dict[str, list[list[GeoPoint]]] = {}
-    # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
-    for s in drive_searches.get("searches", []):
-        by_label.setdefault(s["destination"]["label"], []).append(
-            [GeoPoint(lat, lon) for lat, lon in s["polygon"]]
-        )
-    return by_label
-
-
-def _missing_destinations(drive_raw: DriveRawPayload, by_label: PolygonsByLabel) -> list[str]:
-    """Drive destinations absent from the searches, raising on stale drive data.
-
-    A destination with no shed makes its constraint unsatisfiable: the
-    intersection must be EMPTY, never silently dropped ("every commute works"
-    would be a lie). The reverse check — drive_searches containing a
-    destination ABSENT from the config — means stale committed data: ANDing it
-    would silently narrow the intersection; the user must regenerate the drive
-    data.
-    """
-    missing = [d["label"] for d in drive_raw["destinations"] if d["label"] not in by_label]
-    stale = sorted(set(by_label) - {d["label"] for d in drive_raw["destinations"]})
-    if stale:
-        raise ValueError(
-            f"stale drive data: destination(s) {', '.join(stale)} are not in the config — run 'make commute-drive'"
-        )
-    return missing
 
 
 def _intersection_searches(
@@ -292,7 +302,10 @@ def _intersection_searches(
         loop = outer_loop(comp, grid)
         if loop is None:
             continue
-        poly = [(round(p.lat, POLYLINE_DECIMALS), round(p.lon, POLYLINE_DECIMALS)) for p in loop]
+        poly = [
+            (round(p.lat, IntersectionConfig.POLYLINE_DECIMALS), round(p.lon, IntersectionConfig.POLYLINE_DECIMALS))
+            for p in loop
+        ]
         suffix = "" if i == 1 else f"-{i}"
         searches.append(
             _IntersectionSearch(
@@ -306,6 +319,96 @@ def _intersection_searches(
         )
     return searches
 
+
+class _IntersectionBuild:
+    """One all-commutes build: the committed inputs and the steps that turn them
+    into the intersection payload.
+
+    Owns the threaded state (the shed, the drive artifact, its searches, the
+    options) so the assembly steps are methods on the state they read instead of
+    module functions passing ``drive_raw`` through every hop.
+    """
+
+    def __init__(
+        self,
+        *,
+        shed: ShedPayload,
+        drive_raw: DriveRawPayload,
+        drive_searches: DriveSearchesPayload,
+        options: IntersectionOptions,
+    ) -> None:
+        self._shed: ShedPayload = shed
+        self._drive_raw: DriveRawPayload = drive_raw
+        self._drive_searches: DriveSearchesPayload = drive_searches
+        self._options: IntersectionOptions = options
+
+    def payload(self) -> IntersectionPayload:
+        """Transit ∩ every drive shed → the intersection payload (deterministic)."""
+        grid = common_grid(self._drive_raw, self._options.cell_km)
+        kept_stations = [s for s in self._shed.stations if s.kept]
+        transit = transit_cells(kept_stations, grid)
+        by_label = self._polygons_by_label()
+        missing = self._missing_destinations(by_label)
+        if missing:
+            logger.warning(
+                "destination(s) have no shed — the all-commutes intersection is empty: %s", ", ".join(missing)
+            )
+            return _IntersectionPayload(metadata=self._metadata(count=0), searches=[]).to_dict()
+        drive_sets = [drive_cells(polys, grid) for polys in by_label.values()]
+        kept = transit
+        for ds in drive_sets:
+            kept &= ds
+        searches = _intersection_searches(
+            kept, grid, self._thresholds(), self._options.min_beds, self._options.property_type
+        )
+        return _IntersectionPayload(metadata=self._metadata(count=len(searches)), searches=searches).to_dict()
+
+    def _metadata(self, *, count: int) -> _IntersectionMetadata:
+        """The payload's metadata block for a given search count."""
+        return _IntersectionMetadata(
+            engine_version=IntersectionConfig.ENGINE_VERSION,
+            profile="tfl-transit + driving-car",
+            threshold_min=min(self._thresholds()),
+            cell_km=self._options.cell_km.to("km").magnitude,
+            transit_buffer_km=IntersectionConfig.TRANSIT_BUFFER_KM,
+            sources=["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
+            generated_at=self._options.generated_at,
+            count=count,
+        )
+
+    def _thresholds(self) -> list[int]:
+        """The per-destination thresholds the drive artifact was built with."""
+        return [d["threshold_min"] for d in self._drive_raw["destinations"]]
+
+    def _polygons_by_label(self) -> PolygonsByLabel:
+        """Shed polygons per drive destination (a shed may be several loops)."""
+        by_label: PolygonsByLabel = {}
+        # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
+        for s in self._drive_searches.get("searches", []):
+            by_label.setdefault(s["destination"]["label"], []).append(
+                [GeoPoint(lat, lon) for lat, lon in s["polygon"]]
+            )
+        return by_label
+
+    def _missing_destinations(self, by_label: PolygonsByLabel) -> list[str]:
+        """Drive destinations absent from the searches, raising on stale drive data.
+
+        A destination with no shed makes its constraint unsatisfiable: the
+        intersection must be EMPTY, never silently dropped ("every commute works"
+        would be a lie). The reverse check — drive_searches containing a
+        destination ABSENT from the config — means stale committed data: ANDing it
+        would silently narrow the intersection; the user must regenerate the drive
+        data.
+        """
+        missing = [d["label"] for d in self._drive_raw["destinations"] if d["label"] not in by_label]
+        stale = sorted(set(by_label) - {d["label"] for d in self._drive_raw["destinations"]})
+        if stale:
+            raise ValueError(
+                f"stale drive data: destination(s) {', '.join(stale)} are not in the config — run 'make commute-drive'"
+            )
+        return missing
+
+
 def build_payload(
     *,
     shed: ShedPayload,
@@ -314,98 +417,17 @@ def build_payload(
     options: IntersectionOptions | None = None,
 ) -> IntersectionPayload:
     """Transit ∩ every drive shed → the intersection payload (deterministic)."""
-    options = options or IntersectionOptions(generated_at="")
-    cell_km, min_beds, property_type = options.cell_km, options.min_beds, options.property_type
-    grid = common_grid(drive_raw, cell_km)
-    kept_stations = [s for s in shed["stations"] if s.get("kept")]
-    transit = transit_cells(kept_stations, grid)
-
-    by_label = _group_drive_polygons(drive_searches)
-    missing = _missing_destinations(drive_raw, by_label)
-    if missing:
-        logger.warning(
-            "destination(s) have no shed — the all-commutes intersection is empty: %s", ", ".join(missing)
-        )
-        return _IntersectionPayload(
-            metadata=_IntersectionMetadata(
-                engine_version=ENGINE_VERSION,
-                profile="tfl-transit + driving-car",
-                threshold_min=min(d["threshold_min"] for d in drive_raw["destinations"]),
-                cell_km=cell_km.to("km").magnitude,
-                transit_buffer_km=TRANSIT_BUFFER_KM,
-                sources=["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
-                generated_at=options.generated_at,
-                count=0,
-            ),
-            searches=[],
-        ).to_dict()
-    drive_sets = [drive_cells(polys, grid) for polys in by_label.values()]
-    kept = transit
-    for ds in drive_sets:
-        kept &= ds
-
-    thresholds = [d["threshold_min"] for d in drive_raw["destinations"]]
-    searches = _intersection_searches(kept, grid, thresholds, min_beds, property_type)
-    return _IntersectionPayload(
-        metadata=_IntersectionMetadata(
-            engine_version=ENGINE_VERSION,
-            profile="tfl-transit + driving-car",
-            threshold_min=min(thresholds),
-            cell_km=cell_km.to("km").magnitude,
-            transit_buffer_km=TRANSIT_BUFFER_KM,
-            sources=["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
-            generated_at=options.generated_at,
-            count=len(searches),
-        ),
-        searches=searches,
-    ).to_dict()
+    return _IntersectionBuild(
+        shed=shed,
+        drive_raw=drive_raw,
+        drive_searches=drive_searches,
+        options=options or IntersectionOptions(generated_at=""),
+    ).payload()
 
 
-def _valid_polygon(poly) -> bool:
-    """A polygon is a list of 2-element numeric [lat, lon] pairs."""
-    return isinstance(poly, list) and all(
-        isinstance(p, (list, tuple))
-        and len(p) == 2
-        and isinstance(p[0], (int, float))
-        and isinstance(p[1], (int, float))
-        for p in poly
-    )
 
 
-def _search_issues(s: SearchRecord, max_vertices: int) -> list[str]:
-    """Polygon geometry, GB-bbox, and URL round-trip issues for one search."""
-    issues: list[str] = []
-    poly: Any = s.get("polygon")
-    if not _valid_polygon(poly):
-        issues.append(f"{s.get('id')}: polygon is malformed (expected [lat, lon] pairs)")
-        return issues
-    if len(poly) < MIN_POLYGON_VERTICES:
-        issues.append(f"{s.get('id')}: polygon has {len(poly)} vertices (need ≥ 4)")
-    elif poly[0] == poly[-1]:
-        issues.append(f"{s.get('id')}: polygon is closed — loops must stay open")
-    if len(poly) > max_vertices:
-        issues.append(f"{s.get('id')}: {len(poly)} vertices exceeds the {max_vertices} cap")
-    issues.extend(
-        f"{s.get('id')}: vertex ({lat}, {lon}) outside the GB bounding box"
-        for lat, lon in poly
-        if not GB_BBOX.contains(lat, lon)
-    )
-    try:
-        parsed = parse_search_url(s.get("rightmove_url", ""))
-        expected = poly + [poly[0]]
-        if len(parsed) != len(expected) or any(
-            abs(pl - el) > ROUND_TRIP_EPS or abs(po - eo) > ROUND_TRIP_EPS
-            for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
-        ):
-            issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
-    # lucidlint: ignore broad-except any parse failure is a URL issue (mirrors the noqa BLE001)
-    except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
-        issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
-    return issues
-
-
-# lucidlint: ignore record-shape incoming committed payload — parsed defensively at the boundary (coding-standards.md)
-def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:
+def validate_payload(payload: Mapping[str, Any], *, max_vertices: int = IntersectionConfig.MAX_VERTICES) -> list[str]:
     """Issues with the intersection payload; empty means it passes."""
     if not isinstance(payload, dict):
         return ["payload is malformed (expected an object)"]
@@ -420,32 +442,30 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     issues: list[str] = []
     if metadata.get("count") != len(searches):
         issues.append(f"metadata count {metadata.get('count')} != {len(searches)} searches")
-    issues.extend(issue for s in searches for issue in _search_issues(s, max_vertices))
+    issues.extend(
+        issue
+        for s in searches
+        for issue in search_geometry_issues(
+            s,
+            min_polygon_vertices=IntersectionConfig.MIN_POLYGON_VERTICES,
+            closed_loop_hint="",
+            max_vertices=max_vertices,
+            round_trip_eps=IntersectionConfig.ROUND_TRIP_EPS,
+        )
+    )
     return issues
 
 
 
 def _validate_committed(out_path: Path) -> int:
     """--validate: check the committed intersection payload and report."""
-    if not out_path.exists():
-        return fail(
-            "No all-commutes data yet — run 'make commute-intersection' first.",
-            f"{out_path} not found for --validate",
-        )
-    try:
-        payload = json.loads(out_path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        return fail(
-            "The saved all-commutes data is unreadable — regenerate it with 'make commute-intersection'.",
-            f"unreadable {out_path} for --validate: {e}",
-        )
-    issues = validate_payload(payload)
-    if issues:
-        for issue in issues:
-            print(f"- {issue}", file=sys.stderr)
-        return 1
-    print(f"intersection OK ({len(payload['searches'])} search(es))")
-    return 0
+    return validate_committed_payload(
+        out_path,
+        what="all-commutes data",
+        make="commute-intersection",
+        ok_label="intersection",
+        validator=validate_payload,
+    )
 
 
 @dataclass(frozen=True)
@@ -469,10 +489,10 @@ def _load_inputs(args) -> _CommittedInputs | int:
             f"intersection inputs not found: {', '.join(str(p) for p, _ in missing)}",
         )
     try:
-        shed = json.loads(Path(args.shed).read_text())
+        shed = ShedPayload(**json.loads(Path(args.shed).read_text()))
         drive_raw = json.loads(Path(args.drive_raw).read_text())
         drive_searches = json.loads(Path(args.drive_searches).read_text())
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, ValidationError) as e:
         return fail(
             "Commute data is unreadable — regenerate it with 'make commute-drive'.",
             f"unreadable intersection input: {e}",
@@ -480,11 +500,13 @@ def _load_inputs(args) -> _CommittedInputs | int:
     return _CommittedInputs(shed=shed, raw=drive_raw, searches=drive_searches)
 
 
-# lucidlint: ignore record-shape built wire payload post-to_dict — json.dumps serializes it here (coding-standards.md)
-def _write_if_changed(out_path: Path, payload: dict) -> None:
+def _write_if_changed(out_path: Path, payload: IntersectionPayload) -> None:
     """Write the payload atomically, skipping a byte-identical committed copy."""
     existing = existing_payload(out_path)
-    if existing is None or not same_payload(existing, payload):
+    if existing is None or not same_payload(existing, dict(payload)):
+        # dict(payload): the TypedDict is a dict at runtime — the wire
+        # comparison helper types its args as plain dicts (pyrefly: TypedDict
+        # → dict needs an explicit projection).
         out_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = out_path.with_suffix(out_path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2) + "\n")
@@ -497,7 +519,7 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--drive-raw", default=str(DEFAULT_DRIVE_RAW))
     parser.add_argument("--drive-searches", default=str(DEFAULT_DRIVE_SEARCHES))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
-    parser.add_argument("--cell-km", type=float, default=DEFAULT_CELL_KM)
+    parser.add_argument("--cell-km", type=float, default=IntersectionConfig.DEFAULT_CELL_KM)
     parser.add_argument("--min-beds", type=int, default=2)
     parser.add_argument("--property-type", default="houses")
     parser.add_argument("--validate", action="store_true", help="validate the committed intersection.json and exit")
@@ -519,7 +541,7 @@ def run(argv: list[str] | None = None) -> int:
             drive_searches=drive_searches,
             options=IntersectionOptions(
                 generated_at=datetime.now(UTC).isoformat(),
-                cell_km=args.cell_km * KM,
+                cell_km=args.cell_km * Units.KM,
                 min_beds=args.min_beds,
                 property_type=args.property_type,
             ),

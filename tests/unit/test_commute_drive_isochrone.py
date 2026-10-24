@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+from typing import Any
 
 import pytest
 
 from houses.geopoint import GeoPoint
 from tools.commute.drive_isochrone import (
-    DEFAULT_THRESHOLD_MIN,
     DriveDestination,
+    DriveIsochroneConfig,
     _components,
     _signed_area,
     build_matrix_requests,
@@ -26,7 +27,7 @@ from tools.commute.drive_isochrone import (
 )
 from tools.commute.rightmove_url import parse_search_url
 from tools.commute.tile import Grid, GridCell, Rect
-from tools.commute.units import KM, MINUTE
+from tools.commute.units import Units
 
 NOW = "2026-08-03T09:00:00+00:00"
 
@@ -46,7 +47,7 @@ def _grid(
 
 
 def _dest(label: str = "Dad", postcode: str = "OX7 1AA", threshold: int = 90) -> DriveDestination:
-    return DriveDestination(label=label, postcode=postcode, threshold_min=threshold * MINUTE)
+    return DriveDestination(label=label, postcode=postcode, threshold_min=threshold * Units.MINUTE)
 
 
 # ── config ───────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ def test_load_config_applies_global_threshold(tmp_path):
 def test_load_config_default_threshold_when_omitted(tmp_path):
     cfg = tmp_path / "destinations.json"
     cfg.write_text(json.dumps({"destinations": [{"label": "Dad", "postcode": "OX7 1AA"}]}))
-    assert load_config(cfg) == [_dest(threshold=DEFAULT_THRESHOLD_MIN)]
+    assert load_config(cfg) == [_dest(threshold=DriveIsochroneConfig.DEFAULT_THRESHOLD_MIN)]
 
 
 # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
@@ -106,7 +107,7 @@ def test_apply_default_threshold_skips_explicit_overrides(tmp_path):
         )
     )
     data = _json.loads(cfg.read_text())
-    dests = apply_default_threshold(load_config(cfg), data, 60 * MINUTE)
+    dests = apply_default_threshold(load_config(cfg), data, 60 * Units.MINUTE)
     assert [d.threshold_min.to("minute").magnitude for d in dests] == [60, 75]
 
 
@@ -153,12 +154,12 @@ def test_load_config_rejects_missing_fields(tmp_path):
 
 def test_slack_minutes_is_half_diagonal_crossing_time():
     # 4 km cell, half-diagonal 2.83 km, at 70 km/h → 2.42 min
-    slack = slack_minutes(4.0 * KM)
+    slack = slack_minutes(4.0 * Units.KM)
     assert slack.to("minute").magnitude == pytest.approx(4.0 * math.sqrt(2) / 2 / 70.0 * 60.0, abs=1e-9)
 
 
 def test_region_bbox_centers_on_destination():
-    rect = region_bbox(51.94, -1.55, 100.0 * KM)
+    rect = region_bbox(51.94, -1.55, 100.0 * Units.KM)
     assert (rect.lat_min + rect.lat_max) / 2 == pytest.approx(51.94)
     assert (rect.lon_min + rect.lon_max) / 2 == pytest.approx(-1.55)
     assert rect.lat_max - rect.lat_min == pytest.approx(2 * 100.0 / 111.0, rel=0.01)
@@ -372,7 +373,6 @@ def test_drive_map_html_escapes_user_labels():
 
     evil = "</script><script>alert(1)</script>"
     searches = {
-        "metadata": {},
         "searches": [
             {
                 "id": "x",
@@ -394,7 +394,6 @@ def test_drive_map_html_one_marker_per_destination_label():
     from tools.commute.drive_isochrone import _map_html
 
     searches = {
-        "metadata": {},
         "searches": [
             {
                 "id": "drive-dad-ox71aa-090",
@@ -655,23 +654,25 @@ async def test_run_does_not_write_when_validation_fails(tmp_path):
 
 def test_kept_cells_threshold_boundary():
     cells = [GridCell(r, c, 51.0 + r * 0.05, -2.0 + c * 0.08) for r in range(2) for c in range(3)]
-    durations = [d * MINUTE if d is not None else None for d in (0.0, 89.0, 90.0, 90.5, 91.0, None)]
-    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {GridCell(0, 0), GridCell(0, 1), GridCell(0, 2)}
+    durations = [d * Units.MINUTE if d is not None else None for d in (0.0, 89.0, 90.0, 90.5, 91.0, None)]
+    assert kept_cells(cells, durations, 90 * Units.MINUTE, 0 * Units.MINUTE) == {
+        GridCell(0, 0), GridCell(0, 1), GridCell(0, 2)
+    }
 
 
 def test_kept_cells_slack_absorbs_boundary_overage():
     cells = [GridCell(0, c, 51.0, -2.0 + c * 0.08) for c in range(4)]
-    durations = [d * MINUTE for d in (90.0, 92.0, 93.0, 94.0)]
-    slack = slack_minutes(4.0 * KM)  # ≈ 2.42
-    assert kept_cells(cells, durations, 90 * MINUTE, slack) == {GridCell(0, 0), GridCell(0, 1)}
-    assert GridCell(0, 2) not in kept_cells(cells, durations, 90 * MINUTE, slack)  # 93.0 > 90 + 2.42
+    durations = [d * Units.MINUTE for d in (90.0, 92.0, 93.0, 94.0)]
+    slack = slack_minutes(4.0 * Units.KM)  # ≈ 2.42
+    assert kept_cells(cells, durations, 90 * Units.MINUTE, slack) == {GridCell(0, 0), GridCell(0, 1)}
+    assert GridCell(0, 2) not in kept_cells(cells, durations, 90 * Units.MINUTE, slack)  # 93.0 > 90 + 2.42
 
 
 def test_kept_cells_drops_unreachable():
     cells = [(0, 0, 51.0, -2.0), (0, 1, 51.0, -1.92)]
     cells = [GridCell(0, 0, 51.0, -2.0), GridCell(0, 1, 51.0, -1.92)]
-    durations = [None, 10.0 * MINUTE]
-    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {GridCell(0, 1)}
+    durations = [None, 10.0 * Units.MINUTE]
+    assert kept_cells(cells, durations, 90 * Units.MINUTE, 0 * Units.MINUTE) == {GridCell(0, 1)}
 
 
 # ── raw → searches ───────────────────────────────────────────────────
@@ -896,7 +897,7 @@ def test_validate_payload_passes_valid_payload():
 
 
 def test_validate_payload_catches_too_many_vertices():
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     poly = payload["searches"][0]["polygon"]
     payload["searches"][0]["polygon"] = poly + [(51.0 + i * 1e-4, -1.9 + i * 1e-4) for i in range(600)]
     issues = validate_payload(payload)
@@ -904,7 +905,7 @@ def test_validate_payload_catches_too_many_vertices():
 
 
 def test_validate_payload_catches_out_of_bbox_vertex():
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["polygon"][0] = (57.0, -1.9)  # Sheffield's latitude — outside GB_BBOX
     assert any("bounding box" in i for i in validate_payload(payload))
 
@@ -912,7 +913,7 @@ def test_validate_payload_catches_out_of_bbox_vertex():
 def test_validate_payload_catches_url_polygon_mismatch():
     import tools.commute.rightmove_url as rmu
 
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     poly = payload["searches"][0]["polygon"]
     shifted = [(lat + 0.1, lon) for lat, lon in poly]
     payload["searches"][0]["rightmove_url"] = rmu.build_search_url(shifted, min_beds=2, property_type="houses")
@@ -934,7 +935,7 @@ def test_validate_payload_catches_destination_lost():
 def test_validate_payload_flags_malformed_polygon_without_crashing():
     """A non-list polygon (hand-edited or partial artifact) must be flagged,
     not crash the validator with a TypeError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["polygon"] = "not a polygon"
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)
@@ -943,7 +944,7 @@ def test_validate_payload_flags_malformed_polygon_without_crashing():
 def test_validate_payload_flags_missing_destination_without_crashing():
     """A search record without a destination dict must be flagged, not crash
     the destination-centre check with a KeyError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["destination"] = None
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)
@@ -952,7 +953,7 @@ def test_validate_payload_flags_missing_destination_without_crashing():
 def test_validate_payload_flags_string_vertices_without_crashing():
     """Vertices with quoted numbers (e.g. hand-edited "51.0") must be
     flagged, not crash the GB-bbox check with a TypeError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["polygon"][0] = ["51.0", "-1.0"]
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)
@@ -961,7 +962,7 @@ def test_validate_payload_flags_string_vertices_without_crashing():
 def test_validate_payload_flags_non_dict_destination_without_crashing():
     """A non-dict destination (e.g. "destination": "corrupt") must be
     flagged, not crash the label/grouping steps with an AttributeError."""
-    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload: dict[str, Any] = dict(raw_to_searches(_raw_payload(), generated_at=NOW))
     payload["searches"][0]["destination"] = "corrupt"
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)

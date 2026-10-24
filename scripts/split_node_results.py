@@ -26,14 +26,23 @@ import zlib
 
 import dag.persistence as per
 
-NO_WRITE_MARKER = "no-write:"
-"""Printed when this migration has nothing to write (tools/deploy/migrations.list).
 
-The runner's rule is "an --apply run leaves a backup behind"; a database that is
-already split writes nothing, so it states that instead of leaving a 600 MB copy
-to prove a no-op."""
+class _SplitMigration:
+    """The split migration's written contract: deploy marker, DB default, chunk policy."""
 
-DB_PATH = "data/houses.db"
+    # Printed when this migration has nothing to write (tools/deploy/migrations.list).
+    # The runner's rule is "an --apply run leaves a backup behind"; a database that is
+    # already split writes nothing, so it states that instead of leaving a 600 MB copy
+    # to prove a no-op.
+    NO_WRITE_MARKER = "no-write:"
+
+    DB_PATH = "data/houses.db"
+
+    # Rows per read and per commit. Bounding BOTH is what keeps the migration
+    # inside the box's memory: the table's blobs are ~330 MB in total, so reading
+    # them all at once (or holding one transaction over them) is an OOM, not a
+    # slow path — the person-id migration learned this the hard way on 2026-09-23.
+    CHUNK_ROWS = 2_000
 
 
 
@@ -53,11 +62,6 @@ def _columns(conn: sqlite3.Connection) -> set[str]:
 
 
 
-_CHUNK_ROWS = 2_000
-"""Rows per read and per commit. Bounding BOTH is what keeps the migration
-inside the box's memory: the table's blobs are ~330 MB in total, so reading
-them all at once (or holding one transaction over them) is an OOM, not a
-slow path — the person-id migration learned this the hard way on 2026-09-23."""
 
 
 # hoisting "what one item contributes" would put the whole table back in memory, the exact OOM this avoids
@@ -76,13 +80,13 @@ def convert_all(conn: sqlite3.Connection, pending_sql: str) -> int | None:
     # list here to drift.
     present = _columns(conn)
     cursor = conn.execute(pending_sql)
-    # lucidlint: ignore loop-hoist the loop IS the streaming step (read a chunk, convert, commit) —
+    
     # hoisting "what one item contributes" would put the table back in memory, the OOM this avoids
     while True:
-        chunk = cursor.fetchmany(_CHUNK_ROWS)
+        chunk = cursor.fetchmany(_SplitMigration.CHUNK_ROWS)
         if not chunk:
             break
-        # lucidlint: ignore loop-hoist per-row work IS the conversion; there is no collection to build
+        
         for row_id, raw in chunk:
             if not convert_row(conn, row_id, raw, present):
                 conn.commit()
@@ -213,7 +217,7 @@ def _report(conn: sqlite3.Connection, options: RunOptions) -> _Outcome:
     if pending == 0 and "result_json" not in _columns(conn):
         # The runner requires a pre-write backup unless the apply says it wrote
         # nothing: this is that statement (contract in tools/deploy/migrations.list).
-        print(f"{NO_WRITE_MARKER} already split: no legacy column, no legacy rows")
+        print(f"{_SplitMigration.NO_WRITE_MARKER} already split: no legacy column, no legacy rows")
         return _Outcome(result=None, exit_code=0)
     if pending == 0:
         print("no rows to convert; the legacy column is empty (drop it with --apply)")
@@ -279,7 +283,7 @@ def main() -> int:
         "--backup-path", default=None, help="where --backup writes (default: <db>.pre-<script>)"
     )
     parser.add_argument("--verify", action="store_true", help="re-scan after apply: zero legacy rows")
-    parser.add_argument("--db", default=DB_PATH, help="sqlite path (default: data/houses.db)")
+    parser.add_argument("--db", default=_SplitMigration.DB_PATH, help="sqlite path (default: data/houses.db)")
     args = parser.parse_args()
     return run(
         RunOptions(

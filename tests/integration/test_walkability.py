@@ -43,4 +43,4 @@ async def test_amenities_include_walk_times():
         assert 1 <= minutes <= 60, f"Walk time should be 1-60 min, got: {minutes}"
 
     assert result.walk_to_town is not None, "Walk to town time not found"
-    assert 1 <= result.walk_to_town.value <= 60
+    assert 1 <= result.walk_to_town.magnitude <= 60

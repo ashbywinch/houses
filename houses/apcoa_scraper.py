@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TypedDict
 
-from scripts.sync_parking_rates import city_slugs, extract_daily_rate_from_tariff, make_slug
+from houses.apcoa_rates import city_slugs, extract_daily_rate_from_tariff, make_slug
+
+
+class ApcoaPage(TypedDict):
+    """A parsed APCOA page as the parking records carry it: name, address, price."""
+
+    name: str | None
+    address: str | None
+    price: float
 
 
 @dataclass(frozen=True)
@@ -16,12 +25,22 @@ class ApcoaPageRecord:
     address: str | None
     price: float
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {"name": self.name, "address": self.address, "price": self.price}
+    def to_dict(self) -> ApcoaPage:
+        return ApcoaPage(name=self.name, address=self.address, price=self.price)
 
 
+def apcoa_location_urls(station_name: str) -> list[str]:
+    """Candidate APCOA location page URLs for a station — the one URL-shape
+    helper (the scraper class and the parking-rate sync both use it)."""
+    station_slug = make_slug(station_name)
+    urls: list[str] = []
+    for city_slug in city_slugs(station_name):
+        urls.append(f"{ApcoaScraper._APCOA_BASE}/{city_slug}/{station_slug}-station-{city_slug}")
+        urls.append(f"{ApcoaScraper._APCOA_BASE}/{city_slug}/{city_slug}-station-{city_slug}")
+    return urls
+
+
+# lucidlint: ignore static-husk the class IS car_park's injected seam type — one parse surface (review-log)
 class ApcoaScraper:
     """Scrape APCOA parking data: URL generation, location page parsing,
     and prebook listing parsing.
@@ -34,6 +53,8 @@ class ApcoaScraper:
     """
 
     _APCOA_BASE = "https://www.apcoa.co.uk/find-parking/locations"
+    # Plausibility bound for daily rates: APCOA daily parking at most £100.
+    _MAX_PLAUSIBLE_DAILY_RATE = 100
 
     @staticmethod
     def _make_slug(name: str) -> str:
@@ -45,14 +66,10 @@ class ApcoaScraper:
         """Generate candidate city slugs for APCOA URL construction."""
         return city_slugs(station_name)
 
-    def apcoa_location_urls(self, station_name: str) -> list[str]:
+    @staticmethod
+    def apcoa_location_urls(station_name: str) -> list[str]:
         """Generate candidate APCOA location page URLs for a station."""
-        station_slug = self._make_slug(station_name)
-        urls: list[str] = []
-        for city_slug in self._city_slugs(station_name):
-            urls.append(f"{self._APCOA_BASE}/{city_slug}/{station_slug}-station-{city_slug}")
-            urls.append(f"{self._APCOA_BASE}/{city_slug}/{city_slug}-station-{city_slug}")
-        return urls
+        return apcoa_location_urls(station_name)
 
     # ── APCOA page parsers (pure functions, testable with fixtures) ───
 
@@ -92,13 +109,17 @@ class ApcoaScraper:
 
         tariff_end = page_text.find("Parking offers nearby", tariff_start)
         if tariff_end < 0:
+            # No "Parking offers nearby" marker on this page: cap the tariff
+            # window at 3000 chars — a parse-window heuristic that bounds the
+            # scan while still covering the whole tariff section of real pages.
+            # lucidlint: ignore magic-number parse-window heuristic — tariff-scan cap (review-log)
             tariff_end = tariff_start + 3000
         tariff_text = page_text[tariff_start:tariff_end]
 
         price = extract_daily_rate_from_tariff(tariff_text)
         if price is None:
             return None
-        if not (0 <= price <= 100):
+        if not (0 <= price <= ApcoaScraper._MAX_PLAUSIBLE_DAILY_RATE):
             return None
 
         return ApcoaPageRecord(
@@ -135,7 +156,7 @@ class ApcoaScraper:
             return None
 
         cost = float(price)
-        if not (0 <= cost <= 100):
+        if not (0 <= cost <= ApcoaScraper._MAX_PLAUSIBLE_DAILY_RATE):
             return None
 
         return ApcoaPageRecord(

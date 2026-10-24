@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5: no config ignores)
 """Broadcaster — pushes fresh property summaries to WebSocket clients.
 
 When DAG state changes (via _processor), _on_node_refreshed routes
@@ -13,82 +12,99 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from functools import partial
+from typing import Any, Literal
 
 from fastapi import WebSocket
 
-from houses.nodes.current_home_node import CURRENT_STATUS
-from houses.nodes.property_nodes import SummaryJson
+from dag.guard import capture_async
+from houses.nodes.current_home_node import CurrentHomeNode
+from houses.nodes.property_summary import PropertySummary
 from houses.services_provider import get_services
 from houses.web.monthly_delta import attach as attach_monthly_delta
-from houses.web.settings_payload import SettingsPayloadJson, settings_payload
+from houses.web.settings_payload import SettingsPayload, settings_payload
+from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
 
-_broadcast_queue: asyncio.Queue[str] = asyncio.Queue()
-_websocket_clients: set[WebSocket] = set()
-_stale_push_rids: set[str] = set()
-"""Properties whose broadcast push failed — their cards are silently
-stale until a later push succeeds. Surfaced on the listing wire so the
-frontend can mark the card 'not being updated'."""
+class _BroadcastState:
+    """The broadcaster's process state — the RID event queue, connected
+    clients, the notify-coalescing set + debounce task, and the stale-rid
+    set — one owner, reset whole for test isolation."""
+
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    websocket_clients: set[WebSocket] = set()
+    pending_notify_rids: set[str] = set()
+    notify_debounce_task: asyncio.Task | None = None
+    # Properties whose broadcast push failed — their cards are silently
+    # stale until a later push succeeds. Surfaced on the listing wire so the
+    # frontend can mark the card 'not being updated'.
+    stale_push_rids: set[str] = set()
+    NOTIFY_DEBOUNCE_SECONDS = 0.4
+
+
+def _mark_broadcast_failed(rid: str, exc: object) -> None:
+    """One property's failed broadcast must not kill the broadcaster:
+    record the staleness (the frontend marks the card) and let the loop
+    continue."""
+    logger.warning("Broadcast failed for %s: %s", rid, exc)
+    _BroadcastState.stale_push_rids.add(rid)
+
 
 
 def stale_push_rids() -> frozenset[str]:
     """Rids whose last broadcast push failed (frontend staleness marker)."""
-    return frozenset(_stale_push_rids)
+    return frozenset(_BroadcastState.stale_push_rids)
 
 
 def _reset():
     """Reset broadcast state for test isolation."""
-    global _broadcast_queue, _pending_notify_rids, _notify_debounce_task, _stale_push_rids
-    _broadcast_queue = asyncio.Queue()
-    _pending_notify_rids = set()
-    _notify_debounce_task = None
-    _stale_push_rids = set()
-    _websocket_clients.clear()
+    _BroadcastState.queue = asyncio.Queue()
+    _BroadcastState.pending_notify_rids = set()
+    _BroadcastState.notify_debounce_task = None
+    _BroadcastState.stale_push_rids = set()
+    _BroadcastState.websocket_clients.clear()
 
 
 async def register_client(ws: WebSocket) -> None:
     """Register a WebSocket client and keep the connection alive."""
     await ws.accept()
-    _websocket_clients.add(ws)
+    _BroadcastState.websocket_clients.add(ws)
     try:
         while True:
-            try:
-                await ws.receive_text()
-            # lucidlint: ignore broad-except connection boundary — any receive failure means the client is gone; drop it
-            except Exception:
+            _, failure = await capture_async(ws.receive_text)
+            if failure is not None:
                 break
     finally:
-        _websocket_clients.discard(ws)
+        _BroadcastState.websocket_clients.discard(ws)
 
 
-@dataclass(frozen=True)
-class _PropertyUpdatedEnvelope:
-    """The property_updated websocket message envelope (wire shape)."""
+class _PropertyUpdatedEnvelope(SerializableAsDict):
+    """The property_updated websocket message: one property's fresh summary.
 
+    The class owns the message bytes — ``to_json()`` is the only place the
+    envelope becomes text, so the key order and separators live here.
+    """
+
+    type: Literal["property_updated"] = "property_updated"
     rid: str
-    data: dict
+    data: dict[str, Any]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(type="property_updated", rid=self.rid, data=self.data)
+    def to_json(self) -> str:
+        return json.dumps(self.model_dump())
 
 
-@dataclass(frozen=True)
-class _SettingsUpdatedEnvelope:
-    """The settings_updated websocket message envelope (wire shape)."""
+class _SettingsUpdatedEnvelope(SerializableAsDict):
+    """The settings_updated websocket message: the whole settings document."""
 
-    data: SettingsPayloadJson
+    type: Literal["settings_updated"] = "settings_updated"
+    data: SettingsPayload
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(type="settings_updated", data=self.data.to_dict())
+    def to_json(self) -> str:
+        return json.dumps(self.model_dump(by_alias=True))
 
 
-async def _push_summary(rid: str) -> SummaryJson | None:
+async def _push_summary(rid: str) -> PropertySummary | None:
     """Build, delta-attach, and push one property's summary to all clients.
 
     Returns the pushed summary record, or None when the rid has no
@@ -96,25 +112,24 @@ async def _push_summary(rid: str) -> SummaryJson | None:
     prop = get_services().property_registry.get(rid)
     if prop is None:
         return None
-    # property_nodes.to_json_summary still returns the wire dict (its
-    # record conversion is out of this wave's file set) — reconstruct the
-    # record at the consumption boundary, then serialize at the edge.
-    summary = SummaryJson(**await prop.to_json_summary())
-    wire = summary.to_dict()
+    summary = await prop.summary()
+    wire = dict(summary.to_dict())
     await attach_monthly_delta(wire, rid)
-    msg = json.dumps(_PropertyUpdatedEnvelope(rid=rid, data=wire).to_dict())
-    dead: list[WebSocket] = []
-    for ws in list(_websocket_clients):
-        try:
-            await ws.send_text(msg)
-        # lucidlint: ignore broad-except connection boundary — any send failure discards the dead client
-        except Exception as e:
-            logger.debug("client websocket send failed (discarding client): %s", e)
-            dead.append(ws)
-            continue
-    for ws in dead:
-        _websocket_clients.discard(ws)
+    msg = _PropertyUpdatedEnvelope(rid=rid, data=wire).to_json()
+    await _broadcast_wire(msg)
     return summary
+
+
+async def _broadcast_wire(msg: str) -> None:
+    """Send one wire message to every client; drop the ones that fail."""
+    dead: list[WebSocket] = []
+    for ws in list(_BroadcastState.websocket_clients):
+        _, failure = await capture_async(partial(ws.send_text, msg))
+        if failure is not None:
+            logger.debug("client websocket send failed (discarding client): %s", failure)
+            dead.append(ws)
+    for ws in dead:
+        _BroadcastState.websocket_clients.discard(ws)
 
 
 def _is_current_home(rid: str) -> bool:
@@ -125,7 +140,7 @@ def _is_current_home(rid: str) -> bool:
     if prop is None:
         return False
     att = prop.comment_status.latest_attempt()
-    return att.succeeded and (att.value_or_none() or "").strip().lower() == CURRENT_STATUS
+    return att.succeeded and (att.value_or_none() or "").strip().lower() == CurrentHomeNode.CURRENT_STATUS
 
 
 async def _broadcaster() -> None:
@@ -136,35 +151,33 @@ async def _broadcaster() -> None:
     the registry are built and pushed DIRECTLY here (never re-enqueued
     through the queue: that would loop)."""
     while True:
-        rid = await _broadcast_queue.get()
-        if not _websocket_clients:
+        rid = await _BroadcastState.queue.get()
+        if not _BroadcastState.websocket_clients:
             continue
-        try:
-            summary = await _push_summary(rid)
-            if summary is not None:
-                _stale_push_rids.discard(rid)
-            if _is_current_home(rid):
-                for other_rid in get_services().property_registry.list_properties():
-                    if other_rid == rid:
-                        continue
-                    try:
-                        if await _push_summary(other_rid) is not None:
-                            _stale_push_rids.discard(other_rid)
-                    # lucidlint: ignore broad-except loop boundary — one stale summary must not kill the sweep
-                    except Exception as exc:
-                        logger.warning("Broadcast failed for %s: %s", other_rid, exc)
-                        _stale_push_rids.add(other_rid)
-                        continue
-        # lucidlint: ignore broad-except loop boundary — one property's broadcast failure must not kill the broadcaster
-        except Exception as exc:
-            logger.warning("Broadcast failed for %s: %s", rid, exc)
-            _stale_push_rids.add(rid)
-            continue
+        if await _push_or_mark(rid) and _is_current_home(rid):
+            for other_rid in get_services().property_registry.list_properties():
+                if other_rid == rid:
+                    continue
+                await _push_or_mark(other_rid)
 
 
-_pending_notify_rids: set[str] = set()
-_notify_debounce_task: asyncio.Task | None = None
-_NOTIFY_DEBOUNCE_SECONDS = 0.4
+async def _push_or_mark(rid: str) -> bool:
+    """Push one property's summary; mark the rid stale when it fails.
+
+    Returns False only when the push failed — the caller sweeps the other
+    cards after a push that did not fail.
+    """
+    _, failure = await capture_async(partial(_push_summary, rid))
+    if failure is not None:
+        _mark_broadcast_failed(rid, failure)
+        return False
+    # The marker means "this card's figures are old, re-fetch". A landed push
+    # clears it, and so does a property that vanished while it was queued: the
+    # marker names a card that no longer exists, so keeping it would leave the
+    # listing telling the frontend to fetch something that is gone.
+    _BroadcastState.stale_push_rids.discard(rid)
+    return True
+
 
 
 async def notify_node_refreshed_async(node) -> None:
@@ -180,13 +193,12 @@ async def notify_node_refreshed_async(node) -> None:
     it over via run_coroutine_threadsafe, keeping every asyncio object
     here owned by one loop.
     """
-    global _notify_debounce_task
     rid = getattr(node, "property_rid", None)
     if rid is None:
         return  # not a property view — nothing to coalesce against
-    _pending_notify_rids.add(rid)
-    if _notify_debounce_task is None or _notify_debounce_task.done():
-        _notify_debounce_task = asyncio.create_task(_flush_notifies())
+    _BroadcastState.pending_notify_rids.add(rid)
+    if _BroadcastState.notify_debounce_task is None or _BroadcastState.notify_debounce_task.done():
+        _BroadcastState.notify_debounce_task = asyncio.create_task(_flush_notifies())
 
 
 async def push_settings_updated() -> None:
@@ -205,23 +217,13 @@ async def push_settings_updated() -> None:
     thresholds, ceilings, labels, and the what-if flag.
     """
     payload = await settings_payload()
-    msg = json.dumps(_SettingsUpdatedEnvelope(data=payload).to_dict())
-    dead: list[WebSocket] = []
-    for ws in list(_websocket_clients):
-        try:
-            await ws.send_text(msg)
-        # lucidlint: ignore broad-except connection boundary — any send failure discards the dead client
-        except Exception as e:
-            logger.debug("client websocket send failed (discarding client): %s", e)
-            dead.append(ws)
-            continue
-    for ws in dead:
-        _websocket_clients.discard(ws)
+    msg = _SettingsUpdatedEnvelope(data=payload).to_json()
+    await _broadcast_wire(msg)
 
 
 async def _flush_notifies() -> None:
-    await asyncio.sleep(_NOTIFY_DEBOUNCE_SECONDS)
-    rids = list(_pending_notify_rids)
-    _pending_notify_rids.clear()
+    await asyncio.sleep(_BroadcastState.NOTIFY_DEBOUNCE_SECONDS)
+    rids = list(_BroadcastState.pending_notify_rids)
+    _BroadcastState.pending_notify_rids.clear()
     for rid in rids:
-        await _broadcast_queue.put(rid)
+        await _BroadcastState.queue.put(rid)

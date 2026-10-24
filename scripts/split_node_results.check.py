@@ -12,13 +12,18 @@ import sqlite3
 import sys
 from pathlib import Path
 
-EXIT_COMPLETE = 0
-EXIT_INCOMPLETE = 1
-EXIT_UNSCANNABLE = 2
 
-DB_PATH = "data/houses.db"
+class _SplitCheck:
+    """The split check's contract: the expected split columns, DB default, and exit codes."""
 
-_SPLIT_COLUMNS = ("status", "value_json", "provenance_z")
+    # The post-split column set this check verifies — DATA from the migration's
+    # spec, not a heuristic.
+    SPLIT_COLUMNS = ("status", "value_json", "provenance_z")
+    DB_PATH = "data/houses.db"
+    EXIT_COMPLETE = 0
+    EXIT_INCOMPLETE = 1
+    EXIT_UNSCANNABLE = 2
+
 
 
 def _columns(conn: sqlite3.Connection) -> set[str]:
@@ -30,7 +35,7 @@ def check(db_path: str) -> int:
     db = Path(db_path)
     if not db.is_file():
         print(f"check: database not found: {db}", file=sys.stderr)
-        return EXIT_UNSCANNABLE
+        return _SplitCheck.EXIT_UNSCANNABLE
     # mode=ro: the check must not be able to write, even by accident.
     conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -39,19 +44,19 @@ def check(db_path: str) -> int:
             "SELECT name FROM sqlite_master WHERE type='table' AND name='node_results'"
         ).fetchone():
             print("check INCOMPLETE: no node_results table", file=sys.stderr)
-            return EXIT_INCOMPLETE
+            return _SplitCheck.EXIT_INCOMPLETE
         columns = _columns(conn)
-        missing = [c for c in _SPLIT_COLUMNS if c not in columns]
+        missing = [c for c in _SplitCheck.SPLIT_COLUMNS if c not in columns]
         if missing:
             print(f"check INCOMPLETE: split columns missing: {missing}", file=sys.stderr)
-            return EXIT_INCOMPLETE
+            return _SplitCheck.EXIT_INCOMPLETE
         if "result_json" in columns:
             print("check INCOMPLETE: the legacy result_json column is still present", file=sys.stderr)
-            return EXIT_INCOMPLETE
+            return _SplitCheck.EXIT_INCOMPLETE
         unset = int(conn.execute("SELECT COUNT(*) FROM node_results WHERE status IS NULL").fetchone()[0])
         if unset:
             print(f"check INCOMPLETE: {unset} rows have no status", file=sys.stderr)
-            return EXIT_INCOMPLETE
+            return _SplitCheck.EXIT_INCOMPLETE
         # The JSON columns must parse — a sample, since the full table is
         # hundreds of thousands of rows and this check runs on every install.
         sample = conn.execute(
@@ -65,17 +70,17 @@ def check(db_path: str) -> int:
                     json.loads(row[column])
     except sqlite3.Error as exc:
         print(f"check: cannot scan {db} ({exc})", file=sys.stderr)
-        return EXIT_UNSCANNABLE
+        return _SplitCheck.EXIT_UNSCANNABLE
     finally:
         conn.close()
 
     print(f"check ok: node_results split (columns present, no legacy blob, {len(sample)} rows parsed)")
-    return EXIT_COMPLETE
+    return _SplitCheck.EXIT_COMPLETE
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", default=DB_PATH, help="sqlite path (default: data/houses.db)")
+    parser.add_argument("--db", default=_SplitCheck.DB_PATH, help="sqlite path (default: data/houses.db)")
     return check(parser.parse_args().db)
 
 

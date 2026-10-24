@@ -15,12 +15,16 @@ refresh path (a different task, no staging) is never affected.
 from __future__ import annotations
 
 import contextvars
+from collections.abc import Mapping
 from typing import Any
 
 from dag.attempt import Attempt
 
+type Staging = dict[str, Attempt]
+
+
 # Staged node_id -> Attempt during an evaluation; None outside one.
-eval_staging_ctx: contextvars.ContextVar[dict[str, Attempt] | None] = contextvars.ContextVar(
+eval_staging_ctx: contextvars.ContextVar[Staging | None] = contextvars.ContextVar(
     "dag_eval_ctx", default=None
 )
 
@@ -31,14 +35,13 @@ def staged_attempt(node_id: str) -> Attempt | None:
     return ctx.get(node_id) if ctx is not None else None
 
 
-# lucidlint: ignore record-shape keyed collection, not a record — overrides maps variable node ids to candidate values
-def build_staging(overrides: dict[str, Any]) -> dict[str, Attempt]:
+def build_staging(overrides: Mapping[str, Any]) -> Staging:
     """Seed a staging map from ``node_id -> candidate value`` overrides.
 
     Overridden inputs become succeeded Attempts marked hypothetical so
     provenance can distinguish them from real values.
     """
-    staging: dict[str, Attempt] = {}
-    for node_id, value in overrides.items():
-        staging[node_id] = Attempt.succeeded(value, metadata={"hypothetical": True})
-    return staging
+    return {
+        node_id: Attempt.succeeded(value, metadata={"hypothetical": True})
+        for node_id, value in overrides.items()
+    }

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from playwright.async_api import Error as PlaywrightError
 
 SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "capture_dom.py"
 
@@ -87,12 +88,12 @@ async def test_auth_state_distinguishes_unreachable_from_unauthenticated():
 
     assert await cd._auth_state(FakePage(True)) is True
     assert await cd._auth_state(FakePage(False)) is False
-    assert await cd._auth_state(FakePage(ConnectionError("backend down"))) is None
+    assert await cd._auth_state(FakePage(PlaywrightError("backend down"))) is None
     # SPA redirected off the frontend (Google sign-in): expired session,
     # not a backend outage
     assert (
         await cd._auth_state(
-            FakePage(ConnectionError("fetch failed"), url="https://accounts.google.com/o/oauth2/auth")
+            FakePage(PlaywrightError("fetch failed"), url="https://accounts.google.com/o/oauth2/auth")
         )
         is False
     )

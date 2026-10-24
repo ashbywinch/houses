@@ -28,7 +28,7 @@ class TestBestLocationFlow:
     async def test_value_persists_across_node_recreation(self):
         """A computed BestLocationNode value survives re-creating the node
         (loaded from the DAG persistence layer)."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         # Phase 1: push data and flush the processor.
         precise = UserInputNode[GeoPoint](f"{RID}/flow_precise_persist", GeoPoint)
@@ -71,7 +71,7 @@ class TestBestLocationFlow:
     async def test_impossible_when_no_location_sources(self):
         """Without any location source, best_location stays impossible
         even when an address exists."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint](f"{RID}/flow_precise_none", GeoPoint)
         rm_loc = UserInputNode[GeoPoint](f"{RID}/flow_rm_loc_none", GeoPoint)
@@ -92,7 +92,7 @@ class TestBestLocationFlow:
     @pytest.mark.asyncio
     async def test_recomputes_on_rightmove_location_update(self):
         """Pushing a new rightmove_location triggers recomputation."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint](f"{RID}/flow_precise_recomp", GeoPoint)
         rm_loc = UserInputNode[GeoPoint](f"{RID}/flow_rm_loc_recomp", GeoPoint)
@@ -126,7 +126,7 @@ class TestBestAddressFlow:
     @pytest.mark.asyncio
     async def test_corrected_address_overrides_rightmove(self):
         """corrected_address has higher priority than rightmove_address."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str](f"{RID}/flow_user_addr", str)
         corrected = UserInputNode[str](f"{RID}/flow_corrected_addr", str)
@@ -151,7 +151,7 @@ class TestBestAddressFlow:
     async def test_derived_value_persisted_after_resolve(self):
         """After flush, the derived address is stored in the persistence layer
         and can be loaded by a freshly created node with the same ID."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str](f"{RID}/flow_user_persist", str)
         corrected = UserInputNode[str](f"{RID}/flow_corrected_persist", str)
@@ -188,7 +188,7 @@ class TestBestAddressFlow:
     @pytest.mark.asyncio
     async def test_re_enrichment_updates_derived_value(self):
         """Pushing a new rightmove_address causes the derived node to re-compute."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str](f"{RID}/flow_user_reenrich", str)
         corrected = UserInputNode[str](f"{RID}/flow_corrected_reenrich", str)
@@ -264,8 +264,8 @@ class TestEnrichmentApi:
         await flush_processor()
 
         result = await staleness_check(RID, nodes="best_address")
-        assert result["fresh"]
-        nodes = result["nodes"]
+        assert result.fresh
+        nodes = result.nodes
         assert isinstance(nodes, dict)
         assert not nodes.get("best_address", True)
 
@@ -314,7 +314,7 @@ class TestEnrichmentBootstrap:
     @pytest.mark.asyncio
     async def test_import_noop_when_no_rightmove_data(self):
         """Without any source pushes, derived nodes remain pending."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str](f"{RID}/bs_user", str)
         corrected = UserInputNode[str](f"{RID}/bs_corrected", str)
@@ -333,7 +333,7 @@ class TestEnrichmentBootstrap:
     @pytest.mark.asyncio
     async def test_import_seeds_rightmove_address_and_resolves(self):
         """Push rightmove_address and verify best_address picks it up."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str](f"{RID}/bs_user2", str)
         corrected = UserInputNode[str](f"{RID}/bs_corrected2", str)
@@ -361,7 +361,7 @@ class TestEnrichmentBootstrap:
         prop = PropertyNodes(RID * 2)
 
         # Create an EnrichedProperty (the old data shape).
-        from houses.property import EnrichedProperty
+        from houses.enriched_property import EnrichedProperty
 
         enriched = EnrichedProperty(
             url="https://rightmove.co.uk/properties/999",
@@ -393,8 +393,8 @@ class TestEnrichmentBootstrap:
     async def test_import_with_approx_location(self):
         """When approx lat/lng is available, rightmove_location is set and
         best_location picks it up (no GeocodeNode in the chain)."""
+        from houses.nodes.best_location_node import BestLocationNode
         from houses.nodes.cutover import push_enriched_property
-        from houses.nodes.location import BestLocationNode
 
         # Build BestLocationNode *without* a GeocodeNode to isolate the
         # approx→rightmove_location flow.
@@ -409,7 +409,7 @@ class TestEnrichmentBootstrap:
             best_address=rm_addr,
         )
 
-        from houses.property import EnrichedProperty
+        from houses.enriched_property import EnrichedProperty
 
         enriched = EnrichedProperty(
             url="",
@@ -457,9 +457,9 @@ class TestEnrichmentBootstrap:
     async def test_scrape_errors_recorded_as_impossible_on_source_nodes(self):
         """A scrape parse error lands on its DAG source node as an impossible
         attempt (the DAG's error mechanism), and a value push supersedes it."""
+        from houses.enriched_property import EnrichedProperty
         from houses.nodes.cutover import push_enriched_property
         from houses.nodes.property_nodes import PropertyNodes
-        from houses.property import EnrichedProperty
 
         prop = PropertyNodes(RID * 3)
         sources = {

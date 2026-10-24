@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are the mandated pattern (review-log scope decision 5: no config
 """Drive isochrones — one-off ORS matrix batch producing driving search URLs.
 
 Companion to the transit shed toolchain (``station_shed.py`` → ``searches.py``),
@@ -42,7 +41,7 @@ import math
 import os
 import re
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,10 +57,10 @@ from houses.ors_endpoints import ORS_MATRIX
 from houses.settings import settings
 from tools.commute.payload_checks import fail, same_payload
 from tools.commute.rightmove_url import build_search_url, parse_search_url
-from tools.commute.station_shed import DEFAULT_BBOX, BBox
-from tools.commute.tile import KM_PER_DEG_LAT, Grid, GridCell, Rect
+from tools.commute.station_shed import BBox, StationShedConfig
+from tools.commute.tile import Grid, GridCell, Rect
 from tools.commute.union import union_outline
-from tools.commute.units import KM, KMH, MINUTE
+from tools.commute.units import Units
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +72,6 @@ class MapAssets:
     leaflet_js: str
     leaflet_css: str
     icons: dict[str, str]
-
-
-# one colour per layer — the transit layer always takes _COLORS[0], so the
-# drive palette excludes it (a drive shed must never look like the train shed)
-_COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
-_DRIVE_COLORS = _COLORS[1:]
 
 
 def js_safe_json(obj) -> str:
@@ -96,33 +89,39 @@ def user_label(label: str) -> str:
     layer control and marker popups."""
     return html.escape(label)
 
-ORS_MATRIX_URL = f"{ORS_MATRIX}/driving-car"
-ENGINE_VERSION = "drive-isochrone-v1"
-SEARCHES_VERSION = "drive-searches-v1"
+
+class DriveIsochroneConfig:
+    """Constants of the drive isochrone batch (review-log: one config class
+    owns the ORS URL, artifact names, and grid/threshold tunables)."""
+
+    ORS_MATRIX_URL = f"{ORS_MATRIX}/driving-car"
+    ENGINE_VERSION = "drive-isochrone-v1"
+    SEARCHES_VERSION = "drive-searches-v1"
+    RAW_FILENAME = "drive_isochrone.json"
+    SEARCHES_FILENAME = "drive_searches.json"
+    TXT_FILENAME = "drive_searches.txt"
+    MAP_FILENAME = "drive_searches.html"
+    DEFAULT_CELL_KM = 4.0
+    DEFAULT_THRESHOLD_MIN = 90
+    REGION_MULTIPLIER = 1.7  # region radius (km) = threshold_min * this — covers the free-flow frontier
+    MAX_LOCATIONS_PER_REQUEST = 1000  # ORS matrix cap (incl. the destination) — probed live
+    FREEFLOW_KMH = 70.0  # slack = half-cell crossing time at this speed
+    MAX_VERTICES = 500
+    MIN_ISLAND_CELLS = 4  # fringe speckles below this many cells are noise
+    REQUEST_DELAY_S = 0.2  # polite sequential cadence between matrix calls
+    CELL_COUNT_EPSILON = 1e-9  # float-error guard before ceil — exact multiples must not add a phantom row
+    SECONDS_PER_MINUTE = 60.0  # dimensionless conversion factor: seconds → minutes magnitude
+    MINUTES_PER_HOUR = 60.0  # dimensionless conversion factor: hours → minutes
+    MINUTES_DECIMALS = 3
+    POLYLINE_DECIMALS = 5
+    MIN_POLYGON_VERTICES = 4
+    MIN_CONTAINMENT_VERTICES = 3
+    ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
+    GB_BBOX = BBox(**StationShedConfig.DEFAULT_BBOX)  # sanity bound for polygon vertices
+
+
 DEFAULT_CONFIG = Path("data/commute/drive_destinations.json")
 DEFAULT_OUT_DIR = Path("data/commute")
-RAW_FILENAME = "drive_isochrone.json"
-SEARCHES_FILENAME = "drive_searches.json"
-TXT_FILENAME = "drive_searches.txt"
-MAP_FILENAME = "drive_searches.html"
-DEFAULT_CELL_KM = 4.0
-DEFAULT_THRESHOLD_MIN = 90
-REGION_MULTIPLIER = 1.7  # region radius (km) = threshold_min * this — covers the free-flow frontier
-MAX_LOCATIONS_PER_REQUEST = 1000  # ORS matrix cap (incl. the destination) — probed live
-FREEFLOW_KMH = 70.0  # slack = half-cell crossing time at this speed
-MAX_VERTICES = 500
-MIN_ISLAND_CELLS = 4  # fringe speckles below this many cells are noise
-GB_BBOX = BBox(**DEFAULT_BBOX)  # sanity bound for polygon vertices
-
-_REQUEST_DELAY_S = 0.2  # polite sequential cadence between matrix calls
-CELL_COUNT_EPSILON = 1e-9  # float-error guard before ceil — exact multiples must not add a phantom row
-SECONDS_PER_MINUTE = 60.0
-MINUTES_PER_HOUR = 60.0
-MINUTES_DECIMALS = 3
-POLYLINE_DECIMALS = 5
-MIN_POLYGON_VERTICES = 4
-MIN_CONTAINMENT_VERTICES = 3
-ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
 
 
 @dataclass(frozen=True)
@@ -155,8 +154,158 @@ class DriveConfig(TypedDict, total=False):
     threshold_min: int
     destinations: list[DriveConfigEntry]
 
+# ── serialized wire shapes ───────────────────────────────────────────
+# The committed artifacts' records as named TypedDicts (record-shape
+# ruling 4): writers construct them with keyword calls, type-safe readers
+# index them. ``total=False`` where a synthetic/partial payload is legal.
 
-def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN) -> list[DriveDestination]:
+class _ORSRequestBody(TypedDict):
+    """ORS matrix request body — every source routes to the destination at index 0."""
+
+    locations: list[list[float]]
+    sources: list[int]
+    destinations: list[int]
+    metrics: list[str]
+
+
+class RawMetadataEntry(TypedDict):
+    """One metadata destination summary of the raw payload."""
+
+    label: str
+    postcode: str
+    threshold_min: int
+
+
+class RawGridBounds(TypedDict):
+    """Serialized grid bounds of a destination block in drive_isochrone.json."""
+
+    lat_min: float
+    lat_max: float
+    lon_min: float
+    lon_max: float
+
+
+class RawGridCell(TypedDict):
+    """One grid-cell center with its drive duration, serialized."""
+
+    r: int
+    c: int
+    lat: float
+    lon: float
+    duration_min: float | None
+
+
+class RawDestination(TypedDict, total=False):
+    """One destination's full serialized block in drive_isochrone.json."""
+
+    label: str
+    postcode: str
+    lat: float
+    lon: float
+    threshold_min: int
+    cell_km: float
+    slack_min: float
+    grid: RawGridBounds
+    cells: list[RawGridCell]
+
+
+class RawMetadata(TypedDict, total=False):
+    """Serialized metadata header of drive_isochrone.json."""
+
+    engine_version: str
+    profile: str
+    speed_model: str
+    threshold_min: int
+    cell_km: float
+    region_km: float
+    destinations: list[RawMetadataEntry]
+    generated_at: str
+    count: int
+
+
+class RawPayload(TypedDict, total=False):
+    """drive_isochrone.json — the raw matrix payload."""
+
+    metadata: RawMetadata
+    destinations: list[RawDestination]
+
+
+class ConfigSignature(TypedDict):
+    """The config identity a raw payload was built under."""
+
+    engine_version: str
+    profile: str
+    threshold_min: int
+    cell_km: float
+    region_km: float
+    destinations: list[RawMetadataEntry]
+    coords: dict[str, tuple[float, float]]
+
+
+class SearchFilters(TypedDict):
+    """Rightmove query filters carried on a drive search record."""
+
+    min_beds: int
+    property_type: str
+
+
+class SearchDestination(TypedDict):
+    """The destination block embedded in a drive search record."""
+
+    label: str
+    postcode: str
+    lat: float
+    lon: float
+
+
+class SearchRecord(TypedDict):
+    """A scraper-compatible Rightmove search record for one kept component."""
+
+    id: str
+    name: str
+    polygon: list[tuple[float, float]]
+    filters: SearchFilters
+    rightmove_url: str
+    destination: SearchDestination
+    threshold_min: int
+
+
+class SearchesMetadata(TypedDict):
+    """Metadata header of drive_searches.json."""
+
+    engine_version: str
+    profile: str
+    speed_model: str
+    threshold_min: int
+    cell_km: float
+    destinations: list[str]
+    generated_at: str
+    count: int
+
+
+class SearchesPayload(TypedDict):
+    """drive_searches.json — the serialized searches payload."""
+
+    metadata: SearchesMetadata
+    searches: list[SearchRecord]
+
+
+class _MapMarker(TypedDict):
+    """Leaflet marker payload embedded in the map HTML."""
+
+    label: str
+    lat: float
+    lon: float
+    url: str
+
+
+type _CellComponents = list[set[GridCell]]
+type _BuildResult = tuple[SearchesPayload | None, int | None]
+
+
+def load_config(
+    path: str | Path, default_threshold: int = DriveIsochroneConfig.DEFAULT_THRESHOLD_MIN
+) -> list[DriveDestination]:
     """Parse the destinations config file.
 
     Shape: ``{"threshold_min": 90, "destinations": [{"label": "Dad",
@@ -176,7 +325,7 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
             raise ValueError(f"each destination needs 'label' and 'postcode', got {entry!r}")
         destinations.append(
             DriveDestination(
-                label=label, postcode=postcode, threshold_min=int(entry.get("threshold_min", threshold)) * MINUTE
+                label=label, postcode=postcode, threshold_min=int(entry.get("threshold_min", threshold)) * Units.MINUTE
             )
         )
     if not destinations:
@@ -217,14 +366,14 @@ def slack_minutes(cell_km: Quantity) -> Quantity:
     by the per-property gate.
     """
     half_diagonal_km = cell_km * math.sqrt(2) / 2
-    return (half_diagonal_km / (FREEFLOW_KMH * KMH)).to("minute")
+    return (half_diagonal_km / (DriveIsochroneConfig.FREEFLOW_KMH * Units.KMH)).to("minute")
 
 
 def region_bbox(lat: float, lon: float, region_km: Quantity) -> Rect:
     """Destination-centred square region, ``region_km`` in every direction."""
     km = region_km.to("km").magnitude
-    lat_deg = km / KM_PER_DEG_LAT
-    lon_deg = km / (KM_PER_DEG_LAT * math.cos(math.radians(lat)))
+    lat_deg = km / Grid.KM_PER_DEG_LAT
+    lon_deg = km / (Grid.KM_PER_DEG_LAT * math.cos(math.radians(lat)))
     return Rect(lat - lat_deg, lat + lat_deg, lon - lon_deg, lon + lon_deg)
 
 
@@ -234,8 +383,8 @@ def grid_cell_centers(grid: Grid) -> list[GridCell]:
     Row/col are the grid indices ``union_outline`` traces, so the duration
     list returned by the matrix call aligns with the kept-cell set by index.
     """
-    rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - CELL_COUNT_EPSILON)
-    cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - CELL_COUNT_EPSILON)
+    rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - DriveIsochroneConfig.CELL_COUNT_EPSILON)
+    cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - DriveIsochroneConfig.CELL_COUNT_EPSILON)
     cells: list[GridCell] = []
     for r in range(rows):
         for c in range(cols):
@@ -257,17 +406,18 @@ class _ORSMatrixRequest:
     destinations: list[int]
     metrics: list[str]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the ORS wire shape (coding-standards.md)
-        return dict(
+    def to_dict(self) -> _ORSRequestBody:
+        return _ORSRequestBody(
             locations=self.locations, sources=self.sources,
             destinations=self.destinations, metrics=self.metrics,
         )
 
 
 def build_matrix_requests(
-    dest_lon: float, dest_lat: float, centers: list[GridCell], max_locations: int = MAX_LOCATIONS_PER_REQUEST
+    dest_lon: float,
+    dest_lat: float,
+    centers: list[GridCell],
+    max_locations: int = DriveIsochroneConfig.MAX_LOCATIONS_PER_REQUEST,
 ) -> list[_ORSMatrixRequest]:
     """Chunk grid centres into matrix request bodies.
 
@@ -293,8 +443,7 @@ def build_matrix_requests(
     return bodies
 
 
-# lucidlint: ignore record-shape parses the ORS matrix response — provider wire payload (coding-standards.md)
-def parse_durations(data: dict, count: int) -> list[Quantity | None]:
+def parse_durations(data: Mapping[str, Any], count: int) -> list[Quantity | None]:
     """Extract minutes from an ORS matrix response, aligned to the request order.
 
     ``durations[i][0]`` is the duration (seconds) from the i-th source to the
@@ -310,13 +459,13 @@ def parse_durations(data: dict, count: int) -> list[Quantity | None]:
     for row in rows:
         if len(row) != 1:
             raise ValueError(f"unexpected duration row {row!r} (expected one destination)")
-        out.append(None if row[0] is None else row[0] / SECONDS_PER_MINUTE * MINUTE)
+        out.append(None if row[0] is None else row[0] / DriveIsochroneConfig.SECONDS_PER_MINUTE * Units.MINUTE)
     return out
 
 
-# lucidlint: ignore record-shape posts and returns the ORS matrix response — provider wire payload (coding-standards.md)
-# lucidlint: ignore record-shape request/response bodies cross the provider boundary here (coding-standards.md)
-async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: Any = None) -> dict:
+async def fetch_matrix(
+    body: Mapping[str, Any], *, key: str, timeout: float = 120.0, client: Any = None
+) -> Mapping[str, Any]:
     """POST one matrix request through the disk cache; retry transient errors.
 
     Errors are never cached (the cache whitelists 2xx/3xx/404), so a retry is
@@ -330,14 +479,13 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: 
     disk-cached httpx client.
     """
 
-# lucidlint: ignore record-shape HTTP request headers — keyed collection, not a record (review-log)
-    headers = {"Content-Type": "application/json", "Authorization": key}
+    headers = {"Authorization": key}  # httpx sets Content-Type: application/json for json= bodies
     transient = (429, 500, 502, 503, 504)
     for attempt in (1, 2):
         try:
             cm = client if client is not None else cached_async_client(timeout=timeout)
             async with cm as http:
-                resp = await http.post(ORS_MATRIX_URL, json=body, headers=headers)
+                resp = await http.post(DriveIsochroneConfig.ORS_MATRIX_URL, json=body, headers=headers)
                 if resp.status_code in transient and attempt == 1:
                     await asyncio.sleep(2.0 * attempt)
                     continue
@@ -386,44 +534,18 @@ class MatrixBatchConfig:
     fetch: Callable | None = None
 
 
-@dataclass(frozen=True)
-class IsochroneSnapshot:
-    """The drive_isochrone.json document: metadata header plus one
-    destination block per configured destination."""
-
-    engine_version: str
-    profile: str
-    speed_model: str
-    generated_at: str
-    metadata: IsochroneMetadata
-    destinations: list[IsochroneDestination]
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the JSON wire shape (coding-standards.md)
-        return dict(
-            # lucidlint: ignore record-shape metadata header assembly (coding-standards.md)
-            metadata=dict(
-                engine_version=self.engine_version, profile=self.profile,
-                speed_model=self.speed_model, **self.metadata.to_dict(),
-                generated_at=self.generated_at,
-            ),
-            destinations=[d.to_dict() for d in self.destinations],
-        )
-
-
 async def build_raw(
     located: list[LocatedDestination],
     config: MatrixBatchConfig,
     generated_at: str,
-) -> IsochroneSnapshot:
+) -> RawPayload:
     """Geocode-backed matrix batch → the raw isochrone payload.
 
     Payload values are bare unit-named numbers (the wire format); all
     computation above is Quantity.
     """
     fetch = config.fetch or fetch_matrix
-    records: list[IsochroneDestination] = []
+    destinations: list[RawDestination] = []
     for ld in located:
         dest = ld.destination
         point = ld.point
@@ -435,52 +557,60 @@ async def build_raw(
         for req in build_matrix_requests(point.lon, point.lat, centers):
             data = await fetch(req.to_dict(), key=config.key)
             durations.extend(parse_durations(data, len(req.sources)))
-            if _REQUEST_DELAY_S:
-                await asyncio.sleep(_REQUEST_DELAY_S)
-        rec = IsochroneDestination(
-            label=dest.label,
-            postcode=dest.postcode,
-            lat=point.lat,
-            lon=point.lon,
-            threshold_min=int(dest.threshold_min.to("minute").magnitude),
-            cell_km=config.cell_km.to("km").magnitude,
-            slack_min=round(slack_minutes(config.cell_km).to("minute").magnitude, MINUTES_DECIMALS),
-            grid=IsochroneGridBounds(
-                lat_min=bbox.lat_min, lat_max=bbox.lat_max,
-                lon_min=bbox.lon_min, lon_max=bbox.lon_max,
-            ),
-            cells=[
-                IsochroneGridCell(
-                    r=cell.row, c=cell.col, lat=cell.lat, lon=cell.lon,
-                    duration_min=None if dur is None else round(dur.to("minute").magnitude, MINUTES_DECIMALS),
-                )
-                for cell, dur in zip(cells, durations, strict=True)
-            ],
-        )
-        records.append(rec)
-    metadata = IsochroneMetadata(
-        threshold_min=int(min(ld.destination.threshold_min for ld in located).to("minute").magnitude),
-        cell_km=config.cell_km.to("km").magnitude,
-        region_km=config.region_km.to("km").magnitude,
-        destinations=[
-            IsochroneDestinationSummary(
-                label=ld.destination.label,
-                postcode=ld.destination.postcode,
-                threshold_min=int(ld.destination.threshold_min.to("minute").magnitude),
+            if DriveIsochroneConfig.REQUEST_DELAY_S:
+                await asyncio.sleep(DriveIsochroneConfig.REQUEST_DELAY_S)
+        destinations.append(
+            RawDestination(
+                label=dest.label,
+                postcode=dest.postcode,
+                lat=point.lat,
+                lon=point.lon,
+                threshold_min=int(dest.threshold_min.to("minute").magnitude),
+                cell_km=config.cell_km.to("km").magnitude,
+                slack_min=round(
+                    slack_minutes(config.cell_km).to("minute").magnitude, DriveIsochroneConfig.MINUTES_DECIMALS
+                ),
+                grid=RawGridBounds(
+                    lat_min=bbox.lat_min, lat_max=bbox.lat_max,
+                    lon_min=bbox.lon_min, lon_max=bbox.lon_max,
+                ),
+                cells=[
+                    RawGridCell(
+                        r=cell.row, c=cell.col, lat=cell.lat, lon=cell.lon,
+                        duration_min=None
+                        if dur is None
+                        else round(dur.to("minute").magnitude, DriveIsochroneConfig.MINUTES_DECIMALS),
+                    )
+                    for cell, dur in zip(cells, durations, strict=True)
+                ],
             )
-            for ld in located
-        ],
-        count=len(records),
-    )
-    return IsochroneSnapshot(
-        engine_version=ENGINE_VERSION, profile="driving-car", speed_model="free-flow",
-        generated_at=generated_at, metadata=metadata, destinations=records,
+        )
+    return RawPayload(
+        metadata=RawMetadata(
+            engine_version=DriveIsochroneConfig.ENGINE_VERSION,
+            profile="driving-car",
+            speed_model="free-flow",
+            threshold_min=int(min(ld.destination.threshold_min for ld in located).to("minute").magnitude),
+            cell_km=config.cell_km.to("km").magnitude,
+            region_km=config.region_km.to("km").magnitude,
+            destinations=[
+                RawMetadataEntry(
+                    label=ld.destination.label,
+                    postcode=ld.destination.postcode,
+                    threshold_min=int(ld.destination.threshold_min.to("minute").magnitude),
+                )
+                for ld in located
+            ],
+            generated_at=generated_at,
+            count=len(destinations),
+        ),
+        destinations=destinations,
     )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-# lucidlint: ignore record-shape wire-format dict — config-signature projection of the serialized raw payload
-def config_signature(raw: dict) -> dict:
+
+
+def config_signature(raw: Mapping[str, Any]) -> ConfigSignature:
     """The config identity a raw payload was built under.
 
     If any of these change, previously-fetched durations (routed to the OLD
@@ -492,25 +622,23 @@ def config_signature(raw: dict) -> dict:
         for rec in raw.get("destinations", [])
         if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
     }
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        "engine_version": meta["engine_version"],
-        "profile": meta["profile"],
-        "threshold_min": meta["threshold_min"],
-        "cell_km": meta["cell_km"],
-        "region_km": meta["region_km"],
-        "destinations": meta["destinations"],
+    return ConfigSignature(
+        engine_version=meta["engine_version"],
+        profile=meta["profile"],
+        threshold_min=meta["threshold_min"],
+        cell_km=meta["cell_km"],
+        region_km=meta["region_km"],
+        destinations=meta["destinations"],
         # a postcode whose geocoding changed (geocoder data update, centroid
         # vs rooftop) must regenerate — never silently reuse a grid centred on
         # the old coordinates
-        "coords": coords,
-    }
+        coords=coords,
+    )
 
 
-# lucidlint: ignore record-shape component cell sets — homogeneous collections, not field-wise records
 def retained_components(
-    kept: set[GridCell], min_island_cells: int = MIN_ISLAND_CELLS
-) -> list[set[GridCell]]:
+    kept: set[GridCell], min_island_cells: int = DriveIsochroneConfig.MIN_ISLAND_CELLS
+) -> _CellComponents:
     """Components to outline: the main shed ALWAYS, plus satellites of at
     least ``min_island_cells`` cells — the single home of the
     'fringe speckles are noise, the destination's own shed never is' rule
@@ -521,8 +649,7 @@ def retained_components(
     return [c for c in comps if c is comps[0] or len(c) >= min_island_cells]
 
 
-# lucidlint: ignore record-shape component cell sets — homogeneous collections, not field-wise records
-def _components(kept: set[GridCell]) -> list[set[GridCell]]:
+def _components(kept: set[GridCell]) -> _CellComponents:
     """Connected components of the kept-cell set under 4-neighbourhood adjacency.
 
     Cells touching only at a corner are separate components — the same
@@ -573,153 +700,12 @@ def outer_loop(cells: set[GridCell], grid: Grid) -> list[GeoPoint] | None:
         return None
     return max(loops, key=lambda loop: abs(_signed_area(loop)))
 
-@dataclass(frozen=True)
-class IsochroneGridBounds:
-    """Serialized grid bounds of a destination block in drive_isochrone.json."""
-
-    lat_min: float
-    lat_max: float
-    lon_min: float
-    lon_max: float
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(lat_min=self.lat_min, lat_max=self.lat_max, lon_min=self.lon_min, lon_max=self.lon_max)
 
 
-@dataclass(frozen=True)
-class IsochroneGridCell:
-    """One grid-cell center with its drive duration, serialized."""
-
-    r: int
-    c: int
-    lat: float
-    lon: float
-    duration_min: float | None
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(r=self.r, c=self.c, lat=self.lat, lon=self.lon, duration_min=self.duration_min)
-
-
-@dataclass(frozen=True)
-class IsochroneDestination:
-    """One destination's full serialized block in drive_isochrone.json."""
-
-    label: str
-    postcode: str
-    lat: float
-    lon: float
-    threshold_min: int
-    cell_km: float
-    slack_min: float
-    grid: IsochroneGridBounds
-    cells: list[IsochroneGridCell]
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(
-            label=self.label, postcode=self.postcode, lat=self.lat, lon=self.lon,
-            threshold_min=self.threshold_min, cell_km=self.cell_km,
-            slack_min=self.slack_min, grid=self.grid.to_dict(),
-            cells=[c.to_dict() for c in self.cells],
-        )
-
-
-@dataclass(frozen=True)
-class IsochroneDestinationSummary:
-    """The metadata-level destination summary in drive_isochrone.json."""
-
-    label: str
-    postcode: str
-    threshold_min: int
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(label=self.label, postcode=self.postcode, threshold_min=self.threshold_min)
-
-
-@dataclass(frozen=True)
-class IsochroneMetadata:
-    """Serialized metadata header of drive_isochrone.json (engine/profile
-    keys are added at assembly)."""
-
-    threshold_min: int
-    cell_km: float
-    region_km: float
-    destinations: list[IsochroneDestinationSummary]
-    count: int
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(
-            threshold_min=self.threshold_min, cell_km=self.cell_km,
-            region_km=self.region_km,
-            destinations=[d.to_dict() for d in self.destinations],
-            count=self.count,
-        )
-
-
-@dataclass(frozen=True)
-class _SearchFilters:
-    """Rightmove query filters carried on a drive search record."""
-
-    min_beds: int
-    property_type: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(min_beds=self.min_beds, property_type=self.property_type)
-
-
-@dataclass(frozen=True)
-class _SearchDestination:
-    """The destination block embedded in a drive search record."""
-
-    label: str
-    postcode: str
-    lat: float
-    lon: float
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(label=self.label, postcode=self.postcode, lat=self.lat, lon=self.lon)
-
-
-@dataclass(frozen=True)
-class DriveSearchRecord:
-    """A scraper-compatible Rightmove search record for one kept component."""
-
-    id: str
-    name: str
-    polygon: list[tuple[float, float]]
-    filters: _SearchFilters
-    rightmove_url: str
-    destination: _SearchDestination
-    threshold_min: int
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(
-            id=self.id, name=self.name, polygon=self.polygon,
-            filters=self.filters.to_dict(), rightmove_url=self.rightmove_url,
-            destination=self.destination.to_dict(), threshold_min=self.threshold_min,
-        )
-
-
-# lucidlint: ignore record-shape raw payload passed by key — keyed collection, not a record (review-log)
-# lucidlint: ignore record-shape returns the drive_searches.json payload — serialization boundary (coding-standards.md)
 def raw_to_searches(
-    raw: dict, *, min_beds: int = 2, property_type: str = "houses", generated_at: str, min_island_cells: int = 4
-) -> dict:
+    raw: Mapping[str, Any], *, min_beds: int = 2, property_type: str = "houses", generated_at: str,
+    min_island_cells: int = 4
+) -> SearchesPayload:
     """Kept cells → component outlines → Rightmove search records (deterministic).
 
     Mirrors ``searches.py``'s record shape (id, name, polygon, filters,
@@ -735,14 +721,14 @@ def raw_to_searches(
     the outer polygon already covers them (over-coverage, filtered by the gate)
     and Rightmove cannot draw exclusion holes.
     """
-    searches: list[dict] = []
+    searches: list[SearchRecord] = []
     for dest in raw["destinations"]:
         grid = Grid.from_cell_km(Rect(**dest["grid"]), dest["cell_km"])
         cells = [GridCell(c["r"], c["c"], c["lat"], c["lon"]) for c in dest["cells"]]
         # payload values are bare unit-named numbers (the wire format) —
         # restore units for the Quantity computation
-        durations = [None if c["duration_min"] is None else c["duration_min"] * MINUTE for c in dest["cells"]]
-        kept = kept_cells(cells, durations, dest["threshold_min"] * MINUTE, dest["slack_min"] * MINUTE)
+        durations = [None if c["duration_min"] is None else c["duration_min"] * Units.MINUTE for c in dest["cells"]]
+        kept = kept_cells(cells, durations, dest["threshold_min"] * Units.MINUTE, dest["slack_min"] * Units.MINUTE)
         slug = re.sub(r"[^a-z0-9]+", "-", dest["label"].lower()).strip("-") or "dest"
         # ids must be unique across destinations: two labels can slug to the
         # same string (e.g. "Dad" and "Dad!"), so the postcode disambiguates
@@ -751,39 +737,40 @@ def raw_to_searches(
             loop = outer_loop(comp, grid)
             if loop is None:
                 continue
-            poly = [(round(p.lat, POLYLINE_DECIMALS), round(p.lon, POLYLINE_DECIMALS)) for p in loop]
+            poly = [
+                (
+                    round(p.lat, DriveIsochroneConfig.POLYLINE_DECIMALS),
+                    round(p.lon, DriveIsochroneConfig.POLYLINE_DECIMALS),
+                )
+                for p in loop
+            ]
             suffix = "" if i == 1 else f"-{i}"
             searches.append(
-                # lucidlint: ignore record-shape wire-format dict — scraper-compatible search record (mirrors
-                {
-                    "id": f"drive-{slug}-{postcode_slug}-{dest['threshold_min']:03d}{suffix}",
-                    "name": f"{dest['label']} — {dest['threshold_min']} min drive",
-                    "polygon": poly,
-                    # lucidlint: ignore record-shape wire-format dict — Rightmove query filters, serialization boundary
-                    "filters": {"min_beds": min_beds, "property_type": property_type},
-                    "rightmove_url": build_search_url(poly, min_beds=min_beds, property_type=property_type),
-                    # lucidlint: ignore record-shape wire-format dict — serialized destination block of the search
-                    "destination": {
-                        "label": dest["label"], "postcode": dest["postcode"], "lat": dest["lat"], "lon": dest["lon"]
-                    },
-                    "threshold_min": dest["threshold_min"],
-                }
+                SearchRecord(
+                    id=f"drive-{slug}-{postcode_slug}-{dest['threshold_min']:03d}{suffix}",
+                    name=f"{dest['label']} — {dest['threshold_min']} min drive",
+                    polygon=poly,
+                    filters=SearchFilters(min_beds=min_beds, property_type=property_type),
+                    rightmove_url=build_search_url(poly, min_beds=min_beds, property_type=property_type),
+                    destination=SearchDestination(
+                        label=dest["label"], postcode=dest["postcode"], lat=dest["lat"], lon=dest["lon"]
+                    ),
+                    threshold_min=dest["threshold_min"],
+                )
             )
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        # lucidlint: ignore record-shape wire-format dict — searches payload metadata, serialization boundary owns the
-        "metadata": {
-            "engine_version": SEARCHES_VERSION,
-            "profile": raw["metadata"]["profile"],
-            "speed_model": raw["metadata"]["speed_model"],
-            "threshold_min": raw["metadata"]["threshold_min"],
-            "cell_km": raw["metadata"]["cell_km"],
-            "destinations": [d["label"] for d in raw["metadata"]["destinations"]],
-            "generated_at": generated_at,
-            "count": len(searches),
-        },
-        "searches": searches,
-    }
+    return SearchesPayload(
+        metadata=SearchesMetadata(
+            engine_version=DriveIsochroneConfig.SEARCHES_VERSION,
+            profile=raw["metadata"]["profile"],
+            speed_model=raw["metadata"]["speed_model"],
+            threshold_min=raw["metadata"]["threshold_min"],
+            cell_km=raw["metadata"]["cell_km"],
+            destinations=[d["label"] for d in raw["metadata"]["destinations"]],
+            generated_at=generated_at,
+            count=len(searches),
+        ),
+        searches=searches,
+    )
 
 
 # ── validation ───────────────────────────────────────────────────────
@@ -836,57 +823,67 @@ def _point_segment_distance(point: GeoPoint, a: GeoPoint, b: GeoPoint) -> float:
     return math.hypot(point.lat - (a.lat + t * dx), point.lon - (a.lon + t * dy))
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _search_geometry_issues(s: dict, max_vertices: int) -> list[str]:
-    """Polygon shape, GB-bbox, and URL round-trip issues for one search."""
+def search_geometry_issues(
+    s: Mapping[str, Any],
+    *,
+    min_polygon_vertices: int,
+    closed_loop_hint: str,
+    max_vertices: int,
+    round_trip_eps: float,
+) -> list[str]:
+    """Polygon shape, GB-bbox, and URL round-trip issues for one search.
+
+    Shared by the drive and intersection validators — identical checks; only
+    the config constants and the closed-loop hint differ. One implementation
+    so the two validators can't drift.
+    """
     issues: list[str] = []
     poly: Any = s.get("polygon")
     if not _polygon_is_valid(poly):
         issues.append(f"{s.get('id')}: polygon is malformed (expected [lat, lon] pairs)")
         return issues
-    if len(poly) < MIN_POLYGON_VERTICES:
+    if len(poly) < min_polygon_vertices:
         issues.append(f"{s.get('id')}: polygon has {len(poly)} vertices (need ≥ 4)")
     elif poly[0] == poly[-1]:
-        issues.append(f"{s.get('id')}: polygon is closed — loops must stay open (the URL builder closes them)")
+        issues.append(f"{s.get('id')}: polygon is closed — loops must stay open{closed_loop_hint}")
     if len(poly) > max_vertices:
         issues.append(f"{s.get('id')}: {len(poly)} vertices exceeds the {max_vertices} cap")
     issues.extend(
         f"{s.get('id')}: vertex ({lat}, {lon}) outside the GB bounding box"
         for lat, lon in poly
-        if not GB_BBOX.contains(lat, lon)
+        if not DriveIsochroneConfig.GB_BBOX.contains(lat, lon)
     )
     try:
-        parsed = parse_search_url(s.get("rightmove_url", ""))
+        url = s.get("rightmove_url")
+        parsed = parse_search_url(url if isinstance(url, str) else "")
         expected = poly + [poly[0]]
         if len(parsed) != len(expected) or any(
-            abs(pl - el) > ROUND_TRIP_EPS or abs(po - eo) > ROUND_TRIP_EPS
+            abs(pl - el) > round_trip_eps or abs(po - eo) > round_trip_eps
             for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
         ):
             issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
-    # lucidlint: ignore broad-except any parse failure is a URL issue (mirrors the noqa BLE001)
-    except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
+    except (LookupError, ValueError) as e:
         issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
     return issues
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _destination_label(s: dict) -> str | None:
+def _destination_label(s: Mapping[str, Any]) -> str | None:
     """The search's destination label (None when the destination is malformed)."""
     dest = s.get("destination")
     return dest.get("label") if isinstance(dest, dict) else None
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _containment_issues(searches: list[dict]) -> list[str]:
+def _containment_issues(searches: list[SearchRecord]) -> list[str]:
     """Every destination's centre must sit inside one of its own shed's loops."""
     issues: list[str] = []
-    by_label: dict[str | None, list[dict]] = {}
+    by_label: dict[str | None, list[SearchRecord]] = {}
     # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
     for s in searches:
         by_label.setdefault(_destination_label(s), []).append(s)
     for group in by_label.values():
         valid = [
-            o for o in group if _polygon_is_valid(o.get("polygon")) and len(o["polygon"]) >= MIN_CONTAINMENT_VERTICES
+            o
+            for o in group
+            if _polygon_is_valid(o.get("polygon"))
+            and len(o["polygon"]) >= DriveIsochroneConfig.MIN_CONTAINMENT_VERTICES
         ]
         for s in group:
             d = s.get("destination")
@@ -904,8 +901,7 @@ def _containment_issues(searches: list[dict]) -> list[str]:
     return issues
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:
+def validate_payload(payload: Mapping[str, Any], *, max_vertices: int = DriveIsochroneConfig.MAX_VERTICES) -> list[str]:
     """Return issues with the drive searches payload; empty means it passes.
 
     Mirrors the transit validator's remit: geometry sanity, URL round-trip,
@@ -926,7 +922,15 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
         issues.append(f"metadata count {metadata.get('count')} != {len(searches)} searches")
     labels_in_searches: set[str] = set()
     for s in searches:
-        issues.extend(_search_geometry_issues(s, max_vertices))
+        issues.extend(
+            search_geometry_issues(
+                s,
+                min_polygon_vertices=DriveIsochroneConfig.MIN_POLYGON_VERTICES,
+                closed_loop_hint=" (the URL builder closes them)",
+                max_vertices=max_vertices,
+                round_trip_eps=DriveIsochroneConfig.ROUND_TRIP_EPS,
+            )
+        )
         label = _destination_label(s)
         if isinstance(label, str) and label:
             labels_in_searches.add(label)
@@ -952,10 +956,9 @@ def _atomic_write(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _load_searches_payload(out_dir: Path) -> dict | None:
+def _load_searches_payload(out_dir: Path) -> Mapping[str, Any] | None:
     """Current searches payload, or None when absent/unreadable (will rewrite)."""
-    searches_path = out_dir / SEARCHES_FILENAME
+    searches_path = out_dir / DriveIsochroneConfig.SEARCHES_FILENAME
     if not searches_path.exists():
         return None
     try:
@@ -966,9 +969,7 @@ def _load_searches_payload(out_dir: Path) -> dict | None:
 
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-# lucidlint: ignore record-shape wire-format dict — serialized drive artifacts written here, serialization boundary
-def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> None:
+def write_payloads(raw: Mapping[str, Any] | None, searches: SearchesPayload, out_dir: str | Path) -> None:
     """Write raw (when regenerated) + searches.json/.txt/.html without churn.
 
     A regeneration with only a different ``generated_at`` must not dirty the
@@ -977,17 +978,17 @@ def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> Non
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if raw is not None:
-        _atomic_write(out_dir / RAW_FILENAME, json.dumps(raw, indent=2) + "\n")
+        _atomic_write(out_dir / DriveIsochroneConfig.RAW_FILENAME, json.dumps(raw, indent=2) + "\n")
 
-    searches_path = out_dir / SEARCHES_FILENAME
+    searches_path = out_dir / DriveIsochroneConfig.SEARCHES_FILENAME
     existing = _load_searches_payload(out_dir)
-    if existing is not None and same_payload(existing, searches):
-        _write_if_changed(out_dir / TXT_FILENAME, _urls_text(searches))
-        _write_if_changed(out_dir / MAP_FILENAME, _map_html(searches))
+    if existing is not None and same_payload(dict(existing), dict(searches)):
+        _write_if_changed(out_dir / DriveIsochroneConfig.TXT_FILENAME, _urls_text(searches))
+        _write_if_changed(out_dir / DriveIsochroneConfig.MAP_FILENAME, _map_html(searches))
         return
     _atomic_write(searches_path, json.dumps(searches, indent=2) + "\n")
-    _atomic_write(out_dir / TXT_FILENAME, _urls_text(searches))
-    _atomic_write(out_dir / MAP_FILENAME, _map_html(searches))
+    _atomic_write(out_dir / DriveIsochroneConfig.TXT_FILENAME, _urls_text(searches))
+    _atomic_write(out_dir / DriveIsochroneConfig.MAP_FILENAME, _map_html(searches))
 
 
 def _write_if_changed(path: Path, content: str) -> None:
@@ -995,13 +996,11 @@ def _write_if_changed(path: Path, content: str) -> None:
         path.write_text(content)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _urls_text(payload: dict) -> str:
+def _urls_text(payload: SearchesPayload) -> str:
     return "\n".join(s["rightmove_url"] for s in payload["searches"]) + "\n"
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _map_html(searches: dict) -> str:
+def _map_html(searches: Mapping[str, Any]) -> str:
     """Leaflet map (Leaflet + CSS from CDN): destination markers + shed
     outlines. The combined map (combined_map.py) is the self-contained one;
     this page is the per-destination quick view."""
@@ -1023,8 +1022,9 @@ def _map_html(searches: dict) -> str:
         # out of the script element
         markers_js.append(
             js_safe_json(
-                # lucidlint: ignore record-shape wire-format dict — Leaflet marker payload embedded in the HTML
-                {"label": user_label(d["label"]), "lat": d["lat"], "lon": d["lon"], "url": s["rightmove_url"]}
+                _MapMarker(
+                    label=user_label(d["label"]), lat=d["lat"], lon=d["lon"], url=s["rightmove_url"]
+                )
             )
         )
     html = """<!DOCTYPE html>
@@ -1069,8 +1069,7 @@ async def _geocode(postcode: str) -> GeoPoint:
     return GeoPoint(point.lat, point.lon)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _load_raw(path: Path) -> dict | None:
+def _load_raw(path: Path) -> Mapping[str, Any] | None:
     try:
         return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
@@ -1093,25 +1092,43 @@ async def _geocode_destinations(geocoder, destinations):
 
 def _validate_committed(out_dir: Path) -> int:
     """--validate: check the committed searches payload and report."""
-    searches_path = out_dir / SEARCHES_FILENAME
-    if not searches_path.exists():
+    return validate_committed_payload(
+        out_dir / DriveIsochroneConfig.SEARCHES_FILENAME,
+        what="commute map data",
+        make="commute-drive",
+        ok_label="drive searches",
+        validator=validate_payload,
+    )
+
+
+def validate_committed_payload(
+    path: Path,
+    *,
+    what: str,
+    make: str,
+    ok_label: str,
+    validator: Callable[[Mapping[str, Any]], list[str]],
+) -> int:
+    """--validate for one committed payload — shared by drive isochrones and
+    the intersection (identical flow; only the labels and validator differ)."""
+    if not path.exists():
         return fail(
-            "No commute map data yet — run 'make commute-drive' first.",
-            f"{searches_path} not found for --validate",
+            f"No {what} yet — run 'make {make}' first.",
+            f"{path} not found for --validate",
         )
     try:
-        payload = json.loads(searches_path.read_text())
+        payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as e:
         return fail(
-            "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
-            f"unreadable {searches_path} for --validate: {e}",
+            f"The saved {what} is unreadable — regenerate it with 'make {make}'.",
+            f"unreadable {path} for --validate: {e}",
         )
-    issues = validate_payload(payload)
+    issues = validator(payload)
     if issues:
         for issue in issues:
             print(f"- {issue}", file=sys.stderr)
         return 1
-    print(f"drive searches OK ({len(payload['searches'])} search(es))")
+    print(f"{ok_label} OK ({len(payload['searches'])} search(es))")
     return 0
 
 
@@ -1145,47 +1162,46 @@ def _load_destinations(
             f"unreadable drive destinations config {config_path}: {e}",
         )
     if threshold_override_min:
-        destinations = apply_default_threshold(destinations, config_data, threshold_override_min * MINUTE)
+        destinations = apply_default_threshold(destinations, config_data, threshold_override_min * Units.MINUTE)
     threshold_min = min(d.threshold_min for d in destinations)
     if region_override_km:
-        region_km = region_override_km * KM
+        region_km = region_override_km * Units.KM
     else:
-        region_km = max(d.threshold_min for d in destinations).to("hour") * (REGION_MULTIPLIER * MINUTES_PER_HOUR * KMH)
+        region_km = max(d.threshold_min for d in destinations).to("hour") * (
+            DriveIsochroneConfig.REGION_MULTIPLIER * DriveIsochroneConfig.MINUTES_PER_HOUR * Units.KMH
+        )
     return DestinationConfig(destinations, threshold_min, region_km)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
 def _expected_signature(
-    destinations: list[DriveDestination], coords_by_label: dict[str, GeoPoint], *, threshold_min, region_km, cell_km
-) -> dict:
+    destinations: list[DriveDestination], coords_by_label: Mapping[str, GeoPoint], *, threshold_min, region_km, cell_km
+) -> ConfigSignature:
     """The config identity the current run expects — a match reuses the raw."""
     return config_signature(
-        # lucidlint: ignore record-shape wire-format dict — synthetic raw payload for signature comparison,
-        {
-            # lucidlint: ignore record-shape wire-format dict — raw payload metadata shape (coding-standards.md)
-            "metadata": {
-                "engine_version": ENGINE_VERSION,
-                "profile": "driving-car",
-                "speed_model": "free-flow",
-                "threshold_min": int(threshold_min.to("minute").magnitude),
-                "cell_km": cell_km,
-                "region_km": region_km.to("km").magnitude,
-                "destinations": [
-                    # lucidlint: ignore record-shape wire-format dict — metadata destinations entry
-                    {
-                        "label": d.label,
-                        "postcode": d.postcode,
-                        "threshold_min": int(d.threshold_min.to("minute").magnitude),
-                    }
+        RawPayload(
+            metadata=RawMetadata(
+                engine_version=DriveIsochroneConfig.ENGINE_VERSION,
+                profile="driving-car",
+                speed_model="free-flow",
+                threshold_min=int(threshold_min.to("minute").magnitude),
+                cell_km=cell_km,
+                region_km=region_km.to("km").magnitude,
+                destinations=[
+                    RawMetadataEntry(
+                        label=d.label,
+                        postcode=d.postcode,
+                        threshold_min=int(d.threshold_min.to("minute").magnitude),
+                    )
                     for d in destinations
                 ],
-            },
-            "destinations": [
-                # lucidlint: ignore record-shape wire-format dict — destinations entry of the raw payload shape
-                {"label": d.label, "lat": coords_by_label[d.label].lat, "lon": coords_by_label[d.label].lon}
+            ),
+            destinations=[
+                RawDestination(
+                    label=d.label, lat=coords_by_label[d.label].lat, lon=coords_by_label[d.label].lon
+                )
                 for d in destinations
             ],
-        }
+        )
     )
 
 
@@ -1193,7 +1209,7 @@ def _expected_signature(
 class RawPayloadResult:
     """A raw matrix payload when produced or reused, else the exit code aborting the run."""
 
-    raw: dict | None
+    raw: Mapping[str, Any] | None
     exit_code: int | None
 
 
@@ -1219,7 +1235,7 @@ def _reuse_raw(
     ``exit_code`` is non-None when the stored payload is unreadable in a way
     that must abort the run.
     """
-    raw_path = Path(args.out_dir) / RAW_FILENAME
+    raw_path = Path(args.out_dir) / DriveIsochroneConfig.RAW_FILENAME
     if not raw_path.exists() or args.force:
         return RawPayloadResult(None, None)
     prev = _load_raw(raw_path)
@@ -1283,7 +1299,7 @@ async def _fetch_raw(
             MatrixBatchConfig(cell_km=cell_km, region_km=region_km, key=key),
             generated_at=datetime.now(UTC).isoformat(),
         )
-        raw = snapshot.to_dict()
+        raw = snapshot
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             # auth failures never fix themselves by retrying
@@ -1311,20 +1327,23 @@ async def _fetch_raw(
     return RawPayloadResult(raw, None)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _warn_sheds_touching_region_edge(raw: dict) -> None:
+def _warn_sheds_touching_region_edge(raw: Mapping[str, Any]) -> None:
     """Kept cells on the region border mean the frontier may exceed --region-km."""
     for record in raw["destinations"]:
         grid = Grid.from_cell_km(Rect(**record["grid"]), record["cell_km"])
         cells = grid_cell_centers(grid)
         kept = kept_cells(
             cells,
-            [None if c["duration_min"] is None else c["duration_min"] * MINUTE for c in record["cells"]],
-            record["threshold_min"] * MINUTE,
-            record["slack_min"] * MINUTE,
+            [None if c["duration_min"] is None else c["duration_min"] * Units.MINUTE for c in record["cells"]],
+            record["threshold_min"] * Units.MINUTE,
+            record["slack_min"] * Units.MINUTE,
         )
-        rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - CELL_COUNT_EPSILON)
-        cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - CELL_COUNT_EPSILON)
+        rows = math.ceil(
+            (grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - DriveIsochroneConfig.CELL_COUNT_EPSILON
+        )
+        cols = math.ceil(
+            (grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - DriveIsochroneConfig.CELL_COUNT_EPSILON
+        )
         if kept and any(cell.row in (0, rows - 1) or cell.col in (0, cols - 1) for cell in kept):
             logger.warning(
                 "%s: kept cells touch the region edge — the 90-min frontier may exceed --region-km; increase it",
@@ -1336,16 +1355,14 @@ def _warn_sheds_touching_region_edge(raw: dict) -> None:
             )
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-# lucidlint: ignore record-shape wire-format dict — returns the drive_searches.json payload or an exit code,
 def _build_searches_orfail(
-    raw: dict,
+    raw: Mapping[str, Any],
     *,
     min_beds: int,
     property_type: str,
     generated_at: str,
     min_island_cells: int,
-) -> tuple[dict | None, int | None]:
+) -> _BuildResult:
     """Raw payload → validated searches; a conversion/validation failure is an exit code."""
     try:
         searches = raw_to_searches(
@@ -1370,9 +1387,9 @@ def _build_searches_orfail(
 
 
 def _report(count: int, out_dir: Path) -> None:
-    print(f"{count} drive search(es) → {out_dir / SEARCHES_FILENAME}")
-    print(f"urls → {out_dir / TXT_FILENAME}")
-    print(f"map → {out_dir / MAP_FILENAME}")
+    print(f"{count} drive search(es) → {out_dir / DriveIsochroneConfig.SEARCHES_FILENAME}")
+    print(f"urls → {out_dir / DriveIsochroneConfig.TXT_FILENAME}")
+    print(f"map → {out_dir / DriveIsochroneConfig.MAP_FILENAME}")
 
 
 async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | None = None) -> int:
@@ -1385,7 +1402,9 @@ async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | No
     parser.add_argument(
         "--threshold-min", type=int, default=0, help="override the config's default threshold (minutes)"
     )
-    parser.add_argument("--cell-km", type=float, default=DEFAULT_CELL_KM, help="grid cell size in km (default 4)")
+    parser.add_argument(
+        "--cell-km", type=float, default=DriveIsochroneConfig.DEFAULT_CELL_KM, help="grid cell size in km (default 4)"
+    )
     parser.add_argument(
         "--region-km",
         type=float,
@@ -1419,18 +1438,14 @@ async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | No
         geocoder = _geocode
     located, geocode_error = await _geocode_destinations(geocoder, loaded.destinations)
 
-    reused = _reuse_raw(
+    stage = _reuse_raw(
         args,
         loaded.destinations,
         located,
         threshold_min=loaded.threshold_min,
         region_km=loaded.region_km,
     )
-    if reused.exit_code is not None:
-        return reused.exit_code
-
-    raw = reused.raw
-    if raw is None:
+    if stage.raw is None and stage.exit_code is None:
         if located is None:
             # regeneration is actually needed — the deferred geocoding error
             # is now the real problem
@@ -1439,18 +1454,20 @@ async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | No
                 f"geocoding failed for a drive destination: {geocode_error}",
             )
         api_key = ors_key if ors_key is not None else settings.ors_api_key
-        fetched = await _fetch_raw(
+        stage = await _fetch_raw(
             located,
-            cell_km=args.cell_km * KM,
+            cell_km=args.cell_km * Units.KM,
             region_km=loaded.region_km,
             key=api_key,
         )
-        # lucidlint: ignore duplicate-block parallel stage-result unwraps — each stage returns a Result record; the
-        if fetched.exit_code is not None:
-            return fetched.exit_code
-        raw = fetched.raw
-        assert raw is not None  # exit_code None ⇔ the batch succeeded
-        _warn_sheds_touching_region_edge(raw)
+        if stage.exit_code is not None:
+            return stage.exit_code
+        assert stage.raw is not None  # exit_code None ⇔ the batch succeeded
+        _warn_sheds_touching_region_edge(stage.raw)
+    elif stage.exit_code is not None:
+        return stage.exit_code
+    raw = stage.raw
+    assert raw is not None  # exit_code None ⇔ the stage produced a payload
 
     searches, searches_exit = _build_searches_orfail(
         raw,

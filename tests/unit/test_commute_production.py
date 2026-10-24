@@ -124,7 +124,7 @@ async def test_production_commute_flow():
     # Run processor — this is what the production _processor task does
     await flush_processor()  # second pass for transitive deps
 
-    summary = await prop.to_json_summary()
+    summary = (await prop.summary()).to_dict()
 
     # 1. There must be commute selectors
     commutes = summary.get("commutes", {})
@@ -165,7 +165,7 @@ async def test_school_commutes_resolve():
 
     await flush_processor()
 
-    summary = await prop.to_json_summary()
+    summary = (await prop.summary()).to_dict()
 
     # 1. School data must be present and succeeded
     schools = summary.get("schools", {})

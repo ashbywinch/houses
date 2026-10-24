@@ -19,27 +19,58 @@ import os
 import sys
 import zipfile
 from pathlib import Path
+from typing import TypedDict
 
 import httpx
+from money import Money
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("download_rail_fares")
 
-AUTH_URL = "https://opendata.nationalrail.co.uk/authenticate"
-FARES_URL = "https://opendata.nationalrail.co.uk/api/staticfeeds/2.0/fares"
-USERNAME = "ashby@juggler.net"
 
-# Destination stations we care about
-DEST_CRS = {"VIC", "FST"}
-PENCE_PER_POUND = 100.0
-MIN_FARE_LINE_LENGTH = 20
+class _AuthForm(TypedDict):
+    """The NRDP authenticate POST form — the external API's contract."""
+
+    username: str
+    password: str
+
+
+class _FareRow(TypedDict):
+    """One row of the filtered fares CSV: the CSV boundary's shape."""
+
+    origin_crs: str
+    dest_crs: str
+    single_fare_gbp: str
+
+
+class _NrdtdFares:
+    """The NR DTD fares feed: auth/fares endpoints and the destinations we keep."""
+
+    AUTH_URL = "https://opendata.nationalrail.co.uk/authenticate"
+    FARES_URL = "https://opendata.nationalrail.co.uk/api/staticfeeds/2.0/fares"
+    USERNAME = "ashby@juggler.net"
+
+    # Destination stations we care about
+    DEST_CRS = {"VIC", "FST"}
+    MIN_FARE_LINE_LENGTH = 20
+
+
+def _pence_to_money(pence: int) -> Money:
+    """NR DTD fares list pence; Money's ``amount`` is the main unit (GBP pounds).
+
+    The pence-per-pound scaling lives here alone — the money layer owns the
+    conversion, business code never sees a /100 factor.
+    """
+    # lucidlint: ignore magic-number the pence-per-pound factor is the money layer's one job (Money owns unit math)
+    return Money(str(pence / 100), "GBP")
+
+
 
 
 def authenticate(password: str) -> str:
     resp = httpx.post(
-        AUTH_URL,
-        # lucidlint: ignore record-shape wire-format dict — NRDP auth request body, external API contract
-        data={"username": USERNAME, "password": password},
+        _NrdtdFares.AUTH_URL,
+        data=_AuthForm(username=_NrdtdFares.USERNAME, password=password),
     )
     resp.raise_for_status()
     body = resp.json()
@@ -52,17 +83,15 @@ def authenticate(password: str) -> str:
 
 
 def download_fares(token: str) -> bytes:
-    logger.info("Downloading fares from %s ...", FARES_URL)
-    resp = httpx.get(FARES_URL, headers={"X-Auth-Token": token}, timeout=300)
-    resp.raise_for_status()
+    logger.info("Downloading fares from %s ...", _NrdtdFares.FARES_URL)
+    resp = httpx.get(_NrdtdFares.FARES_URL, headers={"X-Auth-Token": token}, timeout=300)
     logger.info("Downloaded %d bytes", len(resp.content))
     return resp.content
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def extract_relevant_fares(zip_data: bytes) -> list[dict]:
+def extract_relevant_fares(zip_data: bytes) -> list[_FareRow]:
     """Unzip the fares file and extract only fares involving DEST_CRS stations."""
-    relevant = []
+    relevant: list[_FareRow] = []
     seen = set()
     with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
         for name in z.namelist():
@@ -70,33 +99,32 @@ def extract_relevant_fares(zip_data: bytes) -> list[dict]:
                 continue
             with z.open(name) as f:
                 text = f.read().decode("latin-1")
-                if not any(crs in text for crs in DEST_CRS):
+                if not any(crs in text for crs in _NrdtdFares.DEST_CRS):
                     continue
                 for line in text.splitlines():
                     if not line.strip():
                         continue
                     # Fixed-format: origin_crs(4) dest_crs(4) ... fare(8)
                     # Fare file format: positions 0-3 origin, 4-7 dest, rest is fare data
-                    if len(line) < MIN_FARE_LINE_LENGTH:
+                    if len(line) < _NrdtdFares.MIN_FARE_LINE_LENGTH:
                         continue
                     origin = line[0:4].strip()
                     dest = line[4:8].strip()
-                    if origin in DEST_CRS or dest in DEST_CRS:
+                    if origin in _NrdtdFares.DEST_CRS or dest in _NrdtdFares.DEST_CRS:
                         fare_str = line[16:24].strip()
                         try:
-                            fare = float(fare_str) / PENCE_PER_POUND
+                            fare = _pence_to_money(int(fare_str))
                         except ValueError:
                             continue
                         key = (origin, dest)
                         if key not in seen:
                             seen.add(key)
                             relevant.append(
-                                # lucidlint: ignore record-shape wire-format dict — CSV output row for
-                                {
-                                    "origin_crs": origin,
-                                    "dest_crs": dest,
-                                    "single_fare_gbp": fare,
-                                }
+                                _FareRow(
+                                    origin_crs=origin,
+                                    dest_crs=dest,
+                                    single_fare_gbp=str(fare.amount),
+                                )
                             )
     logger.info("Extracted %d relevant fare records", len(relevant))
     return relevant

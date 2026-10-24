@@ -27,7 +27,8 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.measurement import Measurement
-from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+from houses.annexe_dwelling import AnnexeDwelling
+from houses.council_tax_info import CouncilTaxInfo
 from houses.geopoint import GeoPoint
 from houses.model.domain import HomeCoOwner, Person, PlaceOfInterest
 from houses.nodes.property_nodes import PropertyNodes

@@ -69,7 +69,7 @@ def failing_prop():
 @pytest.mark.asyncio
 async def test_a_failed_commute_is_reported_as_failed(failing_prop):
     await flush_processor()
-    summary = await failing_prop.to_json_summary()
+    summary = (await failing_prop.summary()).to_dict()
     entries = {key: cd["commute"] for key, cd in summary["commutes"].items()}
     assert entries, "the summary must carry the commute entries"
     failed = {key: entry for key, entry in entries.items() if entry["status"] == "impossible"}
@@ -84,7 +84,7 @@ async def test_a_failed_commute_is_reported_as_failed(failing_prop):
 @pytest.mark.asyncio
 async def test_no_entry_papers_a_failure_over_as_an_empty_value(failing_prop):
     await flush_processor()
-    summary = await failing_prop.to_json_summary()
+    summary = (await failing_prop.summary()).to_dict()
     for key, cd in summary["commutes"].items():
         entry = cd["commute"]
         assert entry["status"] != "succeeded" or entry["value"] is not None, (
@@ -96,7 +96,7 @@ async def test_no_entry_papers_a_failure_over_as_an_empty_value(failing_prop):
 @pytest.mark.asyncio
 async def test_a_failed_commute_errors_the_household_total(failing_prop):
     await flush_processor()
-    summary = await failing_prop.to_json_summary()
+    summary = (await failing_prop.summary()).to_dict()
     failed = [key for key, cd in summary["commutes"].items() if cd["commute"]["status"] == "impossible"]
     assert failed, (
         "no commute reports a failure although every route errored — the total's "

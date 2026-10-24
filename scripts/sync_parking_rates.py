@@ -16,134 +16,68 @@ import argparse
 import asyncio
 import csv
 import logging
-import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
+
+from dag.guard import capture_async
+from houses.apcoa_rates import city_slugs, extract_daily_rate_from_tariff
+from houses.apcoa_scraper import apcoa_location_urls
 
 logger = logging.getLogger(__name__)
 
-STATIONS_CSV = Path("data/stations.csv")
-PARKING_CSV = Path("data/parking_rates.csv")
-MAX_COST_GBP = 100.0
+class _ApcoaRates:
+    """The APCOA parking-rates source: data paths, base URL, and scrape pacing."""
 
-APCOA_BASE = "https://www.apcoa.co.uk/find-parking/locations"
-REQUEST_DELAY_SECONDS = 3.0
-CHECKPOINT_INTERVAL = 5
-
-
-def extract_daily_rate_from_tariff(tariff_text: str) -> float | None:
-    """Extract the weekday daily parking rate from APCOA tariff text.
-
-    Handles several formats:
-    - "Daily Rate: £X.XX" (Woking, Fleet)
-    - "Daily Rate before 12pm: £X.XX" (Bourne End)
-    - "Up to 24 hours £X.XX" (Didcot Foxhall)
-    - Multi-line tariff from the Monday-Friday section.
-
-    Returns:
-        float — the daily rate in GBP
-        None — if no rate could be confidently extracted
-
-    Designed as a pure function — no I/O, no side effects. Testable
-    with fixture files containing ``Parking tariff`` section text.
-    """
-    # The caller already extracts the relevant section from the page.
-    # The text may or may not start with "Parking tariff".
-    tariff_start = tariff_text.find("Parking tariff")
-    if tariff_start < 0:
-        tariff_start = tariff_text.find("Pricing and payment")
-    if tariff_start < 0:
-        return None
-    tariff = tariff_text[tariff_start:]
-
-    # Isolate the Monday-Friday block (ends before Saturday or weeklies).
-    # "Sunday" is too broad (matches "Monday - Sunday"), so we only
-    # anchor on "Saturday" which cleanly separates weekday from weekend.
-    mf_end = len(tariff)
-    for marker in ["Saturday", "Weekly\n", "Monthly\n", "Season Ticket"]:
-        idx = tariff.find(marker)
-        if idx >= 0 and idx < mf_end:
-            mf_end = idx
-    mf = tariff[:mf_end]
-
-    # Check for "Permit Holders Only" — no daily rate available
-    if re.search(r"Permit\s*Holders?\s*Only", mf, re.IGNORECASE):
-        return None
-
-    # Strategy 1 then 2: explicit "Daily Rate: £X.XX" (handles "before 12pm"
-    # qualifiers), then "Up to 24 hours £X.XX" / "Up to 24 hours: £X.XX".
-    for pattern in (
-        r"Daily\s*Rate\s*\S*?\s*:?\s*£(\d+\.\d{2})",
-        r"(?:Up\s*to\s*)?24\s*hours?\s*:?\s*£(\d+\.\d{2})",
-    ):
-        m = re.search(pattern, mf, re.IGNORECASE)
-        if m:
-            return float(m.group(1))
-
-    # Strategy 3: extract all £X.XX prices, take the highest (likely daily max)
-    prices = [float(p) for p in re.findall(r"£(\d+\.\d{2})", mf)]
-    if prices:
-        max_price = max(prices)
-        if max_price > 0:
-            return max_price
-
-    return None
+    STATIONS_CSV = Path("data/stations.csv")
+    PARKING_CSV = Path("data/parking_rates.csv")
+    MAX_COST_GBP = 100.0
+    APCOA_BASE = "https://www.apcoa.co.uk/find-parking/locations"
+    REQUEST_DELAY_SECONDS = 3.0
+    CHECKPOINT_INTERVAL = 5
 
 
-def make_slug(name: str) -> str:
-    """Convert a station name to an APCOA URL slug."""
-    slug = name.lower()
-    slug = slug.replace("'", "").replace("&", "and")
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    return slug.strip("-")
+type _StationPosition = tuple[float, float]
+"""A station's (latitude, longitude) as stations.csv states them."""
 
 
-def city_slugs(station_name: str) -> list[str]:
-    """Generate candidate city slugs for APCOA URL construction.
+class _StationRecord(TypedDict):
+    """One station as this script's CSV boundary carries it: the stations.csv
+    row's station name and CRS code, projected for the parking-rates CSV."""
 
-    Tries the full station name first (e.g. 'Bourne End' →
-    'bourne-end'), then falls back to the first word
-    (e.g. 'Didcot Parkway' → 'didcot').
-    """
-    name = station_name.strip()
-    full = make_slug(name)
-    first = make_slug(name.split()[0])
-    candidates = [full]
-    if first != full:
-        candidates.append(first)
-    return candidates
+    stationName: str
+    crs: str
 
 
-def _apcoa_urls(station_name: str) -> list[str]:
-    """Generate candidate APCOA location page URLs for a station."""
-    station_slug = make_slug(station_name)
-    urls: list[str] = []
-    for city_slug in city_slugs(station_name):
-        urls.append(f"{APCOA_BASE}/{city_slug}/{station_slug}-station-{city_slug}")
-        urls.append(f"{APCOA_BASE}/{city_slug}/{city_slug}-station-{city_slug}")
-    return urls
+@dataclass(frozen=True)
+class _SyncSelection:
+    """The CLI's station selection: which stations one run processes."""
+
+    crs: str | None = None
+    missing: bool = False
+    force: bool = False
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def load_stations() -> list[dict]:
-    stations: list[dict] = []
-    with STATIONS_CSV.open(newline="") as f:
+def load_stations() -> list[_StationRecord]:
+    stations: list[_StationRecord] = []
+    with _ApcoaRates.STATIONS_CSV.open(newline="") as f:
         for row in csv.DictReader(f):
             crs = (row.get("crsCode", "") or "").strip()
             name = (row.get("stationName", "") or "").strip()
             if crs and name:
-                # lucidlint: ignore record-shape wire-format dict — station CSV row shape, the CSV boundary owns the
-                stations.append({"stationName": name, "crs": crs.upper()})
-    logger.info("Loaded %d stations from %s", len(stations), STATIONS_CSV)
+                stations.append(_StationRecord(stationName=name, crs=crs.upper()))
+    logger.info("Loaded %d stations from %s", len(stations), _ApcoaRates.STATIONS_CSV)
     return stations
 
 def load_existing_rates() -> dict[str, float | None]:
     """Return {crs: cost} from existing CSV."""
     rates: dict[str, float | None] = {}
-    if not PARKING_CSV.is_file():
+    if not _ApcoaRates.PARKING_CSV.is_file():
         return rates
-    with PARKING_CSV.open(newline="") as f:
+    with _ApcoaRates.PARKING_CSV.open(newline="") as f:
         for row in csv.DictReader(f):
             crs = (row.get("crs", "") or "").strip().upper()
             raw = (row.get("daily_cost_gbp", "") or "").strip()
@@ -159,20 +93,6 @@ def load_existing_rates() -> dict[str, float | None]:
     return rates
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def write_rates(all_stations: list[dict], rates: dict[str, float | None]) -> None:
-    PARKING_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with PARKING_CSV.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["station_name", "crs", "daily_cost_gbp"])
-        for s in sorted(all_stations, key=lambda x: x["crs"]):
-            crs = s["crs"]
-            cost = rates.get(crs)
-            val = f"{cost:.2f}" if cost is not None else ""
-            writer.writerow([s["stationName"], crs, val])
-    logger.info("Wrote %d rates to %s", len(rates), PARKING_CSV)
-
-
 async def find_station_urls(page, station_name: str) -> list[str]:
     """Find station car park URLs from an APCOA city listing page.
 
@@ -180,7 +100,7 @@ async def find_station_urls(page, station_name: str) -> list[str]:
     extracts links containing '-station-'.
     """
     for city_slug in city_slugs(station_name):
-        listing_url = f"{APCOA_BASE}/{city_slug}/"
+        listing_url = f"{_ApcoaRates.APCOA_BASE}/{city_slug}/"
         try:
             await page.goto(listing_url, wait_until="domcontentloaded", timeout=15000)
             await asyncio.sleep(2)
@@ -196,8 +116,8 @@ async def find_station_urls(page, station_name: str) -> list[str]:
             if station_urls:
                 logger.info("Found %d station URLs in %s", len(station_urls), listing_url)
                 return station_urls
-        # lucidlint: ignore broad-except scraper boundary — one city-listing failure continues to the next slug
-        except Exception as e:
+        # Playwright's Error covers goto/title/evaluate — one slug degrades, the loop continues.
+        except PlaywrightError as e:
             logger.warning("Failed to fetch city listing %s: %s", listing_url, e)
             continue
     return []
@@ -279,7 +199,7 @@ async def extract_daily_rate(page, url: str) -> float | None:
             logger.warning("Could not extract daily rate from %s", url)
             return None
 
-        if cost < 0 or cost > MAX_COST_GBP:
+        if cost < 0 or cost > _ApcoaRates.MAX_COST_GBP:
             logger.warning("Implausible rate £%.2f on %s", cost, url)
             return None
 
@@ -287,8 +207,8 @@ async def extract_daily_rate(page, url: str) -> float | None:
         logger.info("  → %s: £%.2f", station_name, cost)
         return round(cost, 2)
 
-    # lucidlint: ignore broad-except scraper boundary — one URL's extraction failure returns None
-    except Exception as e:
+    # Playwright's Error covers goto/title/evaluate — one URL degrades to None, the caller tries the next.
+    except PlaywrightError as e:
         logger.warning("Failed to extract rate from %s: %s", url, e)
         return None
 
@@ -302,8 +222,7 @@ async def _try_urls(page, urls) -> float | None:
     return None
 
 
-# lucidlint: ignore record-shape (lat, lng) pair — a NamedTuple is ceremony for a local lookup
-def _station_coords(station_name: str) -> tuple[float, float] | None:
+def _station_coords(station_name: str) -> _StationPosition | None:
     csv_path = Path("data/stations.csv")
     if not csv_path.is_file():
         return None
@@ -325,7 +244,7 @@ async def find_station_rate(page, station_name: str) -> float | None:
     to the city listing page to find station car park URLs.
     """
     # Try direct URLs first
-    rate = await _try_urls(page, _apcoa_urls(station_name))
+    rate = await _try_urls(page, apcoa_location_urls(station_name))
     if rate is not None:
         return rate
 
@@ -335,105 +254,131 @@ async def find_station_rate(page, station_name: str) -> float | None:
     if rate is not None:
         return rate
 
-    # Last resort: try APCOA prebook listing page near the station
-    try:
-        coords = _station_coords(station_name)
-        if coords is not None:
-            lat, lng = coords
-            listing_url = (
-                f"https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
-                f"?latitude={lat}&longitude={lng}&placeName={station_name}&maximumDistance=3"
-            )
-            logger.info("Trying APCOA prebook listing for '%s'...", station_name)
-            rate = await extract_daily_rate(page, listing_url)
-            if rate is not None:
-                # Check that the page actually showed results (not just "Sorry!")
-                page_text = await page.evaluate("() => document.body.innerText.substring(0, 300)")
-                if "Sorry" not in page_text:
-                    return rate
-    # lucidlint: ignore broad-except deliberate fallback — prebook-listing failure returns None
-    except Exception as e:
-        logger.warning("APCOA prebook listing failed for %s: %s", station_name, e)
-        return None
+    # Last resort: the APCOA prebook listing page near the station. A failure
+    # here is the station's failure — the caller's boundary records None and
+    # the sync continues with the next station.
+    coords = _station_coords(station_name)
+    if coords is not None:
+        lat, lng = coords
+        listing_url = (
+            f"https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
+            f"?latitude={lat}&longitude={lng}&placeName={station_name}&maximumDistance=3"
+        )
+        logger.info("Trying APCOA prebook listing for '%s'...", station_name)
+        rate = await extract_daily_rate(page, listing_url)
+        if rate is not None:
+            # Check that the page actually showed results (not just "Sorry!")
+            page_text = await page.evaluate("() => document.body.innerText.substring(0, 300)")
+            if "Sorry" not in page_text:
+                return rate
 
     return None
 
 
-async def _process_station(page, name: str, crs: str, rate_map: dict[str, float | None]) -> None:
-    """Fetch and record one station's daily rate; failures record None."""
-    try:
-        rate = await find_station_rate(page, name)
-        rate_map[crs] = rate
+class ParkingRateSync:
+    """One run of the APCOA parking-rate sync: the stations it processes and
+    the rate map it builds for the parking-rates CSV."""
+
+    def __init__(self, selection: _SyncSelection) -> None:
+        self.selection = selection
+        self.all_stations: list[_StationRecord] = []
+        self.rate_map: dict[str, float | None] = {}
+
+    async def run(self) -> None:
+        """Scrape the stations this run selected, checkpointing the CSV."""
+        self.all_stations = load_stations()
+        self.rate_map = load_existing_rates()
+        stations = self._select_stations()
+        stations = self._filter_missing(stations)
+
+        async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            )
+            page = await context.new_page()
+            processed = await self._scrape(page, stations)
+
+        self._write_rates()
+        found = sum(1 for v in self.rate_map.values() if v is not None)
+        logger.info("Done. Processed %d stations. %d have rates.", processed, found)
+
+    def _select_stations(self) -> list[_StationRecord]:
+        """--crs narrows the run to those CRS codes; otherwise every station."""
+        crs = self.selection.crs
+        if not crs:
+            return list(self.all_stations)
+        target = {c.strip().upper() for c in crs.split(",")}
+        return [s for s in self.all_stations if s["crs"] in target]
+
+    def _filter_missing(self, stations: list[_StationRecord]) -> list[_StationRecord]:
+        """--missing drops the stations whose rate the run already has."""
+        if not self.selection.missing:
+            return stations
+        filtered = [s for s in stations if self.rate_map.get(s["crs"]) is None]
+        logger.info("Filtered to %d missing stations", len(filtered))
+        return filtered
+
+    async def _scrape(self, page, stations: list[_StationRecord]) -> int:
+        """Fetch each station's rate in turn, checkpointing every few stations."""
+        processed = 0
+        for station in stations:
+            crs = station["crs"]
+            name = station["stationName"]
+
+            if not self.selection.force and self.rate_map.get(crs) is not None:
+                logger.info("Skipping %s (%s) — already have £%.2f", name, crs, self.rate_map[crs])
+                continue
+
+            logger.info("Processing %s (%s)...", name, crs)
+            if processed > 0:
+                await asyncio.sleep(_ApcoaRates.REQUEST_DELAY_SECONDS)
+            await self._process_station(page, name, crs)
+
+            processed += 1
+            if processed % _ApcoaRates.CHECKPOINT_INTERVAL == 0:
+                self._write_rates()
+        return processed
+
+    async def _process_station(self, page, name: str, crs: str) -> None:
+        """Fetch and record one station's daily rate; failures record None.
+
+        One station is one unit of work: any failure is logged and recorded as
+        None, and the sync continues with the rest.
+        """
+        rate, failure = await capture_async(lambda: find_station_rate(page, name))
+        if failure is not None:
+            logger.warning("Failed to process %s (%s): %s", name, crs, failure)
+            self.rate_map[crs] = None
+            return
+        self.rate_map[crs] = rate
         if rate is None:
             logger.info("  → %s: no rate found", name)
-    # lucidlint: ignore broad-except one station's rate sync failure logs and continues with the rest
-    except Exception as e:
-        logger.warning("Failed to process %s (%s): %s", name, crs, e)
-        rate_map[crs] = None
-        return
+
+    def _write_rates(self) -> None:
+        """Rewrite the parking-rates CSV from the run's stations and rate map."""
+        _ApcoaRates.PARKING_CSV.parent.mkdir(parents=True, exist_ok=True)
+        with _ApcoaRates.PARKING_CSV.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["station_name", "crs", "daily_cost_gbp"])
+            for station in sorted(self.all_stations, key=lambda x: x["crs"]):
+                crs = station["crs"]
+                cost = self.rate_map.get(crs)
+                val = f"{cost:.2f}" if cost is not None else ""
+                writer.writerow([station["stationName"], crs, val])
+        logger.info("Wrote %d rates to %s", len(self.rate_map), _ApcoaRates.PARKING_CSV)
 
 
-# lucidlint: ignore record-shape station records — CSV boundary owns the shape
-def _select_stations(args, all_stations) -> list[dict]:
-    if args.crs:
-        target = {c.strip().upper() for c in args.crs.split(",")}
-        return [s for s in all_stations if s["crs"] in target]
-    return list(all_stations)
-
-
-# lucidlint: ignore record-shape station records — CSV boundary owns the shape
-def _filter_missing(args, stations, existing) -> list[dict]:
-    if not args.missing:
-        return stations
-    filtered = [s for s in stations if s["crs"] not in existing or existing.get(s["crs"]) is None]
-    logger.info("Filtered to %d missing stations", len(filtered))
-    return filtered
-
-
-async def main():
+async def main() -> None:
     parser = argparse.ArgumentParser(description="Sync parking rates from APCOA via Playwright")
     parser.add_argument("--crs", help="Comma-separated CRS codes to process")
     parser.add_argument("--missing", action="store_true", help="Only stations not yet in CSV")
     parser.add_argument("--force", action="store_true", help="Re-process stations already in CSV")
     args = parser.parse_args()
-    all_stations = load_stations()
-
-    stations = _select_stations(args, all_stations)
-    existing = load_existing_rates()
-    stations = _filter_missing(args, stations, existing)
-
-    # Build the master rate map from existing + new
-    rate_map: dict[str, float | None] = dict(existing)
-
-    async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
-        )
-        page = await context.new_page()
-
-        processed = 0
-        for s in stations:
-            crs = s["crs"]
-            name = s["stationName"]
-
-            if not args.force and crs in rate_map and rate_map[crs] is not None:
-                logger.info("Skipping %s (%s) — already have £%.2f", name, crs, rate_map[crs])
-                continue
-
-            logger.info("Processing %s (%s)...", name, crs)
-            if processed > 0:
-                await asyncio.sleep(REQUEST_DELAY_SECONDS)
-            await _process_station(page, name, crs, rate_map)
-
-            processed += 1
-            if processed % CHECKPOINT_INTERVAL == 0:
-                write_rates(all_stations, rate_map)
-
-    write_rates(all_stations, rate_map)
-    found = sum(1 for v in rate_map.values() if v is not None)
-    logger.info("Done. Processed %d stations. %d have rates.", processed, found)
+    selection = _SyncSelection(crs=args.crs, missing=args.missing, force=args.force)
+    await ParkingRateSync(selection).run()
 
 
 if __name__ == "__main__":

@@ -23,13 +23,14 @@ Design rules (from the plan, settled 2026-08-06):
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from inspect import iscoroutine
-from typing import Any
+from typing import Any, cast
 
 from dag.attempt import Attempt, AttemptError
 from dag.derived_node import DerivedNode
-from dag.eval_context import build_staging, eval_staging_ctx
+from dag.eval_context import Staging, build_staging, eval_staging_ctx
+from dag.guard import capture_async
 from dag.node import Node
 
 logger = logging.getLogger(__name__)
@@ -38,18 +39,22 @@ logger = logging.getLogger(__name__)
 async def _compute_attempt(node: DerivedNode, dep_attempts: list[Attempt], active: tuple[Node, ...]) -> Attempt:
     """Run one node's compute in a what-if evaluation, converting failures
     into impossible Attempts (never raising into the caller)."""
-    try:
-        result = node._call_compute(dep_attempts, active)
-        if iscoroutine(result):
-            result = await result
-        return result
-    # lucidlint: ignore broad-except boundary — what-if compute failures convert to impossible Attempts, never raise
-    except Exception as e:
-        logger.debug("what-if compute failed for %s: %s", node._id, e)
-        return Attempt.impossible(
-            f"{node._id}: {e}",
-            error_info=AttemptError.from_exception(str(e), e, source=node._id),
-        )
+    result, failure = await capture_async(lambda: _run_compute(node, dep_attempts, active))
+    if failure is None:
+        return cast(Attempt, result)
+    logger.debug("what-if compute failed for %s: %s", node._id, failure)
+    return Attempt.impossible(
+        f"{node._id}: {failure}",
+        error_info=AttemptError.from_exception(str(failure), failure, source=node._id),
+    )
+
+
+async def _run_compute(node: DerivedNode, dep_attempts: list[Attempt], active: tuple[Node, ...]) -> Attempt:
+    """Run one node's compute, awaiting it when it is a coroutine."""
+    result = node._call_compute(dep_attempts, active)
+    if iscoroutine(result):
+        return await result
+    return result
 
 
 def _closure(targets: Iterable[Node]) -> list[Node]:
@@ -73,8 +78,7 @@ def _closure(targets: Iterable[Node]) -> list[Node]:
         visit(target)
     return order
 
-
-async def _stage_node(node: Node, staging: dict[str, Attempt]) -> None:
+async def _stage_node(node: Node, staging: Staging) -> None:
     """Stage one node's hypothetical attempt when a dep changed.
 
     Mirrors the refresh path: never call compute with pending/impossible
@@ -105,14 +109,12 @@ async def _stage_node(node: Node, staging: dict[str, Attempt]) -> None:
         return
     staging[node._id] = await _compute_attempt(node, dep_attempts, active)
 
-
-def _staged_results(target_nodes: list[Node], staging: dict[str, Attempt]) -> dict[str, Attempt]:
+def _staged_results(target_nodes: list[Node], staging: Staging) -> Staging:
     """{target id: hypothetical attempt} — real attempts for unstaged targets."""
     return {target._id: staging.get(target._id) or target.latest_attempt() for target in target_nodes}
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def evaluate(targets: Node | Iterable[Node], overrides: dict[str, Any] | None = None) -> dict[str, Attempt]:
+async def evaluate(targets: Node | Iterable[Node], overrides: Mapping[str, Any] | None = None) -> Staging:
     """Evaluate target nodes under input overrides — pure and throwaway.
 
     Args:

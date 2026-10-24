@@ -30,17 +30,29 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from tools.commute.drive_isochrone import MapAssets, js_safe_json, user_label
 from tools.commute.payload_checks import fail
 
-# one colour per layer — the transit layer always takes _COLORS[0], so the
-# drive layers cycle through the rest (index 0 is the transit colour).
-_COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
-_DRIVE_COLORS = _COLORS[1:]
-
 logger = logging.getLogger(__name__)
+
+
+class MapPageConfig:
+    """Constants of the combined map page (review-log: one config class owns
+    the layer palette and the embedded asset filenames)."""
+
+    # one colour per layer — the transit layer always takes COLORS[0], so the
+    # drive layers cycle through the rest (index 0 is the transit colour).
+    COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
+    DRIVE_COLORS = COLORS[1:]
+
+    # CSS background images in leaflet.css (layer-control toggle + default marker)
+    CSS_IMAGES = ("layers-2x.png", "layers.png", "marker-icon.png")
+    # JS default icon options (Leaflet resolves these relative to the page, which
+    # breaks on a static host — embedded here instead)
+    JS_ICONS = ("marker-icon.png", "marker-icon-2x.png", "marker-shadow.png")
+
 
 DEFAULT_UNION = Path("data/commute/union.json")
 DEFAULT_DRIVE = Path("data/commute/drive_searches.json")
@@ -48,12 +60,32 @@ DEFAULT_INTERSECTION = Path("data/commute/intersection.json")
 DEFAULT_OUT = Path("data/commute/commute_map.html")
 VENDOR_DIR = Path("tools/commute/vendor")
 
+# Leaflet layer wire shapes (record-shape ruling 4) — the page's JS payloads.
+class _LeafletPolygonShape(TypedDict):
+    """One polygon entry of a Leaflet layer, serialized into the page."""
 
-# CSS background images in leaflet.css (layer-control toggle + default marker)
-_CSS_IMAGES = ("layers-2x.png", "layers.png", "marker-icon.png")
-# JS default icon options (Leaflet resolves these relative to the page, which
-# breaks on a static host — embedded here instead)
-_JS_ICONS = ("marker-icon.png", "marker-icon-2x.png", "marker-shadow.png")
+    coords: list[tuple[float, float]]
+    url: str
+    name: str
+
+
+class _LeafletLayerShape(TypedDict, total=False):
+    """One Leaflet layer config serialized into the map page JS."""
+
+    name: str
+    color: str
+    polygons: list[_LeafletPolygonShape]
+    fillOpacity: float  # noqa: N815 — the Leaflet JS config key is the wire key
+    weight: int
+
+
+class _MapMarker(TypedDict):
+    """Leaflet marker object serialized into the page."""
+
+    label: str
+    lat: float
+    lon: float
+    url: str
 
 
 @dataclass(frozen=True)
@@ -64,10 +96,8 @@ class _LeafletPolygon:
     url: str
     name: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        return dict(coords=self.coords, url=self.url, name=self.name)
+    def to_dict(self) -> _LeafletPolygonShape:
+        return _LeafletPolygonShape(coords=self.coords, url=self.url, name=self.name)
 
 
 @dataclass(frozen=True)
@@ -80,10 +110,10 @@ class _LeafletLayer:
     fill_opacity: float | None = None
     weight: int | None = None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape — owned here (coding-standards.md)
-        d: dict = dict(name=self.name, color=self.color, polygons=[p.to_dict() for p in self.polygons])
+    def to_dict(self) -> _LeafletLayerShape:
+        d: _LeafletLayerShape = _LeafletLayerShape(
+            name=self.name, color=self.color, polygons=[p.to_dict() for p in self.polygons]
+        )
         if self.fill_opacity is not None:
             d["fillOpacity"] = self.fill_opacity
         if self.weight is not None:
@@ -95,10 +125,9 @@ def _data_uri(path: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def build_html(  # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape
-    union: dict,
-    drive: dict,
+def build_html(
+    union: Mapping[str, Any],
+    drive: Mapping[str, Any],
     assets: MapAssets,
     intersection: Mapping[str, Any] | None = None,
 ) -> str:
@@ -120,12 +149,12 @@ def build_html(  # lucidlint: ignore record-shape wire-format dict — serializa
     if transit:
         transit_layer = _LeafletLayer(
             name="Train: Pimlico & Aldgate",
-            color=_COLORS[0],
+            color=MapPageConfig.COLORS[0],
             polygons=[_LeafletPolygon(coords=outline, url="", name="") for outline in transit],
         )
         layers_js.append(js_safe_json(transit_layer.to_dict()))
     for i, (label, searches) in enumerate(drive_by_label.items(), 1):
-        color = _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)]
+        color = MapPageConfig.DRIVE_COLORS[(i - 1) % len(MapPageConfig.DRIVE_COLORS)]
         # the search NAME is user-controlled (built from the destination label)
         # — HTML-escape it for the popup innerHTML
         polygons = [
@@ -142,8 +171,7 @@ def build_html(  # lucidlint: ignore record-shape wire-format dict — serializa
         d = searches[0]["destination"]
         markers_js.append(
             js_safe_json(
-                # lucidlint: ignore record-shape Leaflet marker object serialized into the page (coding-standards.md)
-                dict(
+                _MapMarker(
                     label=user_label(label), lat=d["lat"], lon=d["lon"],
                     url=searches[0]["rightmove_url"],
                 )
@@ -161,14 +189,14 @@ def build_html(  # lucidlint: ignore record-shape wire-format dict — serializa
         layers_js.append(js_safe_json(intersection_layer.to_dict()))
 
     css = assets.leaflet_css
-    for name in _CSS_IMAGES:
+    for name in MapPageConfig.CSS_IMAGES:
         css = css.replace(f"url(images/{name})", f"url({assets.icons[name]})")
     icon_option = {
         "marker-icon.png": "iconUrl",
         "marker-icon-2x.png": "iconRetinaUrl",
         "marker-shadow.png": "shadowUrl",
     }
-    icon_opts = ",\n  ".join(f"{icon_option[name]}: '{assets.icons[name]}'" for name in _JS_ICONS)
+    icon_opts = ",\n  ".join(f"{icon_option[name]}: '{assets.icons[name]}'" for name in MapPageConfig.JS_ICONS)
 
     html = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -279,8 +307,7 @@ def write_map(html: str, out_path: str | Path) -> None:
     os.replace(tmp, out_path)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _load_intersection(path: Path) -> dict | None:
+def _load_intersection(path: Path) -> Mapping[str, Any] | None:
     """Saved intersection payload, or None when absent/unreadable (map renders without it)."""
     if not path.exists():
         return None
@@ -292,9 +319,14 @@ def _load_intersection(path: Path) -> dict | None:
         return None
 
 
+def _warn_layer(path: Path, message: str, detail: str) -> None:
+    """Print a layer warning on stderr and in the log — a degraded layer is
+    never dropped silently (an empty intersection must not read as complete)."""
+    print(message, file=sys.stderr)
+    logger.warning("%s %s", path, detail)
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _load_intersection_layer(path: Path) -> dict | None:
+
+def _load_intersection_layer(path: Path) -> Mapping[str, Any] | None:
     """The gold 'Where we could live' layer, degraded to None with a warning
     when absent, empty, or malformed (the map renders without it — but never
     silently, so an empty intersection isn't mistaken for a complete map)."""
@@ -302,26 +334,23 @@ def _load_intersection_layer(path: Path) -> dict | None:
     if intersection is None:
         return None
     if not (isinstance(intersection, dict) and intersection.get("searches")):
-        print(
-            "warning: the 'Where we could live' layer is missing — the saved all-commutes data has no "
+        return _warn_layer(
+            path,
+            message="warning: the 'Where we could live' layer is missing — the saved all-commutes data has no "
             "areas (run 'make commute-intersection' to check)",
-            file=sys.stderr,
+            detail="has no searches — omitting the 'Where we could live' layer",
         )
-        logger.warning("%s has no searches — omitting the 'Where we could live' layer", path)
-        return None
     if not all(
         isinstance(s, dict) and "polygon" in s and "rightmove_url" in s and "name" in s
         for s in intersection["searches"]
     ):
         # records missing expected keys would crash build_html — degrade
         # to a map without the layer instead of aborting the whole build
-        # lucidlint: ignore duplicate-block the two malformed-payload warnings intentionally mirror each other —
-        print(
-            "warning: the saved all-commutes data is malformed — showing the map without it.",
-            file=sys.stderr,
+        return _warn_layer(
+            path,
+            message="warning: the saved all-commutes data is malformed — showing the map without it.",
+            detail="has malformed search records — omitting the 'Where we could live' layer",
         )
-        logger.warning("%s has malformed search records — omitting the 'Where we could live' layer", path)
-        return None
     return intersection
 
 
@@ -348,7 +377,7 @@ def _build_map(
     assets = MapAssets(
         leaflet_js=(vendor / "leaflet.js").read_text(),
         leaflet_css=(vendor / "leaflet.css").read_text(),
-        icons={name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS},
+        icons={name: _data_uri(vendor / name) for name in MapPageConfig.CSS_IMAGES + MapPageConfig.JS_ICONS},
     )
     html = build_html(
         union,
@@ -359,25 +388,22 @@ def _build_map(
     return _RenderedMap(union=union, drive=drive, html=html)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _warn_empty_layers(drive: dict, union: dict, drive_path: Path, union_path: Path) -> None:
+def _warn_empty_layers(drive: Mapping[str, Any], union: Mapping[str, Any], drive_path: Path, union_path: Path) -> None:
     """A map missing the drive/union layers must not be mistaken for complete."""
     if isinstance(drive, dict) and not drive.get("searches"):
-        print(
-            "warning: no drive sheds found — the map shows only the train area (run 'make commute-drive' if "
+        _warn_layer(
+            drive_path,
+            message="warning: no drive sheds found — the map shows only the train area (run 'make commute-drive' if "
             "unexpected)",
-            file=sys.stderr,
+            detail="has no searches — drive layers omitted",
         )
-        logger.warning("%s has no searches — drive layers omitted", drive_path)
-    # lucidlint: ignore duplicate-block the two empty-layer warnings intentionally mirror each other — one per missing
     if isinstance(union, dict) and not union.get("components"):
-        print(
-            "warning: no train area found — the map may be incomplete (run 'make commute-searches' if "
+        _warn_layer(
+            union_path,
+            message="warning: no train area found — the map may be incomplete (run 'make commute-searches' if "
             "unexpected)",
-            file=sys.stderr,
+            detail="has no components — train layer omitted",
         )
-        logger.warning("%s has no components — train layer omitted", union_path)
 
 
 def main(argv: list[str] | None = None) -> int:

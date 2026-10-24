@@ -10,6 +10,7 @@ from typing import override
 import pytest
 from money import Money
 from pint import Quantity
+from pydantic_core import PydanticSerializationError
 
 from dag.attempt import Attempt, AttemptError, Provenance, project_value
 from dag.node import Node
@@ -391,7 +392,9 @@ class TestValueProjection:
             pass
 
         prov = Provenance(label="Bad", value=Opaque())
-        with pytest.raises(TypeError, match="not JSON-serializable"):
+        # Pydantic wraps a field-serializer error; the contract is that it fails
+        # loudly at the dump, never silently degrading.
+        with pytest.raises(PydanticSerializationError, match="not JSON-serializable"):
             prov.to_dict()
 
     def test_build_provenance_applies_projection(self):

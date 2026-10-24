@@ -8,28 +8,37 @@ import inspect as _inspect
 import logging
 import textwrap
 import traceback
-from abc import abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from types import FunctionType, ModuleType
 from typing import Any, Generic, NamedTuple, TypeVar, cast, override
 
-from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, classify_exception, project_value
+from dag.attempt import (
+    Attempt,
+    AttemptError,
+    Formula,
+    Provenance,
+    ProvenanceSources,
+    SourceType,
+    classify_exception,
+    project_value,
+)
+from dag.connection import Connection
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
-from dag.node import Node, NodeJson
+from dag.guard import capture_async, guarded
+from dag.node import Node, NodeValue
 from dag.persistence import latest_node_provenance
-from dag.scheduler import assert_mutation_allowed, get_scheduler
-from dag.signals import Connection, Slot
+from dag.processor import assert_mutation_allowed
+from dag.scheduler import get_scheduler
+from dag.slot import Slot
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-
-_CODE_VERSION_CACHE: dict[type, str] = {}
-_CODE_VERSION_EPOCH: int = 0
+type _QualifiedCall = tuple[str, str]
 
 
 def _normalize_compute_source(source: str) -> str:
@@ -60,7 +69,7 @@ class _CallTargets:
 
     called: list[str]
     self_methods: list[str]
-    qualified: list[tuple[str, str]]
+    qualified: list[_QualifiedCall]
 
 
 @dataclass(frozen=True)
@@ -80,7 +89,6 @@ def _bound_names(tree: ast.AST) -> set[str]:
     unrelated same-module helper into the fingerprint.
     """
     bound: set[str] = set()
-    # lucidlint: ignore loop-pipeline group-by/control-flow — comprehension cannot express
     for node in ast.walk(tree):
         if isinstance(node, ast.arg):
             bound.add(node.arg)
@@ -105,7 +113,7 @@ def _call_targets(tree: ast.AST, bound: set[str]) -> _CallTargets:
     """
     called: list[str] = []
     self_methods: list[str] = []
-    qualified: list[tuple[str, str]] = []
+    qualified: list[_QualifiedCall] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -246,8 +254,7 @@ class _FunctionHelperIndex:
             )
         return _HelperSources(parts, queue)
 
-    # lucidlint: ignore record-shape wire-format (module, name) resolution pairs — consumed once by this BFS
-    def _module_call_queue(self, called: list[str], qualified: list[tuple[str, str]]) -> list[_HelperRef]:
+    def _module_call_queue(self, called: list[str], qualified: list[_QualifiedCall]) -> list[_HelperRef]:
         """Initial resolution queue: plain names in the function's own
         module, module-qualified names through their import."""
         queue: list[_HelperRef] = [_HelperRef(name, self._module) for name in called]
@@ -270,7 +277,7 @@ def _compute_code_version(node: DerivedNode) -> str:
     fingerprint", never as a mismatch.
     """
     cls = type(node)
-    cached = _CODE_VERSION_CACHE.get(cls)
+    cached = DerivedNode._CODE_VERSION_CACHE.get(cls)
     if cached is not None:
         return cached
     func = node.compute
@@ -279,7 +286,7 @@ def _compute_code_version(node: DerivedNode) -> str:
     try:
         raw = inspect.getsource(func)
     except (OSError, TypeError):
-        _CODE_VERSION_CACHE[cls] = ""
+        DerivedNode._CODE_VERSION_CACHE[cls] = ""
         return ""
     normalized = _normalize_compute_source(raw)
     helpers = _FunctionHelperIndex(func).sources()
@@ -295,11 +302,10 @@ def _compute_code_version(node: DerivedNode) -> str:
     digest = hashlib.sha256(
         (f"{cls.__module__}.{cls.__qualname__}:{normalized}:{'|'.join(helpers)}:{'|'.join(structure_parts)}").encode()
     ).hexdigest()[:16]
-    _CODE_VERSION_CACHE[cls] = digest
+    DerivedNode._CODE_VERSION_CACHE[cls] = digest
     # Bump the epoch whenever a NEW fingerprint is computed — the epoch
     # is the cheap 'did any code change since my last scan' signal.
-    global _CODE_VERSION_EPOCH
-    _CODE_VERSION_EPOCH += 1
+    DerivedNode._CODE_VERSION_EPOCH += 1
     return digest
 
 
@@ -330,9 +336,23 @@ def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None
         )
 
 
-# lucidlint: ignore latent-class partition 26 methods over 501 lines, but every method cluster (dep wiring, retry
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
+
+    # ── Compute-code fingerprint cache ───────────────────
+    # compute() is a bound method — identical code for every instance,
+    # so the fingerprint is cached per class. The epoch is the cheap
+    # "did any code change since my last scan" signal, bumped on every
+    # NEW fingerprint.
+    _CODE_VERSION_CACHE: dict[type, str] = {}
+    _CODE_VERSION_EPOCH: int = 0
+
+    # ── Retry bounds ─────────────────────────────────────
+    # Retry-After is authoritative within a day; exponential backoff
+    # caps at five minutes (only the provider's explicit window may
+    # exceed the cap).
+    RETRY_AFTER_CAP = timedelta(days=1)
+    BACKOFF_CAP = timedelta(minutes=5)
 
     # ── Expression system ────────────────────────────────
     # Subclasses set ``expression`` (or override it as a ``@property``)
@@ -350,11 +370,7 @@ class DerivedNode(Node[T], Generic[T]):
         expr = self.expression
         if expr is None:
             return None
-        try:
-            return expr.to_formula()
-        # lucidlint: ignore broad-except deliberate degrade — formula rendering failure falls back to None
-        except Exception:
-            return None
+        return guarded(expr.to_formula, lambda _exc: None)
 
     def __init__(
         self,
@@ -422,10 +438,11 @@ class DerivedNode(Node[T], Generic[T]):
             # and a REQUIRED param with no active dep fails loudly (the
             # named branch must not be quieter than the positional
             # arity guard).
-            kwargs: dict[str, Attempt] = {}
-            for name, dep in zip(self._dep_names, self._deps, strict=True):
-                if dep in active_deps:
-                    kwargs[name] = dep_attempts[active_deps.index(dep)]
+            kwargs: dict[str, Attempt] = {
+                name: dep_attempts[active_deps.index(dep)]
+                for name, dep in zip(self._dep_names, self._deps, strict=True)
+                if dep in active_deps
+            }
             missing = [
                 p.name
                 for p in inspect.signature(self.compute).parameters.values()
@@ -614,44 +631,43 @@ class DerivedNode(Node[T], Generic[T]):
             # the provider's declared window (Retry-After) is authoritative
             # within a day — a 429 that says "wait an hour" must not be
             # hammered at the 5-minute backoff cap; only the exponential
-            # backoff path keeps the 300s bound
-            return timedelta(seconds=min(retry_after, 86400))
+            # backoff path keeps the five-minute bound
+            return min(timedelta(seconds=retry_after), DerivedNode.RETRY_AFTER_CAP)
         delay_sec = base_delay.total_seconds() * (2**self._retry_count)
         if self._retry_count < self._max_retries:
             self._retry_count += 1
-        return timedelta(seconds=min(delay_sec, 300))
+        return min(timedelta(seconds=delay_sec), DerivedNode.BACKOFF_CAP)
 
-    async def _error_result_dict(self, status: str, exc: Exception) -> NodeJson:
-        return NodeJson(
+    async def _error_result(self, status: str, exc: Exception) -> NodeValue:
+        return NodeValue(
             status=status,
             value=None,
             error=f"{self._id}: {exc}",
             error_detail=AttemptError.from_exception(str(exc), exc, source=self._id).to_dict(),
-            provenance=await self._build_provenance_dict(),
+            provenance=(await self._build_provenance()).to_dict(),
         )
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _safe_result_dict(
+    async def _safe_result(
         self, status: str, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
-        """Serialize for persistence, degrading to an error result on failure.
+    ) -> NodeValue:
+        """The node's wire record for persistence, degrading to an error result.
 
         Passing the bound attempts makes this the PERSIST path: the
         provenance tree is built fresh from this evaluation (never the
         frozen serve of the previous row).
         """
-        try:
-            return await self.to_json(dep_attempts=dep_attempts, active_deps=active_deps)
-        # lucidlint: ignore broad-except to_json failure degrades to an error-result dict so the attempt still persists
-        except Exception as e:
-            logger.debug(
-                "%s: to_json failed; persisting an error result for status %r: %s",
-                self._id,
-                status,
-                e,
-            )
-            error_rec = await self._error_result_dict(status, e)
-            return error_rec.to_dict()
+        result, failure = await capture_async(
+            lambda: self.to_node_value(dep_attempts=dep_attempts, active_deps=active_deps)
+        )
+        if failure is None:
+            return cast(NodeValue, result)
+        logger.debug(
+            "%s: to_node_value failed; persisting an error result for status %r: %s",
+            self._id,
+            status,
+            failure,
+        )
+        return await self._error_result(status, failure)
 
     async def _compute_attempt(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Attempt:
         """Run compute, converting failures into pending/impossible Attempts.
@@ -668,7 +684,7 @@ class DerivedNode(Node[T], Generic[T]):
                 # burst refresh (many nodes queued at startup).
                 await asyncio.sleep(0)
             return result
-        # lucidlint: ignore broad-except boundary — compute failures convert to pending/impossible Attempts, never raise
+        # lucidlint: ignore broad-except compute is subclass code — failures become pending/impossible, never raise
         except Exception as e:
             if self._is_transient_error(e):
                 if not self.schedule_retry(self._retry_delay_from(e)):
@@ -792,17 +808,16 @@ class DerivedNode(Node[T], Generic[T]):
             return
         await self._complete_refresh(result, dep_attempts, active_deps, origin_stamps)
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def _build_provenance_dict(
+    async def _build_provenance(
         self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
-        """Build provenance dict for persistence, with a fallback if build_provenance() fails."""
-        try:
-            prov = await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
-            return prov.to_dict()
-        # lucidlint: ignore broad-except deliberate degrade — provenance build failure falls back to an empty label
-        except Exception:
-            return {"label": ""}
+    ) -> Provenance:
+        """Build this node's provenance record, with a fallback if the build fails."""
+        prov, failure = await capture_async(
+            lambda: self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
+        )
+        if failure is not None:
+            return Provenance(label="")
+        return cast(Provenance, prov)
 
     @override
     async def build_provenance(
@@ -839,7 +854,7 @@ class DerivedNode(Node[T], Generic[T]):
         is a plain walk (used by leaves and by direct callers).
         """
         deps = tuple(active_deps) if active_deps is not None else self._get_active_deps()
-        sources: dict[str, Provenance] = {}
+        sources = ProvenanceSources()
         for i, dep in enumerate(deps):
             att = bound[i] if bound is not None and i < len(bound) else None
             sources[dep._id] = await self._dep_provenance(dep, att)
@@ -920,8 +935,8 @@ class DerivedNode(Node[T], Generic[T]):
         (2026-09-19: stamp-stale geocode nodes re-enqueued every sweep).
         """
         self._computed_at = datetime.now(UTC)
-        result_dict = await self._safe_result_dict(status, dep_attempts, active_deps)
-        self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
+        record = await self._safe_result(status, dep_attempts, active_deps)
+        self._persist(record.to_dict(), dep_timestamps, code_version=self._current_code_version())
 
     async def _dep_provenance(self, dep: Node, att: Attempt | None = None) -> Provenance:
         """One dependency's subtree, degraded on failure.
@@ -932,21 +947,19 @@ class DerivedNode(Node[T], Generic[T]):
         this evaluation used. A dep with no recorded row falls back to a
         leaf rendered from its own state.
         """
-        try:
-            sub = await self._dep_recorded_subtree(dep, att)
-            return sub
-        # lucidlint: ignore broad-except deliberate degrade — one failing dep degrades to a placeholder provenance
-        except Exception as e:
-            logger.debug(
-                "%s: build_provenance failed for dep %s; degrading to a placeholder: %s",
-                self._id,
-                dep._id,
-                e,
-            )
-            return Provenance(
-                label=getattr(dep, "display_name", dep._id),
-                description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
-            )
+        sub, failure = await capture_async(lambda: self._dep_recorded_subtree(dep, att))
+        if failure is None:
+            return cast(Provenance, sub)
+        logger.debug(
+            "%s: build_provenance failed for dep %s; degrading to a placeholder: %s",
+            self._id,
+            dep._id,
+            failure,
+        )
+        return Provenance(
+            label=getattr(dep, "display_name", dep._id),
+            description=f"build_provenance failed: {failure}\n{traceback.format_exc()}",
+        )
 
     @staticmethod
     def _stored_provenance(node_id: str) -> Provenance | None:
@@ -1019,30 +1032,27 @@ class DerivedNode(Node[T], Generic[T]):
         """
         return self.provenance_formula
 
-    # lucidlint: ignore record-shape result is the base serialization dict extended in place — wire format
-    def _enrich_json(self, result: dict) -> None:
-        """Add DerivedNode lifecycle fields to a base serialization dict."""
+    def _enrich_json(self, result: NodeValue) -> None:
+        """Add DerivedNode's lifecycle keys to the node's wire record."""
         if self._retry_at is not None:
-            result["retry_at"] = self._retry_at.isoformat()
-            result["retry_count"] = self._retry_count
+            result.retry_at = self._retry_at.isoformat()
+            result.retry_count = self._retry_count
         if not self._attempt.pending:
-            result["stale"] = self._is_stale()
+            result.stale = self._is_stale()
 
     @override
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def to_json(
-        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
-        result = await super().to_json(dep_attempts=dep_attempts, active_deps=active_deps)
-        self._enrich_json(result)
-        return result
-
-    @override
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    async def to_json_value(self) -> dict:
-        result = await super().to_json_value()
-        self._enrich_json(result)
-        return result
+    async def to_node_value(
+        self,
+        dep_attempts: list[Attempt] | None = None,
+        active_deps: tuple[Node, ...] | None = None,
+        *,
+        provenance: bool = True,
+    ) -> NodeValue:
+        rec = await super().to_node_value(
+            dep_attempts=dep_attempts, active_deps=active_deps, provenance=provenance
+        )
+        self._enrich_json(rec)
+        return rec
 
     @staticmethod
     def _assert_deps_succeeded(**deps: Attempt) -> None:
@@ -1058,6 +1068,17 @@ class DerivedNode(Node[T], Generic[T]):
                 f"Dependencies not succeeded: {failed}. Auto-propagation should have caught these before compute()."
             )
 
-    @staticmethod
-    @abstractmethod
-    def compute(*dep_attempts: Attempt) -> Attempt[T]: ...
+    async def compute(self, *dep_attempts: Attempt, **kwargs: Attempt) -> Attempt[T]:
+        """The node's computation over its dependency attempts.
+
+        Subclasses override this for real computation, or set
+        ``expression`` and let this default evaluate it — a node whose
+        value IS its expression tree needs no forwarding shim (the
+        expression reads ``Ref`` deps itself, so the attempts are not
+        consulted here).
+        """
+        if self.expression is None:
+            raise NotImplementedError(
+                f"{self._id}: compute() is not implemented and no expression is set"
+            )
+        return self.expression.evaluate()

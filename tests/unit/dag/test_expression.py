@@ -9,7 +9,7 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.expression import Conditional, Literal, Ref
-from houses.nodes.expressions import PMT, StampDutyFn
+from houses.nodes.pmt import PMT
 
 # ── Test helper: a minimal node-like object ──
 
@@ -276,28 +276,6 @@ class TestConditional:
         assert result.succeeded
         assert result.value == Decimal("10")
 
-
-class TestStampDutyFn:
-    def test_calculates_stamp_duty(self):
-        """£800,000 property → £27,500 stamp duty (5% on £550k after £250k threshold)"""
-        from money import Money
-        expr = StampDutyFn(_ref(Money("800000", "GBP")))
-        result = expr.evaluate()
-        assert result.succeeded
-        assert result.value == Money("27500", "GBP")
-
-    def test_failure_propagates(self):
-        expr = StampDutyFn(_ref(Attempt.impossible("no price")))
-        result = expr.evaluate()
-        assert result.impossible
-
-    def test_to_formula_lines(self):
-        price_node = FakeNode(_id="price", display_name="price",
-                              _attempt=Attempt.succeeded(Money("800000", "GBP")))
-        expr = StampDutyFn(Ref(price_node))
-        lines = expr.to_formula_lines()
-        assert len(lines) == 1
-        assert "price" in lines[0].label
 
 
 class TestExpressionIntegration:

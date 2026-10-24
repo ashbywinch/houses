@@ -107,6 +107,41 @@ class TestPetrolCostAugmentNode:
         )
 
     @pytest.mark.asyncio
+    async def test_row_wire_states_is_child_last(self):
+        """The row's own key is declared on its wire record (_SchoolCommuteRow),
+        so it follows the base record's keys and DerivedNode's lifecycle keys —
+        and the priced value's own flag wins over the node's pre-price argument."""
+        from houses.nodes.petrol import PetrolCostAugmentNode
+
+        commute_in = UserInputNode[Commute]("petrol_wire", Commute)
+        node = PetrolCostAugmentNode(
+            "petrol_wire",
+            commute_node=commute_in,
+            petrol_mpg_node=_petrol_mpg_node(45),
+            petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
+            is_child=True,
+        )
+        commute_in.push(_make_commute(duration_min=30, mode="transit"), "test")
+        await flush_processor()
+        await node.attempt()
+
+        row = await node.to_json()
+        assert list(row) == ["status", "value", "succeeded", "pending", "impossible", "provenance", "stale", "is_child"]
+        assert row["is_child"] is False, "the priced value's own is_child wins"
+
+        # Unpriced: the node's own argument states the flag, as it must before
+        # the pipeline has priced (and if it never does).
+        unpriced = PetrolCostAugmentNode(
+            "petrol_wire_unpriced",
+            commute_node=UserInputNode[Commute]("petrol_wire_in", Commute),
+            petrol_mpg_node=_petrol_mpg_node(45),
+            petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
+            is_child=True,
+        )
+        await unpriced.attempt()
+        assert (await unpriced.to_json())["is_child"] is True
+
+    @pytest.mark.asyncio
     async def test_returns_commute_unchanged_when_no_drive_legs(self):
         from houses.nodes.petrol import PetrolCostAugmentNode
 
@@ -237,7 +272,7 @@ class TestDriveCommuteAlwaysHasCost:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.geopoint import GeoPoint
-        from houses.nodes.bus import BusLegAugmentNode  # noqa: F401
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode  # noqa: F401
         from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.transit import DriveNode, RouteOptions

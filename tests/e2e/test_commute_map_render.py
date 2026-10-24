@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.commute.combined_map import _CSS_IMAGES, _JS_ICONS, VENDOR_DIR, MapAssets, _data_uri, build_html
+from tools.commute.combined_map import VENDOR_DIR, MapAssets, MapPageConfig, _data_uri, build_html
 
 pytestmark = pytest.mark.e2e
 
@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def _build_map(tmp_path: Path) -> Path:
     union = json.loads((ROOT / "data/commute/union.json").read_text())
     drive = json.loads((ROOT / "data/commute/drive_searches.json").read_text())
-    icons = {name: _data_uri(VENDOR_DIR / name) for name in _CSS_IMAGES + _JS_ICONS}
+    icons = {name: _data_uri(VENDOR_DIR / name) for name in MapPageConfig.CSS_IMAGES + MapPageConfig.JS_ICONS}
     html = build_html(
         union,
         drive,

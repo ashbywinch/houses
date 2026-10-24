@@ -8,99 +8,103 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, cast
 
 import httpx
 from money import Money
+from pydantic import Field
 from uk_property_apis.voa import VOAClient
 
 from dag.attempt import Attempt
+from dag.guard import capture_async
 from dag.measurement import Measurement
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
-from houses.api_cache import cached_sync_client, get_cached, set_cached
-from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+from houses.annexe_dwelling import AnnexeDwelling
+from houses.api_cache import CacheRequest, cached_sync_client
+from houses.council_tax_info import CouncilTaxInfo
+from serialization import SerializableAsDict, omit_when_none
 
 if TYPE_CHECKING:
     from uk_property_apis.voa import VOAClient
 
 logger = logging.getLogger(__name__)
 
-# lucidlint: ignore record-shape statutory ratio table — data, not a record (review-log)
-BAND_RATIOS = {
-    "A": 6 / 9,
-    "B": 7 / 9,
-    "C": 8 / 9,
-    "D": 9 / 9,
-    "E": 11 / 9,
-    "F": 13 / 9,
-    "G": 15 / 9,
-    "H": 18 / 9,
-}
-CIVACCOUNT_URL = "https://www.civaccount.co.uk/api/v1/councils"
-COUNCIL_TAX_CSV = "data/council_tax_rates.csv"
+class _TaxRates:
+    """The council-tax rate data: statutory band ratios, the CivAccount
+    endpoint + Band D CSV, the legacy-district → authority alias table, and
+    the in-memory rate cache. One owner, reset whole for test isolation."""
 
-# In-memory cache: lowercased authority name -> Band D rate (float)
-_cached_rates: dict[str, float] | None = None
-HTTP_OK = 200
+    # Statutory band ratios keyed by band letter — data, not a record.
+    BAND_RATIOS: dict[str, float] = {
+        band: ratio
+        for band, ratio in (
+            ("A", 6 / 9),
+            ("B", 7 / 9),
+            ("C", 8 / 9),
+            ("D", 9 / 9),
+            ("E", 11 / 9),
+            ("F", 13 / 9),
+            ("G", 15 / 9),
+            ("H", 18 / 9),
+        )
+    }
+    CIVACCOUNT_URL = "https://www.civaccount.co.uk/api/v1/councils"
+    COUNCIL_TAX_CSV = "data/council_tax_rates.csv"
+    # In-memory cache: lowercased authority name -> Band D rate (float)
+    cached_rates: dict[str, float] | None = None
+    HTTP_OK = 200
+    # Legacy district -> current billing authority.  VOA rows are keyed by the
+    # district that existed when the row was created; the government Band D CSV
+    # uses today's authorities.  Buckinghamshire's 2020 unitary reorg merged the
+    # four districts below into one UA.
+    RATE_ALIASES: dict[str, str] = {
+        "wycombe": "buckinghamshire ua",
+        "aylesbury vale": "buckinghamshire ua",
+        "chiltern": "buckinghamshire ua",
+        "south bucks": "buckinghamshire ua",
+    }
 
 
 def _reset():
     """Clear the cached council tax rates for test isolation."""
-    global _cached_rates
-    _cached_rates = None
+    _TaxRates.cached_rates = None
 
 
 # Legacy district -> current billing authority.  VOA rows are keyed by the
 # district that existed when the row was created; the government Band D CSV
 # uses today's authorities.  Buckinghamshire's 2020 unitary reorg merged the
 # four districts below into one UA.
-_RATE_ALIASES = {
-    "wycombe": "buckinghamshire ua",
-    "aylesbury vale": "buckinghamshire ua",
-    "chiltern": "buckinghamshire ua",
-    "south bucks": "buckinghamshire ua",
-}
 
 
 def _load_rates() -> dict[str, float]:
-    global _cached_rates
-    if _cached_rates is not None:
-        return _cached_rates
-    _cached_rates = {}
-    path = Path(__file__).parent.parent / COUNCIL_TAX_CSV
+    if _TaxRates.cached_rates is not None:
+        return _TaxRates.cached_rates
+    _TaxRates.cached_rates = {}
+    path = Path(__file__).parent.parent / _TaxRates.COUNCIL_TAX_CSV
     if not path.is_file():
         logger.warning("Council tax rates CSV not found at %s", path)
-        return _cached_rates
+        return _TaxRates.cached_rates
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             rate = row.get("band_d_rate", "")
             if rate:
-                _cached_rates[row["authority"].strip().lower()] = float(rate)
-    logger.debug("Loaded %d council tax rates from %s", len(_cached_rates), COUNCIL_TAX_CSV)
-    return _cached_rates
+                _TaxRates.cached_rates[row["authority"].strip().lower()] = float(rate)
+    logger.debug(
+        "Loaded %d council tax rates from %s", len(_TaxRates.cached_rates), _TaxRates.COUNCIL_TAX_CSV
+    )
+    return _TaxRates.cached_rates
 
 
-@dataclass(frozen=True)
-class _BuildingMatch:
-    """The building descriptor parsed from an address (keys present only
-    when identified)."""
+
+class _BuildingMatch(SerializableAsDict):
+    """The building descriptor parsed from an address — each identified
+    part is on the wire only when the address carried it."""
 
     postcode: str
-    building_number: str | None = None
-    unit: str | None = None
-    building_name: str | None = None
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        d = dict(postcode=self.postcode)
-        if self.building_number is not None:
-            d["building_number"] = self.building_number
-        if self.unit is not None:
-            d["unit"] = self.unit
-        if self.building_name is not None:
-            d["building_name"] = self.building_name
-        return d
+    building_number: str | None = Field(default=None, exclude_if=omit_when_none)
+    unit: str | None = Field(default=None, exclude_if=omit_when_none)
+    building_name: str | None = Field(default=None, exclude_if=omit_when_none)
 
 
 def _extract_building(address: str) -> _BuildingMatch:
@@ -140,13 +144,13 @@ class CivAccountRatePayload(TypedDict):
     band_d_rate: float | None
 
 @dataclass(frozen=True)
-class _CivAccountRateJson:
+class _CivAccountRate:
     """The CivAccount council API payload — the Band-D rate it reports."""
 
     band_d_rate: float | None = None
 
     @classmethod
-    def from_dict(cls, raw: CivAccountRatePayload) -> _CivAccountRateJson:
+    def from_dict(cls, raw: CivAccountRatePayload) -> _CivAccountRate:
         return cls(band_d_rate=raw.get("band_d_rate"))
 
 
@@ -157,16 +161,17 @@ def _civaccount_rate(
     client_factory: Callable[..., Any],
 ) -> Money | None:
     """Fetch the Band D rate from CivAccount, or ``None`` when unavailable."""
-    url = f"{CIVACCOUNT_URL}/{slug}"
+    url = f"{_TaxRates.CIVACCOUNT_URL}/{slug}"
     try:
         with client_factory(timeout=10.0) as client:
             civ = client.get(url)
-            if civ.status_code == HTTP_OK:
-                band_d_rate = _CivAccountRateJson.from_dict(civ.json()).band_d_rate
-                if band_d_rate and band in BAND_RATIOS:
-                    return Money(str(round(band_d_rate * BAND_RATIOS[band], 2)), "GBP")
-    # lucidlint: ignore broad-except API fallback — any CivAccount lookup failure degrades to None (unavailable)
-    except Exception:
+            if civ.status_code == _TaxRates.HTTP_OK:
+                band_d_rate = _CivAccountRate.from_dict(civ.json()).band_d_rate
+                if band_d_rate and band in _TaxRates.BAND_RATIOS:
+                    return Money(str(round(band_d_rate * _TaxRates.BAND_RATIOS[band], 2)), "GBP")
+    except (httpx.HTTPError, OSError, AttributeError, KeyError, TypeError, ValueError):
+        # Transport, HTTP status, or a malformed rate payload: the Band D
+        # rate is simply unavailable for this authority.
         logger.warning("CivAccount lookup failed for %s (%s)", local_authority, slug)
         return None
     return None
@@ -202,8 +207,8 @@ def _csv_band_d_rate(
     # 2b) VOA rows carry LEGACY district names (e.g. "Wycombe"), but the
     #     CSV is keyed by today's billing authorities (the 2020 unitary
     #     reorg merged the Buckinghamshire districts into one UA).
-    if band_d_rate is None and norm in _RATE_ALIASES:
-        norm = _RATE_ALIASES[norm]
+    if band_d_rate is None and norm in _TaxRates.RATE_ALIASES:
+        norm = _TaxRates.RATE_ALIASES[norm]
         band_d_rate = rates.get(norm)
 
     # 3) London boroughs: the CSV only has an aggregate "London boroughs" entry.
@@ -268,7 +273,7 @@ def _lookup_yearly_cost(
     Returns a ``Money`` in GBP, or ``None`` if no rate could be found.
 
     CivAccount is called via ``cached_sync_client`` which automatically
-    caches every response to disk — no manual ``get_cached``/``set_cached``
+    caches every response to disk — no manual ``CacheRequest.cached``/``store``
     needed.
 
     ``load_rates_fn`` and ``client_factory`` are DI seams (tests inject
@@ -285,8 +290,8 @@ def _lookup_yearly_cost(
 
     # 2) Fall back to the cached CSV of government Band D rates
     band_d_rate = _csv_band_d_rate(load_rates_fn, local_authority)
-    if band_d_rate and band in BAND_RATIOS:
-        return Money(str(round(band_d_rate * BAND_RATIOS[band], 2)), "GBP")
+    if band_d_rate and band in _TaxRates.BAND_RATIOS:
+        return Money(str(round(band_d_rate * _TaxRates.BAND_RATIOS[band], 2)), "GBP")
 
     return None
 
@@ -311,11 +316,11 @@ class _VoaRow:
     postcode: str = ""
     local_authority: str | None = None
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the cached wire shape (coding-standards.md)
-        return dict(
-            band=self.band, address=self.address, postcode=self.postcode,
+    def to_dict(self) -> VoaRowPayload:
+        return VoaRowPayload(
+            band=self.band,
+            address=self.address,
+            postcode=self.postcode,
             local_authority=self.local_authority,
         )
 
@@ -350,8 +355,9 @@ class CachedVOAClient:
             await self._inner.__aexit__(*args)
 
     async def fetch_page(self, postcode: str, page: int = 0):
-        key = f"voa/{postcode.strip().upper()}"
-        cached = get_cached("GET", key)
+        url = f"voa/{postcode.strip().upper()}"
+        call = CacheRequest("GET", url)
+        cached = call.cached()
         if cached is not None:
             rows = [_VoaRow.from_dict(r) for r in cached.get("rows", [])]
             return type("Page", (), {"rows": rows})()
@@ -366,7 +372,7 @@ class CachedVOAClient:
             ).to_dict()
             for r in result.rows
         ]
-        set_cached("GET", key, None, None, {"rows": rows})
+        call.store({"rows": rows})
         return result
 async def _fetch_voa_results(
     postcode: str,
@@ -509,16 +515,6 @@ def _match_building_name(
     return matches or []
 
 
-def _match_rows(active: list[_VoaRow], building, query: _PropertyRef) -> list[_VoaRow] | None:
-    """VOA rows matching the building identifier, or None when the address
-    cannot positively identify a single property."""
-    building_id = building.building_number or building.building_name or ""
-    norm_id = _normalise(building_id)
-    if building.building_number:
-        return _match_by_number(active, norm_id, query.address)
-    return _match_building_name(active, building, query)
-
-
 def _collapse_exact_matches(matches: list[_VoaRow] | None, address: str) -> list[_VoaRow]:
     """Prefer rows whose address is a token-aligned prefix of the query.
 
@@ -560,32 +556,6 @@ class _RateLookup:
     lookup_error: str
 
 
-def _select_matched_row(
-    matches: list[_VoaRow] | None,
-    query: _PropertyRef,
-) -> _RowMatch:
-    """Reduce matches to one unambiguous row.
-
-    Returns ``_RowMatch(row, None)`` when the address identifies a single
-    property, or ``_RowMatch(None, reason)`` when it is ambiguous — the
-    reason names the first two addresses (sorted, deterministic) and the
-    total count so the provenance is actually troubleshooting-useful.
-    """
-    matches = _collapse_exact_matches(matches, query.address)
-    unique_addresses = sorted({m.address for m in matches})
-    if len(unique_addresses) > 1:
-        logger.debug(
-            "Ambiguous address %r — matched %d different VOA addresses for %s",
-            query.building_id,
-            len(unique_addresses),
-            query.postcode,
-        )
-        sample = ", ".join(repr(a) for a in unique_addresses[:2])
-        reason_msg = f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
-        return _RowMatch(row=None, reason=reason_msg)
-    return _RowMatch(row=matches[0], reason=None)
-
-
 def _is_letter_suffix_annexe(row_tokens: list[str], main_tokens: list[str]) -> bool:
     """True when the row is the classic letter-suffixed annexe — the main
     number plus exactly one letter ("2A WILLOWMEAD GARDENS" vs
@@ -599,93 +569,141 @@ def _is_letter_suffix_annexe(row_tokens: list[str], main_tokens: list[str]) -> b
     )
 
 
-def _find_annexe(
-    active: list[_VoaRow],
-    matched: _VoaRow,
-    rate_lookup: Callable[[str, str], Money | None],
-) -> AnnexeDwelling | None:
-    """The single OTHER VOA property whose address is the main address
-    with a unit prefix (a superset), or None.
-
-    The exact match IS the property — "FLAT 2, 2 WILLOWMEAD GARDENS"
-    contains "2 WILLOWMEAD GARDENS".  Locality-suffixed duplicates ("2
-    WILLOWMEAD GARDENS MARLOW") are the same property, not an annexe.
-    """
-    main_tokens = _strip_postcode(_normalise(matched.address).split(), matched.address)
-    annexe_rows = []
-    for r in active:
-        row_tokens = _strip_postcode(_normalise(r.address).split(), r.address)
-        if row_tokens == main_tokens:
-            continue
-        # The main designation appears contiguously after a unit prefix —
-        # at index >= 1 so a locality-suffixed duplicate (index 0) is not
-        # an annexe.  Trailing locality/county after the designation is
-        # tolerated ("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, BUCKINGHAMSHIRE").
-        if _is_letter_suffix_annexe(row_tokens, main_tokens):
-            annexe_rows.append(r)
-            continue
-        if len(row_tokens) > len(main_tokens):
-            for i in range(1, len(row_tokens) - len(main_tokens) + 1):
-                if row_tokens[i : i + len(main_tokens)] == main_tokens:
-                    annexe_rows.append(r)
-                    break
-    if len(annexe_rows) == 1:
-        r = annexe_rows[0]
-        annexe_yearly = rate_lookup(r.band, r.local_authority) if r.local_authority else None
-        return AnnexeDwelling(
-            address=r.address,
-            band=r.band,
-            yearly_cost=Measurement(annexe_yearly, 0.0) if annexe_yearly is not None else None,
-        )
-    return None
-
-def _lookup_matched_rate(
-    matched: _VoaRow,
-    rate_lookup: Callable[[str, str], Money | None],
-    query: _PropertyRef,
-) -> _RateLookup:
-    """The matched row's yearly cost, evidence URL and lookup error.
-
-    The CivAccount WEBSITE has no /councils/<slug> pages (they 404 for
-    every authority) — the API endpoint that actually serves the rate is
-    the only working evidence link.
-    """
-
-    yearly_cost = None
-    evidence_url = ""
-    lookup_error = ""
-    if matched.local_authority:
-        slug = matched.local_authority.lower().replace(" ", "-").replace(".", "")
-        evidence_url = f"{CIVACCOUNT_URL}/{slug}"
-        yearly_cost = rate_lookup(matched.band, matched.local_authority)
-        if yearly_cost is None:
-            # The band is real but the rate is not — the provenance must
-            # say why there is no figure instead of silently omitting it.
-            lookup_error = f"no yearly rate found for {matched.local_authority}"
-    else:
-        logger.warning("No local authority found for %s postcode %s", query.building_id, query.postcode)
-    return _RateLookup(yearly_cost=yearly_cost, evidence_url=evidence_url, lookup_error=lookup_error)
-
-
 def _active_rows(results: list[_VoaRow]) -> list[_VoaRow]:
     """Rows with a live band (A–H or I), excluding DELETED/archived rows."""
-    return [r for r in results if r.band in BAND_RATIOS or r.band == "I"]
-
-def _match_failure(matches: list[_VoaRow] | None, query: _PropertyRef) -> str | None:
-    """The impossible-reason when matches do not identify a single
-    property; None to proceed with the match."""
-    if matches is None:
-        return "address does not identify a single property"
-    if not matches:
-        logger.debug(
-            "Could not match building %r in VOA results for %s",
-            query.building_id,
-            query.postcode,
-        )
-        return f"no VOA match for building {query.building_id}"
-    return None
+    return [r for r in results if r.band in _TaxRates.BAND_RATIOS or r.band == "I"]
 
 
+def _voa_preflight_impossible(reason: str, log_message: str, log_arg: str) -> Attempt[CouncilTaxInfo]:
+    """Log the failed VOA preflight at debug and return its impossible Attempt."""
+    logger.debug(log_message, log_arg)
+    return Attempt.impossible(reason)
+
+
+class _VoaMatcher:
+    """One property's VOA match: the active rows, the query they must
+    positively identify, and the rate lookup seam.
+
+    Each method is one step of the match pipeline; the threaded state
+    (rows, query, rate lookup) lives on the object instead of on every call.
+    """
+
+    def __init__(
+        self,
+        active: list[_VoaRow],
+        query: _PropertyRef,
+        rate_lookup: Callable[[str, str], Money | None],
+    ) -> None:
+        self._active = active
+        self._query = query
+        self._rate_lookup = rate_lookup
+
+    def match_rows(self, building: _BuildingMatch) -> list[_VoaRow] | None:
+        """VOA rows matching the building identifier, or None when the address
+        cannot positively identify a single property."""
+        building_id = building.building_number or building.building_name or ""
+        norm_id = _normalise(building_id)
+        if building.building_number:
+            return _match_by_number(self._active, norm_id, self._query.address)
+        return _match_building_name(self._active, building, self._query)
+
+    def match_failure(self, matches: list[_VoaRow] | None) -> str | None:
+        """The impossible-reason when matches do not identify a single
+        property; None to proceed with the match."""
+        if matches is None:
+            return "address does not identify a single property"
+        if not matches:
+            logger.debug(
+                "Could not match building %r in VOA results for %s",
+                self._query.building_id,
+                self._query.postcode,
+            )
+            return f"no VOA match for building {self._query.building_id}"
+        return None
+
+    def select_matched_row(self, matches: list[_VoaRow] | None) -> _RowMatch:
+        """Reduce matches to one unambiguous row.
+
+        Returns ``_RowMatch(row, None)`` when the address identifies a single
+        property, or ``_RowMatch(None, reason)`` when it is ambiguous — the
+        reason names the first two addresses (sorted, deterministic) and the
+        total count so the provenance is actually troubleshooting-useful.
+        """
+        matches = _collapse_exact_matches(matches, self._query.address)
+        unique_addresses = sorted({m.address for m in matches})
+        if len(unique_addresses) > 1:
+            logger.debug(
+                "Ambiguous address %r — matched %d different VOA addresses for %s",
+                self._query.building_id,
+                len(unique_addresses),
+                self._query.postcode,
+            )
+            sample = ", ".join(repr(a) for a in unique_addresses[:2])
+            reason_msg = f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
+            return _RowMatch(row=None, reason=reason_msg)
+        return _RowMatch(row=matches[0], reason=None)
+
+    def find_annexe(self, matched: _VoaRow) -> AnnexeDwelling | None:
+        """The single OTHER VOA property whose address is the main address
+        with a unit prefix (a superset), or None.
+
+        The exact match IS the property — "FLAT 2, 2 WILLOWMEAD GARDENS"
+        contains "2 WILLOWMEAD GARDENS".  Locality-suffixed duplicates ("2
+        WILLOWMEAD GARDENS MARLOW") are the same property, not an annexe.
+        """
+        main_tokens = _strip_postcode(_normalise(matched.address).split(), matched.address)
+        annexe_rows = []
+        for r in self._active:
+            row_tokens = _strip_postcode(_normalise(r.address).split(), r.address)
+            if row_tokens == main_tokens:
+                continue
+            # The main designation appears contiguously after a unit prefix —
+            # at index >= 1 so a locality-suffixed duplicate (index 0) is not
+            # an annexe.  Trailing locality/county after the designation is
+            # tolerated ("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, BUCKINGHAMSHIRE").
+            if _is_letter_suffix_annexe(row_tokens, main_tokens):
+                annexe_rows.append(r)
+                continue
+            if len(row_tokens) > len(main_tokens):
+                for i in range(1, len(row_tokens) - len(main_tokens) + 1):
+                    if row_tokens[i : i + len(main_tokens)] == main_tokens:
+                        annexe_rows.append(r)
+                        break
+        if len(annexe_rows) == 1:
+            r = annexe_rows[0]
+            annexe_yearly = self._rate_lookup(r.band, r.local_authority) if r.local_authority else None
+            return AnnexeDwelling(
+                address=r.address,
+                band=r.band,
+                yearly_cost=Measurement(annexe_yearly, 0.0) if annexe_yearly is not None else None,
+            )
+        return None
+
+    def lookup_matched_rate(self, matched: _VoaRow) -> _RateLookup:
+        """The matched row's yearly cost, evidence URL and lookup error.
+
+        The CivAccount WEBSITE has no /councils/<slug> pages (they 404 for
+        every authority) — the API endpoint that actually serves the rate is
+        the only working evidence link.
+        """
+        yearly_cost = None
+        evidence_url = ""
+        lookup_error = ""
+        if matched.local_authority:
+            slug = matched.local_authority.lower().replace(" ", "-").replace(".", "")
+            evidence_url = f"{_TaxRates.CIVACCOUNT_URL}/{slug}"
+            yearly_cost = self._rate_lookup(matched.band, matched.local_authority)
+            if yearly_cost is None:
+                # The band is real but the rate is not — the provenance must
+                # say why there is no figure instead of silently omitting it.
+                lookup_error = f"no yearly rate found for {matched.local_authority}"
+        else:
+            logger.warning(
+                "No local authority found for %s postcode %s",
+                self._query.building_id,
+                self._query.postcode,
+            )
+        return _RateLookup(yearly_cost=yearly_cost, evidence_url=evidence_url, lookup_error=lookup_error)
 
 
 async def lookup_council_tax(
@@ -710,14 +728,14 @@ async def lookup_council_tax(
     """
     if rate_lookup is None:
         rate_lookup = _lookup_yearly_cost
-    try:
-        results = await _fetch_voa_results(postcode, page_fetcher, voa_client_factory)
-    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
-        raise  # transient — let DAG retry handle it
-    # lucidlint: ignore broad-except boundary — unknown VOA failures convert to an impossible attempt, never raise
-    except Exception as e:
-        logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
-        return Attempt.impossible(f"VOA lookup failed: {e}")
+    fetched, failure = await capture_async(
+        lambda: _fetch_voa_results(postcode, page_fetcher, voa_client_factory),
+        reraise=(httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException),
+    )
+    if failure is not None:
+        logger.warning("VOA council tax lookup failed for %s: %s", postcode, failure)
+        return Attempt.impossible(f"VOA lookup failed: {failure}")
+    results = cast(list[_VoaRow], fetched)
 
     if not address:
         logger.debug("No address provided — cannot positively identify property")
@@ -725,28 +743,34 @@ async def lookup_council_tax(
 
     active = _active_rows(results)
     if not active:
-        logger.debug("VOA returned no active properties for %s", postcode)
-        return Attempt.impossible("no active properties in VOA results")
+        return _voa_preflight_impossible(
+            reason="no active properties in VOA results",
+            log_message="VOA returned no active properties for %s",
+            log_arg=postcode,
+        )
 
     building, building_id, norm_id = _building_identifier(address)
-    # lucidlint: ignore duplicate-block intentional guard clauses — each VOA preflight (no active rows / no building
     if not norm_id:
-        logger.debug("Could not extract building identifier from address %r", address)
-        return Attempt.impossible("could not extract building identifier")
+        return _voa_preflight_impossible(
+            reason="could not extract building identifier",
+            log_message="Could not extract building identifier from address %r",
+            log_arg=address,
+        )
 
     query = _PropertyRef(address=address, building_id=building_id, postcode=postcode)
-    matches = _match_rows(active, building, query)
-    failure = _match_failure(matches, query)
+    matcher = _VoaMatcher(active, query, rate_lookup)
+    matches = matcher.match_rows(building)
+    failure = matcher.match_failure(matches)
     if failure is not None:
         return Attempt.impossible(failure)
 
-    selection = _select_matched_row(matches, query)
+    selection = matcher.select_matched_row(matches)
     if selection.reason is not None or selection.row is None:
         return Attempt.impossible(selection.reason or "no matching VOA property row")
 
     matched = selection.row
-    annexe = _find_annexe(active, matched, rate_lookup)
-    rate = _lookup_matched_rate(matched, rate_lookup, query)
+    annexe = matcher.find_annexe(matched)
+    rate = matcher.lookup_matched_rate(matched)
 
     return Attempt.succeeded(
         CouncilTaxInfo(

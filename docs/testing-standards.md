@@ -4,7 +4,7 @@ Test conventions for the property enrichment engine. Supplementary to `docs/codi
 
 ## Organization
 
-Test files mirror the module under test (`houses/nodes/area.py` → `tests/unit/nodes/test_area.py`); functions describe behaviour (`test_walk_selected_when_fastest`, `test_empty_comment_rejected`); classes group scenarios per method/state. `tests/helpers.py` holds fakes; `tests/unit/isolation_fixtures.py` holds DB isolation.
+Test files mirror the module under test (`houses/nodes/petrol.py` → `tests/unit/nodes/test_petrol.py`); functions describe behaviour (`test_walk_selected_when_fastest`, `test_empty_comment_rejected`); classes group scenarios per method/state. `tests/helpers.py` holds fakes; `tests/unit/isolation_fixtures.py` holds DB isolation.
 
 ## Deterministic tests
 
@@ -106,6 +106,26 @@ def test_the_commute_re_prices_when_the_destination_moves(...):
 ## Deterministic fixtures
 
 Integration tests needing a real SQLite DB use in-memory, shared between the app and DAG connection paths — see `tests/unit/isolation_fixtures.py`.
+
+### Real filesystem, not pyfakefs
+
+A test that touches the filesystem uses **`tmp_path`** (pytest's per-test temp
+directory) and the real OS, never `pyfakefs`. This is a decision, not an
+oversight:
+
+- the suite runs sqlite3 (C-level I/O), Playwright, and subprocesses — none of
+  which a fake filesystem can intercept, so a pyfakefs layer would be
+  half-fake and worse than none;
+- the isolation that matters is already there: `tmp_path` per test, plus the
+  `_isolate_api_cache` / in-memory-DB fixtures, so no test can reach the repo's
+  `data/`;
+- lucidlint's `fakefs` rule fires on every such test. Its own message allows a
+  real path "when the code under test needs real FS semantics (subprocess
+  interop, symlinks, C-level I/O like sqlite3)" — that carve-out covers the
+  subprocess/sqlite tests directly; the rest cite this section.
+
+So: `tmp_path` for a test that reads or writes a file, and a per-site
+`# lucidlint: ignore fakefs` citing this section.
 
 ## Test smells to avoid
 

@@ -13,7 +13,7 @@ class TestBestAddressNode:
         user = UserInputNode[str]("user", str)
         corrected = UserInputNode[str]("corrected", str)
         rightmove = UserInputNode[str]("rightmove", str)
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         node = BestAddressNode(
             "best_addr",
@@ -34,7 +34,7 @@ class TestBestAddressNode:
 
     @pytest.mark.asyncio
     async def test_corrected_takes_priority_over_rightmove(self, nodes):
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         # Create a node without user_entered to verify corrected > rightmove
         corrected = UserInputNode[str]("c2", str)
@@ -51,7 +51,7 @@ class TestBestAddressNode:
 
     @pytest.mark.asyncio
     async def test_fallback_to_rightmove(self, nodes):
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         # All deps share the same UserInputNode; once pushed, all succeed
         # Priority: user_entered is checked first, so it returns rightmove's value
@@ -79,7 +79,7 @@ class TestBestAddressNode:
     async def test_corrected_address_push_after_compute_recomputes(self):
         """First corrected_address push after an initial compute (corrected
         never had a value) must recompute best_address."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str]("addr_user_firstpush", str)
         corrected = UserInputNode[str]("addr_corr_firstpush", str)
@@ -105,7 +105,7 @@ class TestBestAddressNode:
         lands — a corrected address (address patch) must still resolve;
         the pending hard dep must not stall the node (pre-existing gap,
         surfaced by the postcode derivation work)."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str]("addr_user_norm", str)
         corrected = UserInputNode[str]("addr_corr_norm", str)
@@ -126,7 +126,7 @@ class TestBestAddressNode:
     async def test_stays_pending_until_any_source_arrives(self):
         """No address source has a value — the node must stay pending,
         not fail the cascade (a fresh URL-only add)."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         user = UserInputNode[str]("addr_user_none", str)
         corrected = UserInputNode[str]("addr_corr_none", str)
@@ -145,7 +145,7 @@ class TestBestAddressNode:
         """A corrected_address push after a server restart must recompute
         best_address — the optional-source staleness snapshot is lost on
         restart and must not mask the change."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         node_id = "addr_best_restart"
         # First process: seed rightmove + corrected, compute best_address.
@@ -184,7 +184,7 @@ class TestBestAddressNode:
     async def test_user_entered_address_push_after_restart_recomputes(self):
         """A user_entered_address push after restart takes priority over the
         persisted corrected_address."""
-        from houses.nodes.location import BestAddressNode
+        from houses.nodes.best_address_node import BestAddressNode
 
         node_id = "addr_best_user_restart"
         user = UserInputNode[str]("addr_user_u", str)
@@ -219,7 +219,7 @@ class TestBestAddressNode:
 class TestBestLocationNode:
     @pytest.mark.asyncio
     async def test_precise_takes_priority(self):
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
@@ -240,7 +240,7 @@ class TestBestLocationNode:
 
     @pytest.mark.asyncio
     async def test_rightmove_used_when_precise_missing_and_vague_address(self):
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         # Build node without precise dependency to test rightmove fallback
         rightmove_loc = UserInputNode[GeoPoint]("rm_fb", GeoPoint)
@@ -262,7 +262,7 @@ class TestBestLocationNode:
 
     @pytest.mark.asyncio
     async def test_pending_when_no_sources(self):
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
@@ -276,7 +276,7 @@ class TestBestLocationNode:
 
     @pytest.mark.asyncio
     async def test_pending_when_all_deps_missing(self):
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
@@ -290,7 +290,7 @@ class TestBestLocationNode:
 
     @pytest.mark.asyncio
     async def test_recomputes_when_precise_updated(self):
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
@@ -315,7 +315,7 @@ class TestBestLocationNode:
     async def test_precise_location_push_after_restart_recomputes(self):
         """A precise_location push after a server restart must recompute
         best_location — same optional-source staleness bug class."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         node_id = "best_loc_restart"
         precise = UserInputNode[GeoPoint]("precise_restart", GeoPoint)
@@ -353,7 +353,7 @@ class TestBestLocationNode:
 
     @pytest.mark.asyncio
     async def test_to_json_with_succeeded(self):
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
@@ -373,7 +373,7 @@ class TestBestLocationNode:
 
     @pytest.mark.asyncio
     async def test_to_json_with_pending(self):
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
@@ -395,7 +395,7 @@ class TestBestLocationNodeGeocodeFallback:
     async def test_geocode_fallback_priority_over_rightmove(self):
         """When precise_location is missing, geocode result should
         take priority over rightmove_location for single-property addresses."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         # Use UserInputNode as stand-in for GeocodeNode's result
         precise = UserInputNode[GeoPoint]("precise_gp", GeoPoint)
@@ -428,7 +428,7 @@ class TestBestLocationNodeGeocodeFallback:
     @pytest.mark.asyncio
     async def test_falls_back_to_rightmove_when_geocode_fails(self):
         """When geocode fails but rightmove_location succeeds, use rightmove."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise_gf2", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc_gf2", GeoPoint)
@@ -456,7 +456,7 @@ class TestBestLocationNodeGeocodeFallback:
     @pytest.mark.asyncio
     async def test_precise_still_takes_highest_priority(self):
         """precise_location remains highest priority even when geocode is wired."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise_gf3", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc_gf3", GeoPoint)
@@ -488,7 +488,7 @@ class TestBestLocationNodeGeocodeFallback:
     @pytest.mark.asyncio
     async def test_recomputes_when_geocode_updated(self):
         """Updating the geocode dependency should trigger recompute."""
-        from houses.nodes.location import BestLocationNode
+        from houses.nodes.best_location_node import BestLocationNode
 
         precise = UserInputNode[GeoPoint]("precise_gf4", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc_gf4", GeoPoint)
@@ -525,7 +525,7 @@ class TestPostcodeNode:
 
     @pytest.fixture
     def node(self):
-        from houses.nodes.location import PostcodeNode
+        from houses.nodes.postcode_node import PostcodeNode
 
         addr = UserInputNode[str]("pc_addr", str)
         return PostcodeNode("pc", best_address=addr), addr

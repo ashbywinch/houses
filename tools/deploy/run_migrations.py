@@ -57,19 +57,28 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-DESCRIPTION = "Run the manifest's data migrations against one sqlite database."
-DEFAULT_HOUSES_ROOT = "/opt/houses"
-LOGS_SUBDIR = "logs/releases"
-LOG_PREFIX = "run-migrations-"
-KEEP_LOGS = 32
-# DB + 1 GiB journal/backup headroom — the 2026-09-18 out-of-disk crash:
-# the batched apply needs room for the copy, the journal and the WAL.
-MIGRATION_HEADROOM_BYTES = 1_073_741_824
-MAX_ERROR_CHARS = 200
-EXIT_OK = 0
-EXIT_FAILED = 1
-EXIT_REFUSED = 2
-NOT_ATTEMPTED = "apply FAILED: not attempted — an earlier migration failed"
+
+class RunnerConfig:
+    """run_migrations.py constants — the runner's one config surface (review-log)."""
+
+    DESCRIPTION = "Run the manifest's data migrations against one sqlite database."
+    DEFAULT_HOUSES_ROOT = "/opt/houses"
+    LOGS_SUBDIR = "logs/releases"
+    LOG_PREFIX = "run-migrations-"
+    KEEP_LOGS = 32
+    # DB + 1 GiB journal/backup headroom — the 2026-09-18 out-of-disk crash:
+    # the batched apply needs room for the copy, the journal and the WAL.
+    MIGRATION_HEADROOM_BYTES = 1_073_741_824
+    MAX_ERROR_CHARS = 200
+    EXIT_OK = 0
+    EXIT_FAILED = 1
+    EXIT_REFUSED = 2
+    NOT_ATTEMPTED = "apply FAILED: not attempted — an earlier migration failed"
+    # What an apply script prints when it had nothing to write (migrations.list).
+    # The backup exists to protect a write, so an apply that wrote nothing needs
+    # no backup — but only the MIGRATION knows that. It says so, and the runner
+    # believes it, rather than the runner guessing from rows or schema.
+    NO_WRITE_MARKER = "no-write:"
 
 # A manifest path is relative, inside the checkout, and free of quoting
 # metacharacters: the runner rebuilds subprocess argv from it, and a
@@ -170,24 +179,17 @@ class Report:
         self._handle.close()
 
 
-NO_WRITE_MARKER = "no-write:"
-"""What an apply script prints when it had nothing to write (migrations.list).
-
-The backup exists to protect a write, so an apply that wrote nothing needs no
-backup — but only the MIGRATION knows that. It says so, and the runner believes
-it, rather than the runner guessing from rows or schema."""
 
 
 def _announced_no_write(proc: subprocess.CompletedProcess[str]) -> bool:
     """True when the apply script stated, in its own output, that it wrote nothing."""
     text = (proc.stdout or "") + (proc.stderr or "")
-    return any(line.lstrip().startswith(NO_WRITE_MARKER) for line in text.splitlines())
-
+    return any(line.lstrip().startswith(RunnerConfig.NO_WRITE_MARKER) for line in text.splitlines())
 
 def _last_line(text: str) -> str:
     for line in reversed(text.splitlines()):
         if line.strip():
-            return " ".join(line.split())[:MAX_ERROR_CHARS]
+            return " ".join(line.split())[:RunnerConfig.MAX_ERROR_CHARS]
     return ""
 
 
@@ -227,9 +229,13 @@ class Run:
             text=True,
         )
 
-    def _dry_run_report(self, migration: Migration) -> subprocess.CompletedProcess[str]:
-        proc = self._invoke(migration.apply, extra=[], may_write=False)
-        self.report.echo(migration.name, proc.stdout + proc.stderr)
+    def _read_only_stage(
+        self, command: Path, name: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one read-only stage and echo its report — the dry-run and the
+        independent check share this step."""
+        proc = self._invoke(command, extra=[], may_write=False)
+        self.report.echo(name, proc.stdout + proc.stderr)
         return proc
 
     def _apply_and_backup(self, migration: Migration, backup: Path) -> subprocess.CompletedProcess[str]:
@@ -239,11 +245,6 @@ class Run:
             may_write=True,
         )
         self.report.echo(migration.name, proc.stdout + proc.stderr)
-        return proc
-
-    def _independent_check(self, migration: Migration) -> subprocess.CompletedProcess[str]:
-        proc = self._invoke(migration.check, extra=[], may_write=False)
-        self.report.echo(migration.check.name, proc.stdout + proc.stderr)
         return proc
 
     def _hand_back(self) -> None:
@@ -260,12 +261,14 @@ class Run:
 
     def dry_run_verdict(self, migration: Migration) -> str | None:
         """None when the apply script's own read-only report succeeded."""
-        return _stage_verdict("dry-run FAILED", self._dry_run_report(migration))
+        return _stage_verdict("dry-run FAILED", self._read_only_stage(migration.apply, migration.name))
 
     def apply_verdict(self, migration: Migration) -> str | None:
         """The full verdict clause: None when applied, backed up and checked."""
         backup = self.db.with_name(self.db.name + f".pre-{migration.name}")
-        if reason := _stage_verdict("apply FAILED: dry-run failed", self._dry_run_report(migration)):
+        if reason := _stage_verdict(
+            "apply FAILED: dry-run failed", self._read_only_stage(migration.apply, migration.name)
+        ):
             return reason
         proc = self._apply_and_backup(migration, backup)
         # WHOEVER wrote, the app must be able to open the DB — ownership is
@@ -280,9 +283,9 @@ class Run:
                 # apply is still "applied+checked": the independent check below
                 # is what proves the migration's effect holds.
                 self.no_write.add(migration.name)
-                return _stage_verdict("check FAILED", self._independent_check(migration))
+                return _stage_verdict("check FAILED", self._read_only_stage(migration.check, migration.check.name))
             return f"apply FAILED: no backup written at {backup}"
-        return _stage_verdict("check FAILED", self._independent_check(migration))
+        return _stage_verdict("check FAILED", self._read_only_stage(migration.check, migration.check.name))
 
     def dry_run(self, entries: list[Migration]) -> int:
         """Read-only report: every apply script's own dry-run mode. No writes."""
@@ -302,7 +305,7 @@ class Run:
         """
         stopped = False
         for migration in entries:
-            reason = NOT_ATTEMPTED if stopped else self.apply_verdict(migration)
+            reason = RunnerConfig.NOT_ATTEMPTED if stopped else self.apply_verdict(migration)
             stopped = stopped or reason is not None
             yield migration.name, reason
 
@@ -320,13 +323,13 @@ class Run:
 
 
 def _log_dir() -> Path:
-    root = Path(os.environ.get("HOUSES_ROOT", DEFAULT_HOUSES_ROOT))
-    return Path(os.environ.get("HOUSES_LOG_DIR", root / LOGS_SUBDIR))
+    root = Path(os.environ.get("HOUSES_ROOT", RunnerConfig.DEFAULT_HOUSES_ROOT))
+    return Path(os.environ.get("HOUSES_LOG_DIR", root / RunnerConfig.LOGS_SUBDIR))
 
 
 def _prune_logs(log_dir: Path) -> None:
     """Keep the newest KEEP_LOGS transcripts — the box must not fill up."""
-    for stale in sorted(log_dir.glob(f"{LOG_PREFIX}*.log"), reverse=True)[KEEP_LOGS:]:
+    for stale in sorted(log_dir.glob(f"{RunnerConfig.LOG_PREFIX}*.log"), reverse=True)[RunnerConfig.KEEP_LOGS:]:
         stale.unlink(missing_ok=True)
 
 
@@ -335,7 +338,7 @@ def _space_gate(db: Path, report: Report) -> str | None:
     headroom free beside it. Returns an error line, or None when there is
     room. HOUSES_MIGRATION_MIN_FREE_BYTES pins the threshold in tests."""
     need = int(
-        os.environ.get("HOUSES_MIGRATION_MIN_FREE_BYTES", db.stat().st_size + MIGRATION_HEADROOM_BYTES)
+        os.environ.get("HOUSES_MIGRATION_MIN_FREE_BYTES", db.stat().st_size + RunnerConfig.MIGRATION_HEADROOM_BYTES)
     )
     free = shutil.disk_usage(db.parent).free
     if free < need:
@@ -371,7 +374,7 @@ def _missing_script(entries: list[Migration]) -> str | None:
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=DESCRIPTION)
+    parser = argparse.ArgumentParser(description=RunnerConfig.DESCRIPTION)
     parser.add_argument("--manifest", required=True, type=Path, help="migration manifest path")
     parser.add_argument("--db", required=True, type=Path, help="sqlite database to migrate")
     parser.add_argument(
@@ -398,7 +401,7 @@ def _open_report() -> Report:
     log_dir = _log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
-    report = Report(log_dir / f"{LOG_PREFIX}{stamp}.log")
+    report = Report(log_dir / f"{RunnerConfig.LOG_PREFIX}{stamp}.log")
     _prune_logs(log_dir)
     return report
 
@@ -431,12 +434,12 @@ def main(argv: list[str] | None = None) -> int:
         prepared = _preflight(args, report)
         if isinstance(prepared, str):
             report.say(f"run_migrations: {prepared}")
-            return EXIT_REFUSED
+            return RunnerConfig.EXIT_REFUSED
         run = Run(db=args.db, python=args.python, scripts_dir=args.scripts_dir, report=report)
         if args.mode != "apply":
-            return EXIT_OK if run.dry_run(prepared) == 0 else EXIT_FAILED
+            return RunnerConfig.EXIT_OK if run.dry_run(prepared) == 0 else RunnerConfig.EXIT_FAILED
         failures = run.apply(prepared)
-        return EXIT_OK if failures == 0 else EXIT_FAILED
+        return RunnerConfig.EXIT_OK if failures == 0 else RunnerConfig.EXIT_FAILED
     finally:
         report.close()
 

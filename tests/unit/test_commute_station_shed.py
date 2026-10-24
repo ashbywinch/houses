@@ -50,14 +50,14 @@ def test_bbox_excludes_outside():
 def test_in_inner_zone_within_radius():
     # Ealing Broadway is ~10 km from Pimlico — inside a 20 km inner zone.
     st = Station("Ealing Broadway", "EAL", 51.5149, -0.3016)
-    assert st.distance_km_to(PIMLICO) <= 20.0
-    assert st.distance_km_to(ALDGATE) <= 20.0
+    assert st.point.distance_km_to(PIMLICO) <= 20.0
+    assert st.point.distance_km_to(ALDGATE) <= 20.0
 
 
 def test_in_inner_zone_outside_radius():
     # Woking is ~30+ km from both offices.
     st = Station("Woking", "WOK", 51.3173, -0.5571)
-    assert st.distance_km_to(PIMLICO) > 20.0
+    assert st.point.distance_km_to(PIMLICO) > 20.0
 
 
 # ── Keep rule ────────────────────────────────────────────────────────
@@ -136,19 +136,19 @@ async def test_build_shed_routes_only_non_inner_in_bbox():
     )
     shed = await build_shed(_make_stations(), ctx)
 
-    by_crs = {r["crs"]: r for r in shed}
+    by_crs = {r.crs: r for r in shed}
 
     # Ealing Broadway is inner-zone: kept with no routing calls at all.
-    assert by_crs["EAL"]["kept"] is True
-    assert by_crs["EAL"]["duration_pimlico"] is None
+    assert by_crs["EAL"].kept is True
+    assert by_crs["EAL"].duration_pimlico is None
 
     # Reading (55/60) kept; Guildford (70/75) kept; Woking (60/65) kept.
-    assert by_crs["RDG"]["kept"] is True
-    assert by_crs["GLD"]["kept"] is True
-    assert by_crs["WOK"]["kept"] is True
+    assert by_crs["RDG"].kept is True
+    assert by_crs["GLD"].kept is True
+    assert by_crs["WOK"].kept is True
 
     # Exeter (150/155) dropped — the negative control.
-    assert by_crs["EXD"]["kept"] is False
+    assert by_crs["EXD"].kept is False
 
     # Routed calls: 4 stations × 2 destinations; EAL never routed.
     routed_crs = {c[0] for c in router.calls}
@@ -164,8 +164,8 @@ async def test_build_shed_failed_route_dropped():
         offices=OFFICES, bbox=BBOX, inner_radius_km=20.0, threshold=THRESHOLD, router=router, delay_s=0.5
     )
     shed = await build_shed(_make_stations(), ctx)
-    by_crs = {r["crs"]: r for r in shed}
-    assert by_crs["RDG"]["kept"] is False
+    by_crs = {r.crs: r for r in shed}
+    assert by_crs["RDG"].kept is False
 
 
 @pytest.mark.asyncio

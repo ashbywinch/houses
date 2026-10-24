@@ -34,7 +34,7 @@ def _use_sqlite_memory(_sqlite_memory):  # noqa: F811
     no row exists, and the settings write guard (rightly) refuses those
     pushes outside app/pytest-isolated processes.  On a fresh DB that push
     happens during earlier services access (e.g. _reset_geo_cache) unless
-    the in-memory DB + per.testing flag are already active.  Autouse
+    the in-memory DB + per.Runtime.testing flag are already active.  Autouse
     fixtures run in definition order — keep this at the top.
     """
     pass
@@ -161,7 +161,7 @@ def _reset_geo_cache(_use_sqlite_memory):  # noqa: ARG001 — ordering dependenc
 
     Depends on the DB isolation fixture EXPLICITLY: autouse ordering is not
     declaration order in this pytest version, and touching services on a
-    fresh DB before the in-memory DB + per.testing flag are active trips
+    fresh DB before the in-memory DB + per.Runtime.testing flag are active trips
     the settings write guard (or writes a real DB).
     """
     from houses.services_provider import get_services

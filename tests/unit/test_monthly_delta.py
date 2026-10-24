@@ -20,16 +20,6 @@ from houses.nodes.delta_vs_home_node import DeltaVsHomeValue
 from houses.services_provider import get_services
 from tests.unit.conftest import flush_all
 
-
-def _group_block(summary: dict) -> dict | None:
-    """The group value block (top level on summaries, under
-    affordability on detail payloads)."""
-    group = summary.get("group_monthly_cost")
-    if group is None:
-        affordability = summary.get("affordability")
-        group = affordability.get("group_monthly_cost") if isinstance(affordability, dict) else None
-    return group if isinstance(group, dict) else None
-
 # ── helpers ──────────────────────────────────────────────────────────
 
 
@@ -257,8 +247,8 @@ class TestAttachProjection:
         assert summary["is_current_home"] is False
         assert summary["monthly_baseline"] is not None
         assert summary["monthly_baseline"]["rid"] == "880001"
-        group = _group_block(summary)
-        assert group is not None and group["value"] is not None
+        group = summary["affordability"]["group_monthly_cost"]
+        assert group["value"] is not None
         delta = group["value"]["delta_vs_home"]
         assert isinstance(delta, dict) and delta["couple"] is not None
 
@@ -269,9 +259,26 @@ class TestAttachProjection:
         summary = {"affordability": {"group_monthly_cost": asyncio.run(prop.group_monthly_cost.to_json_value())}}
         self._attach("880001", summary)
         assert summary["is_current_home"] is True
-        group = _group_block(summary)
-        assert group is not None and group["value"] is not None
+        group = summary["affordability"]["group_monthly_cost"]
+        assert group["value"] is not None
         assert group["value"]["delta_vs_home"] is None
+
+    def test_summary_payload_keeps_the_block_keys_and_their_order(self):
+        """The block is rebuilt as the DAG record and written back into the
+        top-level slot: the payload keeps the node wire's keys in the node
+        wire's order, with the delta appended to the value."""
+        _baseline_pair(base_status="current")
+        prop = get_services().property_registry.get("880002")
+        assert prop is not None
+        wire = asyncio.run(prop.group_monthly_cost.to_json_value())
+        assert isinstance(wire["value"], dict)
+        summary = {"group_monthly_cost": wire}
+        self._attach("880002", summary)
+        group = summary["group_monthly_cost"]
+        assert list(group) == list(wire), "the rebuild must not reorder or drop the block's keys"
+        assert list(group["value"]) == [*wire["value"], "delta_vs_home"]
+        delta = group["value"]["delta_vs_home"]
+        assert isinstance(delta, dict) and delta["couple"] is not None
 
 
 # ── the endpoint serves the DAG's own record ─────────────────────────

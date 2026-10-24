@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
-from typing import Any, override
+from collections.abc import Mapping
+from typing import Any, TypedDict, override
 
 from money import Money
 from pint import Quantity
@@ -23,12 +23,7 @@ from dag.user_input_node import UserInputNode
 from houses.model.domain import Person, PlaceOfInterest
 from houses.settings import settings
 
-_app_mode = False
 logger = logging.getLogger(__name__)
-SIMON_BUS_WALK_PENALTY = 20
-LORENA_BUS_WALK_PENALTY = 15
-ASHBY_BUS_WALK_PENALTY = 10
-
 def set_app_mode() -> None:
     """Mark this process as the running app.
 
@@ -36,8 +31,7 @@ def set_app_mode() -> None:
     reloader respawn) runs the lifespan; an ad-hoc script or REPL kernel
     that merely imports the app modules does not.
     """
-    global _app_mode
-    _app_mode = True
+    SettingsNode._app_mode = True
 
 
 def guard_settings_write(
@@ -57,14 +51,14 @@ def guard_settings_write(
 
     The keyword args are DI seams: tests pass explicit flags instead of
     monkeypatching the module state.  ``None`` reads the real state
-    (``dag.persistence.testing``, the app-mode flag, the env var).
+    (``dag.persistence.Runtime.testing``, the app-mode flag, the env var).
     """
     if testing is None:
-        testing = _persistence.testing
+        testing = _persistence.Runtime.testing
     if isolation_armed is None:
-        isolation_armed = _persistence.testing
+        isolation_armed = _persistence.Runtime.testing
     if app_mode is None:
-        app_mode = _app_mode
+        app_mode = SettingsNode._app_mode
     if scripts_may_write is None:
         scripts_may_write = os.environ.get("HOUSES_SCRIPTS_MAY_WRITE") == "1"
     if testing:
@@ -88,9 +82,12 @@ class SettingsNode(UserInputNode):
     """A settings input node whose writes are guarded — only the app,
     pytest, or an explicitly opted-in script may change family data."""
 
-    # The DAG→frontend role, declared at the class: a refresh of a
-    # settings node pushes the settings payload. The refresh hook routes
-    # on this attribute — it never parses node ids.
+    # Process state: set true by the FastAPI lifespan (set_app_mode).
+    _app_mode = False
+    # Default-person bus walk penalties (minutes) for the default household.
+    SIMON_BUS_WALK_PENALTY = 20
+    LORENA_BUS_WALK_PENALTY = 15
+    ASHBY_BUS_WALK_PENALTY = 10
     refresh_kind: str | None = "settings"
 
     @override
@@ -146,9 +143,7 @@ def alarm_household_shrink(previous: Any, incoming: Any, source_label: str) -> N
     found the same day.  Neither blocks the write.
     """
 
-    # lucidlint: ignore record-shape person-name → POI-label-set loss-detection map — variable keys, never serialized
-    # (only set math inside alarm_household_shrink)
-    def _doc(persons: Any) -> dict[str, set[str]]:
+    def _doc(persons: Any) -> Mapping[str, set[str]]:
         out: dict[str, set[str]] = {}
         for p in persons or ():
             name = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
@@ -221,7 +216,7 @@ def make_default_persons() -> list[Person]:
             is_superuser=False,
             has_car=True,
             selling_home=True,
-            bus_walk_penalty=Quantity(SIMON_BUS_WALK_PENALTY, "minute"),
+            bus_walk_penalty=Quantity(SettingsNode.SIMON_BUS_WALK_PENALTY, "minute"),
             home_sale_price=Money(amount="550000", currency="GBP"),
             outstanding_mortgage=Money(amount="373000", currency="GBP"),
             life_insurance_monthly=Money(amount="150", currency="GBP"),
@@ -256,7 +251,7 @@ def make_default_persons() -> list[Person]:
             is_superuser=False,
             selling_home=False,
             has_car=False,
-            bus_walk_penalty=Quantity(LORENA_BUS_WALK_PENALTY, "minute"),
+            bus_walk_penalty=Quantity(SettingsNode.LORENA_BUS_WALK_PENALTY, "minute"),
             places_of_interest=(
                 PlaceOfInterest(
                     label="Aldgate",
@@ -302,23 +297,24 @@ def make_default_persons() -> list[Person]:
     ]
 
 
-@dataclass(frozen=True)
-class _ThresholdJson:
+class _Threshold(TypedDict):
     """Wire shape of one person's commute colour-band thresholds."""
 
     good_max_minutes: int
     fine_max_minutes: int
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(good_max_minutes=self.good_max_minutes, fine_max_minutes=self.fine_max_minutes)
+
+type _ThresholdMap = dict[str, _Threshold]
 
 
-# lucidlint: ignore record-shape person-keyed defaults map — keyed collection, not a fixed record shape (review-log)
-def make_default_thresholds() -> dict[str, dict[str, int]]:
-    # lucidlint: ignore record-shape person-keyed defaults map — keyed collection, not a fixed record shape (review-log)
+def make_default_thresholds() -> _ThresholdMap:
     return {
-        "Simon": _ThresholdJson(good_max_minutes=30, fine_max_minutes=45).to_dict(),
-        "Lorena": _ThresholdJson(good_max_minutes=40, fine_max_minutes=60).to_dict(),
+        name: threshold
+        for name, threshold in (
+            ("Simon", _Threshold(good_max_minutes=30, fine_max_minutes=45)),
+            ("Lorena", _Threshold(good_max_minutes=40, fine_max_minutes=60)),
+        )
     }
+
+
+

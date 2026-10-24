@@ -632,7 +632,8 @@ class TestGroupMonthlyCostNode:
         """The annexe's council tax is split equally among the people the
         user picked — here only Ashby pays it, so the others' figure
         carries the whole annexe bill."""
-        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.annexe_dwelling import AnnexeDwelling
+        from houses.council_tax_info import CouncilTaxInfo
 
         node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe1")
         mg.push(Money("0", "GBP"), "test")
@@ -688,7 +689,8 @@ class TestGroupMonthlyCostNode:
         annexe bill — mirroring the main-bill path, it falls back to the
         all-adults split so the second dwelling's council tax is never
         lost without explanation."""
-        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.annexe_dwelling import AnnexeDwelling
+        from houses.council_tax_info import CouncilTaxInfo
 
         node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe_stale")
         mg.push(Money("0", "GBP"), "test")
@@ -729,7 +731,8 @@ class TestGroupMonthlyCostNode:
 
     @pytest.mark.asyncio
     async def test_empty_annexe_payers_split_across_all_adults(self):
-        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.annexe_dwelling import AnnexeDwelling
+        from houses.council_tax_info import CouncilTaxInfo
 
         node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe2")
         mg.push(Money("0", "GBP"), "test")
@@ -767,7 +770,8 @@ class TestGroupMonthlyCostNode:
 
     @pytest.mark.asyncio
     async def test_ignored_annexe_contributes_nothing(self):
-        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.annexe_dwelling import AnnexeDwelling
+        from houses.council_tax_info import CouncilTaxInfo
 
         node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe3")
         mg.push(Money("0", "GBP"), "test")

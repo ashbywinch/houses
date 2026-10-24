@@ -20,7 +20,7 @@ from houses.nodes.current_home_node import CurrentHomeNode
 @pytest.mark.asyncio
 async def test_current_home_constructs_when_a_persisted_attempt_exists(_sqlite_memory):
     # (The autouse _inject_test_scheduler fixture already installed an
-    # isolated AsyncQueueScheduler(respect_time=False) for this test.)
+    # isolated AsyncRefreshQueue(respect_time=False) for this test.)
     # Drive a REAL succeeded attempt to persistence, the way the convergence
     # sweep does (status dep → compute → flush).
     status = UserInputNode[str]("p100/status", str)

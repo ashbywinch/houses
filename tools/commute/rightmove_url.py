@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are the mandated pattern (review-log scope decision 5: no config
 """Rightmove drawn-area search URLs.
 
 Spike result (2026-08-02, verified live on rightmove.co.uk): drawn search areas
@@ -12,33 +11,44 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-SEARCH_BASE = "https://www.rightmove.co.uk/property-for-sale/map.html"
-_LOCATION_PREFIX = 'USERDEFINEDAREA^{"polylines":"'
-_LOCATION_SUFFIX = '"}'
 
-Coord = tuple[float, float]
+class RightmoveSearch:
+    """Constants of the Rightmove drawn-area search URLs and the Google
+    polyline codec (review-log: one holder for the URL + spec constants the
+    module's pure functions read)."""
+
+    SEARCH_BASE = "https://www.rightmove.co.uk/property-for-sale/map.html"
+    LOCATION_PREFIX = 'USERDEFINEDAREA^{"polylines":"'
+    LOCATION_SUFFIX = '"}'
+    POLYLINE_PRECISION = 1e5  # Google polyline: 5 decimal places (spec)
+    POLYLINE_CONTINUATION = 0x20  # chunk continuation bit (spec)
+    POLYLINE_CHUNK_MASK = 0x1F  # low 5 bits per chunk (spec)
+    POLYLINE_CHUNK_BITS_COUNT = 5  # bits consumed per chunk (spec)
+    POLYLINE_ASCII_OFFSET = 63  # ASCII-63 offset of emitted chunk bytes (spec)
 
 
-_POLYLINE_PRECISION = 1e5  # Google polyline: 5 decimal places (spec)
-_POLYLINE_CONTINUATION = 0x20  # chunk continuation bit (spec)
-_POLYLINE_CHUNK_MASK = 0x1F  # low 5 bits per chunk (spec)
-_POLYLINE_CHUNK_BITS_COUNT = 5  # bits consumed per chunk (spec)
-_POLYLINE_ASCII_OFFSET = 63  # ASCII-63 offset of emitted chunk bytes (spec)
+type Coord = tuple[float, float]
+
 
 def encode_polyline(coords: list[Coord]) -> str:
     """Encode a list of (lat, lon) pairs with the Google polyline algorithm."""
     out: list[str] = []
     prev_lat = prev_lon = 0
     for lat, lon in coords:
-        lat5, lon5 = round(lat * _POLYLINE_PRECISION), round(lon * _POLYLINE_PRECISION)
+        lat5, lon5 = round(lat * RightmoveSearch.POLYLINE_PRECISION), round(lon * RightmoveSearch.POLYLINE_PRECISION)
         dlat, dlon = lat5 - prev_lat, lon5 - prev_lon
         prev_lat, prev_lon = lat5, lon5
         for v in (dlat, dlon):
             v = ~(v << 1) if v < 0 else v << 1
-            while v >= _POLYLINE_CONTINUATION:
-                out.append(chr((_POLYLINE_CONTINUATION | (v & _POLYLINE_CHUNK_MASK)) + _POLYLINE_ASCII_OFFSET))
-                v >>= _POLYLINE_CHUNK_BITS_COUNT
-            out.append(chr(v + _POLYLINE_ASCII_OFFSET))
+            while v >= RightmoveSearch.POLYLINE_CONTINUATION:
+                out.append(
+                    chr(
+                        (RightmoveSearch.POLYLINE_CONTINUATION | (v & RightmoveSearch.POLYLINE_CHUNK_MASK))
+                        + RightmoveSearch.POLYLINE_ASCII_OFFSET
+                    )
+                )
+                v >>= RightmoveSearch.POLYLINE_CHUNK_BITS_COUNT
+            out.append(chr(v + RightmoveSearch.POLYLINE_ASCII_OFFSET))
     return "".join(out)
 
 
@@ -51,23 +61,20 @@ def decode_polyline(encoded: str) -> list[Coord]:
         for is_lat in (True, False):
             shift = result = 0
             while True:
-                # lucidlint: ignore magic-number 63 — ASCII base-63 offset of the Google polyline decode (spec constant)
-                b = ord(encoded[i]) - 63
+                b = ord(encoded[i]) - RightmoveSearch.POLYLINE_ASCII_OFFSET
                 i += 1
-                # lucidlint: ignore magic-number 0x1F — 5-bit chunk mask of the Google polyline decode (spec constant)
-                result |= (b & 0x1F) << shift
-                shift += 5
-                # lucidlint: ignore magic-number 0x20 — continuation bit of the Google polyline decode (spec constant)
-                if b < 0x20:
+                result |= (b & RightmoveSearch.POLYLINE_CHUNK_MASK) << shift
+                shift += RightmoveSearch.POLYLINE_CHUNK_BITS_COUNT
+                if b < RightmoveSearch.POLYLINE_CONTINUATION:
                     break
             d = ~(result >> 1) if result & 1 else result >> 1
             if is_lat:
                 lat += d
             else:
                 lon += d
-        # lucidlint: ignore magic-number same polyline precision factor, second operand
-        # lucidlint: ignore magic-number 1e5 — polyline precision factor of the Google polyline decode (spec constant)
-        coords.append((lat / 1e5, lon / 1e5))
+        scaled_lat = lat / RightmoveSearch.POLYLINE_PRECISION
+        scaled_lon = lon / RightmoveSearch.POLYLINE_PRECISION
+        coords.append((scaled_lat, scaled_lon))
     return coords
 
 
@@ -78,7 +85,7 @@ def _closed(coords: list[Coord]) -> list[Coord]:
 
 def location_identifier(coords: list[Coord]) -> str:
     """Build the ``locationIdentifier`` value for a drawn-area search."""
-    return _LOCATION_PREFIX + encode_polyline(_closed(coords)) + _LOCATION_SUFFIX
+    return RightmoveSearch.LOCATION_PREFIX + encode_polyline(_closed(coords)) + RightmoveSearch.LOCATION_SUFFIX
 
 
 def build_search_url(
@@ -90,32 +97,33 @@ def build_search_url(
     max_price: int | None = None,
 ) -> str:
     """Build a Rightmove map search URL for the drawn polygon."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
     params = {
-        "searchType": "MAP",
+        **{
+            "searchType": "MAP",
+            "insId": "1",
+            "radius": "0.0",
+            "maxBedrooms": "",
+            "maxDaysSinceAdded": "",
+            "_includeLetAgreed": "on",
+            "sortBy": "6",
+            "includeSSTC": "true",
+            "viewType": "MAP",
+            "channel": "BUY",
+            "index": "0",
+        },
         "locationIdentifier": location_identifier(coords),
-        "insId": "1",
-        "radius": "0.0",
         "minPrice": "" if min_price is None else str(min_price),
         "maxPrice": "" if max_price is None else str(max_price),
         "minBedrooms": "" if min_beds is None else str(min_beds),
-        "maxBedrooms": "",
         "displayPropertyType": property_type or "",
-        "maxDaysSinceAdded": "",
-        "_includeLetAgreed": "on",
-        "sortBy": "6",
-        "includeSSTC": "true",
-        "viewType": "MAP",
-        "channel": "BUY",
-        "index": "0",
     }
-    return SEARCH_BASE + "?" + urlencode(params)
+    return RightmoveSearch.SEARCH_BASE + "?" + urlencode(params)
 
 
 def parse_search_url(url: str) -> list[Coord]:
     """Extract the polygon coordinates from a Rightmove search URL."""
     qs = parse_qs(urlsplit(url).query)
     lid = qs["locationIdentifier"][0]
-    if not (lid.startswith(_LOCATION_PREFIX) and lid.endswith(_LOCATION_SUFFIX)):
+    if not (lid.startswith(RightmoveSearch.LOCATION_PREFIX) and lid.endswith(RightmoveSearch.LOCATION_SUFFIX)):
         raise ValueError(f"not a drawn-area locationIdentifier: {lid[:80]!r}")
-    return decode_polyline(lid[len(_LOCATION_PREFIX) : -len(_LOCATION_SUFFIX)])
+    return decode_polyline(lid[len(RightmoveSearch.LOCATION_PREFIX) : -len(RightmoveSearch.LOCATION_SUFFIX)])

@@ -29,7 +29,7 @@ make test-integration     # Integration only
 make coverage             # Test with coverage report
 ```
 
-Test layout mirrors the module tree under `tests/` (`houses/nodes/area.py` → `tests/unit/nodes/test_area.py`). DI patterns and fake usage: `docs/coding-standards.md` → *Dependency Injection* and `docs/testing-standards.md`.
+Test layout mirrors the module tree under `tests/` (`houses/nodes/petrol.py` → `tests/unit/nodes/test_petrol.py`). DI patterns and fake usage: `docs/coding-standards.md` → *Dependency Injection* and `docs/testing-standards.md`.
 
 **Markers:** no marker = unit (fast, no external); `@pytest.mark.integration` = full pipeline (excluded from `make test`).
 

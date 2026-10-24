@@ -541,15 +541,15 @@ class TestFingerprintNormalization:
         text unchanged — the fingerprint must still move, or persisted
         results stay 'fresh' forever (live gap: the TransitNode fallback
         fix in _nr_fallback was invisible to the staleness check)."""
-        from dag.derived_node import _CODE_VERSION_CACHE, _compute_code_version
+        from dag.derived_node import DerivedNode, _compute_code_version
 
         node = _HelperDoubleNode("helper_fp", ())
-        _CODE_VERSION_CACHE.clear()
+        DerivedNode._CODE_VERSION_CACHE.clear()
         before = _compute_code_version(node)
 
         # Same compute() text, different helper behavior.
         _HelperDoubleNode._multiplier = lambda self, value: value * 3
-        _CODE_VERSION_CACHE.clear()
+        DerivedNode._CODE_VERSION_CACHE.clear()
         after = _compute_code_version(node)
 
         assert after != before, "a self-helper body change must move the fingerprint"

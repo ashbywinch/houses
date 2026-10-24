@@ -17,10 +17,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 from money import Money
 
@@ -43,13 +44,8 @@ class FareProductType(Enum):
     DAY = auto()  # adult_day
 
 
-# Maps JSON product keys to FareProductType
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-_KEY_TO_TYPE: dict[str, FareProductType] = {
-    "adult_single": FareProductType.SINGLE,
-    "adult_return": FareProductType.RETURN,
-    "adult_day": FareProductType.DAY,
-}
+type _ProductKeyMap = dict[str, FareProductType]
+
 
 
 @dataclass(frozen=True)
@@ -66,19 +62,6 @@ class FareProduct:
     zone_pair: str
 
 
-@dataclass
-class BusJourney:
-    """A bus journey between two stops, with available fare options.
-
-    ``available_fares`` is keyed by product type — at most one entry per key.
-    """
-
-    origin: GeoPoint | None = None
-    destination: GeoPoint | None = None
-    duration_minutes: int | None = None
-    available_fares: dict[FareProductType, FareProduct] = field(default_factory=dict)
-
-
 @dataclass(frozen=True)
 class _StopPoint:
     """A bus stop reference for fare lookups: display name + coordinates."""
@@ -86,16 +69,6 @@ class _StopPoint:
     name: str
     lat: float
     lon: float
-
-
-class _StopCoordWire(TypedDict, total=False):
-    """A BODS stop-coordinate row as ``data/bus_fares.json`` states it: the
-    ``{lat, lon, zone}`` shape (the row also carries the stop name; ``zone``
-    is absent on unzoned stops)."""
-
-    lat: float
-    lon: float
-    zone: str
 
 
 @dataclass(frozen=True)
@@ -108,7 +81,7 @@ class _StopCoord:
 
     
     @classmethod
-    def from_dict(cls, sc: _StopCoordWire) -> _StopCoord:
+    def from_dict(cls, sc: dict) -> _StopCoord:
         return cls(lat=sc["lat"], lon=sc["lon"], zone=sc.get("zone"))
 
 
@@ -144,6 +117,21 @@ class BusJourneyRegistry:
     multi-stage lookup: direct name → fuzzy token match → coordinate.
     """
 
+    # Keyed lookup: JSON product key → the FareProductType it names.
+    KEY_TO_TYPE: _ProductKeyMap = {
+        product_key: fare_type
+        for product_key, fare_type in (
+            ("adult_single", FareProductType.SINGLE),
+            ("adult_return", FareProductType.RETURN),
+            ("adult_day", FareProductType.DAY),
+        )
+    }
+
+
+    # Token-overlap (Jaccard) similarity a fuzzy stop-name match must meet
+    # before the zone pair is trusted.
+    FUZZY_MATCH_THRESHOLD = 0.85
+
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
         self._meta: dict[str, Any] | None = None
@@ -174,8 +162,7 @@ class BusJourneyRegistry:
         self._loaded = True
 
     @staticmethod
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    def _assert_no_duplicate_products(data: dict[str, Any]) -> None:
+    def _assert_no_duplicate_products(data: Mapping[str, Any]) -> None:
         """Fail fast if any zone pair has multiple products of the same type.
 
         The ``dict[FareProductType, FareProduct]`` contract depends on this.
@@ -323,12 +310,12 @@ class BusJourneyRegistry:
         label: str,
         raw_name: str,
     ) -> str | None:
-        """First stop whose BODS name hits the 85% Jaccard threshold, if any."""
+        """First stop whose BODS name hits the similarity threshold, if any."""
         for bods_name, zone in stop_zones.items():
             bods_tokens = _norm_tokens(bods_name)
             inter = tokens & bods_tokens
             union = tokens | bods_tokens
-            if union and len(inter) / len(union) >= 0.85:
+            if union and len(inter) / len(union) >= BusJourneyRegistry.FUZZY_MATCH_THRESHOLD:
                 logger.warning(
                     "Bus fare fuzzy match %s='%s' -> '%s' zone=%s",
                     label,
@@ -433,7 +420,7 @@ class BusJourneyRegistry:
 
         products: dict[FareProductType, FareProduct] = {}
         for json_key, price_val in pairs.items():
-            ptype = _KEY_TO_TYPE.get(json_key)
+            ptype = self.KEY_TO_TYPE.get(json_key)
             if ptype is None:
                 continue
             price = Money(str(price_val), "GBP")

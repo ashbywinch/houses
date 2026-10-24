@@ -31,32 +31,156 @@ import sys
 import time
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn, TypedDict
 
 import httpx
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
 
 from houses.settings import settings
 
-FRONTEND_URL = "http://localhost:5173"
-BACKEND_URL = "http://localhost:8765"
-LAUNCH_OPTS = {"headless": True, "args": ["--no-sandbox", "--disable-gpu"]}
-LOGIN_TIMEOUT_MINUTES = 10
-SECONDS_PER_MINUTE = 60
-LOGIN_TIMEOUT_S = LOGIN_TIMEOUT_MINUTES * SECONDS_PER_MINUTE
-GOOGLE_DEVICE_URL = "https://oauth2.googleapis.com/device/code"
-GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_DEVICE_SCOPE = "openid email profile"
-AUTH_HINT = "Session expired or invalid — run 'python tools/capture_dom.py --login'"
-HTTP_OK = 200
-HTTP_4XX_START = 400
-HTTP_5XX_START = 500
-HTTP_SERVICE_UNAVAILABLE = 503
-POLL_INTERVAL_DEFAULT_S = 5
-STATE_FILE_MODE = 0o600
-PAGE_SETTLE_DELAY_MS = 5000
+
+class _DeviceFlowForm(TypedDict, total=False):
+    """Google device-authorization POST form — the OAuth wire shape."""
+
+    client_id: str
+    scope: str
+    client_secret: str
+
+
+class _TokenPollForm(TypedDict, total=False):
+    """Google device-flow token poll POST form — the OAuth wire shape."""
+
+    client_id: str
+    device_code: str
+    grant_type: str
+    client_secret: str
+
+
+class _LaunchOptions(TypedDict):
+    """Chromium launch options — the Playwright ``launch()`` contract."""
+
+    headless: bool
+    args: list[str]
+
+
+class _StorageCookie(TypedDict):
+    """One cookie of a Playwright ``storageState`` file."""
+
+    name: str
+    value: str
+    domain: str
+    path: str
+    expires: int
+    httpOnly: bool
+    secure: bool
+    sameSite: str
+
+
+class _StorageState(TypedDict):
+    """A Playwright ``storageState`` file: the cookies replayed into each capture."""
+
+    cookies: list[_StorageCookie]
+    origins: list[Any]
+
+
+class DomCapture:
+    """One capture run: the browser session plus the endpoints and tunables it drives.
+
+    Constants are class attributes (the global-state gate's rule: values
+    belong to the class that serves them — this script's module-level names
+    are all run configuration, so they live with the run).
+    """
+
+    LAUNCH_OPTS = _LaunchOptions(headless=True, args=["--no-sandbox", "--disable-gpu"])
+
+    FRONTEND_URL = "http://localhost:5173"
+    BACKEND_URL = "http://localhost:8765"
+    LOGIN_TIMEOUT = timedelta(minutes=10)
+    GOOGLE_DEVICE_URL = "https://oauth2.googleapis.com/device/code"
+    GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+    GOOGLE_DEVICE_SCOPE = "openid email profile"
+    AUTH_HINT = "Session expired or invalid — run 'python tools/capture_dom.py --login'"
+    HTTP_OK = 200
+    HTTP_4XX_START = 400
+    HTTP_5XX_START = 500
+    HTTP_SERVICE_UNAVAILABLE = 503
+    POLL_INTERVAL_DEFAULT_S = 5
+    STATE_FILE_MODE = 0o600
+    PAGE_SETTLE_DELAY_MS = 5000
+
+    def __init__(self) -> None:
+        self._browser = None
+        self._playwright = None
+
+    async def browser(self):
+        """The one shared Chromium instance, launched on first use."""
+        if self._browser and self._browser.is_connected():
+            return self._browser
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(**self.LAUNCH_OPTS)
+        return self._browser
+
+    async def stop_browser(self) -> None:
+        if self._browser:
+            await self._browser.close()
+        if self._playwright:
+            await self._playwright.stop()
+
+    async def capture_page(self, url: str, output_dir: str | Path, label: str, state_file: Path):
+        browser = await self.browser()
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 2048},
+            ignore_https_errors=True,
+            storage_state=str(state_file),
+        )
+        page = await context.new_page()
+
+        errors = _PageErrors()
+        page.on("console", errors.on_console)
+        page.on("pageerror", errors.on_page_error)
+
+        await page.goto(url, wait_until="networkidle", timeout=30000)
+        await page.wait_for_timeout(self.PAGE_SETTLE_DELAY_MS)
+
+        auth = await _auth_state(page)
+        if auth is None:
+            await context.close()
+            _fail(
+                "The app's server isn't responding — fix that, then re-run this capture.",
+                f"{page.url} — backend unreachable during session check",
+            )
+        if not auth:
+            await context.close()
+            _fail(
+                f"{self.AUTH_HINT}, then re-run this capture.",
+                f"{page.url} — no authenticated session (session cookie missing or expired)",
+            )
+
+        html = await page.content()
+        html_path = Path(output_dir) / f"dom_{label}.html"
+        html_path.write_text(html)
+        print(f"  DOM saved ({len(html)} bytes) → {html_path}")
+
+        screenshot_path = Path(output_dir) / f"screenshot_{label}.png"
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        print(f"  Screenshot → {screenshot_path}")
+
+        if errors.messages:
+            print(f"  Console errors ({len(errors.messages)}):")
+            for e in errors.messages[:5]:
+                print(f"    {e}")
+
+        cards = await page.query_selector_all(".card")
+        print(f"  Cards: {len(cards)}")
+        for i, card in enumerate(cards[:2]):
+            text = (await card.text_content() or "").strip()[:500]
+            print(f"\n  --- Card {i} ---")
+            print(f"  {text}")
+
+        await context.close()
 
 logger = logging.getLogger("capture_dom")
 
@@ -89,30 +213,25 @@ def _default_state_file() -> Path:
     return Path(__file__).resolve().parent / ".auth-state.json"
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _storage_state(session_cookie: str) -> dict:
+def _storage_state(session_cookie: str) -> _StorageState:
     """Playwright storageState carrying only the localhost session cookie."""
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-    return {
-        "cookies": [
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-            {
-                "name": "session",
-                "value": session_cookie,
-                "domain": "localhost",
-                "path": "/",
-                "expires": -1,
-                "httpOnly": True,
-                "secure": False,
-                "sameSite": "Lax",
-            }
+    return _StorageState(
+        cookies=[
+            _StorageCookie(
+                name="session",
+                value=session_cookie,
+                domain="localhost",
+                path="/",
+                expires=-1,
+                httpOnly=True,
+                secure=False,
+                sameSite="Lax",
+            )
         ],
-        "origins": [],
-    }
+        origins=[],
+    )
 
 
-_browser = None
-_playwright = None
 
 
 async def wait_for_server(url: str, label: str, timeout: float = 30) -> None:
@@ -124,7 +243,7 @@ async def wait_for_server(url: str, label: str, timeout: float = 30) -> None:
             logger.debug("server %s not ready yet (retrying): %s", url, e)
             await asyncio.sleep(1)
             continue
-        if r.status_code < HTTP_5XX_START:
+        if r.status_code < DomCapture.HTTP_5XX_START:
             return
         await asyncio.sleep(1)
     _fail(
@@ -133,14 +252,6 @@ async def wait_for_server(url: str, label: str, timeout: float = 30) -> None:
     )
 
 
-async def get_browser():
-    global _browser, _playwright
-    if _browser and _browser.is_connected():
-        return _browser
-
-    _playwright = await async_playwright().start()
-    _browser = await _playwright.chromium.launch(**LAUNCH_OPTS)
-    return _browser
 
 
 async def _auth_state(page) -> bool | None:
@@ -156,10 +267,10 @@ async def _auth_state(page) -> bool | None:
             ".then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))"
             ".then(d => d.authenticated === true)"
         )
-    # lucidlint: ignore broad-except session check failure prints a warning and continues the login flow
-    except Exception as e:
+    # Playwright's Error covers every JS/evaluate/timeout failure — the session check degrades, never fails the capture.
+    except PlaywrightError as e:
         print(f"  WARNING: could not check session at {page.url}: {e}", file=sys.stderr)
-        if not page.url.startswith(FRONTEND_URL):
+        if not page.url.startswith(DomCapture.FRONTEND_URL):
             # The SPA navigated off the frontend origin (e.g. Google sign-in
             # redirect after an expired session): the failed fetch is an
             # unauthenticated page, not a backend outage.
@@ -184,21 +295,20 @@ async def _start_device_flow(client_id: str, client_secret: str) -> "DeviceFlowA
     and the poll cadence.
     """
     async with httpx.AsyncClient(timeout=30) as client:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        device_data = {"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE}
+        device_data = _DeviceFlowForm(client_id=client_id, scope=DomCapture.GOOGLE_DEVICE_SCOPE)
         if client_secret:
             device_data["client_secret"] = client_secret
         try:
-            r = await client.post(GOOGLE_DEVICE_URL, data=device_data)
+            r = await client.post(DomCapture.GOOGLE_DEVICE_URL, data=device_data)
         except httpx.HTTPError as e:
             _fail(
                 "Couldn't reach Google's sign-in service — check your connection and try again.",
-                f"device-flow setup POST to {GOOGLE_DEVICE_URL} failed: {e}",
+                f"device-flow setup POST to {DomCapture.GOOGLE_DEVICE_URL} failed: {e}",
             )
             return DeviceFlowAuthorization(
-                device_code="", user_code="", verification_url="", poll_interval_s=POLL_INTERVAL_DEFAULT_S
+                device_code="", user_code="", verification_url="", poll_interval_s=DomCapture.POLL_INTERVAL_DEFAULT_S
             )  # unreachable — _fail exits; keeps the swallow gate honest
-        if r.status_code != HTTP_OK:
+        if r.status_code != DomCapture.HTTP_OK:
             _fail(
                 "Couldn't start Google sign-in — the sign-in app isn't allowed to use device sign-in. "
                 "Nothing you did wrong; try again once it's fixed.",
@@ -206,7 +316,7 @@ async def _start_device_flow(client_id: str, client_secret: str) -> "DeviceFlowA
                 f"is device flow enabled for OAuth client {client_id}?",
             )
             return DeviceFlowAuthorization(
-                device_code="", user_code="", verification_url="", poll_interval_s=POLL_INTERVAL_DEFAULT_S
+                device_code="", user_code="", verification_url="", poll_interval_s=DomCapture.POLL_INTERVAL_DEFAULT_S
             )  # unreachable — _fail exits; keeps the swallow gate honest
         try:
             info = r.json()
@@ -216,12 +326,12 @@ async def _start_device_flow(client_id: str, client_secret: str) -> "DeviceFlowA
                 f"device-flow setup response was not JSON: {e}",
             )
             return DeviceFlowAuthorization(
-                device_code="", user_code="", verification_url="", poll_interval_s=POLL_INTERVAL_DEFAULT_S
+                device_code="", user_code="", verification_url="", poll_interval_s=DomCapture.POLL_INTERVAL_DEFAULT_S
             )  # unreachable — _fail exits; keeps the swallow gate honest
         device_code = info["device_code"]
         user_code = info["user_code"]
         verification_url = info.get("verification_url", "https://www.google.com/device")
-        interval = int(info.get("interval", POLL_INTERVAL_DEFAULT_S))
+        interval = int(info.get("interval", DomCapture.POLL_INTERVAL_DEFAULT_S))
         return DeviceFlowAuthorization(device_code, user_code, verification_url, interval)
 
 
@@ -233,18 +343,17 @@ async def _poll_for_id_token(client_id: str, client_secret: str, device_code: st
     'no one approved'.
     """
     async with httpx.AsyncClient(timeout=30) as client:
-        deadline = time.monotonic() + LOGIN_TIMEOUT_S
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-        token_data = {
-            "client_id": client_id,
-            "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        }
+        deadline = time.monotonic() + DomCapture.LOGIN_TIMEOUT.total_seconds()
+        token_data = _TokenPollForm(
+            client_id=client_id,
+            device_code=device_code,
+            grant_type="urn:ietf:params:oauth:grant-type:device_code",
+        )
         if client_secret:
             token_data["client_secret"] = client_secret
         while time.monotonic() < deadline:
             try:
-                r = await client.post(GOOGLE_TOKEN_URL, data=token_data)
+                r = await client.post(DomCapture.GOOGLE_TOKEN_URL, data=token_data)
             except httpx.HTTPError as e:
                 # Transient network blip: keep polling — the deadline below
                 # bounds the retry; log so a silent loop is diagnosable.
@@ -258,7 +367,7 @@ async def _poll_for_id_token(client_id: str, client_secret: str, device_code: st
                 # invalid_client served as an HTML page) — fail fast instead
                 # of polling to the deadline and misreporting as 'no one
                 # approved'. 5xx non-JSON stays a transient retry.
-                if HTTP_4XX_START <= r.status_code < HTTP_5XX_START:
+                if DomCapture.HTTP_4XX_START <= r.status_code < DomCapture.HTTP_5XX_START:
                     _fail(
                         "Google sign-in failed — nothing was signed in. Try again.",
                         f"Google device flow token exchange failed ({r.status_code}): {r.text[:200]}",
@@ -269,7 +378,7 @@ async def _poll_for_id_token(client_id: str, client_secret: str, device_code: st
                 )
                 await asyncio.sleep(interval)
                 continue
-            if r.status_code == HTTP_OK:
+            if r.status_code == DomCapture.HTTP_OK:
                 id_token = data.get("id_token")
                 if not id_token:
                     _fail(
@@ -298,10 +407,10 @@ async def _poll_for_id_token(client_id: str, client_secret: str, device_code: st
                 )
             await asyncio.sleep(interval)
     _fail(
-        f"No one approved the sign-in within {LOGIN_TIMEOUT_S // SECONDS_PER_MINUTE} minutes — "
+        f"No one approved the sign-in within {DomCapture.LOGIN_TIMEOUT // timedelta(minutes=1)} minutes — "
         "nothing was signed in. "
         f"Run the command again when you can approve it.",
-        f"no device-flow approval after {LOGIN_TIMEOUT_S // SECONDS_PER_MINUTE} min",
+        f"no device-flow approval after {DomCapture.LOGIN_TIMEOUT // timedelta(minutes=1)} min",
     )
     return ""  # unreachable — _fail exits; keeps the swallow gate honest
 
@@ -309,15 +418,15 @@ async def _poll_for_id_token(client_id: str, client_secret: str, device_code: st
 async def _exchange_for_session_cookie(client: httpx.AsyncClient, id_token: str) -> str:
     """Trade the Google id_token for the app's signed session cookie."""
     try:
-        r = await client.post(BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
+        r = await client.post(DomCapture.BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
     except httpx.HTTPError as e:
         _fail(
             "Couldn't reach the app to finish signing in — check that it's running, then try again.",
-            f"device login POST to {BACKEND_URL}/api/auth/device failed: {e}",
+            f"device login POST to {DomCapture.BACKEND_URL}/api/auth/device failed: {e}",
         )
         return ""  # unreachable — _fail exits; keeps the swallow gate honest
-    if r.status_code != HTTP_OK:
-        if r.status_code == HTTP_SERVICE_UNAVAILABLE:
+    if r.status_code != DomCapture.HTTP_OK:
+        if r.status_code == DomCapture.HTTP_SERVICE_UNAVAILABLE:
             _fail(
                 "Couldn't complete the sign-in — the sign-in service was unreachable. "
                 "Check your connection and try again.",
@@ -363,8 +472,8 @@ async def login(state_file: Path) -> None:
     client_secret = settings.device_client_secret
 
     print("Waiting for servers …")
-    await wait_for_server(BACKEND_URL + "/api/auth/me", "backend")
-    await wait_for_server(FRONTEND_URL, "frontend")
+    await wait_for_server(DomCapture.BACKEND_URL + "/api/auth/me", "backend")
+    await wait_for_server(DomCapture.FRONTEND_URL, "frontend")
     print(f"Session state will be saved to: {state_file}")
 
     flow = await _start_device_flow(client_id, client_secret)
@@ -374,7 +483,7 @@ async def login(state_file: Path) -> None:
     print(f"1) Open {verification_url} in any browser")
     print(f"2) Enter code: {user_code}")
     print("3) Approve with your Google account (2FA if asked)")
-    print(f"Waiting for approval (up to {LOGIN_TIMEOUT_S // SECONDS_PER_MINUTE} min) …")
+    print(f"Waiting for approval (up to {DomCapture.LOGIN_TIMEOUT // timedelta(minutes=1)} min) …")
 
     id_token = await _poll_for_id_token(client_id, client_secret, device_code, interval)
 
@@ -385,7 +494,7 @@ async def login(state_file: Path) -> None:
     # Create owner-only from the start: write_text() would briefly create the
     # file with the default umask before chmod runs. 0o600 is still masked by
     # umask, so this can only be more restrictive, never less.
-    fd = os.open(state_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, STATE_FILE_MODE)
+    fd = os.open(state_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, DomCapture.STATE_FILE_MODE)
     with os.fdopen(fd, "w") as f:
         json.dump(_storage_state(session_cookie), f, indent=2)
     print(f"Session saved → {state_file} (localhost session cookie only)")
@@ -405,58 +514,6 @@ class _PageErrors:
         self.messages.append(f"PAGE: {str(error)[:300]}")
 
 
-async def capture_page(url: str, output_dir: str | Path, label: str, state_file: Path):
-    browser = await get_browser()
-    context = await browser.new_context(
-        viewport={"width": 1280, "height": 2048},
-        ignore_https_errors=True,
-        storage_state=str(state_file),
-    )
-    page = await context.new_page()
-
-    errors = _PageErrors()
-    page.on("console", errors.on_console)
-    page.on("pageerror", errors.on_page_error)
-
-    await page.goto(url, wait_until="networkidle", timeout=30000)
-    await page.wait_for_timeout(PAGE_SETTLE_DELAY_MS)
-
-    auth = await _auth_state(page)
-    if auth is None:
-        await context.close()
-        _fail(
-            "The app's server isn't responding — fix that, then re-run this capture.",
-            f"{page.url} — backend unreachable during session check",
-        )
-    if not auth:
-        await context.close()
-        _fail(
-            f"{AUTH_HINT}, then re-run this capture.",
-            f"{page.url} — no authenticated session (session cookie missing or expired)",
-        )
-
-    html = await page.content()
-    html_path = Path(output_dir) / f"dom_{label}.html"
-    html_path.write_text(html)
-    print(f"  DOM saved ({len(html)} bytes) → {html_path}")
-
-    screenshot_path = Path(output_dir) / f"screenshot_{label}.png"
-    await page.screenshot(path=str(screenshot_path), full_page=True)
-    print(f"  Screenshot → {screenshot_path}")
-
-    if errors.messages:
-        print(f"  Console errors ({len(errors.messages)}):")
-        for e in errors.messages[:5]:
-            print(f"    {e}")
-
-    cards = await page.query_selector_all(".card")
-    print(f"  Cards: {len(cards)}")
-    for i, card in enumerate(cards[:2]):
-        text = (await card.text_content() or "").strip()[:500]
-        print(f"\n  --- Card {i} ---")
-        print(f"  {text}")
-
-    await context.close()
 
 
 async def main():
@@ -497,24 +554,21 @@ async def main():
     out = Path(args.output) if args.output else _session_dir()
     out.mkdir(parents=True, exist_ok=True)
 
-    print("Waiting for servers …")
-    await wait_for_server(BACKEND_URL + "/api/properties", "backend")
-    await wait_for_server(FRONTEND_URL, "frontend")
+    dc = DomCapture()
+    await wait_for_server(DomCapture.BACKEND_URL + "/api/properties", "backend")
+    await wait_for_server(DomCapture.FRONTEND_URL, "frontend")
 
     urls = []
     if not args.detail_only:
-        urls.append((FRONTEND_URL + "/", "list"))
+        urls.append((DomCapture.FRONTEND_URL + "/", "list"))
     if not args.list_only:
-        urls.append((FRONTEND_URL + "/#/property/89306649", "detail"))
+        urls.append((DomCapture.FRONTEND_URL + "/#/property/89306649", "detail"))
 
     for url, label in urls:
         print(f"\nCapturing {label} page …")
-        await capture_page(url, out, label, state_file)
+        await dc.capture_page(url, out, label, state_file)
 
-    if _browser:
-        await _browser.close()
-    if _playwright:
-        await _playwright.stop()
+    await dc.stop_browser()
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from collections.abc import Iterable
 
 import httpx
 from pint import Quantity
@@ -12,6 +12,7 @@ from pint import Quantity
 from houses import apis
 from houses.geopoint import GeoPoint
 from houses.location import PropertyLocation, WalkabilityFns
+from serialization import QuantityValue, SerializableAsDict
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +75,22 @@ KNOWN_COUNTIES = frozenset(
         "west yorkshire",
     }
 )
-HTTP_TOO_MANY_REQUESTS = 429
-HTTP_5XX_START = 500
-HTTP_5XX_END = 600
+class _WalkabilityLimits:
+    """Walkability enrichment tunables: the HTTP retry band for API
+    calls, the plausibility bound on walk times, and the shape of the
+    amenities summary (how many places it names, where a placeless one
+    sorts)."""
+
+    HTTP_TOO_MANY_REQUESTS = 429
+    HTTP_5XX_START = 500
+    HTTP_5XX_END = 600
+    MAX_PLAUSIBLE_WALK_MINUTES = 180
+    SUMMARY_PLACES = 5
+    NO_POINT_SORT_KEY = 999
+
+
 # walking pace as a Quantity — the km→minutes math goes through pint
 WALKING_SPEED = Quantity(5, "km/hour")
-MAX_PLAUSIBLE_WALK_MINUTES = 180
 
 
 def extract_town(address: str) -> str:
@@ -121,8 +132,8 @@ async def _walk_duration(
             _client_factory=_client_factory,
         )
     except httpx.HTTPStatusError as e:
-        if e.response.status_code == HTTP_TOO_MANY_REQUESTS or (
-            HTTP_5XX_START <= e.response.status_code < HTTP_5XX_END
+        if e.response.status_code == _WalkabilityLimits.HTTP_TOO_MANY_REQUESTS or (
+            _WalkabilityLimits.HTTP_5XX_START <= e.response.status_code < _WalkabilityLimits.HTTP_5XX_END
         ):
             raise  # transient — let DAG retry handle it
         logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
@@ -141,7 +152,9 @@ async def _google_places_text(lat: float, lng: float) -> str:
         results = await apis.places.search_nearby(lat, lng, types=types)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
-        if status == HTTP_TOO_MANY_REQUESTS or (HTTP_5XX_START <= status < HTTP_5XX_END):
+        if status == _WalkabilityLimits.HTTP_TOO_MANY_REQUESTS or (
+            _WalkabilityLimits.HTTP_5XX_START <= status < _WalkabilityLimits.HTTP_5XX_END
+        ):
             raise  # transient — let DAG retry handle it
         logger.warning("Google Places API failed (%s), falling back to Overpass", status)
         return ""
@@ -167,72 +180,49 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         places = _format_overpass(response, lat, lng)
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
-    # lucidlint: ignore broad-except deliberate fallback — Overpass failure returns the partial places string
-    except Exception as e:
+    except (AttributeError, KeyError, OSError, TypeError, ValueError) as e:
         logger.warning("Overpass fallback failed: %s: %s", type(e).__name__, e)
         return places
 
     return places
 
 
-def _format_places(places: list[apis.PlacesResult], lat: float, lng: float) -> str:
-    """Format Google Places results into a human-readable string."""
-    if not places:
-        return ""
-    origin = GeoPoint(lat, lng)
-    hits = []
-    for place in places:
-        place_types = set(place.types)
-        if place_types & {
-            "transit_station",
-            "bus_stop",
-            "bus_station",
-            "locality",
-            "administrative_area_level_3",
-            "administrative_area_level_4",
-        }:
+def _amenity_summary(origin: GeoPoint, named: Iterable[tuple[str, GeoPoint | None]]) -> str:
+    """The nearest destinations as one line: nearest first, at most five.
+
+    Both sources — Google Places and the Overpass fallback — agree on how a
+    place becomes a line, and differ only in where its name and point come
+    from. A place with no point cannot be timed, so it sorts last.
+    """
+    hits: list[tuple[int, str]] = []
+    for name, point in named:
+        if point is None:
+            hits.append((_WalkabilityLimits.NO_POINT_SORT_KEY, name))
             continue
-        name = place.name
-        place_lat = place.latitude
-        place_lng = place.longitude
-        if place_lat is not None and place_lng is not None:
-            dist_km = origin.distance_km_to(GeoPoint(place_lat, place_lng))
-            # GeoPoint.distance_km_to is a bare-km wire value; the pace math
-            # is pint, and the minutes int is the serialization boundary
-            walk_minutes_q = (Quantity(dist_km, "km") / WALKING_SPEED).to("minute")
-            walk_min = max(1, round(walk_minutes_q.magnitude))
-            hits.append((walk_min, f"{name} ({walk_min}m)"))
-        else:
-            hits.append((999, name))
+        # GeoPoint.distance_km_to is a bare-km wire value; the pace math is
+        # pint, and the minutes int is the serialization boundary
+        walk_minutes_q = (Quantity(origin.distance_km_to(point), "km") / WALKING_SPEED).to("minute")
+        walk_min = max(1, round(walk_minutes_q.magnitude))  # one step away is still a minute
+        hits.append((walk_min, f"{name} ({walk_min}m)"))
     hits.sort(key=lambda x: x[0])
-    return " | ".join(name for _, name in hits[:5])
+    return " | ".join(name for _, name in hits[: _WalkabilityLimits.SUMMARY_PLACES])
+
+
+def _format_places(places: list[apis.PlacesResult], lat: float, lng: float) -> str:
+    """The amenities summary from Google Places — destinations only."""
+    destinations = ((place.name, place.location) for place in places if place.is_destination())
+    return _amenity_summary(GeoPoint(lat, lng), destinations)
 
 
 def _format_overpass(data: apis.OverpassResponse, lat: float, lng: float) -> str:
-    """Format Overpass API response into a human-readable string."""
-    elements = data.elements
-    origin = GeoPoint(lat, lng)
-    hits = []
-    for element in elements:
-        name = element.tags.get("name", "")
-        if not name:
-            continue
-        e_lat = element.latitude or (element.center[0] if element.center else None)
-        e_lng = element.longitude or (element.center[1] if element.center else None)
-        if e_lat is not None and e_lng is not None:
-            dist_km = origin.distance_km_to(GeoPoint(e_lat, e_lng))
-            walk_minutes_q = (Quantity(dist_km, "km") / WALKING_SPEED).to("minute")
-            walk_min = max(1, round(walk_minutes_q.magnitude))
-            hits.append((walk_min, f"{name} ({walk_min}m)"))
-        else:
-            hits.append((999, name))
-    hits.sort(key=lambda x: x[0])
-    return " | ".join(name for _, name in hits[:5])
+    """The amenities summary from the Overpass fallback — named elements only."""
+    named = ((name, element.location()) for element in data.elements if (name := element.tags.get("name", "")))
+    return _amenity_summary(GeoPoint(lat, lng), named)
 
 
 def _plausible_walk(minutes) -> bool:
     """True when the walk time is real and within a plausible range."""
-    return minutes is not None and 0 < minutes <= MAX_PLAUSIBLE_WALK_MINUTES
+    return minutes is not None and 0 < minutes <= _WalkabilityLimits.MAX_PLAUSIBLE_WALK_MINUTES
 
 
 async def _walk_to_town_minutes(
@@ -268,33 +258,12 @@ async def _walk_to_town_minutes(
     return walk_to_town_minutes if _plausible_walk(walk_to_town_minutes) else None
 
 
-@dataclass(frozen=True)
-class _WalkToTown:
-    """The walk-to-town summary entry of the walkability payload."""
+class Walkability(SerializableAsDict):
+    """The walkability node value: walk-to-town time plus amenities text,
+    serialized once at the node-value edge by ``to_dict``."""
 
-    value: int
-    unit: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
-        return dict(value=self.value, unit=self.unit)
-
-
-@dataclass(frozen=True)
-class WalkabilityPayload:
-    """The walkability node value: walk-to-town summary plus amenities text."""
-
-    walk_to_town: _WalkToTown | None
+    walk_to_town: QuantityValue | None = None
     amenities: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
-        return dict(
-            walk_to_town=self.walk_to_town.to_dict() if self.walk_to_town is not None else None,
-            amenities=self.amenities,
-        )
 
 
 async def enrich_walkability(
@@ -302,7 +271,7 @@ async def enrich_walkability(
     lng: float,
     address: str,
     fns: WalkabilityFns | None = None,
-) -> WalkabilityPayload:
+) -> Walkability:
     """Walk time to town centre + nearby amenities for a property.
 
     ``fns`` carries the function-param injection seams for tests
@@ -321,5 +290,5 @@ async def enrich_walkability(
     )
     amenities = await nearby_amenities(lat, lng)
 
-    walk_to_town = _WalkToTown(value=walk_to_town_minutes, unit="minute") if walk_to_town_minutes is not None else None
-    return WalkabilityPayload(walk_to_town=walk_to_town, amenities=amenities)
+    walk_to_town = Quantity(walk_to_town_minutes, "minute") if walk_to_town_minutes is not None else None
+    return Walkability(walk_to_town=walk_to_town, amenities=amenities)

@@ -24,12 +24,14 @@ import csv
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from money import Money
 from playwright.async_api import async_playwright
 
 from dag.attempt import Attempt
+from dag.guard import capture_async
 from houses.apcoa_scraper import ApcoaPageRecord, ApcoaScraper
 from houses.stations import Station
 
@@ -79,29 +81,21 @@ def _log_apcoa_find(result: ApcoaPageRecord, source: str, station: Station) -> A
     return result
 
 
-class ApcoaCarParkLookup:
-    """Playwright-scraping half of the car-park database.
+class ApcoaPageWalk:
+    """The Playwright page walk over APCOA: the station's location page
+    first, then the prebook listing near its coordinates.
 
-    Owns the APCOA scraper and the location/prebook page walk. Looked-up
-    results are written back through the ``CarParkRegistry`` it is
-    constructed with (in-memory mutation + CSV persistence), so the
-    registry stays the single owner of car-park state.
+    Owns the APCOA scraper and returns the ``ApcoaPageRecord`` it finds,
+    or ``None``; the registry-facing ``ApcoaCarParkLookup`` writes
+    results back.
     """
 
     _apcoa_scraper_inst: ApcoaScraper
 
-    def __init__(
-        self,
-        registry: CarParkRegistry,
-        apcoa_lookup_fn: Callable[[Station], Awaitable[ApcoaPageRecord | None]] | None = None,
-    ) -> None:
-        """``apcoa_lookup_fn`` is a test seam — it defaults to the real
-        APCOA scrape, so tests never monkeypatch module globals.
-        """
-        self._registry: CarParkRegistry = registry
-        self._apcoa_lookup_fn: Callable[[Station], Awaitable[ApcoaPageRecord | None]] = (
-            apcoa_lookup_fn or self._apcoa_lookup
-        )
+    # Page-load settle times: the prebook results page hydrates its tariff
+    # table slower than the location page.
+    SETTLE_AFTER_LOCATION_PAGE_SECONDS = 2.0
+    SETTLE_AFTER_PREBOOK_PAGE_SECONDS = 3.5
 
     @property
     def _apcoa_scraper(self) -> ApcoaScraper:
@@ -109,6 +103,147 @@ class ApcoaCarParkLookup:
         if not hasattr(self, "_apcoa_scraper_inst"):
             self._apcoa_scraper_inst = ApcoaScraper()
         return self._apcoa_scraper_inst
+
+
+    async def lookup(self, station: Station) -> ApcoaPageRecord | None:
+        """Scrape APCOA for a car park near *station*.
+
+        Strategy (matching ``scripts/sync_parking_rates.py``):
+          1. Try the station's APCOA location page (e.g.
+             ``/find-parking/locations/{city}/{name}-station-{city}``)
+          2. Fall back to the prebook listing page near the station's
+             coordinates.
+
+        Returns an ``ApcoaPageRecord`` with ``name``, ``address``, and
+        ``price`` fields, or ``None`` if nothing found.
+        """
+        async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
+            page = await browser.new_page()
+
+            for strategy in (self._try_location_pages, self._try_prebook_page):
+                found = await strategy(page, station)
+                if found is not None:
+                    return found
+
+            logger.info("APCOA lookup for '%s': all strategies exhausted", station.name)
+            return None
+
+    async def _try_location_pages(self, page, station: Station) -> ApcoaPageRecord | None:
+        """Strategy 1: the station's APCOA location page, across candidate URLs."""
+        for url in self._apcoa_scraper.apcoa_location_urls(station.name):
+            found, failure = await capture_async(partial(self._read_location_page, page, url, station))
+            if failure is not None:
+                # Fail fast: re-raise the ORIGINAL exception so the DAG's
+                # classifier can name the network type (a wrapper kills retry).
+                logger.warning("APCOA lookup failed for %s (url=%s)", station.name, url)
+                raise failure
+            if found is not None:
+                return found
+        return None
+
+    async def _read_location_page(self, page, url: str, station: Station) -> ApcoaPageRecord | None:
+        """One candidate location page: scrape it, or None when it is absent."""
+        await self._goto_and_settle(page, url, self.SETTLE_AFTER_LOCATION_PAGE_SECONDS)
+
+        title = await page.title()
+        if "404" in title:
+            return None
+
+        await self._dismiss_privacy_dialog(page)
+
+        # Click "Pricing and payment" accordion
+        await page.evaluate(
+            """() => {
+                    const btns = [...document.querySelectorAll('button')];
+                    for (const b of btns) {
+                        if (b.textContent.includes('Pricing and payment')) {
+                            b.click(); return;
+                        }
+                    }
+                }"""
+        )
+        await asyncio.sleep(2)
+
+        page_text = await page.evaluate("() => document.body.innerText")
+        record = self._apcoa_scraper._parse_apcoa_location_page(page_text, title)
+        if record is None:
+            return None
+        return _log_apcoa_find(record, "location page", station)
+
+    async def _try_prebook_page(self, page, station: Station) -> ApcoaPageRecord | None:
+        """Strategy 2: the prebook listing page near the station's coordinates."""
+        lat, lng = station.location.lat, station.location.lon
+        url = (
+            "https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
+            f"?latitude={lat}&longitude={lng}&placeName={station.name}&maximumDistance=3"
+        )
+        found, failure = await capture_async(lambda: self._read_prebook_page(page, url, station))
+        if failure is not None:
+            logger.debug("APCOA prebook listing failed for %s: %s", station.name, failure)
+            return None
+        return found
+
+    async def _read_prebook_page(self, page, url: str, station: Station) -> ApcoaPageRecord | None:
+        """The prebook listing page's car parks, or None when it lists none."""
+        await self._goto_and_settle(page, url, self.SETTLE_AFTER_PREBOOK_PAGE_SECONDS)
+
+        await self._dismiss_privacy_dialog(page)
+
+        page_text = await page.evaluate("() => document.body.innerText")
+
+        # Check for "Sorry" — means no results
+        if "Sorry" in page_text:
+            logger.info("APCOA prebook for '%s': no car parks found", station.name)
+            return None
+
+        record = self._apcoa_scraper._parse_apcoa_prebook_listing(page_text)
+        if record is None:
+            return None
+        return _log_apcoa_find(record, "prebook", station)
+
+    @staticmethod
+    async def _goto_and_settle(page, url: str, settle_seconds: float) -> None:
+        """Open an APCOA page and let its content settle before scraping."""
+        await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        await asyncio.sleep(settle_seconds)
+
+    @staticmethod
+    async def _dismiss_privacy_dialog(page) -> None:
+        """Click the APCOA consent button when it appears — the location
+        page offers 'Accept All', the prebook page 'Agree always'."""
+        await page.evaluate(
+            """() => {
+                    const btns = [...document.querySelectorAll('button')];
+                    for (const b of btns) {
+                        const t = b.textContent.trim();
+                        if (t.includes('Accept All') || t.includes('Agree always')) {
+                            b.click(); return;
+                        }
+                    }
+                }"""
+        )
+        await asyncio.sleep(1)
+
+
+class ApcoaCarParkLookup:
+    """Registry-facing half of the car-park database: look up an APCOA car
+    park for a station and write the result back through the
+    ``CarParkRegistry`` it is constructed with (in-memory mutation + CSV
+    persistence), so the registry stays the single owner of car-park state.
+    """
+
+    def __init__(
+        self,
+        registry: CarParkRegistry,
+        apcoa_lookup_fn: Callable[[Station], Awaitable[ApcoaPageRecord | None]] | None = None,
+    ) -> None:
+        """``apcoa_lookup_fn`` is a test seam — it defaults to the real
+        APCOA page walk, so tests never monkeypatch module globals.
+        """
+        self._registry: CarParkRegistry = registry
+        self._apcoa_lookup_fn: Callable[[Station], Awaitable[ApcoaPageRecord | None]] = (
+            apcoa_lookup_fn or ApcoaPageWalk().lookup
+        )
 
     async def load_costs(self, car_park: CarPark, station: Station) -> Attempt[CarPark]:
         """Look up the daily cost for a known car park via APCOA.
@@ -149,108 +284,6 @@ class ApcoaCarParkLookup:
         self._registry._persist_results(station, car_park)
         return Attempt.succeeded(car_park)
 
-    async def _apcoa_lookup(self, station: Station) -> ApcoaPageRecord | None:
-        """Scrape APCOA for a car park near *station*.
-
-        Strategy (matching ``scripts/sync_parking_rates.py``):
-          1. Try the station's APCOA location page (e.g.
-             ``/find-parking/locations/{city}/{name}-station-{city}``)
-          2. Fall back to the prebook listing page near the station's
-             coordinates.
-
-        Returns an ``ApcoaPageRecord`` with ``name``, ``address``, and
-        ``price`` fields, or ``None`` if nothing found.
-        """
-        async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
-            page = await browser.new_page()
-
-            for url in self._apcoa_scraper.apcoa_location_urls(station.name):
-                try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                    await asyncio.sleep(2)
-
-                    title = await page.title()
-                    if "404" in title:
-                        continue
-
-                    # Dismiss privacy dialog
-                    await page.evaluate(
-                        """() => {
-                                const btns = [...document.querySelectorAll('button')];
-                                for (const b of btns) {
-                                    const t = b.textContent.trim();
-                                    if (t.includes('Accept All') || t.includes('Agree always')) {
-                                        b.click(); return;
-                                    }
-                                }
-                            }"""
-                    )
-                    await asyncio.sleep(1)
-
-                    # Click "Pricing and payment" accordion
-                    await page.evaluate(
-                        """() => {
-                                const btns = [...document.querySelectorAll('button')];
-                                for (const b of btns) {
-                                    if (b.textContent.includes('Pricing and payment')) {
-                                        b.click(); return;
-                                    }
-                                }
-                            }"""
-                    )
-                    await asyncio.sleep(2)
-
-                    page_text = await page.evaluate("() => document.body.innerText")
-                    result = self._apcoa_scraper._parse_apcoa_location_page(page_text, title)
-                    if result is not None:
-                        return _log_apcoa_find(result, "location page", station)
-                # Fail fast: re-raise the ORIGINAL exception so the DAG's
-                # single classifier (_compute_attempt) decides retry vs
-                # impossible — a RuntimeError wrapper would hide the
-                # network type and kill the retry (2026-09-19).
-                except Exception:
-                    logger.warning("APCOA lookup failed for %s (url=%s)", station.name, url)
-                    raise
-
-            # ── Strategy 2: Prebook listing page ─────────────
-            lat, lng = station.location.lat, station.location.lon
-            try:
-                url = (
-                    "https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
-                    f"?latitude={lat}&longitude={lng}&placeName={station.name}&maximumDistance=3"
-                )  # lucidlint: ignore duplicate-block strategy 2 intentionally repeats strategy 1's
-                await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                await asyncio.sleep(3.5)
-
-                # Dismiss privacy dialog
-                await page.evaluate(
-                    """() => {
-                            const btns = [...document.querySelectorAll('button')];
-                            const a = btns.find(b => b.textContent.includes('Agree always'));
-                            if (a) a.click();
-                        }"""
-                )
-                await asyncio.sleep(1)
-
-                page_text = await page.evaluate("() => document.body.innerText")
-                title = await page.title()
-
-                # Check for "Sorry" — means no results
-                if "Sorry" in page_text:
-                    logger.info("APCOA prebook for '%s': no car parks found", station.name)
-                    return None
-
-                result = self._apcoa_scraper._parse_apcoa_prebook_listing(page_text)
-                if result is not None:
-                    return _log_apcoa_find(result, "prebook", station)
-            # lucidlint: ignore broad-except deliberate fallback — prebook-listing failure degrades to None
-            except Exception as e:
-                logger.debug("APCOA prebook listing failed for %s: %s", station.name, e)
-                return None
-
-            logger.info("APCOA lookup for '%s': all strategies exhausted", station.name)
-            return None
-
 
 class CarParkRegistry:
     """CSV-backed car park database.
@@ -283,10 +316,8 @@ class CarParkRegistry:
                 station_map={"fleet rail station": "Fleet"},
             )
         """
-        by_name: dict[str, CarPark] = {}
+        by_name: dict[str, CarPark] = {cp.name.lower(): cp for cp in car_parks}
         by_crs: dict[str, CarPark] = {}
-        for cp in car_parks:
-            by_name[cp.name.lower()] = cp
         reg = cls.__new__(cls)
         reg._by_name = by_name
         reg._by_crs = by_crs

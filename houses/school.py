@@ -12,6 +12,9 @@ from houses.school_gender import SchoolGender
 logger = logging.getLogger(__name__)
 
 
+type _PhaseRangeMap = dict[str, tuple[int, int]]
+
+
 @dataclass(frozen=True)
 class School:
     """A UK educational establishment from GIAS data."""
@@ -31,6 +34,7 @@ class School:
     _COL_CORR_LNG: ClassVar[str] = "CorrectedLongitude"
     _COL_LOW_AGE: ClassVar[str] = "StatutoryLowAge"
     _COL_HIGH_AGE: ClassVar[str] = "StatutoryHighAge"
+    _CORRECTED_COORD_MAX_KM: ClassVar[int] = 100
 
     _FEE_PAYING_TYPES: ClassVar[frozenset] = frozenset(
         {
@@ -58,14 +62,18 @@ class School:
     # Postcode centroid from GIAS — approximate location for distance
     # gating when corrected (building-level) coords are unavailable.
     _postcode_centroid: GeoPoint | None = None
-    _PHASE_RANGES: ClassVar[dict[str, tuple[int, int]]] = {
-        "nursery": (2, 4),
-        "primary": (4, 11),
-        "middle deemed primary": (9, 13),
-        "middle deemed secondary": (9, 14),
-        "secondary": (11, 18),
-        "16 plus": (16, 18),
-        "all-through": (4, 18),
+    # Keyed lookup: GIAS phase name → its statutory age range.
+    _PHASE_RANGES: ClassVar[_PhaseRangeMap] = {
+        phase: (low_age, high_age)
+        for phase, low_age, high_age in (
+            ("nursery", 2, 4),
+            ("primary", 4, 11),
+            ("middle deemed primary", 9, 13),
+            ("middle deemed secondary", 9, 14),
+            ("secondary", 11, 18),
+            ("16 plus", 16, 18),
+            ("all-through", 4, 18),
+        )
     }
 
     @property
@@ -104,7 +112,7 @@ class School:
         if corr_lat and corr_lng:
             corrected = _try_geopoint(corr_lat, corr_lng)
             if corrected is not None and original is not None:
-                if original.distance_km_to(corrected) < 100:
+                if original.distance_km_to(corrected) < cls._CORRECTED_COORD_MAX_KM:
                     coords = corrected
             elif corrected is not None:
                 coords = corrected

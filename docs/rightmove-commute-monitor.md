@@ -54,7 +54,8 @@ Requirements:
 
 - Per-property commute engine: TfL Journey Planner (`houses/tfl_client.py`,
   `nationalSearch=true`, arriving 09:00, disk cache `data/api_cache/`), plus a bus-leg
-  augmentation layer (`houses/nodes/bus.py`: Google Directions + BODS fares) covering
+  augmentation layer (`houses/nodes/bus_route_node.py` + `houses/nodes/bods_fare_node.py`:
+  Google Directions + BODS fares) covering
   non-TfL buses at property level. **TfL is a free public API with no hard quota** — the
   quota constraint that matters is Google/BODS, which phase 1 does not touch.
 - `data/stations.csv`: 2606 UK stations with name, CRS, lat/lon (committed).

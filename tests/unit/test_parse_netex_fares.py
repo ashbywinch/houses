@@ -115,8 +115,8 @@ class TestGating:
         </PublicationDelivery>"""
         result = parse_netex_fares(xml, [STATION_AT_FOO])
         assert result is not None
-        assert result["stop_zones"] == {}
-        assert result["stop_coords"] == []
+        assert result.stop_zones == {}
+        assert result.stop_coords == []
 
 
 class TestStops:
@@ -126,7 +126,7 @@ class TestStops:
         # only stop_coords exposes stops; near-station gating shows via which
         # stops survive the proximity filter — Foo Lane (51.5, -0.1) is within
         # 0.2 km of the test station, Bar/Quarry are not.
-        zones = {c["zone"]: c for c in result["stop_coords"]}
+        zones = {c.zone: c for c in result.stop_coords}
         assert set(zones) == {"Z1", "Z2", "Z3"}
 
     # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
@@ -143,61 +143,61 @@ class TestStops:
         )
         result = parse_netex_fares(xml, [STATION_AT_FOO])
         assert result is not None
-        coords = [c for c in result["stop_coords"] if c["name"] == "Foo Lane"]
-        assert coords and coords[0]["lat"] == 51.5  # first definition kept
+        coords = [c for c in result.stop_coords if c.name == "Foo Lane"]
+        assert coords and coords[0].lat == 51.5  # first definition kept
 
     # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
     def test_naptan_fallback_fills_missing_coordinates(self):
         xml = XML.replace("    <Latitude>51.5</Latitude>\n    <Longitude>-0.1</Longitude>\n", "")
         result = parse_netex_fares(xml, [STATION_AT_FOO], naptan={"010A": (51.5005, -0.1005)})
         assert result is not None
-        coords = [c for c in result["stop_coords"] if c["name"] == "Foo Lane"]
-        assert coords and coords[0]["lat"] == 51.5005 and coords[0]["lon"] == -0.1005
+        coords = [c for c in result.stop_coords if c.name == "Foo Lane"]
+        assert coords and coords[0].lat == 51.5005 and coords[0].lon == -0.1005
 
 
 class TestStopZones:
     def test_stop_zones_normalized_by_lowercase_name(self):
         result = parse_netex_fares(XML, [STATION_AT_FOO])
         assert result is not None
-        assert result["stop_zones"] == {"foo lane": "Z1", "bar road": "Z2", "quarry halt": "Z3"}
+        assert result.stop_zones == {"foo lane": "Z1", "bar road": "Z2", "quarry halt": "Z3"}
 
 
 class TestStopCoords:
     def test_coords_rounded_and_zoned(self):
         result = parse_netex_fares(XML, [STATION_AT_FOO])
         assert result is not None
-        by_zone = {c["zone"]: c for c in result["stop_coords"]}
-        assert by_zone["Z1"] == {"name": "Foo Lane", "lat": 51.5, "lon": -0.1, "zone": "Z1"}
-        assert by_zone["Z2"]["name"] == "Bar Road"
-        assert set(by_zone["Z2"]) == {"name", "lat", "lon", "zone"}
+        by_zone = {c.zone: c for c in result.stop_coords}
+        assert by_zone["Z1"].to_dict() == {"name": "Foo Lane", "lat": 51.5, "lon": -0.1, "zone": "Z1"}
+        assert by_zone["Z2"].name == "Bar Road"
+        assert set(by_zone["Z2"].to_dict()) == {"name", "lat", "lon", "zone"}
 
 
 class TestZoneFares:
     def test_distance_matrix_price_with_alighting_normalization(self):
         result = parse_netex_fares(XML, [STATION_AT_FOO])
         assert result is not None
-        assert result["zone_fares"]["Z1:Z2@boarding"]["adult_single"] == 2.5
+        assert result.zone_fares["Z1:Z2@boarding"]["adult_single"] == 2.5
 
     def test_price_group_fare(self):
         result = parse_netex_fares(XML, [STATION_AT_FOO])
         assert result is not None
-        assert result["zone_fares"]["Z2:Z1"]["adult_single"] == 3.75
+        assert result.zone_fares["Z2:Z1"]["adult_single"] == 3.75
 
     def test_preassigned_product_via_product_ref(self):
         result = parse_netex_fares(XML, [STATION_AT_FOO])
         assert result is not None
-        assert result["zone_fares"]["Z3:Z1"]["adult_single"] == 1.2
+        assert result.zone_fares["Z3:Z1"]["adult_single"] == 1.2
 
 
 class TestNetworkFares:
     def test_fare_table_day_product_without_dme_ref(self):
         result = parse_netex_fares(XML, [STATION_AT_FOO])
         assert result is not None
-        assert len(result["network_fares"]) == 1
-        nf = result["network_fares"][0]
-        assert nf["price"] == 4.5
-        assert nf["product_type"] == "adult_day"
-        assert "010a" in nf["covered_stops"]
+        assert len(result.network_fares) == 1
+        nf = result.network_fares[0]
+        assert nf.price == 4.5
+        assert nf.product_type == "adult_day"
+        assert "010a" in nf.covered_stops
 
         # lucidlint: ignore fakefs pure in-memory parse — no FS use; pyfakefs not the house standard (testing-standards)
     def test_tariff_first_fare_zone_ref_only_pins_wire_shape(self):
@@ -207,12 +207,11 @@ class TestNetworkFares:
         )
         result = parse_netex_fares(xml, [STATION_AT_FOO])
         assert result is not None
-        nf = result["network_fares"][0]
+        nf = result.network_fares[0]
         # Shipped contract: only the FIRST FareZoneRef of the Tariff contributes stops.
-        assert nf["covered_stops"] == ["010a"]
+        assert nf.to_dict()["covered_stops"] == ["010a"]
         # The parse result is the wire shape — JSON-serializable end to end.
-        json.dumps(result)
-
+        json.dumps(result.to_dict())
 
 class TestHelpers:
     def test_classify_fare_product_type(self):

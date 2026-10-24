@@ -27,41 +27,27 @@ def _mw(value: int):
 class TestBusRouteNode:
     @pytest.mark.asyncio
     async def test_returns_dict_when_location_ok(self):
-        from houses.nodes.bus import BusRouteNode
+        from houses.bus_route import BusRoute
+        from houses.nodes.bus_route_node import BusRouteNode
+        from houses.transit_stop import TransitStop
 
         loc = UserInputNode[GeoPoint]("loc_br", GeoPoint)
         dest = UserInputNode[str]("dest_br", str)
 
-        async def fake_google_routes(body, field_mask, **kw):
-            return {
-                "routes": [
-                    {
-                        "duration": "600s",
-                        "legs": [
-                            {
-                                "steps": [
-                                    {
-                                        "travelMode": "TRANSIT",
-                                        "transitDetails": {
-                                            "transitLine": {"vehicle": {"type": "BUS"}},
-                                            "stopDetails": {
-                                                "departureStop": {
-                                                    "name": "Stop A",
-                                                    "location": {"latLng": {"latitude": 51.5, "longitude": -0.1}},
-                                                },
-                                                "arrivalStop": {
-                                                    "name": "Stop B",
-                                                    "location": {"latLng": {"latitude": 51.51, "longitude": -0.11}},
-                                                },
-                                            },
-                                        },
-                                    },
-                                ]
-                            }
-                        ],
-                    }
-                ],
-            }
+        async def fake_google_routes(*, origin, destination):
+            return BusRoute(
+                duration=Quantity(600, "second"),
+                stops=(
+                    TransitStop(
+                        departure_name="Stop A",
+                        arrival_name="Stop B",
+                        departure_lat=51.5,
+                        departure_lon=-0.1,
+                        arrival_lat=51.51,
+                        arrival_lon=-0.11,
+                    ),
+                ),
+            )
 
         node = BusRouteNode(
             "br",
@@ -74,6 +60,19 @@ class TestBusRouteNode:
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
+        assert a.value_or_none() == {
+            "bus_stops": [
+                {
+                    "departure_name": "Stop A",
+                    "arrival_name": "Stop B",
+                    "departure_lat": 51.5,
+                    "departure_lon": -0.1,
+                    "arrival_lat": 51.51,
+                    "arrival_lon": -0.11,
+                }
+            ],
+            "duration_minutes": 10,
+        }, "the row keeps Google's stops and the route's duration in minutes"
 
 
 class TestBusRouteAcceptsAPlaceDestination:
@@ -86,17 +85,18 @@ class TestBusRouteAcceptsAPlaceDestination:
 
     @pytest.mark.asyncio
     async def test_plans_by_the_place_address(self):
+        from houses.bus_route import BusRoute
         from houses.model.domain import PlaceOfInterest
-        from houses.nodes.bus import BusRouteNode
+        from houses.nodes.bus_route_node import BusRouteNode
 
         loc = UserInputNode[GeoPoint]("loc_brp", GeoPoint)
         dest = UserInputNode[PlaceOfInterest]("dest_brp", PlaceOfInterest)
 
         seen: dict = {}
 
-        async def fake_google_routes(body, field_mask, **kw):
-            seen["body"] = body
-            return {"routes": [{"duration": "600s", "legs": [{"steps": []}]}]}
+        async def fake_google_routes(*, origin, destination):
+            seen["destination"] = destination
+            return BusRoute(duration=Quantity(600, "second"), stops=())
 
         node = BusRouteNode(
             "brp",
@@ -113,16 +113,19 @@ class TestBusRouteAcceptsAPlaceDestination:
 
         a = await node.attempt()
         assert a.succeeded, f"bus planning failed for a PlaceOfInterest destination: {a.error}"
+        assert seen["destination"] == "Eastgate House, 40 Dukes Place, London EC3A 7LP", (
+            "the node must plan by the place's address"
+        )
 
     @pytest.mark.asyncio
     async def test_an_empty_place_address_is_an_error_not_a_crash(self):
         from houses.model.domain import PlaceOfInterest
-        from houses.nodes.bus import BusRouteNode
+        from houses.nodes.bus_route_node import BusRouteNode
 
         loc = UserInputNode[GeoPoint]("loc_brp2", GeoPoint)
         dest = UserInputNode[PlaceOfInterest]("dest_brp2", PlaceOfInterest)
 
-        async def fake_google_routes(body, field_mask, **kw):
+        async def fake_google_routes(*, origin, destination):
             raise AssertionError("no request should be made without a destination address")
 
         node = BusRouteNode(
@@ -172,7 +175,7 @@ class _StubFareReader(BusJourneyRegistry):
 class TestBodsFareNode:
     @pytest.mark.asyncio
     async def test_succeeds_with_empty_route(self):
-        from houses.nodes.bus import BodsFareNode
+        from houses.nodes.bods_fare_node import BodsFareNode
 
         route = UserInputNode[dict]("route_bf", dict)
         node = BodsFareNode("bf", bus_route_node=route)
@@ -185,7 +188,7 @@ class TestBodsFareNode:
     @pytest.mark.asyncio
     async def test_looks_up_fares_for_stops(self):
         """BodsFareNode returns stop fares for bus stops in the route."""
-        from houses.nodes.bus import BodsFareNode
+        from houses.nodes.bods_fare_node import BodsFareNode
         from houses.services_provider import _request_services
         from tests.helpers import make_services
 
@@ -229,7 +232,7 @@ class TestBusLegAugmentNode:
         """max_walk_node is optional — the dep_names must shrink with the
         deps, not force a 4-vs-3 ValueError at construction."""
         from houses.model.domain import Commute
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_nmw", Commute)
         route = UserInputNode[dict]("r_bl_nmw", dict)
@@ -251,7 +254,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_short", Commute)
         route = UserInputNode[dict]("r_bl_short", dict)
@@ -289,7 +292,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_nobus", Commute)
         route = UserInputNode[dict]("r_bl_nobus", dict)
@@ -331,7 +334,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_repl", Commute)
         route = UserInputNode[dict]("r_bl_repl", dict)
@@ -409,7 +412,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_nw", Commute)
         route = UserInputNode[dict]("r_bl_nw", dict)
@@ -478,7 +481,7 @@ class TestBusLegAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_under", Commute)
         route = UserInputNode[dict]("r_bl_under", dict)
@@ -536,7 +539,7 @@ class TestBusLegAugmentInfeasible:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         class _FixedCommute(DerivedNode[Commute]):
             def __init__(self, node_id: str, commute: Commute):
@@ -595,7 +598,7 @@ class TestBusFallbackForNoTflRoute:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         class _FixedTransit(DerivedNode[Commute]):
             def __init__(self, node_id: str, commute: Commute):
@@ -673,7 +676,7 @@ class TestBusAugmentLateRoute:
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         class _FixedTransit(DerivedNode[Commute]):
             def __init__(self, node_id: str, commute: Commute):
@@ -759,8 +762,9 @@ class TestBusRouteNodeAgainstRealTransport:
 
     @pytest.mark.asyncio
     async def test_bus_stops_parsed_through_real_transport(self):
-        from houses.commute_router import CommuteRouter, GoogleRoutesClient
-        from houses.nodes.bus import BusRouteNode
+        from houses.commute_router import CommuteRouter
+        from houses.google_routes_client import GoogleRoutesClient
+        from houses.nodes.bus_route_node import BusRouteNode
         from houses.settings import settings
 
         payload = {
@@ -859,7 +863,7 @@ class TestBoundMaxWalkInCompute:
         from dag.attempt import Attempt
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
-        from houses.nodes.bus import BusLegAugmentNode
+        from houses.nodes.bus_leg_augment_node import BusLegAugmentNode
 
         transit = UserInputNode[Commute]("t_bl_bm", Commute)
         route = UserInputNode[dict]("r_bl_bm", dict)

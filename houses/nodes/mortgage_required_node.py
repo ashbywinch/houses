@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import override
 
 from money import Money
@@ -9,11 +8,10 @@ from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.expression import Ref
 
-_ZERO = Decimal("0")
-
 
 class MortgageRequiredNode(DerivedNode[Money]):
     """Mortgage principal = Price + StampDuty + TotalWorks - TotalEquity."""
+
 
     def __init__(
         self,

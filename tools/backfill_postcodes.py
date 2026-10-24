@@ -17,10 +17,16 @@ from houses.location import upgrade_address
 from houses.nodes.bootstrap import load_property_nodes_from_db
 from houses.services_provider import get_services
 
-BACKFILL = {
-    "173677193": "RG4 9EJ",
-    "89498715": "SL7 2AP",
-}
+type _RidPostcodeMap = dict[str, str]
+
+
+class _PostcodeBackfill:
+    """The postcode backfill's RID → postcode data table (one-shot migration)."""
+
+    BACKFILL: _RidPostcodeMap = {
+        "173677193": "RG4 9EJ",
+        "89498715": "SL7 2AP",
+    }
 
 
 async def main() -> None:
@@ -28,7 +34,7 @@ async def main() -> None:
     await flush_processor()
     registry = get_services().property_registry
 
-    for rid, postcode in BACKFILL.items():
+    for rid, postcode in _PostcodeBackfill.BACKFILL.items():
         prop = registry.get(rid)
         if prop is None:
             print(f"{rid}: not found in the DB — skip")

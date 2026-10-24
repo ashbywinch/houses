@@ -18,19 +18,44 @@ import logging
 import random
 import re
 import socket
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from playwright.async_api import async_playwright
+from pydantic import Field
 
 from houses.settings import settings
+from serialization import SerializableAsDict, omit_when_none
 
 logger = logging.getLogger(__name__)
-_HUMAN_DELAY_MIN_S = 3.0
-_CHROME_START_ATTEMPTS = 100
-_HUMAN_DELAY_MAX_S = 8.0
-_CHROME_START_POLL_S = 0.1
+class _ScrapeConstants:
+    """The scraper's pacing and robustness tunables — one owner per
+    the global-state gate."""
+
+    HUMAN_DELAY_MIN_S = 3.0
+    CHROME_START_ATTEMPTS = 100
+    HUMAN_DELAY_MAX_S = 8.0
+    CHROME_START_POLL_S = 0.1
+    LOGIN_INDICATORS = [
+        "sign in to continue",
+        "verify you're a human",
+        "unusual traffic",
+        "unusual activity",
+        "sign in to rightmove",
+        'action="/signin"',
+        'action="/login"',
+        "please sign in",
+    ]
+    EXPECTED_FIELDS = (
+        "address",
+        "postcode",
+        "bedrooms",
+        "price",
+        "latitude",
+        "longitude",
+    )
 
 
 @dataclass
@@ -72,8 +97,12 @@ class RightmoveProperty:
 
 CACHE_DIR = Path("data/rightmove_pages")
 _CHROME_DATA_DIR = Path("/tmp/houses-chrome")
-_CHROME_PROCESS: asyncio.subprocess.Process | None = None
-_WE_STARTED_CHROME: bool = False
+class _ChromeRuntime:
+    """The scraper's Chrome subprocess state: the CDP process we
+    spawned and whether we own it — one owner per the global-state gate."""
+
+    process: asyncio.subprocess.Process | None = None
+    started_here: bool = False
 _LD_JSON_RE = re.compile(
     r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
     re.DOTALL,
@@ -96,7 +125,7 @@ _PAGE_MODEL_RE = re.compile(
 
 
 async def _human_delay():
-    delay = random.uniform(_HUMAN_DELAY_MIN_S, _HUMAN_DELAY_MAX_S)
+    delay = random.uniform(_ScrapeConstants.HUMAN_DELAY_MIN_S, _ScrapeConstants.HUMAN_DELAY_MAX_S)
     logger.info("Back-off: waiting %.1fs before Rightmove request", delay)
     await asyncio.sleep(delay)
 
@@ -128,8 +157,8 @@ def _record_or_set_price(extracted, raw: Any):
     try:
         price = _extract_price(raw, field="price")
     except _PageModelError as e:
-        return replace(extracted, parse_errors={"price": str(e)})
-    return replace(extracted, price=price) if price is not None else extracted
+        return extracted.model_copy(update={"parse_errors": {"price": str(e)}})
+    return extracted.model_copy(update={"price": price}) if price is not None else extracted
 
 
 def _clean_price(raw: Any) -> float | None:
@@ -147,105 +176,49 @@ def _clean_price(raw: Any) -> float | None:
         return None
 
 
-@dataclass(frozen=True)
-class _PropertyExtractJson:
+class _PropertyExtract(SerializableAsDict):
     """The property fields pulled from a Rightmove page's data sources.
 
-    Only the fields a source actually yields are set; to_dict omits the
-    rest, so the merged extraction keeps each source's key set.
+    Only the fields a source actually yields are set; the dump omits the rest
+    (``omit_when_none``), so the merged extraction keeps each source's key set.
+    ``parse_errors`` is in-memory only — it is not part of the wire.
     """
 
-    address: str | None = None
-    postcode: str | None = None
-    bedrooms: int | None = None
-    price: float | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    parse_errors: dict[str, str] = field(default_factory=dict)
-    """Fields whose page-model STRUCTURE the parser could not traverse —
-    distinct from genuine absence (a field the page simply doesn't carry).
-    A structure mismatch means Rightmove changed the page layout."""
+    address: str | None = Field(default=None, exclude_if=omit_when_none)
+    postcode: str | None = Field(default=None, exclude_if=omit_when_none)
+    bedrooms: int | None = Field(default=None, exclude_if=omit_when_none)
+    price: float | None = Field(default=None, exclude_if=omit_when_none)
+    latitude: float | None = Field(default=None, exclude_if=omit_when_none)
+    longitude: float | None = Field(default=None, exclude_if=omit_when_none)
+    # Fields whose page-model STRUCTURE the parser could not traverse —
+    # distinct from genuine absence (a field the page simply doesn't carry).
+    # A structure mismatch means Rightmove changed the page layout.
+    parse_errors: dict[str, str] = Field(default_factory=dict, exclude=True)
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        d = {}
-        for k in ("address", "postcode", "bedrooms", "price", "latitude", "longitude"):
-            v = getattr(self, k)
-            if v is not None:
-                d[k] = v
-        return d
-
-
-def _parse_json_ld(html: str) -> _PropertyExtractJson:
-    """Extract property data from JSON-LD structured data."""
-    m = _LD_JSON_RE.search(html)
-    if not m:
-        return _PropertyExtractJson()
-    try:
-        data = json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return _PropertyExtractJson()
-
-    extracted = _PropertyExtractJson()
-
-    addr = data.get("address") or {}
-    street = addr.get("streetAddress", "")
-    locality = addr.get("addressLocality", "")
-    postcode = addr.get("postalCode", "")
-    parts = [p for p in [street, locality, postcode] if p]
-    if parts:
-        extracted = replace(extracted, address=", ".join(parts))
-    if postcode:
-        extracted = replace(extracted, postcode=postcode)
-
-    offers = data.get("offers") or {}
-    extracted = _record_or_set_price(extracted, offers.get("price"))
-
-    geo = data.get("geo") or {}
-    lat = geo.get("latitude")
-    lng = geo.get("longitude")
-    if lat is not None and lng is not None:
-        extracted = replace(extracted, latitude=float(lat), longitude=float(lng))
-
-    return extracted
-
-
-def _parse_preloaded_state(html: str) -> _PropertyExtractJson:
-    """Extract from window.__PRELOADED_STATE__ (Rightmove React app)."""
-    for pattern in [_PRELOADED_RE, _INITIAL_STATE_RE]:
-        m = pattern.search(html)
-        if not m:
-            continue
-        try:
-            state = json.loads(m.group(1))
-        except json.JSONDecodeError:
-            continue
-
-        extracted = _PropertyExtractJson()
-
-        pd = state.get("propertyData") or state.get("property") or {}
-        if pd.get("address"):
-            extracted = replace(extracted, address=pd["address"])
-        if pd.get("bedrooms") is not None:
-            extracted = replace(extracted, bedrooms=int(pd["bedrooms"]))
-        extracted = _record_or_set_price(extracted, pd.get("price"))
-        loc = pd.get("location") or {}
-        lat = loc.get("latitude")
-        lng = loc.get("longitude")
-        if lat is not None and lng is not None:
-            extracted = replace(extracted, latitude=float(lat), longitude=float(lng))
-
-        return extracted
-
-    return _PropertyExtractJson()
-
-
-def _parse_map_coords(html: str) -> _PropertyExtractJson:
-    """Fallback: extract lat/lng from inline map data in script tags."""
-    m = _MAP_COORDS_RE.search(html)
-    if m:
-        return _PropertyExtractJson(latitude=float(m.group(1)), longitude=float(m.group(2)))
-    return _PropertyExtractJson()
+    def to_property(self, url: str) -> RightmoveProperty | None:
+        """The property this extraction describes; None when it holds no value."""
+        if not (set(self.to_dict()) - {"parse_errors"}):
+            if self.parse_errors:
+                # Nothing VALUE extracted, but the parser SAW a page it could
+                # not interpret — the failures are the honest record; carry
+                # them on the property instead of dropping them (2026-09-19).
+                return RightmoveProperty(
+                    url=url,
+                    address=self.address or "",
+                    postcode=self.postcode or "",
+                    parse_errors=self.parse_errors,
+                )
+            return None
+        return RightmoveProperty(
+            url=url,
+            address=self.address or "",
+            postcode=self.postcode or "",
+            bedrooms=self.bedrooms,
+            price=self.price,
+            latitude=self.latitude,
+            longitude=self.longitude,
+            parse_errors=self.parse_errors,
+        )
 
 
 class _PageModelError(Exception):
@@ -254,7 +227,46 @@ class _PageModelError(Exception):
     field ABSENCE (the page carries no such value) stays None."""
 
 
-def _parse_page_model(html: str) -> _PropertyExtractJson:
+
+def _extract_field(
+    model: _PageModel,
+    extracted: _PropertyExtract,
+    getter: Callable[[], object],
+    field: str,
+) -> _PropertyExtract:
+    """One page-model field: merge it when present, record the parse
+    error otherwise — the per-field walk's shared step."""
+    try:
+        value = getter()
+        if value is not None:
+            return extracted.model_copy(update={field: value})  # dynamic field name, the helper's contract
+    except _PageModelError as e:
+        return extracted.model_copy(update={"parse_errors": {**extracted.parse_errors, field: str(e)}})
+    return extracted
+
+
+def _extract_pair(
+    model: _PageModel,
+    extracted: _PropertyExtract,
+    getter: Callable[[], tuple[str, str] | tuple[float, float] | None],
+    field_a: str,
+    field_b: str,
+) -> _PropertyExtract:
+    """A two-field page-model merge (address/coords): split the tuple into
+    its two record fields, recording the parse error otherwise."""
+    try:
+        pair = getter()
+        if pair is not None:
+            return cast(
+                _PropertyExtract,
+                extracted.model_copy(update={field_a: pair[0], field_b: pair[1]}),  # dynamic field names
+            )
+    except _PageModelError as e:
+        return extracted.model_copy(update={"parse_errors": {**extracted.parse_errors, field_a: str(e)}})
+    return extracted
+
+
+def _parse_page_model(html: str) -> _PropertyExtract:
     """Extract property data from window.__PAGE_MODEL (Rightmove's primary data format).
 
     The model is a JSON object where ``data`` is a string containing a JSON array.
@@ -264,58 +276,34 @@ def _parse_page_model(html: str) -> _PropertyExtractJson:
     """
     m = _PAGE_MODEL_RE.search(html)
     if not m:
-        return _PropertyExtractJson()
+        return _PropertyExtract()
     try:
         pm = json.loads(m.group(1))
         data = json.loads(pm["data"])
     except (json.JSONDecodeError, KeyError, TypeError):
-        return _PropertyExtractJson()
+        return _PropertyExtract()
 
     try:
         prop = data[data[0]["propertyData"]]
     except (IndexError, KeyError, TypeError):
-        return _PropertyExtractJson()
+        return _PropertyExtract()
 
-    extracted = _PropertyExtractJson()
+    extracted = _PropertyExtract()
     model = _PageModel(data, prop)
 
-    # Address
-    try:
-        address = model.address()
-        if address is not None:
-            extracted = replace(extracted, address=address[0], postcode=address[1])
-    except _PageModelError as e:
-        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "address": str(e)})
+    # Address + postcode
+    extracted = _extract_pair(model, extracted, model.address, field_a="address", field_b="postcode")
 
     # Price
-    try:
-        price = model.price()
-        if price is not None:
-            extracted = replace(extracted, price=price)
-    except _PageModelError as e:
-        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "price": str(e)})
+    extracted = _extract_field(model, extracted, model.price, "price")
 
     # Bedrooms
-    try:
-        bedrooms = model.bedrooms()
-        if bedrooms is not None:
-            extracted = replace(extracted, bedrooms=bedrooms)
-    except _PageModelError as e:
-        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "bedrooms": str(e)})
+    extracted = _extract_field(model, extracted, model.bedrooms, "bedrooms")
 
     # Location (lat/lng)
-    try:
-        location = model.location()
-        if location is not None:
-            extracted = replace(extracted, latitude=location[0], longitude=location[1])
-    except _PageModelError as e:
-        extracted = replace(extracted, parse_errors={**extracted.parse_errors, "location": str(e)})
+    extracted = _extract_pair(model, extracted, model.location, field_a="latitude", field_b="longitude")
 
     return extracted
-
-
-_PageModelAddress = tuple[str, str]  # (address, postcode)
-_PageModelLocation = tuple[float, float]  # (lat, lng)
 
 
 class _PageModel:
@@ -331,6 +319,8 @@ class _PageModel:
     def __init__(self, data: Any, prop: Any) -> None:
         self.data = data
         self.prop = prop
+
+    type _PageModelAddress = tuple[str, str]  # (address, postcode)
 
     def address(self) -> _PageModelAddress | None:
         """(address, postcode) from the page model."""
@@ -365,6 +355,8 @@ class _PageModel:
             raise _PageModelError(f"bedrooms schema missing ({e})") from e
         return beds if isinstance(beds, int) else None
 
+    type _PageModelLocation = tuple[float, float]  # (lat, lng)
+
     def location(self) -> _PageModelLocation | None:
         """(lat, lng) from the page model.
 
@@ -381,9 +373,9 @@ class _PageModel:
         return None
 
 
-def _merge_missing(result: _PropertyExtractJson, source: _PropertyExtractJson) -> _PropertyExtractJson:
+def _merge_missing(result: _PropertyExtract, source: _PropertyExtract) -> _PropertyExtract:
     """Fill fields absent from result from a secondary extraction source."""
-    return _PropertyExtractJson(
+    return _PropertyExtract(
         address=result.address if result.address is not None else source.address,
         postcode=result.postcode if result.postcode is not None else source.postcode,
         bedrooms=result.bedrooms if result.bedrooms is not None else source.bedrooms,
@@ -394,103 +386,163 @@ def _merge_missing(result: _PropertyExtractJson, source: _PropertyExtractJson) -
     )
 
 
-def _parse_html(html: str, url: str) -> RightmoveProperty | None:
-    """Extract property data from a Rightmove page HTML.
+def _with_coordinates(
+    extracted: _PropertyExtract, geo: Mapping[str, Any] | None
+) -> _PropertyExtract:
+    """The coordinate pair a page's geo block carries — both fields or neither."""
+    if not geo:
+        return extracted
+    lat = geo.get("latitude")
+    lng = geo.get("longitude")
+    if lat is None or lng is None:
+        return extracted
+    return extracted.model_copy(
+        update=_PropertyExtract(latitude=float(lat), longitude=float(lng)).to_dict()
+    )
 
-    Tries data sources in order of preference:
-      1. window.__PAGE_MODEL (Rightmove's primary data store)
-      2. JSON-LD structured data (schema.org)
-      3. window.__PRELOADED_STATE__ / window.__INITIAL_STATE__
-      4. Map coordinate regex fallback
-      5. DOM extraction fallback
 
-    Merges results across sources — e.g. lat/lon from preloaded state
-    may fill gaps left by JSON-LD.  Returns ``None`` when no data can be
-    extracted from the HTML.
+class _PageHtml:
+    """One Rightmove page: its HTML plus the ``window.__PAGE_MODEL``
+    extraction, read across the sources Rightmove ships the property in.
+
+    Owns the page text and the fallback merge: JSON-LD, preloaded state,
+    map coordinates, and the DOM fallbacks — the state every parse step
+    reads.
     """
-    result = _parse_page_model(html)
 
-    # 2. JSON-LD (fills gaps)
-    result = _merge_missing(result, _parse_json_ld(html))
+    def __init__(self, html: str, page_model: _PropertyExtract) -> None:
+        self.html = html
+        self.page_model = page_model
 
-    # 3. Preloaded state (fills bedrooms, lat/lon that JSON-LD may lack)
-    result = _merge_missing(result, _parse_preloaded_state(html))
+    # lucidlint: ignore latent-class the fallback walk reads the PAGE (DOM + preloaded state), not only the record
+    def to_property(self, url: str) -> RightmoveProperty | None:
+        """Extract property data from this page's HTML.
 
-    # 4. Map coords fallback
-    if result.latitude is None:
-        result = _merge_missing(result, _parse_map_coords(html))
+        Tries data sources in order of preference:
+          1. window.__PAGE_MODEL (Rightmove's primary data store)
+          2. JSON-LD structured data (schema.org)
+          3. window.__PRELOADED_STATE__ / window.__INITIAL_STATE__
+          4. Map coordinate regex fallback
+          5. DOM extraction fallback
 
-    # 5. DOM extraction fallback
-    if result.address is None:
-        addr = _extract_by_testid(html, "address-label")
-        if addr:
-            result = replace(result, address=addr)
-    if result.bedrooms is None:
-        beds = _extract_bedrooms_from_html(html)
-        if beds is not None:
-            result = replace(result, bedrooms=beds)
+        Merges results across sources — e.g. lat/lon from preloaded state
+        may fill gaps left by JSON-LD.  Returns ``None`` when no data can be
+        extracted from the HTML.
+        """
+        result = self.page_model
 
-    if not (set(result.to_dict()) - {"parse_errors"}):
-        if result.parse_errors:
-            # Nothing VALUE extracted, but the parser SAW a page it could
-            # not interpret — the failures are the honest record; carry
-            # them on the property instead of dropping them (2026-09-19).
-            return RightmoveProperty(
-                url=url,
-                address=result.address or "",
-                postcode=result.postcode or "",
-                parse_errors=result.parse_errors,
-            )
+        # 2. JSON-LD (fills gaps)
+        result = _merge_missing(result, self._json_ld())
+
+        # 3. Preloaded state (fills bedrooms, lat/lon that JSON-LD may lack)
+        result = _merge_missing(result, self._preloaded_state())
+
+        # 4. Map coords fallback
+        if result.latitude is None:
+            result = _merge_missing(result, self._map_coords())
+
+        # 5. DOM extraction fallback
+        if result.address is None:
+            addr = self._testid_text("address-label")
+            if addr:
+                result = result.model_copy(update={"address": addr})
+        if result.bedrooms is None:
+            beds = self._bedrooms_from_dom()
+            if beds is not None:
+                result = result.model_copy(update={"bedrooms": beds})
+
+        return result.to_property(url)
+
+    def _json_ld(self) -> _PropertyExtract:
+        """Extract property data from JSON-LD structured data."""
+        m = _LD_JSON_RE.search(self.html)
+        if not m:
+            return _PropertyExtract()
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            return _PropertyExtract()
+
+        extracted = _PropertyExtract()
+
+        addr = data.get("address") or {}
+        street = addr.get("streetAddress", "")
+        locality = addr.get("addressLocality", "")
+        postcode = addr.get("postalCode", "")
+        parts = [p for p in [street, locality, postcode] if p]
+        if parts:
+            extracted = extracted.model_copy(update={"address": ", ".join(parts)})
+        if postcode:
+            extracted = extracted.model_copy(update={"postcode": postcode})
+
+        offers = data.get("offers") or {}
+        extracted = _record_or_set_price(extracted, offers.get("price"))
+
+        extracted = _with_coordinates(extracted, data.get("geo"))
+
+        return extracted
+
+    def _preloaded_state(self) -> _PropertyExtract:
+        """Extract from window.__PRELOADED_STATE__ (Rightmove React app)."""
+        for pattern in [_PRELOADED_RE, _INITIAL_STATE_RE]:
+            m = pattern.search(self.html)
+            if not m:
+                continue
+            try:
+                state = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                continue
+
+            extracted = _PropertyExtract()
+
+            pd = state.get("propertyData") or state.get("property") or {}
+            if pd.get("address"):
+                extracted = extracted.model_copy(update={"address": pd["address"]})
+            if pd.get("bedrooms") is not None:
+                extracted = extracted.model_copy(update={"bedrooms": int(pd["bedrooms"])})
+            extracted = _record_or_set_price(extracted, pd.get("price"))
+            extracted = _with_coordinates(extracted, pd.get("location"))
+
+            return extracted
+
+        return _PropertyExtract()
+
+    def _map_coords(self) -> _PropertyExtract:
+        """Fallback: extract lat/lng from inline map data in script tags."""
+        m = _MAP_COORDS_RE.search(self.html)
+        if m:
+            return _PropertyExtract(latitude=float(m.group(1)), longitude=float(m.group(2)))
+        return _PropertyExtract()
+
+    def _testid_text(self, testid: str) -> str:
+        """Extract text content from a data-testid element via regex."""
+        m = re.search(
+            rf'data-testid=["\']{testid}["\'][^>]*>(.*?)</',
+            self.html,
+            re.DOTALL,
+        )
+        if m:
+            text = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+            return text
+        return ""
+
+    def _bedrooms_from_dom(self) -> int | None:
+        """Find the bedroom count from common DOM patterns."""
+        m = re.search(r"(\d+)\s*bedroom", self.html, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
         return None
-    return RightmoveProperty(
-        url=url,
-        address=result.address or "",
-        postcode=result.postcode or "",
-        bedrooms=result.bedrooms,
-        price=result.price,
-        latitude=result.latitude,
-        longitude=result.longitude,
-        parse_errors=result.parse_errors,
-    )
 
 
-def _extract_by_testid(html: str, testid: str) -> str:
-    """Extract text content from a data-testid element via regex."""
-    m = re.search(
-        rf'data-testid=["\']{testid}["\'][^>]*>(.*?)</',
-        html,
-        re.DOTALL,
-    )
-    if m:
-        text = re.sub(r"<[^>]+>", "", m.group(1)).strip()
-        return text
-    return ""
-
-
-def _extract_bedrooms_from_html(html: str) -> int | None:
-    """Find the bedroom count from common DOM patterns."""
-    m = re.search(r"(\d+)\s*bedroom", html, re.IGNORECASE)
-    if m:
-        return int(m.group(1))
-    return None
-
-
-_LOGIN_INDICATORS = [
-    "sign in to continue",
-    "verify you're a human",
-    "unusual traffic",
-    "unusual activity",
-    "sign in to rightmove",
-    'action="/signin"',
-    'action="/login"',
-    "please sign in",
-]
+def _parse_html(html: str, url: str) -> RightmoveProperty | None:
+    """Extract property data from a Rightmove page HTML — see ``_PageHtml``."""
+    return _PageHtml(html, _parse_page_model(html)).to_property(url)
 
 
 def _is_login_wall(html: str) -> bool:
     """Check if the page content looks like a Rightmove login/verification wall."""
     lower = html.lower()
-    for phrase in _LOGIN_INDICATORS:
+    for phrase in _ScrapeConstants.LOGIN_INDICATORS:
         if phrase in lower:
             return True
     # Check page title
@@ -513,11 +565,10 @@ def _is_port_open(port: int) -> bool:
 
 async def _ensure_chrome():
     """Start a headless Chrome with remote debugging if not already running."""
-    global _CHROME_PROCESS, _WE_STARTED_CHROME
-
+    
     if _is_port_open(settings.rightmove_chrome_port):
         return
-    if _WE_STARTED_CHROME and _CHROME_PROCESS is not None and _CHROME_PROCESS.returncode is None:
+    if _ChromeRuntime.started_here and _ChromeRuntime.process is not None and _ChromeRuntime.process.returncode is None:
         return  # We already started it — still running
 
     _CHROME_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -525,7 +576,7 @@ async def _ensure_chrome():
         "Starting google-chrome on port %s for CDP",
         settings.rightmove_chrome_port,
     )
-    _CHROME_PROCESS = await asyncio.create_subprocess_exec(
+    _ChromeRuntime.process = await asyncio.create_subprocess_exec(
         "google-chrome",
         f"--remote-debugging-port={settings.rightmove_chrome_port}",
         f"--user-data-dir={_CHROME_DATA_DIR}",
@@ -537,13 +588,13 @@ async def _ensure_chrome():
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    _WE_STARTED_CHROME = True
+    _ChromeRuntime.started_here = True
 
-    for _ in range(_CHROME_START_ATTEMPTS):
+    for _ in range(_ScrapeConstants.CHROME_START_ATTEMPTS):
         if _is_port_open(settings.rightmove_chrome_port):
             logger.info("Chrome ready on port %s", settings.rightmove_chrome_port)
             return
-        await asyncio.sleep(_CHROME_START_POLL_S)
+        await asyncio.sleep(_ScrapeConstants.CHROME_START_POLL_S)
 
     logger.error("Chrome failed to start within 10s on port %s", settings.rightmove_chrome_port)
 
@@ -578,29 +629,29 @@ async def _pkill_owned_chrome(fingerprint: str) -> None:
             stderr=asyncio.subprocess.DEVNULL,
         )
         await asyncio.wait_for(proc.wait(), timeout=2.0)
-    # lucidlint: ignore broad-except best-effort boundary — pkill fallback never raises (docstring contract)
-    except Exception as e:
+    except (OSError, TimeoutError) as e:
+        # pkill is absent, or would not die within the window: best-effort
+        # cleanup, so the caller only sees a debug line.
         logger.debug("pkill fallback failed for %s (Chrome may linger): %s", fingerprint, e)
         return
 
 
 async def stop_chrome():
     """Kill the Chrome instance we spawned, using user-data-dir as a fingerprint."""
-    global _CHROME_PROCESS, _WE_STARTED_CHROME
-    if not _WE_STARTED_CHROME:
+    if not _ChromeRuntime.started_here:
         return
 
     fingerprint = str(_CHROME_DATA_DIR)
     logger.info("Shutting down Chrome (data dir: %s)", fingerprint)
 
-    if _CHROME_PROCESS is not None and _CHROME_PROCESS.returncode is None:
-        await _stop_chrome_process(_CHROME_PROCESS)
+    if _ChromeRuntime.process is not None and _ChromeRuntime.process.returncode is None:
+        await _stop_chrome_process(_ChromeRuntime.process)
 
     # Also pkill any remaining chrome processes we own
     await _pkill_owned_chrome(fingerprint)
 
-    _CHROME_PROCESS = None
-    _WE_STARTED_CHROME = False
+    _ChromeRuntime.process = None
+    _ChromeRuntime.started_here = False
 
 
 async def _fetch_via_chrome(url: str) -> str:
@@ -619,13 +670,11 @@ async def _fetch_via_chrome(url: str) -> str:
             await page.close()
 
 
-_EXPECTED_FIELDS = ("address", "postcode", "bedrooms", "price", "latitude", "longitude")
-
 
 def _report_missing(result: RightmoveProperty, rid: str) -> None:
-    missing = [k for k in _EXPECTED_FIELDS if not getattr(result, k, None)]
+    missing = [k for k in _ScrapeConstants.EXPECTED_FIELDS if not getattr(result, k, None)]
     if missing:
-        found = [k for k in _EXPECTED_FIELDS if getattr(result, k, None)]
+        found = [k for k in _ScrapeConstants.EXPECTED_FIELDS if getattr(result, k, None)]
         logger.warning(
             "Rightmove scraper for %s: partial extraction — missing %s, found %s",
             rid,
@@ -690,13 +739,6 @@ async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty |
         logger.info("Using Rightmove sample page: %s", path)
         return _parsed_from(path.read_text(encoding="utf-8"), url, rid)
 
-    # 3. Offline mode — fail fast instead of starting Chrome
-    if settings.rightmove_scraper_offline:
-        logger.warning(
-            "No cached Rightmove page for %s and offline mode is enabled. Pre-populate the cache before running tests.",
-            rid,
-        )
-        return None
 
     # 4. Normal mode — fetch via Chrome CDP
     await _human_delay()

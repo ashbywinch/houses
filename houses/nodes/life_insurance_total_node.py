@@ -9,11 +9,11 @@ from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.node import Node
 
-_ZERO = Decimal("0")
-
 
 class LifeInsuranceTotalNode(DerivedNode[Money]):
     """Total monthly life insurance across all persons."""
+
+    _ZERO = Decimal("0")
 
     @override
     @property
@@ -45,7 +45,7 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
         self._assert_deps_succeeded(persons=persons)
         zero = Money(amount="0", currency="GBP")
         ps = persons.value_or_none() or []
-        total = _ZERO
+        total = LifeInsuranceTotalNode._ZERO
         for p in ps:
             ins = getattr(p, "life_insurance_monthly", zero)
             amt = ins.amount if isinstance(ins, Money) else Decimal(str(ins))

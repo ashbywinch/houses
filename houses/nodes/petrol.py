@@ -9,21 +9,19 @@ household finances.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
-from typing import Any, override
+from dataclasses import replace
+from typing import cast, override
 
 from money import Money
 from pint import Quantity
+from pydantic import Field
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
-from dag.node import Node
+from dag.node import Node, NodeValue
 from houses.commute import JourneyLeg, LegMode
 from houses.model.domain import Commute, person_id_of
-
-MINUTES_PER_HOUR = 60.0
-AVERAGE_DRIVE_SPEED_KMH = 48.0
+from serialization import omit_when_none
 
 
 def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float) -> Money | None:
@@ -40,7 +38,11 @@ def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float
         total_drive_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
         if total_drive_min <= 0:
             return None
-        round_trip_km = (total_drive_min / MINUTES_PER_HOUR) * AVERAGE_DRIVE_SPEED_KMH * 2
+        round_trip_km = (
+            (total_drive_min / PetrolCostAugmentNode.MINUTES_PER_HOUR)
+            * PetrolCostAugmentNode.AVERAGE_DRIVE_SPEED_KMH
+            * 2
+        )
 
     # Fuel calculation using pint for proper Imperial gallon -> litre conversion
     # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
@@ -54,10 +56,13 @@ def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float
 class PersonPetrolMpgNode(DerivedNode[int]):
     """The car owner's own petrol economy (miles per imperial gallon).
 
-    Reads the person from the settings persons node by name — changing
-    the person's MPG in Settings flows into every drive commute without
+    The person's MPG in Settings flows into every drive commute without
     a rebuild (provenance shows the persons source).
     """
+
+    # Person.petrol_mpg's data default, mirrored here for entries written
+    # before the field existed (DATA, not a tunable).
+    DEFAULT_PETROL_MPG = 45
 
     def __init__(self, node_id: str, *, persons_source, person_id: str):
         self._person_id: str = person_id
@@ -70,22 +75,17 @@ class PersonPetrolMpgNode(DerivedNode[int]):
             return Attempt.impossible(persons.error)
         for p in persons.value_or_none() or []:
             if person_id_of(p) == self._person_id:
-                return Attempt.succeeded(int(getattr(p, "petrol_mpg", 45)))
-        return Attempt.succeeded(45)
+                return Attempt.succeeded(int(getattr(p, "petrol_mpg", self.DEFAULT_PETROL_MPG)))
+        return Attempt.succeeded(self.DEFAULT_PETROL_MPG)
 
 
-@dataclass(frozen=True)
-class _PetrolAugmentJson:
-    """The serialized petrol-augment payload: the base node record with
-    the entry-level ``is_child`` flag appended last."""
+class _SchoolCommuteRow(NodeValue):
+    """A school-commute row's wire: the entry-level ``is_child`` flag the card
+    classifies on. It must hold before the pipeline has priced (and if it never
+    does) — the value only carries it once it exists, so it is a row key, not a
+    value key."""
 
-    base: Mapping[str, Any]
-    is_child: bool
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-
-        return {**self.base, "is_child": self.is_child}
+    is_child: bool | None = Field(default=None, exclude_if=omit_when_none)
 
 
 class PetrolCostAugmentNode(DerivedNode[Commute]):
@@ -94,6 +94,11 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
     Prefers actual ``distance_km`` from each drive leg. Falls back to
     estimating distance from total drive minutes at 48 km/h.
     """
+    # Drive-time → distance estimation for legs that carry no distance.
+    MINUTES_PER_HOUR = 60.0
+    AVERAGE_DRIVE_SPEED_KMH = 48.0
+
+    wire_type = _SchoolCommuteRow
 
     def __init__(
         self,
@@ -118,6 +123,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
 
     @override
     @property
+    # lucidlint: ignore middle-man framework hook — live-render override for unpersisted provenance (review-log)
     def provenance_formula(self):
         # Never-persisted render (live fallback): a node with no stored
         # row has nothing frozen to violate, so the current dep states
@@ -204,23 +210,18 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         )
         return Attempt.succeeded(new_commute)
 
-    async def _attach_is_child(self, base: Mapping[str, Any]) -> _PetrolAugmentJson:
-        """Annotate a serialized payload with the entry-level ``is_child`` flag."""
-        attempt = await self.attempt()
-        value = attempt.value_or_none() if attempt.succeeded else None
-        return _PetrolAugmentJson(
-            base=base,
-            is_child=bool(value.is_child) if value is not None else self._is_child,
+    @override
+    def _enrich_json(self, result: NodeValue) -> None:
+        """Append the entry-level ``is_child`` flag to the row.
+
+        The card classifies a row as a child's school commute from the
+        ENTRY flag, and that must hold before the pipeline has priced
+        (and if it never does) — the value only carries it once it exists.
+        """
+        super()._enrich_json(result)
+        value = self._attempt.value_or_none() if self._attempt.succeeded else None
+        # The node's own wire type: the builder constructs ``wire_type``, so the
+        # row this method is handed IS a _SchoolCommuteRow.
+        cast(_SchoolCommuteRow, result).is_child = (
+            bool(value.is_child) if value is not None else self._is_child
         )
-
-    @override
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json(self, dep_attempts=None, active_deps=None) -> dict:
-        return (
-            await self._attach_is_child(await super().to_json(dep_attempts=dep_attempts, active_deps=active_deps))
-        ).to_dict()
-
-    @override
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    async def to_json_value(self) -> dict:
-        return (await self._attach_is_child(await super().to_json_value())).to_dict()

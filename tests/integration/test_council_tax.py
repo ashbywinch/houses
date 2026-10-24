@@ -447,9 +447,9 @@ class TestLookupCouncilTax:
 class TestLookupYearlyCost:
     @pytest.mark.asyncio
     async def test_ratio_computation(self):
-        from houses.council_tax import BAND_RATIOS
+        from houses.council_tax import _TaxRates
 
-        assert BAND_RATIOS["F"] == 13 / 9
+        assert _TaxRates.BAND_RATIOS["F"] == 13 / 9
         result = round(307.0 * 13 / 9, 2)
         assert result == 443.44
 
@@ -553,7 +553,7 @@ class TestCouncilTaxNodeProvenance:
             # The postcode is a projection of the address (PostcodeNode)
             # — the node-level test feeds the real derivation chain, not
             # a detached postcode input.
-            from houses.nodes.location import PostcodeNode
+            from houses.nodes.postcode_node import PostcodeNode
 
             postcode = PostcodeNode("ct/pc", best_address=addr)
 

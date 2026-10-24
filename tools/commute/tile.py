@@ -12,11 +12,6 @@ from dataclasses import dataclass
 
 from houses.geopoint import GeoPoint
 
-KM_PER_DEG_LAT = 111.0
-CELL_COUNT_EPSILON = 1e-9  # float-error guard before ceil — exact multiples must not add a phantom row
-ADJACENCY_EPSILON = 1e-9  # rows within this degree gap count as adjacent for merging
-RECT_SPAN_DECIMALS = 6  # lon-span rounding for the vertical-merge grouping key
-
 
 @dataclass(frozen=True)
 class Rect:
@@ -30,15 +25,20 @@ class Rect:
 class Grid:
     """Axis-aligned lat/lon grid with separate degree sizes (square-km cells)."""
 
+    KM_PER_DEG_LAT = 111.0  # km per degree of latitude — the grid's geo conversion
+    CELL_COUNT_EPSILON = 1e-9  # float-error guard before ceil — exact multiples must not add a phantom row
+    ADJACENCY_EPSILON = 1e-9  # rows within this degree gap count as adjacent for merging
+    RECT_SPAN_DECIMALS = 6  # lon-span rounding for the vertical-merge grouping key
+
     bbox: Rect
     lat_deg: float
     lon_deg: float
 
     @classmethod
     def from_cell_km(cls, bbox: Rect, cell_size_km: float) -> Grid:
-        lat_deg = cell_size_km / KM_PER_DEG_LAT
+        lat_deg = cell_size_km / cls.KM_PER_DEG_LAT
         mid_lat = (bbox.lat_min + bbox.lat_max) / 2.0
-        lon_deg = cell_size_km / (KM_PER_DEG_LAT * math.cos(math.radians(mid_lat)))
+        lon_deg = cell_size_km / (cls.KM_PER_DEG_LAT * math.cos(math.radians(mid_lat)))
         return cls(bbox, lat_deg, lon_deg)
 
     def cell_rect(self, r: int, c: int) -> Rect:
@@ -82,12 +82,12 @@ def rasterize(stations: list[GeoPoint], buffer_km: float, grid: Grid) -> set[Gri
     clamp to degenerate zero-area rects and slip through validation as
     line-shaped polygons).
     """
-    n_rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - CELL_COUNT_EPSILON)
-    n_cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - CELL_COUNT_EPSILON)
+    n_rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - Grid.CELL_COUNT_EPSILON)
+    n_cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - Grid.CELL_COUNT_EPSILON)
     kept: set[GridCell] = set()
     for point in stations:
-        dlat = buffer_km / KM_PER_DEG_LAT
-        dlon = buffer_km / (KM_PER_DEG_LAT * math.cos(math.radians(point.lat)))
+        dlat = buffer_km / Grid.KM_PER_DEG_LAT
+        dlon = buffer_km / (Grid.KM_PER_DEG_LAT * math.cos(math.radians(point.lat)))
         r0 = max(0, math.floor((point.lat - dlat - grid.bbox.lat_min) / grid.lat_deg))
         r1 = min(n_rows - 1, math.floor((point.lat + dlat - grid.bbox.lat_min) / grid.lat_deg))
         c0 = max(0, math.floor((point.lon - dlon - grid.bbox.lon_min) / grid.lon_deg))
@@ -124,14 +124,14 @@ def merge_rectangles(rects: list[Rect]) -> list[Rect]:
     """
     by_span: dict[tuple[float, float], list[Rect]] = {}
     for r in rects:
-        span = (round(r.lon_min, RECT_SPAN_DECIMALS), round(r.lon_max, RECT_SPAN_DECIMALS))
+        span = (round(r.lon_min, Grid.RECT_SPAN_DECIMALS), round(r.lon_max, Grid.RECT_SPAN_DECIMALS))
         by_span.setdefault(span, []).append(r)
     merged: list[Rect] = []
     for (lon_min, lon_max), group in by_span.items():
         group.sort(key=lambda r: r.lat_min)
         current = group[0]
         for r in group[1:]:
-            if abs(r.lat_min - current.lat_max) < ADJACENCY_EPSILON:  # adjacent rows
+            if abs(r.lat_min - current.lat_max) < Grid.ADJACENCY_EPSILON:  # adjacent rows
                 current = Rect(current.lat_min, r.lat_max, lon_min, lon_max)
             else:
                 merged.append(current)

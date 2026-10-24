@@ -1,8 +1,11 @@
 """Tests for transit_route.py — TfL tube leg fare lookup."""
 
+from typing import override
+
 import pytest
 from money import Money
 
+from houses.google_routes_client import GoogleRoutesClient
 from houses.stations import Station
 from houses.tfl_client import _JourneyParams
 
@@ -452,7 +455,7 @@ class TestPickBestJourney:
         }
         summary = TflClient._pick_best_journey(data)
         assert summary.duration == 30
-        assert summary.cost == 16.0
+        assert summary.cost == Money("16", "GBP")
         assert isinstance(summary.route_summary, str)
 
     def test_empty_journeys_returns_none(self):
@@ -484,6 +487,7 @@ class TestTflCachedApiCall4xx:
         from unittest.mock import AsyncMock, patch
 
         from dag.http_error import HttpError
+        from houses.api_cache import CacheRequest
         from houses.tfl_client import TflClient
 
         fake_resp = AsyncMock()
@@ -500,9 +504,9 @@ class TestTflCachedApiCall4xx:
                 return False
 
         with (
-            patch("houses.tfl_client.get_cached", return_value=None),
+            patch.object(CacheRequest, "cached", return_value=None),
             patch("houses.tfl_client.cached_async_client", return_value=_FakeCM()),
-            patch("houses.tfl_client.set_cached"),
+            patch.object(CacheRequest, "store"),
         ):
             try:
                 await TflClient._cached_api_call(
@@ -517,19 +521,23 @@ class TestTflCachedApiCall4xx:
                 assert "route planner unavailable" in str(e)
 
 
-class _FakeRoutesClient:
-    """RoutesPostClient stub returning a canned Google TRANSIT route."""
+class _FakeRoutesClient(GoogleRoutesClient):
+    """The real client with only its HTTP answer faked — the router's seam is
+    ``post_route``, so a canned payload arrives through the real parse."""
 
     def __init__(self, payload):
+        super().__init__()
         self.payload = payload
-        self.posted = []
 
+    @override
     async def post(self, body, field_mask, *, options=None):
-        self.posted.append((body, field_mask))
         return self.payload
 
 
-class _RaisingRoutesClient:
+class _RaisingRoutesClient(GoogleRoutesClient):
+    """The real client whose HTTP layer is down — the seam raises."""
+
+    @override
     async def post(self, body, field_mask, *, options=None):
         raise RuntimeError("google down")
 

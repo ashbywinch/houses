@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic_core import PydanticSerializationError
 
 from dag.attempt import Attempt, Formula, FormulaLine, Provenance, SourceType
 
@@ -110,7 +111,9 @@ class TestProvenanceToDict:
     def test_non_json_value_fails_fast(self):
         """An unprojected value must raise, not stringify into a repr dump."""
         prov = Provenance(label="test", value=object())
-        with pytest.raises(TypeError, match="not JSON-serializable"):
+        # Pydantic wraps a field-serializer error; the contract is that it fails
+        # loudly at the dump, never stringifying into a repr dump.
+        with pytest.raises(PydanticSerializationError, match="not JSON-serializable"):
             prov.to_dict()
 
     def test_money_value_stringified(self):

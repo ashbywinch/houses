@@ -11,7 +11,7 @@ from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
-from houses.nodes.area import TownDescNode
+from houses.nodes.town_desc_node import TownDescNode
 
 
 class _FakeTownDesc:
@@ -95,7 +95,7 @@ class TestTownDescDeps:
     re-describe the town."""
 
     def test_active_deps_are_town_inputs_only(self):
-        from houses.nodes.area import TownDescNode
+        from houses.nodes.town_desc_node import TownDescNode
 
         nearest = UserInputNode[str]("dp_nearest", str)
         town = UserInputNode[str]("dp_town", str)

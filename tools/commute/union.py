@@ -20,8 +20,17 @@ from tools.commute.tile import Grid, GridCell
 
 # unit directions: (dlat, dlon)
 N, S, E, W = (1, 0), (-1, 0), (0, 1), (0, -1)
-_LEFT = {N: W, W: S, S: E, E: N}  # turn left from a direction
-COLLINEAR_EPSILON = 1e-9  # degree tolerance for treating outline points as collinear
+
+type _TurnMap = dict[tuple[int, int], tuple[int, int]]
+
+type _Dir = tuple[int, int]  # an axis unit direction (dlat, dlon)
+type _PointLoop = list[GeoPoint]  # one outline loop
+
+
+class _OutlineConfig:
+    """Union-outline constants (review-log: the tracer's degree tolerances)."""
+
+    COLLINEAR_EPSILON = 1e-9  # degree tolerance for treating outline points as collinear
 
 
 @dataclass(frozen=True)
@@ -61,8 +70,7 @@ def _boundary_segments(
     return segs
 
 
-# lucidlint: ignore record-shape (dlat, dlon) direction vector — a lookup-table key for _LEFT, not a data record
-def _direction(a: GeoPoint, b: GeoPoint) -> tuple[int, int]:
+def _direction(a: GeoPoint, b: GeoPoint) -> _Dir:
     """Axis unit direction from a to b (b is exactly one grid step away).
 
     Returned as a ``(dlat, dlon)`` vector — a lookup-table key for
@@ -94,12 +102,13 @@ class _LoopTracer:
     and resolves pinch points without cutting through the union.
     """
 
+    _LEFT: _TurnMap = {N: W, W: S, S: E, E: N}
+
     def __init__(self, by_start: dict[GeoPoint, list[tuple[GeoPoint, int]]]) -> None:
         self._by_start: dict[GeoPoint, list[tuple[GeoPoint, int]]] = by_start
         self._used: set[int] = set()
 
-    # lucidlint: ignore record-shape outline loops — homogeneous point collections, not field-wise records
-    def trace_all(self) -> list[list[GeoPoint]]:
+    def trace_all(self) -> list[_PointLoop]:
         """Trace one loop per still-untraced boundary component."""
         loops: list[list[GeoPoint]] = []
         for start, options in list(self._by_start.items()):
@@ -108,15 +117,19 @@ class _LoopTracer:
                 loops.append(loop)
         return loops
 
-    # lucidlint: ignore record-shape (dlat, dlon) direction vector — a lookup-table key, not a data record
-    def _pick_next(self, vertex: GeoPoint, incoming: tuple[int, int]) -> GeoPoint | None:
+    def _pick_next(self, vertex: GeoPoint, incoming: _Dir) -> GeoPoint | None:
         """Unused segment at vertex preferring left, straight, right, then any."""
         candidates = [end for end, i in self._by_start.get(vertex, []) if i not in self._used]
         if not candidates:
             return None
         if len(candidates) == 1:
             return candidates[0]
-        order = [_LEFT[incoming], incoming, _LEFT[_LEFT[incoming]], _LEFT[_LEFT[_LEFT[incoming]]]]
+        order = [
+            self._LEFT[incoming],
+            incoming,
+            self._LEFT[self._LEFT[incoming]],
+            self._LEFT[self._LEFT[self._LEFT[incoming]]],
+        ]
         for d in order:
             for end in candidates:
                 if _direction(vertex, end) == d:
@@ -145,11 +158,7 @@ class _LoopTracer:
         incoming = _direction(start, end)
         while True:
             nxt = self._pick_next(current, incoming)
-            if nxt is None:
-                break
-            # lucidlint: ignore duplicate-block this guard intentionally mirrors the one above — two different fallible
-            si = self._seg_index(current, nxt)
-            if si is None:
+            if nxt is None or (si := self._seg_index(current, nxt)) is None:
                 break
             self._used.add(si)
             if nxt == start:
@@ -162,9 +171,7 @@ class _LoopTracer:
         return None
 
 
-# lucidlint: ignore record-shape outline loops — homogeneous point collections, not field-wise records
-# lucidlint: ignore record-shape outline loops — homogeneous point collections, not field-wise records
-def _remove_collinear(loops: list[list[GeoPoint]]) -> list[list[GeoPoint]]:
+def _remove_collinear(loops: list[_PointLoop]) -> list[_PointLoop]:
     """Drop outline points that lie on a straight run between neighbours."""
     cleaned_loops = []
     for outline in loops:
@@ -173,8 +180,14 @@ def _remove_collinear(loops: list[list[GeoPoint]]) -> list[list[GeoPoint]]:
         for i, point in enumerate(outline):
             prev = outline[(i - 1) % n]
             nxt = outline[(i + 1) % n]
-            same_lat = abs(prev.lat - point.lat) < COLLINEAR_EPSILON and abs(nxt.lat - point.lat) < COLLINEAR_EPSILON
-            same_lon = abs(prev.lon - point.lon) < COLLINEAR_EPSILON and abs(nxt.lon - point.lon) < COLLINEAR_EPSILON
+            same_lat = (
+                abs(prev.lat - point.lat) < _OutlineConfig.COLLINEAR_EPSILON
+                and abs(nxt.lat - point.lat) < _OutlineConfig.COLLINEAR_EPSILON
+            )
+            same_lon = (
+                abs(prev.lon - point.lon) < _OutlineConfig.COLLINEAR_EPSILON
+                and abs(nxt.lon - point.lon) < _OutlineConfig.COLLINEAR_EPSILON
+            )
             if not (same_lat or same_lon):
                 cleaned.append(point)
         if cleaned:
@@ -182,8 +195,7 @@ def _remove_collinear(loops: list[list[GeoPoint]]) -> list[list[GeoPoint]]:
     return cleaned_loops
 
 
-# lucidlint: ignore record-shape outline loops — homogeneous point collections, not field-wise records
-def union_outline(cells: set[GridCell], grid: Grid) -> list[list[GeoPoint]]:
+def union_outline(cells: set[GridCell], grid: Grid) -> list[_PointLoop]:
     """Trace all boundary loops (one per connected component), collinear points
     removed. Leftmost-turn rule: at each vertex pick the unused segment that
     turns left first (then straight, then right) — keeps the interior on the

@@ -19,7 +19,8 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+from dag.if_then_else_node import IfThenElseNode
+from dag.if_then_else_options import IfThenElseOptions
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.car_park import CarPark, CarParkRegistry
@@ -327,7 +328,8 @@ class TestFullCommutePipeline:
             MergeRailFareNode,
             needs_rail_fare,
         )
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
         from houses.services_provider import get_services
@@ -481,9 +483,11 @@ class TestFullCommutePipeline:
         """A drive-only commute (no transit) gets fuel cost from final_fuel."""
 
         from dag.attempt import Attempt
-        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+        from dag.if_then_else_node import IfThenElseNode
+        from dag.if_then_else_options import IfThenElseOptions
         from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
         from houses.services_provider import get_services

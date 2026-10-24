@@ -1,183 +1,20 @@
 from __future__ import annotations
 
 import logging
-import re
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
-
-from money import Money
 
 from dag.persistence import property_rids
-from dag.user_input_node import UserInputNode
-from houses.geopoint import GeoPoint
-from houses.location import upgrade_address
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
 
 logger = logging.getLogger(__name__)
 
-SOURCE_LABELS: dict[str, str] = {
-    "rightmove_url": "Browser extension",
-    "rightmove_address": "Rightmove",
-    "rightmove_bedrooms": "Rightmove",
-    "rightmove_price": "Rightmove",
-    "rightmove_location": "Rightmove map",
-    "precise_location": "User location",
-    "corrected_address": "User correction",
-    "user_entered_address": "User correction",
-}
 
-COMMENT_LABELS: dict[str, str] = {
-    "comment_status": "Sheet",
-    "comment_status_reason": "Sheet",
-    "comment_group_notes": "Sheet",
-    "comment_ashby_comments": "Sheet",
-    "comment_design_needed": "Sheet",
-    "comment_planning_needed": "Sheet",
-}
+class _PropertyRidContract:
+    """Rightmove property IDs are 6-10 digits; anything shorter or longer
+    is test data that must never enter the production DB."""
 
-COMMENT_COLUMNS: dict[str, str] = {
-    "comment_status": "Status",
-    "comment_status_reason": "Status Reason",
-    "comment_group_notes": "Group Notes / WhatsApp",
-    "comment_ashby_comments": "Ashby comments",
-    "comment_design_needed": "Design Needed",
-    "comment_planning_needed": "Planning Needed",
-}
-
-
-def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng: str, what: str) -> bool:
-    """Push a sheet coordinate pair into sources; False when the cells aren't numeric."""
-    try:
-        flat, flng = float(lat), float(lng)
-        sources[key].push(GeoPoint(flat, flng), SOURCE_LABELS[key])
-        return True
-    except (ValueError, TypeError) as exc:
-        logger.warning("Invalid %s coords: lat=%s lng=%s (%s)", what, lat, lng, exc)
-        return False
-
-@dataclass(frozen=True)
-class SheetRow:
-    """One sheet row plus the input nodes it feeds; the push methods
-    materialise the row's cells onto those nodes."""
-
-    row: dict[str, Any]
-    sources: dict[str, UserInputNode]
-
-    def push_cell(
-        self,
-        col_name: str,
-        source_key: str,
-        *,
-        parse: Callable[[str], object] | None = None,
-    ) -> bool:
-        """Push one stripped sheet cell into a source node; False (no push)
-        when the node isn't wired, the cell is blank, or the parser rejects
-        it — callers count only real pushes.  The label comes from
-        SOURCE_LABELS (Sheet fallback), matching the per-key push chain."""
-        if source_key not in self.sources:
-            return False
-        val = (self.row.get(col_name) or "").strip()
-        if not val:
-            return False
-        if parse is not None:
-            val = parse(val)
-            if val is None:
-                return False
-        self.sources[source_key].push(val, SOURCE_LABELS.get(source_key, "Sheet"))
-        return True
-
-    def push_upgraded_address(self) -> int:
-        """Push the postcode-upgraded address onto both address nodes; 0–2 pushes."""
-        address = (self.row.get("Address") or "").strip()
-        postcode = (self.row.get("Postcode") or "").strip()
-        if not address or not postcode:
-            return 0
-        upgraded = upgrade_address(address, postcode)
-        pushed = 0
-        if upgraded != address and "user_entered_address" in self.sources:
-            self.sources["user_entered_address"].push(upgraded, SOURCE_LABELS["user_entered_address"])
-            pushed += 1
-        if "corrected_address" in self.sources:
-            self.sources["corrected_address"].push(upgraded, SOURCE_LABELS["corrected_address"])
-            pushed += 1
-        return pushed
-
-    def push_comment_cells(self) -> int:
-        """Push every non-blank comment column; floats coerced for float nodes."""
-        pushed = 0
-        for source_key, col_name in COMMENT_COLUMNS.items():
-            if source_key not in self.sources:
-                continue
-            val = (self.row.get(col_name) or "").strip()
-            if not val:
-                continue
-            src = self.sources[source_key]
-            label = COMMENT_LABELS.get(source_key, "Sheet")
-            if isinstance(src, UserInputNode) and src._value_type is float:
-                try:
-                    val = float(val)
-                except (ValueError, TypeError):
-                    continue
-            src.push(val, label)
-            pushed += 1
-        return pushed
-
-    def push_coords(self, lat_col: str, lng_col: str, source_key: str, what: str) -> int:
-        """Push one lat/lng column pair; 1 push when both cells are numeric
-        and the location node is wired."""
-        lat = (self.row.get(lat_col) or "").strip()
-        lng = (self.row.get(lng_col) or "").strip()
-        if lat and lng and source_key in self.sources and _push_geo_coords(
-            self.sources, key=source_key, lat=lat, lng=lng, what=what
-        ):
-            return 1
-        return 0
-
-
-def _parse_price(value: str) -> Money | None:
-    """'£450,000' / '450000' → Money; None when nothing numeric remains."""
-    cleaned = re.sub(r"[^0-9.]", "", value)
-    if not cleaned:
-        return None
-    return Money(cleaned, "GBP")
-
-
-# lucidlint: ignore record-shape external sheet row — keyed collection, not a fixed record shape (review-log)
-# lucidlint: ignore unused sheet-import entry point exercised by the source-values regression suite — startup uses the
-def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -> int:
-    sheet = SheetRow(row=row, sources=sources)
-    pushed = 0
-
-    pushed += sheet.push_cell(col_name="Rightmove URL", source_key="rightmove_url")
-    pushed += sheet.push_cell(col_name="Address", source_key="rightmove_address")
-    pushed += sheet.push_cell(col_name="Bedrooms", source_key="rightmove_bedrooms")
-    pushed += sheet.push_cell(col_name="Price (£)", source_key="rightmove_price", parse=_parse_price)
-
-    pushed += sheet.push_coords(
-        lat_col="Approx Latitude (est)",
-        lng_col="Approx Longitude (est)",
-        source_key="rightmove_location",
-        what="approx",
-    )
-    pushed += sheet.push_coords(
-        lat_col="Actual Latitude", lng_col="Actual Longitude", source_key="precise_location", what="actual"
-    )
-
-    pushed += sheet.push_upgraded_address()
-    pushed += sheet.push_cell(col_name="Postcode", source_key="postcode")
-    pushed += sheet.push_comment_cells()
-    return pushed
-
-
-
-
-# Rightmove property IDs are 6-10 digits; anything shorter or longer is
-# test data that must not enter the production DB.
-_RID_MIN_LENGTH = 6
-_RID_MAX_LENGTH = 10
-
+    MIN_LENGTH = 6
+    MAX_LENGTH = 10
 
 
 def load_property_nodes_from_db() -> int:
@@ -194,7 +31,7 @@ def load_property_nodes_from_db() -> int:
         # do, startup fails loudly instead of silently serving them:
         # delete the offending rows immediately (back the rows up first)
         # and fix whatever wrote them.
-        if not rid.isdigit() or not _RID_MIN_LENGTH <= len(rid) <= _RID_MAX_LENGTH:
+        if not rid.isdigit() or not _PropertyRidContract.MIN_LENGTH <= len(rid) <= _PropertyRidContract.MAX_LENGTH:
             raise RuntimeError(
                 f"node_results contains test-data rows under invalid property "
                 f"RID {rid!r}. Test data must never live in the real DB — "
@@ -213,4 +50,3 @@ def load_property_nodes_from_db() -> int:
         count += 1
     logger.info("Loaded %d properties from DB", count)
     return count
-

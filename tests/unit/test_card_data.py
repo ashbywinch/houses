@@ -19,8 +19,9 @@ from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.nodes.commute import commute_colour, format_duration
-from houses.nodes.property_nodes import PropertyNodes, SummaryJson
+from houses.nodes.commute import commute_colour
+from houses.nodes.property_nodes import PropertyNodes
+from houses.nodes.property_summary import PropertySummary
 from houses.property_registry import register_property
 from houses.web.api_router import _score_from_summary
 from tests.helpers import make_services
@@ -141,32 +142,6 @@ class TestCommuteColour:
         assert commute_colour(None, bracknell=False) == "muted"
 
 
-class TestFormatDuration:
-    """format_duration() replaced the old ``_dur`` helper.
-
-    Frontend still formats commute durations in ``PropertyCard.vue`` via
-    ``commuteDuration()``, but the API response includes raw minutes.
-    This helper is used internally in the DAG pipeline.
-    """
-
-    def test_none_returns_empty(self):
-        assert format_duration(None) == ""
-
-    def test_under_one_hour(self):
-        assert format_duration(32) == "32m"
-
-    def test_exact_one_hour(self):
-        assert format_duration(60) == "1h"
-
-    def test_one_hour_with_minutes(self):
-        assert format_duration(90) == "1h30"
-
-    def test_two_hours_exact(self):
-        assert format_duration(120) == "2h"
-
-    def test_two_hours_with_minutes(self):
-        assert format_duration(145) == "2h25"
-
 
 class TestOfstedColour:
     """_ofsted_score() from the scoring routine replicates the old ofsted_colour() mapping.
@@ -176,8 +151,8 @@ class TestOfstedColour:
     """
 
     @staticmethod
-    def _summary_with_ofsted(ofsted: str) -> SummaryJson:
-        return SummaryJson(**{
+    def _summary_with_ofsted(ofsted: str) -> PropertySummary:
+        return PropertySummary(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk": None}}},
@@ -216,8 +191,8 @@ class TestScoringSurvivesAnUnpricedCommute:
     (2026-09-10), taking the whole index page down."""
 
     @staticmethod
-    def _summary_with_a_null_commute() -> SummaryJson:
-        return SummaryJson(**{
+    def _summary_with_a_null_commute() -> PropertySummary:
+        return PropertySummary(**{
             "commutes": {
                 "Simon/Pimlico": {"commute": {"status": "succeeded", "value": None}},
             },
@@ -249,8 +224,8 @@ class TestWalkColour:
     """
 
     @staticmethod
-    def _summary_with_walk(minutes: int | None) -> SummaryJson:
-        return SummaryJson(**{
+    def _summary_with_walk(minutes: int | None) -> PropertySummary:
+        return PropertySummary(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
@@ -287,7 +262,7 @@ class TestSummaryShape:
     @pytest.mark.asyncio
     async def test_has_expected_top_level_keys(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         assert s["rid"] == "test_card"
         for key in (
@@ -307,7 +282,7 @@ class TestSummaryShape:
     async def test_every_wrapped_value_has_status_and_value(self, prop):
         """Every node-backed field wraps its value in a standard envelope (no provenance in summary)."""
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         wrapped = (
             "best_address",
@@ -330,13 +305,13 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commutes_is_dict(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
         assert isinstance(s["commutes"], dict)
 
     @pytest.mark.asyncio
     async def test_each_commute_has_commute_key(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         for key, cd in s["commutes"].items():
             assert "commute" in cd, f"{key} missing 'commute'"
@@ -347,7 +322,7 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_successful_commute_has_duration_and_cost(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         for key, cd in s["commutes"].items():
             c = cd["commute"]
@@ -370,7 +345,7 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commute_has_is_child_flag(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         for key, cd in s["commutes"].items():
             c = cd["commute"]
@@ -380,7 +355,7 @@ class TestCommuteData:
     async def test_child_commutes_marked_is_child(self, prop):
         """School commutes (George/Primary School etc.) carry is_child=True."""
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         for key, cd in s["commutes"].items():
             c = cd["commute"]
@@ -394,7 +369,7 @@ class TestSchoolData:
     @pytest.mark.asyncio
     async def test_schools_has_primary_and_secondary(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         schools = s.get("schools", {})
         assert "primary" in schools
@@ -405,7 +380,7 @@ class TestSchoolData:
     @pytest.mark.asyncio
     async def test_each_school_has_name_ofsted_and_url(self, prop):
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         for phase in ("primary", "secondary"):
             school_node = s["schools"][phase]["school"]
@@ -420,7 +395,7 @@ class TestSchoolData:
     async def test_school_data_envelope(self, prop):
         """School nodes themselves have a status/value/provenance envelope."""
         await flush_processor()
-        s = await prop.to_json_summary()
+        s = (await prop.summary()).to_dict()
 
         for phase in ("primary", "secondary"):
             school_node = s["schools"][phase]["school"]
@@ -437,12 +412,12 @@ class TestScoring:
     @pytest.mark.asyncio
     async def test_score_is_integer(self, prop):
         await flush_processor()
-        s = SummaryJson(**await prop.to_json_summary())
+        s = await prop.summary()
         score = _score_from_summary(s)
         assert score == 16
 
     def test_all_green_returns_max(self):
-        summary = SummaryJson(**{
+        summary = PropertySummary(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
@@ -474,7 +449,7 @@ class TestScoring:
         assert score == 16  # 8 metrics × 2
 
     def test_greens_and_warns_mixed(self):
-        summary = SummaryJson(**{
+        summary = PropertySummary(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
@@ -506,7 +481,7 @@ class TestScoring:
         assert score == 14  # 2×3 + 1 + 2×3 + 2 + 1 + 2
 
     def test_bad_values_subtract(self):
-        summary = SummaryJson(**{
+        summary = PropertySummary(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
@@ -533,7 +508,7 @@ class TestScoring:
         assert score == -5  # 3 red commutes (-1 each) + red ofsted (-1) + bad walk (-1)
 
     def test_muted_contributes_zero(self):
-        summary = SummaryJson(**{
+        summary = PropertySummary(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
@@ -546,7 +521,7 @@ class TestScoring:
 
     def test_bracknell_thresholds(self):
         """Bracknell commutes use 30/60 thresholds instead of 45/75."""
-        summary = SummaryJson(**{
+        summary = PropertySummary(**{
             "commutes": {
                 "Simon/Bracknell": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 25, "unit": "minute"}}}
@@ -570,7 +545,7 @@ class TestCardSorting:
 
     def test_sorted_by_score_descending(self):
         """Verify the sorting logic used by get_all_properties()."""
-        high = SummaryJson(**{
+        high = PropertySummary(**{
             "commutes": {},
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
@@ -578,7 +553,7 @@ class TestCardSorting:
             },
             "walkability": {"value": None},
         })
-        mid = SummaryJson(**{
+        mid = PropertySummary(**{
             "commutes": {},
             "schools": {
                 "primary": {
@@ -596,7 +571,7 @@ class TestCardSorting:
             },
             "walkability": {"value": None},
         })
-        low = SummaryJson(**{
+        low = PropertySummary(**{
             "commutes": {
                 "Simon/Pimlico": {
                     "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}

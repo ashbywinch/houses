@@ -21,7 +21,8 @@ def _fake_svc():
 async def test_school_location_node_returns_geopoint():
     """SchoolLocationNode must return the school's coordinates as GeoPoint."""
     from dag.user_input_node import UserInputNode
-    from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode
+    from houses.nodes.nearest_school_node import NearestSchoolNode
+    from houses.nodes.school_location_node import SchoolLocationNode
     from houses.school import School
     from houses.school_gender import SchoolGender
 
@@ -29,7 +30,7 @@ async def test_school_location_node_returns_geopoint():
     addr = UserInputNode[str]("addr", str)
 
     # Create derived nodes FIRST so they connect to dep signals
-    primary = PrimarySchoolNode("ps", best_location=loc)
+    primary = NearestSchoolNode("ps", child_age=4, stage="primary", best_location=loc)
     school_loc = SchoolLocationNode("sln", school_node=primary)
 
     # Push values — this triggers changed.emit() which queues the derived nodes
@@ -75,7 +76,7 @@ async def test_school_location_node_returns_geopoint():
 async def test_school_node_output_has_url():
     """School node output must contain 'url' and 'coords' keys."""
     from dag.user_input_node import UserInputNode
-    from houses.nodes.schools import PrimarySchoolNode
+    from houses.nodes.nearest_school_node import NearestSchoolNode
     from houses.school import School
     from houses.school_gender import SchoolGender
 
@@ -83,7 +84,7 @@ async def test_school_node_output_has_url():
     addr = UserInputNode[str]("addr2", str)
 
     # Create derived node FIRST so it connects to dep signals
-    sn = PrimarySchoolNode("ps2", best_location=loc)
+    sn = NearestSchoolNode("ps2", child_age=4, stage="primary", best_location=loc)
 
     # Push values — this triggers changed.emit() which queues the derived node
     loc.push(GeoPoint(51.5, -0.37), "test")
@@ -127,21 +128,3 @@ async def test_school_node_output_has_url():
         assert val.get("ofsted") == "Good"
     finally:
         _sp.reset(token)
-
-
-@pytest.mark.asyncio
-async def test_transit_node_accepts_geopoint_dest():
-    """TransitNode must accept GeoPoint as destination (school location)."""
-    from money import Money
-    from pint import Quantity
-
-    from houses.nodes.transit import CommuteResult
-
-    # CommuteResult itself should accept a GeoPoint as destination reference
-    cr = CommuteResult(
-        duration=Quantity(22, "minute"),
-        daily_cost=Money("0", "GBP"),
-        label="Test School",
-        mode="walk",
-    )
-    assert cr.mode == "walk"

@@ -224,7 +224,7 @@ class TestCouncilTaxNode:
 class TestWalkabilityNode:
     @pytest.mark.asyncio
     async def test_impossible_without_location(self):
-        from houses.nodes.area import WalkabilityNode
+        from houses.nodes.walkability_node import WalkabilityNode
 
         loc = UserInputNode[dict]("loc_w", dict)
         addr = UserInputNode[str]("addr_w", str)
@@ -236,7 +236,7 @@ class TestWalkabilityNode:
 class TestNearestTownNode:
     @pytest.mark.asyncio
     async def test_impossible_without_location(self):
-        from houses.nodes.area import NearestTownNode
+        from houses.nodes.nearest_town_node import NearestTownNode
 
         loc = UserInputNode[dict]("loc_nt", dict)
         node = NearestTownNode("nt", best_location=loc)
@@ -247,7 +247,7 @@ class TestNearestTownNode:
     async def test_returns_town_name(self):
         from dag.scheduler import flush_processor
         from houses.geopoint import GeoPoint
-        from houses.nodes.area import NearestTownNode
+        from houses.nodes.nearest_town_node import NearestTownNode
 
         loc = UserInputNode[GeoPoint]("loc_nt2", GeoPoint)
         node = NearestTownNode("nt2", best_location=loc)
@@ -261,7 +261,7 @@ class TestNearestTownNode:
 class TestTownDescNode:
     @pytest.mark.asyncio
     async def test_impossible_without_deps(self):
-        from houses.nodes.area import TownDescNode
+        from houses.nodes.town_desc_node import TownDescNode
 
         nearest = UserInputNode[str]("nearest_td2", str)
         addr_town = UserInputNode[str]("addr_td2", str)
@@ -274,7 +274,7 @@ class TestTownDescNode:
     async def test_prefers_address_town_over_nearest(self):
         from dag.scheduler import flush_processor
         from houses.geopoint import GeoPoint
-        from houses.nodes.area import TownDescNode
+        from houses.nodes.town_desc_node import TownDescNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -312,7 +312,7 @@ class TestTownDescNode:
     async def test_falls_back_to_nearest_when_address_has_no_town(self):
         from dag.scheduler import flush_processor
         from houses.geopoint import GeoPoint
-        from houses.nodes.area import TownDescNode
+        from houses.nodes.town_desc_node import TownDescNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -359,7 +359,8 @@ class TestParkAndRideAugmentNode:
     async def test_impossible_without_transit(self):
         from dag.user_input_node import UserInputNode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
 
         transit = UserInputNode[Commute]("t_pr3", Commute)
         loc = UserInputNode[GeoPoint]("loc_pr3", GeoPoint)
@@ -408,7 +409,8 @@ class TestParkAndRideAugmentNode:
         if pc_node is None:
             pc_node = UserInputNode[str]("pc_dummy", str)
             pc_node.push("SW1P 1AA", "test")
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
 
         return ParkAndRideAugmentNode(
             "pr_test",
@@ -475,7 +477,8 @@ class TestParkAndRideAugmentNode:
         from houses.car_park import CarPark, CarParkRegistry
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from houses.stations import StationRegistry
         from tests.helpers import make_services
@@ -705,7 +708,8 @@ class TestTransitCostAttribution:
         from dag.user_input_node import UserInputNode
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -785,7 +789,8 @@ class TestTransitCostAttribution:
         from dag.user_input_node import UserInputNode
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geopoint import GeoPoint
-        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_options import ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 

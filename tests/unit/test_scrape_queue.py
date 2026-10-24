@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from houses.database import get_connection
-from houses.scrape_queue import MAX_ATTEMPTS, STALE_CLAIM_SECONDS
+from houses.scrape_queue import _RetryPolicy
 from houses.server import app
 from houses.web.auth import _make_session_cookie
 
@@ -49,7 +49,7 @@ def _add_url_only() -> dict:
 
 
 def _fail_job_until_permanent(job_id: int) -> None:
-    for _ in range(MAX_ATTEMPTS):
+    for _ in range(_RetryPolicy.MAX_ATTEMPTS):
         client.post("/api/scrapes/report", json={"job_id": job_id, "ok": False, "error": "boom"})
         client.post("/api/scrapes/claim")
 
@@ -166,7 +166,7 @@ class TestClaim:
         conn = get_connection()
         conn.execute(
             "UPDATE pending_scrapes SET claimed_at=? WHERE id=?",
-            ((_now() - timedelta(seconds=STALE_CLAIM_SECONDS * 2)).isoformat(), job["id"]),
+            ((_now() - timedelta(seconds=_RetryPolicy.STALE_CLAIM.total_seconds() * 2)).isoformat(), job["id"]),
         )
         conn.commit()
         assert client.post("/api/scrapes/claim").json()["job"] is None, (
@@ -185,10 +185,10 @@ class TestClaim:
         (PR #68 review)."""
         job = _add_url_only()
         conn = get_connection()
-        for _ in range(MAX_ATTEMPTS - 1):
+        for _ in range(_RetryPolicy.MAX_ATTEMPTS - 1):
             conn.execute(
                 "UPDATE pending_scrapes SET claimed_at=? WHERE id=?",
-                ((_now() - timedelta(seconds=STALE_CLAIM_SECONDS * 2)).isoformat(), job["id"]),
+                ((_now() - timedelta(seconds=_RetryPolicy.STALE_CLAIM.total_seconds() * 2)).isoformat(), job["id"]),
             )
             conn.commit()
             # reclaim: requeued with attempts+1 + backoff → nothing due yet
@@ -203,13 +203,13 @@ class TestClaim:
         # The final stale reclaim crosses MAX_ATTEMPTS → permanently failed.
         conn.execute(
             "UPDATE pending_scrapes SET claimed_at=? WHERE id=?",
-            ((_now() - timedelta(seconds=STALE_CLAIM_SECONDS * 2)).isoformat(), job["id"]),
+            ((_now() - timedelta(seconds=_RetryPolicy.STALE_CLAIM.total_seconds() * 2)).isoformat(), job["id"]),
         )
         conn.commit()
         assert client.post("/api/scrapes/claim").json()["job"] is None
         rows = _scrape_rows()
         assert rows[0]["status"] == "failed"
-        assert rows[0]["attempts"] == MAX_ATTEMPTS
+        assert rows[0]["attempts"] == _RetryPolicy.MAX_ATTEMPTS
 
 class TestBackoff:
     def test_failure_backs_off_exponentially(self):
@@ -231,7 +231,7 @@ class TestBackoff:
         _fail_job_until_permanent(job["id"])
         rows = _scrape_rows()
         assert rows[0]["status"] == "failed"
-        assert rows[0]["attempts"] == MAX_ATTEMPTS
+        assert rows[0]["attempts"] == _RetryPolicy.MAX_ATTEMPTS
         assert client.post("/api/scrapes/claim").json()["job"] is None
 
 

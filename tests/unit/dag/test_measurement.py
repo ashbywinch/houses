@@ -15,7 +15,7 @@ from money import Money
 from dag.attempt import Attempt, project_value
 from dag.expression import Choose, Literal, Ref
 from dag.measurement import Measurement
-from dag.scheduler import AsyncQueueScheduler, reset_scheduler, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, reset_scheduler, set_scheduler
 
 # ── Test helper: a minimal node-like object (mirrors test_expression.py) ──
 
@@ -170,7 +170,7 @@ class TestExpressionFlow:
 
 @pytest.fixture(autouse=True)
 def _isolated_scheduler():
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
     yield
     reset_scheduler()
 
@@ -178,7 +178,8 @@ def _isolated_scheduler():
 class TestSelectionNodes:
     @pytest.mark.asyncio
     async def test_if_then_else_true_passes_winner_measurement_unchanged(self):
-        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+        from dag.if_then_else_node import IfThenElseNode
+        from dag.if_then_else_options import IfThenElseOptions
         from dag.scheduler import flush_processor
         from dag.user_input_node import UserInputNode
 
@@ -212,7 +213,8 @@ class TestSelectionNodes:
 
     @pytest.mark.asyncio
     async def test_if_then_else_false_passes_else_measurement_unchanged(self):
-        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+        from dag.if_then_else_node import IfThenElseNode
+        from dag.if_then_else_options import IfThenElseOptions
         from dag.scheduler import flush_processor
         from dag.user_input_node import UserInputNode
 

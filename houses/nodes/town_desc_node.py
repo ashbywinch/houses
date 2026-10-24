@@ -1,0 +1,68 @@
+"""The LLM's description of the property's town."""
+
+from __future__ import annotations
+
+from typing import override
+
+from dag.attempt import Attempt, Provenance, SourceType
+from dag.derived_node import DerivedNode
+from dag.node import Node
+from houses.services_provider import get_services
+
+
+class TownDescNode(DerivedNode[dict]):
+    """The town narration depends on the town inputs only — the
+    property's best_location is NOT read by compute, so a location
+    refinement must not re-describe the town (Part F 4)."""
+    def __init__(self, node_id: str, *, nearest_town, town_name, postcode_node):
+        self._postcode_node: Node = postcode_node
+        self._nearest_town: Node = nearest_town
+        self._town_name: Node = town_name
+        deps: tuple[Node, ...] = (nearest_town, town_name, postcode_node)
+        super().__init__(node_id, dict, deps, dep_names=("nearest_town", "town_name", "postcode"))
+
+    @override
+    def _get_active_deps(self):
+        """The postcode is an optional refinement for the LLM prompt — a
+        pending/empty postcode (a property with no known postcode) must
+        not stall the town description.  The describe call works with an
+        empty postcode string."""
+        deps: list[Node] = [self._nearest_town, self._town_name]
+        pc = self._postcode_node.latest_attempt()
+        if pc.succeeded and pc.value_or_none():
+            deps.append(self._postcode_node)
+        return tuple(deps)
+
+    @override
+    @staticmethod
+    async def compute(
+        nearest_town: Attempt[str],
+        town_name: Attempt[str],
+        postcode: Attempt[str] | None = None,
+    ) -> Attempt[dict]:
+        # Prefer the address-extracted town name (more specific), fall back to
+        # reverse-geocoded town when the address has no recognizable town.
+        town = town_name.value_or_none() or nearest_town.value_or_none()
+        pc = postcode.value_or_none() if postcode is not None else None
+        pc = pc or ""
+        if not town:
+            return Attempt.impossible("no town name available from address or reverse geocode")
+        svc = get_services()
+        result = await svc.town_desc_service.describe(town, pc)
+        if result.impossible:
+            # Propagate the real reason (e.g. LLM call failed) so the
+            # frontend can show it.
+            return Attempt.impossible(result.error or "town description unavailable")
+        return Attempt.succeeded({"description": result.value_or_none() or ""})
+
+    @override
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
+        val = self._attempt.value_or_none()
+        if self._attempt.succeeded and isinstance(val, dict) and val.get("description"):
+            prov.value = val["description"]
+        return prov
+
+    provenance_source_type = SourceType.API

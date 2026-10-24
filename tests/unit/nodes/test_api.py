@@ -240,7 +240,8 @@ class TestPropertyApi:
 
         from dag.attempt import Attempt
         from dag.measurement import Measurement
-        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.annexe_dwelling import AnnexeDwelling
+        from houses.council_tax_info import CouncilTaxInfo
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -297,7 +298,8 @@ class TestPropertyApi:
 
         from dag.attempt import Attempt
         from dag.measurement import Measurement
-        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.annexe_dwelling import AnnexeDwelling
+        from houses.council_tax_info import CouncilTaxInfo
         from houses.model.domain import HomeCoOwner, Person
         from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import _request_services as _sp
@@ -714,7 +716,7 @@ class TestSettingsApi:
         """GET /settings financial must return the LIVE node values —
         a patched rate shows up on the next read (regression: the old
         aggregate blob went stale after PATCH)."""
-        from houses.nodes.settings_node import SETTING_DEFAULTS, aggregate_dict
+        from houses.nodes.settings_node import SettingsNode, aggregate_dict
         from houses.services_provider import get_services
 
         client = self._setup()
@@ -735,7 +737,9 @@ class TestSettingsApi:
         # MPG is per-person now, not a household finance
         assert "petrol_mpg" not in after["value"]
         # untouched nodes keep their defaults (serialized to float)
-        assert after["value"]["sinking_fund_rate"] == float(SETTING_DEFAULTS["settings/sinking_fund_rate"][1]())
+        assert after["value"]["sinking_fund_rate"] == float(
+            SettingsNode.SETTING_DEFAULTS["settings/sinking_fund_rate"][1]()
+        )
         assert aggregate_dict(get_services().setting_nodes) == after["value"]
 
     def test_put_persons_removed(self):
@@ -1216,12 +1220,12 @@ class TestSettingsPropagationApi:
         ]
         breakdown = _deposit_breakdown(persons)
         deposit_persons, total, lines = breakdown.persons, breakdown.total, breakdown.lines
-        assert deposit_persons["Simon"] == {"amount": "88500.00", "currency": "GBP"}
-        assert deposit_persons["Lorena"] == {"amount": "88500.00", "currency": "GBP"}
-        assert deposit_persons["Ashby"] == {"amount": "300000.00", "currency": "GBP"}
+        assert deposit_persons["Simon"] == Money("88500.00", "GBP")
+        assert deposit_persons["Lorena"] == Money("88500.00", "GBP")
+        assert deposit_persons["Ashby"] == Money("300000.00", "GBP")
         # the total is unchanged: 177000 + 300000
         assert total.amount == _Decimal("477000.00")
-        lines_by_label = {v["label"]: v["value"] for v in lines}
+        lines_by_label = {line.label: line.value for line in lines}
         assert "50% yours" in lines_by_label["Simon"]
         assert "50% of Simon's" in lines_by_label["Lorena"]
 
@@ -1253,9 +1257,9 @@ class TestSettingsPropagationApi:
         breakdown = _deposit_breakdown(persons)
         deposit_persons, total, lines = breakdown.persons, breakdown.total, breakdown.lines
         assert "George" not in deposit_persons
-        assert "George" not in [line["label"] for line in lines]
+        assert "George" not in [line.label for line in lines]
         assert total.amount == _Decimal("227000.00")
-        assert deposit_persons["Simon"] == {"amount": "227000.00", "currency": "GBP"}
+        assert deposit_persons["Simon"] == Money("227000.00", "GBP")
 
     def test_settings_change_updates_property_totals(self):
         """PATCH a person's cash contribution → mortgage_required drops by

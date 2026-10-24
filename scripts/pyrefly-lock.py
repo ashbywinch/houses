@@ -39,9 +39,9 @@ import argparse
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-
-DEFAULT_BASELINE = Path(".pyrefly-baseline.json")
+from typing import Any, NamedTuple
 
 
 def _pyrefly_binary() -> str:
@@ -52,20 +52,38 @@ def _pyrefly_binary() -> str:
     return "pyrefly"
 
 
-# Extra args passed to every pyrefly invocation.
-PYREFLY_BASE_ARGS = [_pyrefly_binary(), "check", "--output-format", "json"]
+type _PyreflyErrors = list[Mapping[str, Any]]
+"""A pyrefly report's error list as parsed — the tool's own JSON format, read
+for its path/line/column/name fields; not a shape this repo owns."""
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def error_key(e: dict) -> tuple:
-    return (e.get("path"), e.get("line"), e.get("column"), e.get("name"))
+class _PyreflyLock:
+    """The pyrefly-lock wrapper's invocation policy: baseline file and base args."""
+
+    DEFAULT_BASELINE = Path(".pyrefly-baseline.json")
+
+    # Extra args passed to every pyrefly invocation.
+    PYREFLY_BASE_ARGS = [_pyrefly_binary(), "check", "--output-format", "json"]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def current_errors(extra_args: list[str]) -> list[dict]:
+class _ErrorKey(NamedTuple):
+    """The identity of one pyrefly error: what makes two runs' entries the
+    same error (the baseline's both-direction comparison)."""
+
+    path: object
+    line: object
+    column: object
+    name: object
+
+
+def error_key(e: Mapping[str, Any]) -> _ErrorKey:
+    return _ErrorKey(e.get("path"), e.get("line"), e.get("column"), e.get("name"))
+
+
+def current_errors(extra_args: list[str]) -> _PyreflyErrors:
     """Run pyrefly (no baseline) and return the full error list."""
     proc = subprocess.run(
-        PYREFLY_BASE_ARGS + extra_args,
+        _PyreflyLock.PYREFLY_BASE_ARGS + extra_args,
         capture_output=True,
         text=True,
     )
@@ -82,8 +100,7 @@ def current_errors(extra_args: list[str]) -> list[dict]:
     return data.get("errors", [])
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def load_baseline(path: Path) -> list[dict]:
+def load_baseline(path: Path) -> _PyreflyErrors:
     if not path.is_file():
         return []
     return json.loads(path.read_text()).get("errors", [])
@@ -94,7 +111,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in ("check", "update-baseline"):
         p = sub.add_parser(name)
-        p.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
+        p.add_argument("--baseline", type=Path, default=_PyreflyLock.DEFAULT_BASELINE)
         p.add_argument("--pyrefly-config", type=Path, default=None,
                        help="pyrefly.toml path (passed as -c when given)")
     args = parser.parse_args()

@@ -1,4 +1,3 @@
-# lucidlint: ignore bulk-suppression per-site whys are mandated (review-log scope decision 5) — dunder protocol methods
 """Measurement — a value with an uncertainty, propagated through arithmetic.
 
 Part A: uncertainty ("≈") as a first-class DAG citizen.
@@ -33,7 +32,7 @@ from operator import add as _add
 from operator import mul as _mul
 from operator import sub as _sub
 from operator import truediv as _truediv
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypedDict, TypeVar
 
 from uncertainties import ufloat
 
@@ -77,6 +76,13 @@ def _combine(op: Callable, a: Any, b: Any, sa: float, sb: float) -> float:
     return op(ua, ub).std_dev
 
 
+class MeasurementProvenanceValue(TypedDict):
+    """A Measurement's JSON-safe provenance projection."""
+
+    value: Any
+    uncertainty: float
+
+
 @dataclass(frozen=True)
 class Measurement(Generic[T]):
     """A value with an uncertainty (standard deviation)."""
@@ -96,30 +102,23 @@ class Measurement(Generic[T]):
             _combine(err, self.value, m.value, self.stddev, m.stddev),
         )
 
-    # lucidlint: ignore middle-man __add__ implements the + protocol — _binop is its one implementation
     def __add__(self, other: Any) -> Measurement:
         return self._binop(other, _add, _add)
-
-    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __radd__(self, other: Any) -> Measurement:
-        return self.__add__(other)  # addition is commutative
+        return Measurement(other) + self  # addition is commutative
 
-    # lucidlint: ignore middle-man __sub__ implements the - protocol — _binop is its one implementation
     def __sub__(self, other: Any) -> Measurement:
         return self._binop(other, _sub, _sub)
 
     def __rsub__(self, other: Any) -> Measurement:
         return Measurement(other) - self
 
-    # lucidlint: ignore middle-man __mul__ implements the * protocol — _binop is its one implementation
     def __mul__(self, other: Any) -> Measurement:
         return self._binop(other, _mul, _mul)
 
-    # lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __rmul__(self, other: Any) -> Measurement:
-        return self.__mul__(other)  # multiplication is commutative
+        return Measurement(other) * self  # multiplication is commutative
 
-    # lucidlint: ignore middle-man __truediv__ implements the / protocol — _binop is its one implementation; the dunder
     def __truediv__(self, other: Any) -> Measurement:
         return self._binop(other, _truediv, _truediv)
 
@@ -131,12 +130,10 @@ class Measurement(Generic[T]):
 
     # ── Provenance / serialization ──────────────────────────────
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    def to_provenance_value(self) -> dict:
+    def to_provenance_value(self) -> MeasurementProvenanceValue:
         """JSON-safe projection: ``{value, uncertainty}``.
 
         ``project_value`` handles the wrapped value's own projection
         (Money → its canonical string form, etc.).
         """
-        # lucidlint: ignore record-shape wire-format dict — serialization boundary
-        return {"value": project_value(self.value), "uncertainty": self.stddev}
+        return MeasurementProvenanceValue(value=project_value(self.value), uncertainty=self.stddev)

@@ -2,13 +2,31 @@
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
 from houses.commute import LegMode
+from houses.google_routes_client import GoogleRoutesClient
 from houses.model.domain import Commute, Person, PlaceOfInterest
+
+
+class _FakeRoutesClient(GoogleRoutesClient):
+    """The real client with only its HTTP answer faked — the router's seam is
+    ``post_route``, so a canned response (or a raise) is injected one layer
+    below the request the client builds and the answer it parses."""
+
+    def __init__(self, answer):
+        super().__init__()
+        self._answer = answer
+
+    @override
+    async def post(self, body, field_mask, *, options=None):
+        return await self._answer(body, field_mask, options=options)
+
 
 # ── Fail-fast when API keys are missing ─────────────────────────────────
 
@@ -20,7 +38,7 @@ class TestWalkCommuteFailsFast:
         """_google_routes_post must raise ValueError when Google API key is missing."""
         import asyncio
 
-        from houses.commute_router import GoogleRoutesClient, _LatLng, _RoutesBody, _Waypoint
+        from houses.google_routes_client import GoogleRoutesClient, _LatLng, _RoutesBody, _Waypoint
         from houses.settings import settings
 
         client = GoogleRoutesClient()
@@ -601,37 +619,37 @@ class TestAddressWaypoint:
     """_address_waypoint must handle postcodes, GeoPoints, and coordinate strings."""
 
     def test_postcode_returns_address_waypoint(self):
-        from houses.commute_router import CommuteRouter
+        from houses.google_routes_client import _address_waypoint
 
-        result = CommuteRouter._address_waypoint("SW1P 1AA")
+        result = _address_waypoint("SW1P 1AA")
         assert result.to_dict() == {"address": "SW1P 1AA"}
 
     def test_geopoint_returns_location_waypoint(self):
-        from houses.commute_router import CommuteRouter
         from houses.geopoint import GeoPoint
+        from houses.google_routes_client import _address_waypoint
 
         gp = GeoPoint(lat=51.5, lon=-0.13)
-        result = CommuteRouter._address_waypoint(gp)
+        result = _address_waypoint(gp)
         assert result.to_dict() == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
 
     def test_coordinate_string_returns_location_waypoint(self):
         """'lat,lon' strings must use location format, not address."""
-        from houses.commute_router import CommuteRouter
+        from houses.google_routes_client import _address_waypoint
 
-        result = CommuteRouter._address_waypoint("51.5,-0.13")
+        result = _address_waypoint("51.5,-0.13")
         assert result.to_dict() == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
 
     def test_invalid_coordinate_string_falls_back_to_address(self):
-        from houses.commute_router import CommuteRouter
+        from houses.google_routes_client import _address_waypoint
 
-        result = CommuteRouter._address_waypoint("not-a-coordinate")
+        result = _address_waypoint("not-a-coordinate")
         assert result.to_dict() == {"address": "not-a-coordinate"}
 
 
 class TestGoogleRoutesPostReturn:
     """_google_routes_post must return the response data on cache miss.
 
-    Regression: the function called set_cached() but never returned
+    Regression: the function stored the response but never returned
     `data`, so every uncached Google Routes POST returned None and the
     caller reported "Google Routes returned no data" even when the API
     succeeded.
@@ -641,7 +659,13 @@ class TestGoogleRoutesPostReturn:
     async def test_returns_data_on_cache_miss(self):
         from unittest.mock import AsyncMock
 
-        from houses.commute_router import GoogleRoutesClient, GoogleRoutesOptions, _LatLng, _RoutesBody, _Waypoint
+        from houses.google_routes_client import (
+            GoogleRoutesClient,
+            GoogleRoutesOptions,
+            _LatLng,
+            _RoutesBody,
+            _Waypoint,
+        )
 
 
         fake_resp = AsyncMock()
@@ -677,7 +701,7 @@ class TestGoogleRoutesPostReturn:
         assert result == {"routes": [{"duration": "600s"}]}, (
             f"Expected response data to be returned, got {result!r}"
         )
-        assert len(set_cached_calls) == 1, "set_cached must be called on cache miss"
+        assert len(set_cached_calls) == 1, "the cache store must be called on cache miss"
 
 
 class TestGoogleRouteCommuteErrorReason:
@@ -697,11 +721,7 @@ class TestGoogleRouteCommuteErrorReason:
                 response=httpx.Response(400, request=httpx.Request("POST", "http://example.com")),
             )
 
-        class _StubClient:
-            async def post(self, body, field_mask, *, options=None):
-                return await boom(body, field_mask, options=options)
-
-        router = CommuteRouter(routes_client=_StubClient())
+        router = CommuteRouter(routes_client=_FakeRoutesClient(boom))
         result = await router._google_route_commute("51.5,-0.1", "51.6,-0.2", "WALK", max_walk_minutes=30)
         assert result.impossible
         assert "LatLng cannot be specified" in result.error, f"Got: {result.error}"
@@ -728,11 +748,7 @@ class TestGoogleRouteCommuteLegDestination:
                 ]
             }
 
-        class _StubClient:
-            async def post(self, body, field_mask, *, options=None):
-                return await fake_routes(body, field_mask, options=options)
-
-        router = CommuteRouter(routes_client=_StubClient())
+        router = CommuteRouter(routes_client=_FakeRoutesClient(fake_routes))
         result = await router._google_route_commute(
             "51.5,-0.1", "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET", "WALK", max_walk_minutes=60
         )
@@ -760,11 +776,7 @@ class TestGoogleRouteCommuteLegDestination:
                 ]
             }
 
-        class _StubClient:
-            async def post(self, body, field_mask, *, options=None):
-                return await fake_routes(body, field_mask, options=options)
-
-        router = CommuteRouter(routes_client=_StubClient())
+        router = CommuteRouter(routes_client=_FakeRoutesClient(fake_routes))
         result = await router._google_route_commute(
             "51.5,-0.1", "Example House, Test Road, Bracknell RG12 1AA", "DRIVE"
         )
@@ -797,8 +809,8 @@ class TestGoogleRoutesPostSeam:
 
         router = CommuteRouter()
         assert callable(router.google_routes_post)
-        # Bound to the router's own POST implementation.
-        assert router.google_routes_post.__name__ == "post"
+        # Bound to the client's own bus-route lookup.
+        assert router.google_routes_post.__name__ == "post_bus_route"
 
     def test_builder_can_pass_seam_into_bus_route_node(self):
         """The startup path: build_commute_pipeline reads

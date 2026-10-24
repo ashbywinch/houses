@@ -21,21 +21,10 @@ from typing import Any, cast, override
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from dag.persistence import WireRecord
-
-CURRENT_STATUS = "current"
+from serialization import SerializableAsDict
 
 
-@dataclass(frozen=True)
-class GroupFigureWire(WireRecord):
-    """A raw group figure on the wire: the amount and its uncertainty."""
-
-    value: str | None
-    stddev: float
-
-
-@dataclass(frozen=True)
-class MonthlySide(WireRecord):
+class MonthlySide(SerializableAsDict):
     """One side of the monthly cost as the frontend's MonthlyDeltaSide reads
     it: the human figure, and whether it carries an uncertainty."""
 
@@ -71,8 +60,7 @@ class BaselineProvenanceValue:
         return cast(dict[str, str | None], asdict(self))
 
 
-@dataclass(frozen=True)
-class BaselineWire(WireRecord):
+class Baseline(SerializableAsDict):
     """The baseline as the wire states it (the contract the frontend reads)."""
 
     rid: str
@@ -104,8 +92,7 @@ def _money_text(value: str) -> str:
         return value
 
 
-@dataclass(frozen=True)
-class GroupFigure:
+class GroupFigure(SerializableAsDict):
     """A group figure ingested from the group value dict.
 
     ``value`` is the string amount, ``stddev`` its uncertainty (Part A:
@@ -114,9 +101,6 @@ class GroupFigure:
 
     value: str | None
     stddev: float
-
-    def to_dict(self) -> GroupFigureWire:
-        return GroupFigureWire(value=self.value, stddev=self.stddev)
 
 
 def as_figure(raw: object) -> GroupFigure | None:
@@ -161,13 +145,13 @@ class MonthlyBaseline:
             others=_figure_text(self.group_value.get("others")),
         )
 
-    def to_wire(self) -> BaselineWire:
+    def to_wire(self) -> Baseline:
         # The contract shape is {value, approx} (see the frontend's
         # MonthlyDeltaSide): the stddev feeds the approx flag; the raw
         # stddev itself is the GROUP's wire, not the baseline's.
         couple = _figure_or_empty(self.group_value.get("couple"))
         others = as_figure(self.group_value.get("others"))
-        return BaselineWire(
+        return Baseline(
             rid=self.rid,
             address=self.address,
             couple=_monthly_side(couple),
@@ -194,6 +178,25 @@ class CurrentHomeNode(DerivedNode):
     the active deps were read, never wired).
     """
 
+    CURRENT_STATUS = "current"
+
+    # The app-wide singleton: built lazily on first access, dropped by
+    # reset() (test isolation) — status dep sets and the registry
+    # pointer are per-world state, never shared across tests.
+    _current_home: CurrentHomeNode | None = None
+
+    @classmethod
+    def singleton(cls) -> CurrentHomeNode:
+        """The app-wide singleton (built lazily on first access)."""
+        if cls._current_home is None:
+            cls._current_home = cls()
+        return cls._current_home
+
+    @classmethod
+    def reset(cls) -> None:
+        """Drop the singleton (test isolation): status dep sets and the
+        registry pointer are per-world state, never shared across tests."""
+        cls._current_home = None
     def __init__(self, node_id: str = "settings/current_home"):
         # _registry MUST exist before super().__init__: the base constructor
         # loads a persisted attempt and the scheduler may call _is_stale()
@@ -248,7 +251,7 @@ class CurrentHomeNode(DerivedNode):
             att = node.latest_attempt()
             if att is None or not att.succeeded:
                 continue
-            if (att.value_or_none() or "").strip().lower() == CURRENT_STATUS:
+            if (att.value_or_none() or "").strip().lower() == self.CURRENT_STATUS:
                 prop = self._registry.get(str(node._id).split("/")[0])
                 return prop if prop is not None else None
         return None
@@ -281,7 +284,7 @@ class CurrentHomeNode(DerivedNode):
             if id(node) in status_ids
             and att is not None
             and att.succeeded
-            and (att.value_or_none() or "").strip().lower() == CURRENT_STATUS
+            and (att.value_or_none() or "").strip().lower() == self.CURRENT_STATUS
         ]
         if len(winners) != 1:
             # Zero current homes, or SEVERAL (an ambiguous state) — no
@@ -337,17 +340,10 @@ class CurrentHomeNode(DerivedNode):
 
 def current_home_node() -> CurrentHomeNode:
     """The app-wide singleton (built lazily on first access)."""
-    global _CURRENT_HOME
-    if _CURRENT_HOME is None:
-        _CURRENT_HOME = CurrentHomeNode()
-    return _CURRENT_HOME
+    return CurrentHomeNode.singleton()
 
 
 def _reset() -> None:
     """Drop the singleton (test isolation): status dep sets and the
     registry pointer are per-world state, never shared across tests."""
-    global _CURRENT_HOME
-    _CURRENT_HOME = None
-
-
-_CURRENT_HOME: CurrentHomeNode | None = None
+    CurrentHomeNode.reset()

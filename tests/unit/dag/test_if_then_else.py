@@ -7,9 +7,10 @@ from typing import override
 import pytest
 
 from dag.attempt import Attempt
-from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+from dag.if_then_else_node import IfThenElseNode
+from dag.if_then_else_options import IfThenElseOptions
 from dag.scheduler import (
-    AsyncQueueScheduler,
+    AsyncRefreshQueue,
     flush_processor,
     reset_scheduler,
     set_scheduler,
@@ -19,7 +20,7 @@ from dag.user_input_node import UserInputNode
 
 @pytest.fixture(autouse=True)
 def _isolated_scheduler():
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
     yield
     reset_scheduler()
 

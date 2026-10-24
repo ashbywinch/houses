@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 from dag.attempt import Attempt, AttemptError, Provenance
 from dag.expression import Add, Div, Expression, Literal, Mul, Negate, Ref, Sub
 from dag.persistence import latest_node_result, save_node_result
-from dag.signals import Signal
+from dag.signal import Signal
+from serialization import SerializableAsDict, omit_when_none
 
 
-@dataclass
-class NodeJson:
+class NodeValue(SerializableAsDict):
     """The serialized node record served by to_json/to_json_value and
     persisted into node_results. Fields left as None are omitted from the
     serialized dict, so the emitted key set matches the emitting path
@@ -23,26 +23,25 @@ class NodeJson:
 
     status: str
     value: Any = None
-    succeeded: bool | None = None
-    pending: bool | None = None
-    impossible: bool | None = None
-    error: str | None = None
-    error_detail: dict | None = None
-    source_url: str | None = None
-    provenance: dict | None = None
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the node_results wire shape (coding-standards.md)
-        d = dict(status=self.status, value=self.value)
-        for k in ("succeeded", "pending", "impossible", "error", "error_detail", "source_url", "provenance"):
-            v = getattr(self, k)
-            if v is not None:
-                d[k] = v
-        return d
+    succeeded: bool | None = Field(default=None, exclude_if=omit_when_none)
+    pending: bool | None = Field(default=None, exclude_if=omit_when_none)
+    impossible: bool | None = Field(default=None, exclude_if=omit_when_none)
+    error: str | None = Field(default=None, exclude_if=omit_when_none)
+    error_detail: dict | None = Field(default=None, exclude_if=omit_when_none)
+    source_url: str | None = Field(default=None, exclude_if=omit_when_none)
+    provenance: dict | None = Field(default=None, exclude_if=omit_when_none)
+    # DerivedNode's lifecycle keys. The wire carries them (appended after the
+    # base dump, which is why they are declared last — the record's field order
+    # IS the wire's key order), so the record models them and no node has to
+    # patch keys onto a dict it does not own.
+    retry_at: str | None = Field(default=None, exclude_if=omit_when_none)
+    retry_count: int | None = Field(default=None, exclude_if=omit_when_none)
+    stale: bool | None = Field(default=None, exclude_if=omit_when_none)
 
 
 T = TypeVar("T")
+
+type _DepAttemptMap = dict[str, Attempt[Any]]
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +53,13 @@ def _humanify(name: str) -> str:
     return " ".join(w.capitalize() for w in name.replace("-", " ").split("_"))
 
 
-# Cache TypeAdapters by value type to avoid OOM from creating thousands
-# of Pydantic schemas at startup (~19s, 5GB for 6000 nodes).
-_adapter_cache: dict[type, TypeAdapter] = {}
+
 
 
 def _get_adapter(t: type) -> TypeAdapter:
-    if t not in _adapter_cache:
-        _adapter_cache[t] = TypeAdapter(t)
-    return _adapter_cache[t]
+    if t not in Node._adapter_cache:
+        Node._adapter_cache[t] = TypeAdapter(t)
+    return Node._adapter_cache[t]
 
 
 class PersistedNodeMixin(Generic[T]):
@@ -80,17 +77,20 @@ class PersistedNodeMixin(Generic[T]):
     _id: str
     _adapter: TypeAdapter
 
+    # Immutable defaults live on the class body (a node that never persists
+    # or retries reads these); only the per-instance mutable map is seeded
+    # in __init__, so two nodes can never share one dependency-timestamp dict.
+    _computed_at: datetime | None = None
+    _persisted_at: datetime | None = None
+    _db_created_at: str = ""
+    _persisted_code_version: str | None = None
+    _retry_at: datetime | None = None
+    _retry_count: int = 0
+    _max_retries: int = 3
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._computed_at: datetime | None = None
-        self._persisted_at: datetime | None = None
-        self._db_created_at: str = ""
-        # lucidlint: ignore duplicate-block field-default initializer table — each line seeds a distinct piece of
         self._loaded_dep_timestamps: dict[str, str] = {}
-        self._persisted_code_version: str | None = None
-        self._retry_at: datetime | None = None
-        self._retry_count: int = 0
-        self._max_retries: int = 3
 
     def _load_attempt_from_db(self) -> Attempt[T] | None:
         stored = latest_node_result(self._id)
@@ -126,8 +126,9 @@ class PersistedNodeMixin(Generic[T]):
                 ):
                     value["_details"] = value.pop("details")
                 val = self._adapter.validate_python(value)
-            # lucidlint: ignore broad-except validation failure → Attempt.impossible carrying the reason
-            except Exception as exc:
+            except (KeyError, TypeError, ValueError) as exc:
+                # A row whose value no longer validates against the node's
+                # type: the attempt is impossible and carries the reason.
                 return Attempt.impossible(f"validation error: {exc}")
             return Attempt.succeeded(val)
         if status == "pending":
@@ -176,10 +177,9 @@ class PersistedNodeMixin(Generic[T]):
             )
             return None
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
     def _persist(
         self,
-        result_dict: dict,
+        result_dict: Mapping[str, Any],
         dep_timestamps: dict[str, str] | None = None,
         *,
         code_version: str | None = None,
@@ -199,6 +199,15 @@ class PersistedNodeMixin(Generic[T]):
 
 class Node(ABC, PersistedNodeMixin[T], Generic[T]):
     """Base class for all DAG nodes."""
+
+    # Cache TypeAdapters by value type to avoid OOM from creating thousands
+    # of Pydantic schemas at startup (~19s, 5GB for 6000 nodes).
+    _adapter_cache: dict[type, TypeAdapter] = {}
+
+    #: The record this node's wire is built from. A node whose wire carries
+    #: keys of its own (PetrolCostAugmentNode's ``is_child``) declares its
+    #: subclass, so the extension is modelled once instead of patched on.
+    wire_type: ClassVar[type[NodeValue]] = NodeValue
 
     #: Optional app-layer role for refresh routing. The library never
     #: interprets it — a host application sets it at construction (e.g.
@@ -265,14 +274,25 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         """
         return att.value
 
-    # lucidlint: ignore record-shape to_json returns the serialized node record (coding-standards.md)
-    async def to_json(
-        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
-    ) -> dict:
+    async def to_node_value(
+        self,
+        dep_attempts: list[Attempt] | None = None,
+        active_deps: tuple[Node, ...] | None = None,
+        *,
+        provenance: bool = True,
+    ) -> NodeValue:
+        """This node's wire record — the shape ``to_json``/``to_json_value`` dump.
+
+        The builder is the seam: a subclass whose wire carries keys of its own
+        declares ``wire_type`` and extends the record (DerivedNode's lifecycle
+        keys, PetrolCostAugmentNode's ``is_child``), so no caller has to patch
+        keys onto a dict it does not own. ``provenance=False`` skips the
+        expensive tree build (the bulk-list path).
+        """
         attempt = await self.attempt()
-        rec = NodeJson(
+        rec = self.wire_type(
             status=attempt.status,
-            value=self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
+            value=self._wire_value(attempt),
             succeeded=attempt.succeeded,
             pending=attempt.pending,
             impossible=attempt.impossible,
@@ -284,34 +304,35 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
                 rec.error_detail = info.to_dict()
         if self._source_url:
             rec.source_url = self._source_url
-        if not attempt.pending:
+        if provenance and not attempt.pending:
             rec.provenance = (await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
-        return rec.to_dict()
+        return rec
 
-    # lucidlint: ignore record-shape returns the serialized node record (coding-standards.md)
+    def _wire_value(self, attempt: Attempt[Any]) -> Any:
+        """The value as the wire states it.
+
+        The base dumps the typed value. A node whose value is a machine dict
+        (CommuteSelectorNode's breakdown, with its private ``_details`` field
+        renamed for the frontend) projects it here, so the projection holds on
+        the serve path AND the persist path — one place, not one per caller.
+        """
+        return self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None
+
+    async def to_json(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> dict:
+        """The node's wire: ``to_node_value``, dumped."""
+        return (await self.to_node_value(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
+
     async def to_json_value(self) -> dict:
         """Like to_json() but skips the expensive provenance tree build.
 
         Returns status, value, and metadata only — no ``provenance`` field.
         Use this for bulk-list endpoints where provenance is not needed.
         """
-        attempt = await self.attempt()
-        rec = NodeJson(
-            status=attempt.status,
-            value=self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
-            succeeded=attempt.succeeded,
-            pending=attempt.pending,
-            impossible=attempt.impossible,
-        )
-        if attempt.impossible:
-            info = attempt.error_info
-            rec.error = (info.display_message if info is not None else attempt.error) or attempt.error
-        if self._source_url:
-            rec.source_url = self._source_url
-        return rec.to_dict()
+        return (await self.to_node_value(provenance=False)).to_dict()
 
-    # lucidlint: ignore record-shape wire-format dict — serialization boundary
-    def _impossible(self, dep_attempts: dict[str, Attempt[Any]], extra: str = "") -> Attempt[T]:
+    def _impossible(self, dep_attempts: _DepAttemptMap, extra: str = "") -> Attempt[T]:
         parts = [self._id]
         if extra:
             parts.append(extra)

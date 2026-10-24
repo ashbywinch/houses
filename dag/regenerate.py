@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import Any
+from typing import TypedDict
 
 from dag.derived_node import DerivedNode
 from dag.node import Node
@@ -37,8 +37,24 @@ def nodes_matching(patterns: Iterable[str], nodes: Iterable[Node]) -> list[Node]
     return [n for n in nodes if any(rx.match(n._id) for rx in regexes)]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-async def force_regenerate(nodes: Iterable[Node]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+class RegeneratedNode(TypedDict):
+    """One force-regenerated node row of the admin regenerate response."""
+
+    node: str
+    status: str
+
+
+class SkippedNode(TypedDict):
+    """One skipped (no-computation) match of the admin regenerate response."""
+
+    node: str
+    reason: str
+
+
+type _RegenerateOutcome = tuple[list[RegeneratedNode], list[SkippedNode]]
+
+
+async def force_regenerate(nodes: Iterable[Node]) -> _RegenerateOutcome:
     """Force-recompute every matched DerivedNode and drain the cascade.
 
     Returns:
@@ -46,16 +62,14 @@ async def force_regenerate(nodes: Iterable[Node]) -> tuple[list[dict[str, Any]],
         recomputed node; skipped: ``{node, reason}`` for matches that
         have no computation (UserInputNodes).
     """
-    regenerated: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
+    regenerated: list[RegeneratedNode] = []
+    skipped: list[SkippedNode] = []
     for node in nodes:
         if not isinstance(node, DerivedNode):
-            # lucidlint: ignore record-shape wire-format dict — admin API response payload, serialization boundary owns
-            skipped.append({"node": node._id, "reason": "input node — no computation"})
+            skipped.append(SkippedNode(node=node._id, reason="input node — no computation"))
             continue
         await node.refresh(force=True)
-        # lucidlint: ignore record-shape wire-format dict — admin API response payload, serialization boundary owns the
-        regenerated.append({"node": node._id, "status": node.latest_attempt().status})
+        regenerated.append(RegeneratedNode(node=node._id, status=node.latest_attempt().status))
     # Dependents of the regenerated nodes are now stale — drain the
     # scheduler so the response reflects the completed cascade.
     await flush_processor()

@@ -11,35 +11,40 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
-from houses.services import SETTINGS_SOURCE_CACHE
+from houses.services import Services
 
 # lucidlint: ignore private-import intra-package helper import
 from houses.services_provider import _request_services
 from houses.settings import settings
 from tests.helpers import make_services
 
-SETTINGS_SOURCE_CACHE.clear()
-token = _request_services.set(make_services())
 
-conn = sqlite3.connect(settings.sqlite_path)
-has_data = conn.execute(
-    "SELECT DISTINCT substr(node_id, 1, instr(node_id, '/') - 1) as rid "
-    "FROM node_results WHERE node_id LIKE '%/best_address'"
-).fetchall()
-conn.close()
+async def main() -> None:
+    Services.SETTINGS_SOURCE_CACHE.clear()
+    token = _request_services.set(make_services())
 
-if not has_data:
-    print("No RIDs with node_results for best_address")
-    sys.exit(1)
+    conn = sqlite3.connect(settings.sqlite_path)
+    has_data = conn.execute(
+        "SELECT DISTINCT substr(node_id, 1, instr(node_id, '/') - 1) as rid "
+        "FROM node_results WHERE node_id LIKE '%/best_address'"
+    ).fetchall()
+    conn.close()
 
-sample_rid = has_data[0][0]
-print(f"RID: {sample_rid}")
+    if not has_data:
+        print("No RIDs with node_results for best_address")
+        sys.exit(1)
 
-prop = PropertyNodes(sample_rid)
-register_property(sample_rid, prop)
+    sample_rid = has_data[0][0]
+    print(f"RID: {sample_rid}")
+
+    prop = PropertyNodes(sample_rid)
+    register_property(sample_rid, prop)
+    await check(prop)
+
+    _request_services.reset(token)
 
 
-async def check():
+async def check(prop) -> None:
     for key, sel in prop.commute_selectors.items():
         a = await sel.attempt()
         print(f"  {key:40s} status={a.status:12s}")
@@ -55,6 +60,5 @@ async def check():
             print(f"  {name:25s} status={a.status:12s}")
 
 
-asyncio.run(check())
-
-_request_services.reset(token)
+if __name__ == "__main__":
+    asyncio.run(main())

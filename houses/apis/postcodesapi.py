@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 
 from houses import apigw
-from houses.apis.transport import BaseApi, FetchArgs
+from houses.apigw import FetchArgs
+from houses.apis.base_api import BaseApi
 from houses.geopoint import GeoPoint
 
 # An outcode is the postcode's first 1-2 letters, one digit and an optional

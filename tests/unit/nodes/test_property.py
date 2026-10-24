@@ -109,7 +109,7 @@ class TestProperty:
         prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         await flush_processor()
 
-        j = await prop.to_json()
+        j = (await prop.view()).to_dict()
         assert j["rid"] == "prop123"
         assert j["best_location"]["status"] == "succeeded"
         assert j["best_location"]["value"] == {"lat": 51.5, "lon": -0.1}

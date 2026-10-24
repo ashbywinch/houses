@@ -17,53 +17,66 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dag.scheduler import flush_processor
 from houses.model.domain import Person, PlaceOfInterest
-from houses.services import SETTINGS_SOURCE_CACHE
+from houses.services import Services
 from houses.services_provider import get_services
 
-# POI label → new full address
-_NEW_ADDRESSES: dict[str, str] = {
-    "Pimlico": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
-    "Bracknell": "Waite House, Doncastle Road, Bracknell, Berkshire RG12 8YA",
-    "Dad": "Flat 37, Watson Place, Trinity Road, Chipping Norton OX7 5GZ",
-    "Aldgate": "Eastgate House, 40 Dukes Place, Aldgate, London EC3A 7LP",
-}
+
+class _DestinationMigration:
+    """The destination migration's address table: POI label → full address."""
+
+    NEW_ADDRESSES: dict[str, str] = {
+        "Pimlico": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
+        "Bracknell": "Waite House, Doncastle Road, Bracknell, Berkshire RG12 8YA",
+        "Dad": "Flat 37, Watson Place, Trinity Road, Chipping Norton OX7 5GZ",
+        "Aldgate": "Eastgate House, 40 Dukes Place, Aldgate, London EC3A 7LP",
+    }
+
+
+def _persons_to_migrate(persons_node) -> list[Person]:
+    """The persons whose POI addresses this migration rewrites.
+
+    [] — with the reason printed — when persons_source has not succeeded
+    or holds no persons.
+    """
+    current = persons_node.latest_attempt()
+    persons: list[Person] = (current.value_or_none() or []) if current.succeeded else []
+    if not persons:
+        print(f"persons_source holds no persons (status={current.status}) — nothing to migrate.")
+        return []
+    return persons
 
 
 async def migrate() -> None:
     # Clear cache so _make_settings_source loads fresh from DB
-    SETTINGS_SOURCE_CACHE.clear()
+    Services.SETTINGS_SOURCE_CACHE.clear()
     svc = get_services()
     persons_node = svc.persons_source
 
-    current = persons_node.latest_attempt()
-    if not current.succeeded:
-        print(f"persons_source not succeeded (status={current.status}) — nothing to migrate.")
-        return
-
-    persons: list[Person] = current.value_or_none()
-    if not persons:
-        print("No persons found — nothing to migrate.")
+    persons = _persons_to_migrate(persons_node)
+    if not persons:  # _persons_to_migrate printed why there is nothing to do
         return
 
     updated = 0
     for person in persons:
         new_pois = []
         for poi in person.places_of_interest:
-            if poi.label in _NEW_ADDRESSES:
+            if poi.label in _DestinationMigration.NEW_ADDRESSES:
                 new_poi = PlaceOfInterest(
                     label=poi.label,
-                    address=_NEW_ADDRESSES[poi.label],
+                    address=_DestinationMigration.NEW_ADDRESSES[poi.label],
                     trips_per_week=poi.trips_per_week,
                     weeks_per_year=poi.weeks_per_year,
                 )
                 new_pois.append(new_poi)
                 updated += 1
-                print(f"  {person.name}/{poi.label}: {poi.label} → {_NEW_ADDRESSES[poi.label][:40]}...")
+                print(
+                    f"  {person.name}/{poi.label}: {poi.label} → "
+                    f"{_DestinationMigration.NEW_ADDRESSES[poi.label][:40]}..."
+                )
             else:
                 new_pois.append(poi)
         object.__setattr__(person, "places_of_interest", tuple(new_pois))
 
-    # lucidlint: ignore duplicate-block fail-fast guard triple — each guard exits on a different empty precondition;
     if not updated:
         print("No POIs matched — nothing to migrate.")
         return

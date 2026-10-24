@@ -10,7 +10,7 @@ import pytest
 
 from dag.scheduler import flush_processor
 from houses.api_cache import set_cache_dir
-from houses.nodes.bus import BusRouteNode
+from houses.nodes.bus_route_node import BusRouteNode
 from tests.helpers import FakeSchoolLookup, make_services
 from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _inject_test_scheduler,
@@ -18,9 +18,9 @@ from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _sqlite_memory,
 )
 
-# Prevent BusRouteNode from making real Google Routes API calls in unit tests.
-# bus.py sets _default_google_routes_post = _router._google_routes_post at
-# import time; this override must run after that import but before any test.
+# No unit test may let BusRouteNode post to the real Google Routes API: the
+# pipeline builder injects the client's bus-route seam, and this class default
+# covers every node built without one.
 BusRouteNode._default_google_routes_post = None
 
 
@@ -47,7 +47,7 @@ def flush_all() -> None:
     import dag.scheduler as _dag_sched
 
     sched = _dag_sched.get_scheduler()
-    assert isinstance(sched, _dag_sched.AsyncQueueScheduler)
+    assert isinstance(sched, _dag_sched.AsyncRefreshQueue)
     enqueued_before = sched.enqueued_since_flush
     drained = drain_recompute()
     if drained == 0 and enqueued_before == 0:
@@ -99,11 +99,11 @@ def _isolate_api_cache():
 def _isolate_settings_sources():
     """Clear the settings-source cache so _make_settings_source always
     reads from the per-test in-memory DB or factory, never stale state."""
-    from houses.services import SETTINGS_SOURCE_CACHE
+    from houses.services import Services
 
-    SETTINGS_SOURCE_CACHE.clear()
+    Services.SETTINGS_SOURCE_CACHE.clear()
     yield
-    SETTINGS_SOURCE_CACHE.clear()
+    Services.SETTINGS_SOURCE_CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

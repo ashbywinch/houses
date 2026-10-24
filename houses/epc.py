@@ -10,20 +10,28 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import httpx
 
 from dag.attempt import Attempt
+from dag.guard import capture_async
 from houses import apis
+from houses.address_utils import POSTCODE_RE
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
-from houses.api_cache import get_cached
+from houses.api_cache import CacheRequest
+from houses.apis.epc_search_result import EpcSearchResult
 from houses.settings import settings
+from serialization import SerializableAsDict
 
 logger = logging.getLogger(__name__)
 
-EPC_SEARCH_URL = "https://api.get-energy-performance-data.communities.gov.uk/api/domestic/search"
+class _EpcEndpoints:
+    """The one EPC API endpoint — class attribute per the global-state gate
+    (values belong to the class that serves them)."""
+
+    SEARCH_URL = "https://api.get-energy-performance-data.communities.gov.uk/api/domestic/search"
 
 ROAD_SUFFIXES = frozenset(
     {
@@ -72,20 +80,14 @@ ROAD_SUFFIXES = frozenset(
         "meadows",
     }
 )
-HTTP_OK = 200
 
 
-@dataclass(frozen=True)
-class _EpcSearchParams:
-    """Query params for the EPC domestic search API."""
+class _EpcSearchParams(SerializableAsDict):
+    """Query params for the EPC domestic search API: the fields ARE the
+    request's parameters, serialized once at the HTTP edge by ``to_dict``."""
 
     postcode: str
     page_size: int
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {"postcode": self.postcode, "page_size": self.page_size}
 
 
 class _EpcCertificateRow(TypedDict, total=False):
@@ -128,6 +130,9 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
     e.g. ``"address matched multiple properties"``, ``"no matching
     certificate for this address"``, or ``"no certificates found"``.
 
+    ``postcode`` must be complete: the register refuses an outward code, so
+    a partial one returns ``impossible`` without a request.
+
     When ``address`` is provided, filters the API results to match
     the building identifier (number or name) against ``addressLine1``
     in each certificate. The specific reason from ``_match_cert`` is
@@ -141,23 +146,29 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         return Attempt.impossible("address has no building identifier")
 
     pc = postcode.strip().upper()
+    # The EPC register needs a FULL postcode: an outward code (or none) is
+    # refused here rather than at the API, which answers a bare 400 Bad
+    # Request that names nothing.  Before the cache, so a doomed key is never
+    # looked up or sent.
+    if not pc:
+        return Attempt.impossible("address has no postcode")
+    if not POSTCODE_RE.fullmatch(pc):
+        return Attempt.impossible(f"address has no full postcode ({pc})")
     params = _EpcSearchParams(postcode=pc, page_size=50)
 
-    cached = get_cached("GET", EPC_SEARCH_URL, params)
+    cached = CacheRequest("GET", _EpcEndpoints.SEARCH_URL, params).cached()
     if cached is not None:
         certs = cached.get("data", [])
         return _match_cert(certs, building_id, address)
 
-    try:
-        result = await apis.epc.search(EPC_SEARCH_URL, params)
-        return _match_cert(result.certificates, building_id, address)
-
-    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
-        raise  # transient — let DAG retry handle it
-    # lucidlint: ignore broad-except boundary — unknown EPC failures convert to an impossible attempt, never raise
-    except Exception as e:
-        logger.warning("EPC lookup failed for %s: %s", postcode, e)
-        return Attempt.impossible(f"EPC lookup failed: {e}")
+    result, failure = await capture_async(
+        lambda: apis.epc.search(_EpcEndpoints.SEARCH_URL, params),
+        reraise=(httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException),
+    )
+    if failure is not None:
+        logger.warning("EPC lookup failed for %s: %s", postcode, failure)
+        return Attempt.impossible(f"EPC lookup failed: {failure}")
+    return _match_cert(cast(EpcSearchResult, result).certificates, building_id, address)
 
 
 def _extract_building_id(first_token: str) -> str:
@@ -169,8 +180,10 @@ def _extract_building_id(first_token: str) -> str:
     return first
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _should_lookup_epc(address: str) -> tuple[bool, str]:
+type _EpcLookupDecision = tuple[bool, str]  # (proceed, building_id)
+
+
+def _should_lookup_epc(address: str) -> _EpcLookupDecision:
     """Decide whether to call the EPC API for this address.
 
     Returns (proceed, building_id).
@@ -203,7 +216,6 @@ def _street_after_token(tokens: list[str], token: str) -> str:
     if idx + 1 < len(tokens):
         return tokens[idx + 1]
     return ""
-
 
 
 # lucidlint: ignore data-clump (address, certs) travel

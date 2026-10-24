@@ -19,35 +19,35 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from houses.database import get_connection
-
-MAX_ATTEMPTS = 8
-BACKOFF_BASE_SECONDS = 60
-BACKOFF_CAP_SECONDS = 3600
-STALE_CLAIM_SECONDS = 900
-"""An in_progress job older than this (worker died before reporting) is
-re-queued so the property's enrichment doesn't stall forever."""
-# pending -> claimable
-# in_progress -> claimed, awaiting report (or stale if the worker died)
-# failed -> gave up after MAX_ATTEMPTS; not claimable, visible via status
-_ACTIVE_STATUSES = ("pending", "in_progress")
+from serialization import SerializableAsDict
 
 
-@dataclass(frozen=True)
-class ScrapeJob:
+class _RetryPolicy:
+    """The scrape queue's retry policy — attempt cap, exponential backoff
+    bounds, and the stale-claim window (timedeltas: the units are the
+    type, so callers never multiply bare second counts)."""
+
+    MAX_ATTEMPTS = 8
+    BACKOFF_BASE = timedelta(seconds=60)
+    BACKOFF_CAP = timedelta(seconds=3600)
+    # An in_progress job older than this (worker died before reporting)
+    # is re-queued so the property's enrichment doesn't stall forever.
+    STALE_CLAIM = timedelta(seconds=900)
+    # pending -> claimable
+    # in_progress -> claimed, awaiting report (or stale if the worker died)
+    # failed -> gave up after MAX_ATTEMPTS; not claimable, visible via status
+    ACTIVE_STATUSES = ("pending", "in_progress")
+
+
+class ScrapeJob(SerializableAsDict):
     """A claimed scrape job handed to the worker."""
 
     id: int
     rid: str
     url: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
-        return dict(id=self.id, rid=self.rid, url=self.url)
 
-
-@dataclass(frozen=True)
-class ScrapeJobStatus:
+class ScrapeJobStatus(SerializableAsDict):
     """One property's honest queue state (the card's states)."""
 
     status: str
@@ -56,15 +56,6 @@ class ScrapeJobStatus:
     claimed_at: str | None
     next_retry_at: str
     last_error: str | None
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the wire shape (coding-standards.md)
-        return dict(
-            status=self.status, attempts=self.attempts, created_at=self.created_at,
-            claimed_at=self.claimed_at, next_retry_at=self.next_retry_at,
-            last_error=self.last_error,
-        )
 
 
 @dataclass(frozen=True)
@@ -78,14 +69,14 @@ class ScrapeQueueStatus:
 
 def backoff_delay(attempts: int) -> timedelta:
     """Exponential backoff for the attempt number (1-based)."""
-    return timedelta(seconds=min(BACKOFF_BASE_SECONDS * (2**attempts), BACKOFF_CAP_SECONDS))
+    return min(_RetryPolicy.BACKOFF_BASE * (2**attempts), _RetryPolicy.BACKOFF_CAP)
 
 
 def enqueue_scrape(rid: str, url: str) -> bool:
     """Queue a scrape job; no-op if one is already active for the rid."""
     conn = get_connection()
     active = conn.execute(
-        f"SELECT id FROM pending_scrapes WHERE rid=? AND status IN {_ACTIVE_STATUSES}",
+        f"SELECT id FROM pending_scrapes WHERE rid=? AND status IN {_RetryPolicy.ACTIVE_STATUSES}",
         (rid,),
     ).fetchone()
     if active is not None:
@@ -114,7 +105,7 @@ def claim_due_scrape() -> ScrapeJob | None:
     """
     conn = get_connection()
     now = datetime.now(UTC).isoformat()
-    stale_before = (datetime.now(UTC) - timedelta(seconds=STALE_CLAIM_SECONDS)).isoformat()
+    stale_before = (datetime.now(UTC) - _RetryPolicy.STALE_CLAIM).isoformat()
     # Stale reclaims count toward MAX_ATTEMPTS with the same backoff as
     # reported failures: a worker that keeps dying before reporting must
     # converge to the failed terminal state, not loop forever (the card's
@@ -126,7 +117,7 @@ def claim_due_scrape() -> ScrapeJob | None:
     ).fetchall()
     for stale in stale_rows:
         attempts = stale["attempts"] + 1
-        if attempts >= MAX_ATTEMPTS:
+        if attempts >= _RetryPolicy.MAX_ATTEMPTS:
             conn.execute(
                 "UPDATE pending_scrapes SET status='failed', attempts=?,"
                 " last_error='worker died before reporting' WHERE id=?",
@@ -150,8 +141,7 @@ def claim_due_scrape() -> ScrapeJob | None:
         " RETURNING id, rid, url",
         (now, now),
     ).fetchone()
-    # lucidlint: ignore special-case sqlite row absence — a missing job row IS the
-    # absent case; a null-object dataclass would add ceremony for zero benefit
+    # lucidlint: ignore special-case a missing job row IS the absent case — no null-object here (review-log)
     if row is None:
         conn.commit()  # persist the stale-claim requeue even when nothing is due
         return None
@@ -189,7 +179,7 @@ def report_scrape(job_id: int, ok: bool, error: str | None = None) -> str | None
         conn.commit()
         return row["rid"]
     attempts = row["attempts"] + 1
-    if attempts >= MAX_ATTEMPTS:
+    if attempts >= _RetryPolicy.MAX_ATTEMPTS:
         conn.execute(
             "UPDATE pending_scrapes SET attempts=?, status='failed', last_error=? WHERE id=?",
             (attempts, error, job_id),
@@ -241,11 +231,12 @@ def cancel_scrape_for_rid(rid: str) -> bool:
 def scrape_queue_status() -> ScrapeQueueStatus:
     """Counts by status for operator visibility."""
     conn = get_connection()
-    counts: dict[str, int] = {}
-    for (status, n) in conn.execute(
-        "SELECT status, COUNT(*) FROM pending_scrapes GROUP BY status"
-    ).fetchall():
-        counts[status] = n
+    counts: dict[str, int] = {
+        status: n
+        for status, n in conn.execute(
+            "SELECT status, COUNT(*) FROM pending_scrapes GROUP BY status"
+        ).fetchall()
+    }
     return ScrapeQueueStatus(
         pending=counts.get("pending", 0),
         in_progress=counts.get("in_progress", 0),

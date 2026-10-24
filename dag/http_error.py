@@ -20,6 +20,13 @@ class HttpError(Exception):
     over ``str(exc)``, so a raw body never reaches the UI by default.
     """
 
+    # HTTP status-band boundaries — the retry policy and status
+    # predicates read the same edges as ``dag.attempt``'s classifier
+    # (the single owner of HTTP-band semantics).
+    HTTP_5XX_START = 500
+    HTTP_5XX_END = 600
+    HTTP_TOO_MANY_REQUESTS = 429
+
     def __init__(
         self,
         status: int,
@@ -52,11 +59,11 @@ class HttpError(Exception):
 
     def is_server_error(self) -> bool:
         """True for 5xx responses that may be transient."""
-        return 500 <= self.status < 600
+        return self.HTTP_5XX_START <= self.status < self.HTTP_5XX_END
 
     def is_rate_limit(self) -> bool:
         """True for 429 Too Many Requests."""
-        return self.status == 429
+        return self.status == self.HTTP_TOO_MANY_REQUESTS
 
 
 def _status_phrase(code: int) -> str:

@@ -34,7 +34,7 @@ from houses.services import (
     WalkabilityService,
     _AuthorizationUrl,
 )
-from houses.walkability import WalkabilityPayload, _WalkToTown
+from houses.walkability import Walkability
 
 # ── Individual Fake Services ──────────────────────────────────────────
 
@@ -235,11 +235,11 @@ class FakeWalkability(WalkabilityService):
         self.amenities = amenities
 
     @override
-    async def enrich(self, lat: float, lng: float, address: str) -> WalkabilityPayload:
+    async def enrich(self, lat: float, lng: float, address: str) -> Walkability:
         walk = None
         if self.walk_to_town_minutes is not None:
-            walk = _WalkToTown(value=self.walk_to_town_minutes, unit="minute")
-        return WalkabilityPayload(walk_to_town=walk, amenities=self.amenities)
+            walk = Quantity(self.walk_to_town_minutes, "minute")
+        return Walkability(walk_to_town=walk, amenities=self.amenities)
 
 
 class FakeTownDesc(TownDescService):

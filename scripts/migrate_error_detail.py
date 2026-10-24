@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from dag.persistence import MoneyEncoding
 from scripts.db import conn as _conn
 
 
@@ -56,8 +57,7 @@ def _migrate_works_estimates(conn: sqlite3.Connection) -> int:
         for name, val in list(value.items()):
             is_numeric_str = isinstance(val, str) and val.replace(".", "").replace("-", "").isdigit()
             if isinstance(val, (int, float)) or is_numeric_str:
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-                value[name] = {"amount": str(val), "currency": "GBP"}
+                value[name] = MoneyEncoding(amount=str(val), currency="GBP")
                 changed = True
         if changed:
             data["value"] = value

@@ -69,11 +69,6 @@ if not hasattr(LegMode, "__get_pydantic_core_schema__"):
     LegMode.__get_pydantic_core_schema__ = _legmode_schema
 
 
-class CommuteMode(Enum):
-    TRANSIT = auto()
-    DRIVE = auto()
-
-
 @dataclass(frozen=True)
 class JourneyLeg:
     """One segment of a commute journey."""

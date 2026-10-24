@@ -4,11 +4,9 @@ from typing import override
 
 from money import Money
 
-from dag.attempt import Attempt, SourceType
+from dag.attempt import SourceType
 from dag.derived_node import DerivedNode
 from dag.expression import Ref
-
-SINKING_FUND_RATE_NODE_ID = "settings/sinking_fund_rate"
 
 
 class YearlySinkingFundNode(DerivedNode[Money]):
@@ -24,7 +22,5 @@ class YearlySinkingFundNode(DerivedNode[Money]):
     def expression(self):
         return Ref(self._deps[0]) * Ref(self._deps[1])
 
-# lucidlint: ignore middle-man protocol/reflected-operator requirement
-    @override
-    def compute(self, price: Attempt[Money], rate: Attempt) -> Attempt[Money]:
-        return self.expression.evaluate()
+
+    compute = DerivedNode.compute  # the expression IS the computation — no forwarding shim

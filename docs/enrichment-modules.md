@@ -7,7 +7,7 @@ Index of enrichment modules and their dedicated docs. Entry points are discovera
 | Commute | [commute.md](commute.md) | `houses/enricher.py` |
 | Petrol Cost | — (no doc; see `houses/nodes/petrol.py`) | `houses/nodes/petrol.py` |
 | Rail Fare Fallback | — (no doc; see `houses/nodes/rail_fare_node.py`) | `houses/nodes/rail_fare_node.py` |
-| Schools | — (no doc; see `houses/nodes/schools.py`) | `houses/nodes/schools.py` |
+| Schools | — (no doc; see `houses/nodes/nearest_school_node.py`) | `houses/nodes/nearest_school_node.py` |
 | Walkability | — (no doc; see `houses/walkability.py`) | `houses/walkability.py` |
 | Town Description | — (no doc; see `houses/town_desc.py`) | `houses/town_desc.py` |
 | Council Tax | — (no doc; see `houses/council_tax.py`) | `houses/council_tax.py` |

@@ -1,222 +1,49 @@
+"""Startup bootstrap: the DB loader that builds every property's live node
+graph, plus the address upgrade and input-default invariants its consumers
+share."""
+
 from __future__ import annotations
 
-import pytest
 from money import Money
 
-from dag.scheduler import flush_processor
-from dag.user_input_node import UserInputNode
+from dag.persistence import save_node_result
 from houses.geopoint import GeoPoint
 
 
-class TestBootstrapFromRow:
-    @pytest.mark.asyncio
-    async def test_pushes_address(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
+class TestLoadPropertyNodesFromDb:
+    """The live startup path (houses/server.py::_seed_dag): every RID in
+    node_results becomes a registered PropertyNodes instance.  The
+    test-data pollution guard on the same loader has its own test in
+    tests/unit/dag/test_property_rids.py."""
 
-        sources = {
-            "rightmove_address": UserInputNode[str]("rightmove_address", str),
-        }
-        row = {"Address": "10 High St, London SW1P 1AA"}
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["rightmove_address"].attempt()
-        assert a.value_or_none() == "10 High St, London SW1P 1AA"
+    def test_registers_one_property_per_rid_in_the_db(self):
+        from houses.nodes.bootstrap import load_property_nodes_from_db
+        from houses.property_registry import get_property
 
-    @pytest.mark.asyncio
-    async def test_pushes_url(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
+        rids = ("89306649", "89306650")
+        for rid in rids:
+            save_node_result(
+                f"{rid}/rightmove_address",
+                {"status": "succeeded", "value": "10 High St, SW1P 1AA"},
+                created_at="2026-01-01T00:00:00+00:00",
+                code_version="bootstrap-test",
+            )
 
-        sources = {
-            "rightmove_url": UserInputNode[str]("rightmove_url", str),
-        }
-        row = {"Rightmove URL": "https://www.rightmove.co.uk/properties/12345"}
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["rightmove_url"].attempt()
-        assert a.value_or_none() == "https://www.rightmove.co.uk/properties/12345"
+        assert load_property_nodes_from_db() == len(rids)
 
-    @pytest.mark.asyncio
-    async def test_pushes_bedrooms(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
+        for rid in rids:
+            prop = get_property(rid)
+            assert prop is not None, f"{rid} is in the DB but was not registered"
+            assert prop.rightmove_address.latest_attempt().value_or_none() == "10 High St, SW1P 1AA", (
+                "a loaded property must come up holding its persisted values"
+            )
 
-        sources = {
-            "rightmove_bedrooms": UserInputNode[str]("rightmove_bedrooms", str),
-        }
-        row = {"Bedrooms": "3"}
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["rightmove_bedrooms"].attempt()
-        assert a.value_or_none() == "3"
+    def test_an_empty_db_loads_nothing(self):
+        from houses.nodes.bootstrap import load_property_nodes_from_db
+        from houses.property_registry import list_properties
 
-    @pytest.mark.asyncio
-    async def test_pushes_price(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
-
-        sources = {
-            "rightmove_price": UserInputNode[Money]("rightmove_price", Money),
-        }
-        row = {"Price (£)": "450,000"}
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["rightmove_price"].attempt()
-        assert a.value_or_none() == Money("450000", "GBP")
-
-    @pytest.mark.asyncio
-    async def test_pushes_rightmove_location(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
-
-        sources = {
-            "rightmove_location": UserInputNode[GeoPoint]("rightmove_location", GeoPoint),
-        }
-        row = {
-            "Approx Latitude (est)": "51.5",
-            "Approx Longitude (est)": "-0.1",
-            "Postcode": "SW1P 1AA",
-        }
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["rightmove_location"].attempt()
-        assert a.succeeded
-        assert a.value_or_none() == GeoPoint(51.5, -0.1)
-
-    @pytest.mark.asyncio
-    async def test_skips_rightmove_location_when_coords_invalid(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
-
-        sources = {
-            "rightmove_location": UserInputNode[GeoPoint]("rightmove_location", GeoPoint),
-        }
-        row = {
-            "Approx Latitude (est)": "not-a-number",
-            "Approx Longitude (est)": "-0.1",
-        }
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        assert not (await sources["rightmove_location"].attempt()).succeeded
-
-    @pytest.mark.asyncio
-    async def test_pushes_precise_location(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
-
-        sources = {
-            "precise_location": UserInputNode[GeoPoint]("precise_location", GeoPoint),
-        }
-        row = {
-            "Actual Latitude": "51.6",
-            "Actual Longitude": "-0.2",
-            "Postcode": "SW1P 1AA",
-        }
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["precise_location"].attempt()
-        assert a.succeeded
-        assert a.value_or_none() == GeoPoint(51.6, -0.2)
-
-    @pytest.mark.asyncio
-    async def test_pushes_corrected_address_with_postcode(self):
-        """When address has no trailing outcode, corrected_address is still pushed."""
-        from houses.nodes.bootstrap import bootstrap_from_row
-
-        sources = {
-            "corrected_address": UserInputNode[str]("corrected_address", str),
-        }
-        row = {
-            "Address": "10 High St, London",
-            "Postcode": "SW1P 1AA",
-        }
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["corrected_address"].attempt()
-        assert a.succeeded
-        # Address gets postcode appended
-        value = a.value_or_none()
-        assert value is not None
-        assert "SW1P 1AA" in value
-
-    @pytest.mark.asyncio
-    async def test_pushes_user_entered_address_with_outcode_replace(self):
-        """When address ends with outcode (e.g. 'UB2'), user_entered gets full postcode."""
-        from houses.nodes.bootstrap import bootstrap_from_row
-
-        sources = {
-            "user_entered_address": UserInputNode[str]("user_addr", str),
-            "rightmove_address": UserInputNode[str]("rm_addr", str),
-        }
-        row = {
-            "Address": "31 Isambard Road, Southall, UB2",
-            "Postcode": "UB2 4GN",
-        }
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["user_entered_address"].attempt()
-        assert a.succeeded
-        pushed = a.value_or_none()
-        assert pushed == "31 Isambard Road, Southall, UB2 4GN"
-        assert "UB2, UB2 4GN" not in pushed  # no duplication
-
-    @pytest.mark.asyncio
-    async def test_skips_user_entered_when_address_unchanged(self):
-        """When address already has full postcode, user_entered_address is not pushed."""
-        from houses.nodes.bootstrap import bootstrap_from_row
-
-        sources = {
-            "user_entered_address": UserInputNode[str]("user_addr2", str),
-        }
-        row = {
-            "Address": "10 High St, London SW1P 1AA",
-            "Postcode": "SW1P 1AA",
-        }
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-        a = await sources["user_entered_address"].attempt()
-        assert not a.succeeded  # not pushed because upgraded == address
-
-    @pytest.mark.asyncio
-    async def test_all_sources_integration(self):
-        from houses.nodes.bootstrap import bootstrap_from_row
-        from houses.nodes.location import BestAddressNode, BestLocationNode
-
-        precise = UserInputNode[GeoPoint]("precise_location", GeoPoint)
-        corrected = UserInputNode[str]("corrected_address", str)
-        user = UserInputNode[str]("user_entered_address", str)
-        rightmove_addr = UserInputNode[str]("rightmove_address", str)
-        rightmove_loc = UserInputNode[GeoPoint]("rightmove_location", GeoPoint)
-
-        # Create derived nodes before bootstrap so changed signals enqueue them
-        best_addr = BestAddressNode(
-            "best_addr",
-            user_entered_address=user,
-            corrected_address=corrected,
-            rightmove_address=rightmove_addr,
-        )
-        best_loc = BestLocationNode(
-            "best_loc",
-            precise_location=precise,
-            rightmove_location=rightmove_loc,
-            best_address=best_addr,
-        )
-
-        row = {
-            "Address": "10 High St, London",
-            "Postcode": "SW1P 1AA",
-            "Actual Latitude": "51.6",
-            "Actual Longitude": "-0.2",
-            "Approx Latitude (est)": "51.5",
-            "Approx Longitude (est)": "-0.1",
-        }
-        sources = {
-            "rightmove_address": rightmove_addr,
-            "rightmove_location": rightmove_loc,
-            "precise_location": precise,
-            "corrected_address": corrected,
-            "user_entered_address": user,
-        }
-        bootstrap_from_row(row, sources)
-        await flush_processor()
-
-        a = await best_loc.attempt()
-        assert a.succeeded
-        assert a.value_or_none() == GeoPoint(51.6, -0.2)
+        assert load_property_nodes_from_db() == 0
+        assert list_properties() == []
 
 
 class TestUpgradeAddress:
@@ -276,6 +103,7 @@ class TestUpgradeAddress:
 
         result = _upgrade_address("Winston Drive, Cobham, KT11", "KT11")
         assert result == "Winston Drive, Cobham, KT11"
+
 
 class TestSeedInputDefaults:
     """A pending input node with no producer permanently blocks every

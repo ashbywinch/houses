@@ -17,15 +17,27 @@ Safe to re-run — idempotent.
 from __future__ import annotations
 
 import sqlite3
+from typing import Any, TypedDict
 
 import dag.persistence as per
 import houses.services as services
-from houses.nodes.settings_node import API_KEY_TO_NODE, SETTING_DEFAULTS
+from dag.persistence import MoneyEncoding
+from houses.nodes.settings_node import SettingsNode
 from scripts.db import conn as _conn
 
+type _PersonRecords = list[dict[str, Any]]
+"""The persons node value as stored: parsed JSON objects the migration
+rewrites field by field (both the old and the new shape occur)."""
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _read_persons(conn: sqlite3.Connection) -> list[dict]:
+
+class _NodeRecord(TypedDict):
+    """The node_results record this migration writes: the persons value."""
+
+    status: str
+    value: _PersonRecords
+
+
+def _read_persons(conn: sqlite3.Connection) -> _PersonRecords:
     """Return list of person dicts from the latest succeeded persons row."""
     columns = ", ".join(per.record_select_columns(conn))
     rows = conn.execute(
@@ -39,13 +51,11 @@ def _read_persons(conn: sqlite3.Connection) -> list[dict]:
     return []
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def _write_persons(conn: sqlite3.Connection, persons: list[dict]) -> int:
+def _write_persons(conn: sqlite3.Connection, persons: _PersonRecords) -> int:
     """Write persons data, return new row id."""
     row_id = per.save_node_result(
         "persons",
-        # lucidlint: ignore record-shape this IS the stored node record (serialization boundary)
-        {"status": "succeeded", "value": persons},
+        _NodeRecord(status="succeeded", value=persons),
         created_at="2026-07-30T23:00:00",
     )
     if not row_id:
@@ -68,10 +78,9 @@ def _migrate_persons(conn: sqlite3.Connection) -> bool:
         de = p.pop("deposit_equity", None)
         if de is not None and isinstance(de, dict):
             amount = float(de.get("amount", 0))
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-            p["home_sale_price"] = {"amount": str(amount), "currency": "GBP"}
-            p["outstanding_mortgage"] = {"amount": "0", "currency": "GBP"}
-            p["cash_contribution"] = {"amount": "0", "currency": "GBP"}
+            p["home_sale_price"] = MoneyEncoding(amount=str(amount), currency="GBP")
+            p["outstanding_mortgage"] = MoneyEncoding(amount="0", currency="GBP")
+            p["cash_contribution"] = MoneyEncoding(amount="0", currency="GBP")
             changed = True
             print(f"  {p['name']}: converted deposit_equity ({amount}) → split fields")
 
@@ -84,7 +93,7 @@ def _migrate_persons(conn: sqlite3.Connection) -> bool:
         # Ensure required fields have defaults
         for field in ("home_sale_price", "outstanding_mortgage", "cash_contribution"):
             if field not in p:
-                p[field] = {"amount": "0", "currency": "GBP"}
+                p[field] = MoneyEncoding(amount="0", currency="GBP")
                 changed = True
                 print(f"  {p['name']}: added missing {field}")
 
@@ -135,12 +144,11 @@ def _migrate_financial(conn: sqlite3.Connection) -> bool:
     old_value = blob.get("value", {})
     pushed = 0
     for api_key, value in old_value.items():
-        node_id = API_KEY_TO_NODE.get(api_key)
-        if node_id is None:
-            continue
-        # lucidlint: ignore duplicate-block sequential skip guards — each guard skips a different unmapped key;
-        type_info = SETTING_DEFAULTS.get(node_id)
-        if type_info is None:
+        node_id = SettingsNode.API_KEY_TO_NODE.get(api_key)
+        # one guard for both unmapped steps: the key has no node, or the node
+        # has no default — either way the value has nowhere to go
+        type_info = SettingsNode.SETTING_DEFAULTS.get(node_id) if node_id is not None else None
+        if node_id is None or type_info is None:
             continue
         val_type, _ = type_info
         node = services._make_settings_source(node_id, val_type, lambda: None)

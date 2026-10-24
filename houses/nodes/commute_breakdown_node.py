@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from decimal import Decimal
-from typing import override
+from typing import TypedDict, override
 
 from money import Money
 
@@ -12,8 +11,7 @@ from dag.node import Node
 from houses.model.domain import person_id_of, slugify
 
 
-@dataclass(frozen=True)
-class _CommuteEntryJson:
+class _CommuteEntry(TypedDict):
     """Wire shape of one per-person commute row (node_results)."""
 
     label: str
@@ -21,51 +19,21 @@ class _CommuteEntryJson:
     weeks_per_year: int
     yearly_gbp: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(
-            label=self.label,
-            trips_per_week=self.trips_per_week,
-            weeks_per_year=self.weeks_per_year,
-            yearly_gbp=self.yearly_gbp,
-        )
 
-
-@dataclass(frozen=True)
-class _PersonCommuteJson:
+class _PersonCommute(TypedDict):
     """Wire shape of one person's commute block (node_results)."""
 
     daily_gbp: str
     yearly_gbp: str
-    commutes: list[_CommuteEntryJson]
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(
-            daily_gbp=self.daily_gbp,
-            yearly_gbp=self.yearly_gbp,
-            commutes=[c.to_dict() for c in self.commutes],
-        )
+    commutes: list[_CommuteEntry]
 
 
-@dataclass(frozen=True)
-class _CommuteAggregateJson:
+class _CommuteAggregate(TypedDict):
     """Wire shape of the CommuteBreakdownNode VALUE dict (node_results)."""
 
-    persons: dict[str, dict]
+    persons: dict[str, _PersonCommute]
     yearly_total_gbp: str
     formula_explanation: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(
-            persons=self.persons,
-            yearly_total_gbp=self.yearly_total_gbp,
-            formula_explanation=self.formula_explanation,
-        )
 
 
 class CommuteBreakdownNode(DerivedNode[dict]):
@@ -106,11 +74,11 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         # (<rid>/<person>/<label>/final_fuel) or equal it (tests).
         if not args:
             return Attempt.succeeded(
-                {
-                    "persons": {},
-                    "yearly_total_gbp": 0.0,
-                    "formula_explanation": "No commute data",
-                }
+                _CommuteAggregate(
+                    persons={},
+                    yearly_total_gbp="0",
+                    formula_explanation="No commute data",
+                )
             )
         *selector_attempts, persons = args
         if not persons.succeeded:
@@ -119,7 +87,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         selector_deps = list(self._deps[:-1])
         by_id = {d._id: a for d, a in zip(selector_deps, selector_attempts, strict=False)}
         yearly_total = Money(amount="0", currency="GBP")
-        per_person: dict[str, dict] = {}
+        per_person: dict[str, _PersonCommute] = {}
         for p in persons_list or []:
             person_yearly = Money(amount="0", currency="GBP")
             daily_amount: Money | None = None
@@ -129,7 +97,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 # A person entry without a usable name still needs a stable dict key.
                 name = "?"
             pid = p.get("person_id") or slugify(name) if isinstance(p, dict) else person_id_of(p)
-            commutes: list[_CommuteEntryJson] = []
+            commutes: list[_CommuteEntry] = []
             for poi in pois or ():
                 key = f"{pid}/{poi.label}"
                 commute_node = next(
@@ -157,24 +125,24 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                     person_yearly += yearly_person_poi
                     yearly_total += yearly_person_poi
                     commutes.append(
-                        _CommuteEntryJson(
+                        _CommuteEntry(
                             label=poi.label,
                             trips_per_week=poi.trips_per_week,
                             weeks_per_year=poi.weeks_per_year,
                             yearly_gbp=str(yearly_person_poi.amount),
                         )
                     )
-            per_person[name] = _PersonCommuteJson(
+            per_person[name] = _PersonCommute(
                 daily_gbp=str(daily_amount.amount) if daily_amount is not None else "0",
                 yearly_gbp=str(person_yearly.amount),
                 commutes=commutes,
-            ).to_dict()
+            )
         return Attempt.succeeded(
-            _CommuteAggregateJson(
+            _CommuteAggregate(
                 persons=per_person,
                 yearly_total_gbp=str(yearly_total.amount),
                 formula_explanation="Aggregated from DAG nodes",
-            ).to_dict()
+            )
         )
 
     @override

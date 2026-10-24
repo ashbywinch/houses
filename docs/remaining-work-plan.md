@@ -15,8 +15,8 @@ P1–P13).
   tested, and pushed on `feat/settings-screen` (PR #53).
 - The architecture test was fixed (it was vacuous: `./`-anchored globs
   never matched archunitpython's absolute paths); `PMT`, `StampDutyFn`,
-  `TieredRate` moved out of `dag/expression.py` into
-  `houses/nodes/expressions.py`. `dag/` is now houses-agnostic.
+  `TieredRate` moved out of `dag/expression.py` into `houses/nodes/`
+  (`pmt.py`, `tax_tier.py`, `tiered_rate.py`). `dag/` is now houses-agnostic.
 - Usability walkthrough run 2 (round-2 findings) drove the work above;
   run 3's de-primed two-phase walk produced a fresh findings set (C2–C11
   below). The two-phase prompt lives at
@@ -116,7 +116,7 @@ Workstreams (each red/green):
   globs — they make the check vacuous. Sanity rule: verify a known
   violation goes red before trusting a green architecture test.
 - `dag/` must stay houses-agnostic: new domain expressions belong in
-  `houses/nodes/expressions.py`, not `dag/expression.py`.
+  `houses/nodes/` (`pmt.py`, `tax_tier.py`, `tiered_rate.py`), not `dag/expression.py`.
 
 ## Part D — What-if / scenario evaluation (IMPLEMENTED 2026-08-06)
 
@@ -718,21 +718,23 @@ missing piece on pyrefly instead — and it works:
   `@override` fails the gate. `make check` 7.7s; `make test` green.
   (pyrefly's `--check-all` = 4,224 errors of unannotated-internals
   noise — rejected.)
-- **Dev-server scheme: plain HTTP on :5173 — the HTTPS experiment was
-  reverted.** The saga: the phone browser's HTTPS-First mode auto-upgraded
-  `http://192.168.1.251.sslip.io:5173` to https against the plain-http
-  vite server → `ERR_SSL_PROTOCOL_ERROR`. The attempted fix — a
-  self-signed cert served via `vite server.https` — made vite
-  **HTTPS-ONLY** on :5173, so every http bookmark/URL (what `make run`
-  prints) got `ERR_EMPTY_RESPONSE` (browser connects, vite doesn't speak
-  HTTP on that port, connection closed). Lesson: `server.https` REPLACES
-  http, it doesn't add https. Reverted to plain HTTP: vite.config.ts has
-  no `server.https`, `make run` prints http URLs, `make gen-certs` and
-  the certs dir removed. HTTPS-First browsers fall back to http against
-  a plain-http server (the designed behavior). If a phone hard-fails,
-  the switch is the browser's "Always use secure connections" — not the
-  app. Real HTTPS for the dev box would need a reverse proxy (Caddy/
-  nginx) with a trusted cert — not worth it for dev.
+- **Dev-server scheme: HTTPS on :5173, restored 2026-10-22.** The 2026-08-08
+  experiment (self-signed cert via `vite server.https`) was reverted because
+  `server.https` REPLACES http, so every http bookmark got
+  `ERR_EMPTY_RESPONSE`. That revert rested on a premise that no longer holds:
+  *"HTTPS-First browsers fall back to http against a plain-http server"* —
+  Chrome's HTTPS-Upgrades now upgrades a typed **hostname** and does not fall
+  back, while **IP addresses are exempt**. That is exactly the split seen on
+  the phone: `http://192.168.1.251:5173` loads, the `*.sslip.io` hostname
+  fails, and the Google OAuth callback — which Google only accepts as
+  `https://` (or loopback) — could never complete on the plain-http hostname.
+  So `make gen-certs` + `vite server.https` + `https://` URLs in `make run`
+  are back (cert SANs: `<LAN-IP>.sslip.io`, `*.sslip.io`, the LAN IP), the
+  backend runs with `HOUSES_PUBLIC_URL=https://<LAN-IP>.sslip.io:5173`, and the
+  browser accepts the self-signed cert once. The cost the revert objected to
+  is real and accepted: an `http://` URL to :5173 now gets no reply — use the
+  printed `https://` one. The Google client needs
+  `https://<LAN-IP>.sslip.io:5173/api/auth/callback` registered.
 
 ## Verification
 
@@ -765,7 +767,7 @@ manual scheduling, side memory) is an antipattern — fix the deps. No
   (`houses/nodes/transit.py`); `commute_pipeline_builder.py` no longer
   drops the node, so a car flip never rebuilds the graph.
 - **Wave 2.2 — acceptable as a persons-sourced dep: done.**
-  `SchoolAcceptanceNode` (`houses/nodes/schools.py`) is a dependency of
+  `SchoolAcceptanceNode` (`houses/nodes/school_acceptance_node.py`) is a dependency of
   the school nodes; a filter edit recomputes the lookup.
 - **Wave 2.3 — bound max_walk in the selector choose: done (main).**
   `commute.py` reads `inputs.max_walk.value_or_none()`.

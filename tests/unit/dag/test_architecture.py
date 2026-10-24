@@ -25,22 +25,10 @@ def test_dag_does_not_import_houses():
     la = la.layer("dag").defined_by(f"{ROOT}/dag/*.py")
     la = la.layer("dag_tests").defined_by(f"{ROOT}/tests/unit/dag/*.py")
     la = la.layer("houses").defined_by(f"{ROOT}/houses/*.py")  # fnmatch * crosses "/" — matches the whole tree
-    la = la.where_layer("dag").may_only_depend_on_layers()
-    la = la.where_layer("dag_tests").may_only_depend_on_layers("dag", "houses")
-    violations = la.check()
-    assert len(violations) == 0, _format_violations(violations)
-
-
-def test_web_does_not_import_sheets():
-    """HTTP layer must not import from the sheets module directly.
-
-    All sheet data should reach the web layer through the DAG (computed
-    values) or the comments DB (user-generated content).  Direct sheet
-    access from HTTP handlers bypasses caching and the DAG lifecycle.
-    """
-    la = project_layers()
-    la = la.layer("web").defined_by(f"{ROOT}/houses/web/*.py")
-    la = la.layer("sheets").defined_by(f"{ROOT}/houses/sheets/*.py")
-    la = la.where_layer("web").may_not_depend_on_layers("sheets")
+    # The serialization seam is a library of its own: it depends on nothing of
+    # ours, and every layer may use it.
+    la = la.layer("serialization").defined_by(f"{ROOT}/serialization/*.py")
+    la = la.where_layer("dag").may_only_depend_on_layers("serialization")
+    la = la.where_layer("dag_tests").may_only_depend_on_layers("dag", "houses", "serialization")
     violations = la.check()
     assert len(violations) == 0, _format_violations(violations)

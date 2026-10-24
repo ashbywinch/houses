@@ -6,8 +6,8 @@ stays focused on the property/user API surface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, TypedDict
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -19,23 +19,15 @@ from houses.web.auth import effective_session_user
 admin_router = APIRouter(prefix="/api")
 
 
-@dataclass(frozen=True)
-class _RegenerateReport:
+class _RegenerateReport(TypedDict):
     """Regenerate outcome as serialized into the HTTP response (wire shape)."""
 
     matched: int
     regenerated: list[dict[str, Any]]
     skipped: list[dict[str, Any]]
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict IS the boundary — wire shape owned here (coding-standards.md)
-        return dict(matched=self.matched, regenerated=self.regenerated, skipped=self.skipped)
-
 @admin_router.post("/admin/regenerate")
-# lucidlint: ignore record-shape incoming request body is the caller's
-# wire payload — parsed defensively at the boundary (coding-standards.md)
-async def regenerate_nodes(body: dict, request: Request):
+async def regenerate_nodes(body: Mapping[str, Any], request: Request):
     """Force-recompute DerivedNodes whose persisted results are stale in
     CODE, not by timestamp — e.g. after a computation change (the A3
     council-tax fallback). Superuser-only.
@@ -48,7 +40,7 @@ async def regenerate_nodes(body: dict, request: Request):
     dependents (e.g. total monthly cost) are recomputed too.
     """
     user = effective_session_user(request)
-    if not user or not user.get("is_superuser"):
+    if not user or not user.is_superuser:
         raise HTTPException(status_code=403, detail="Superuser access required")
 
     patterns = body.get("patterns")
@@ -65,4 +57,4 @@ async def regenerate_nodes(body: dict, request: Request):
     regenerated, skipped = await run_on_processor(lambda: force_regenerate(matched))
     return _RegenerateReport(
         matched=len(matched), regenerated=regenerated, skipped=skipped
-    ).to_dict()
+    )

@@ -9,12 +9,12 @@ push it without importing the router — a top-level import from
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal as _Decimal
 from typing import Any
 
 from money import Money
+from pydantic import Field
 
 from houses.model.domain import (
     EquityInputs,
@@ -28,105 +28,57 @@ from houses.model.domain import (
 )
 from houses.nodes.settings_node import aggregate_dict
 from houses.services_provider import get_services
-from houses.web.json_utils import MoneyJson
+from houses.web.auth import SessionClaims
+from serialization import MoneyValue, SerializableAsDict
 
 
-@dataclass(frozen=True)
-class _FinancialJson:
-    """The financial block: status plus the aggregate value (wire shape)."""
-
-    status: str
-    value: Any
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(status=self.status, value=self.value)
-
-
-@dataclass(frozen=True)
-class _FormulaJson:
-    """The deposit provenance formula block (wire shape)."""
-
-    lines: list
-    result: str
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(lines=self.lines, result=self.result)
-
-
-@dataclass(frozen=True)
-class _ProvenanceJson:
-    """The household-deposit provenance block (wire shape)."""
-
-    value: str
-    formula: _FormulaJson
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {
-            "label": "Household Deposit",
-            "value": self.value,
-            "sourceType": "calc",
-            "formula": self.formula.to_dict(),
-        }
-
-
-@dataclass(frozen=True)
-class _HouseholdDepositJson:
-    """The household-deposit block: one server-computed total, per-person
-    amounts, and the provenance lines (wire shape)."""
-
-    total: MoneyJson
-    persons: dict
-    provenance: _ProvenanceJson
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {
-            "total": self.total.to_dict(),
-            "persons": self.persons,
-            "provenance": self.provenance.to_dict(),
-        }
-
-
-@dataclass(frozen=True)
-class SettingsPayloadJson:
-    """The settings document wire shape (GET /api/settings and the websocket push)."""
-
-    persons: dict
-    financial: _FinancialJson
-    commute_thresholds: dict
-    household_deposit: _HouseholdDepositJson
-    what_if_active: bool
-
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return {
-            "persons": self.persons,
-            "financial": self.financial.to_dict(),
-            "commute_thresholds": self.commute_thresholds,
-            "household_deposit": self.household_deposit.to_dict(),
-            "what_if_active": self.what_if_active,
-        }
-
-
-@dataclass(frozen=True)
-class _ProvenanceLineJson:
-    """One deposit provenance line: {label, value} (wire shape)."""
+class ProvenanceLine(SerializableAsDict):
+    """One deposit provenance line."""
 
     label: str
     value: str
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction IS the serialization boundary (coding-standards.md)
-        return dict(label=self.label, value=self.value)
+
+class DepositFormula(SerializableAsDict):
+    """The deposit provenance formula block."""
+
+    lines: list[ProvenanceLine]
+    result: str
+
+
+class DepositProvenance(SerializableAsDict):
+    """The household-deposit provenance block."""
+
+    label: str
+    value: str
+    source_type: str = Field(alias="sourceType")
+    formula: DepositFormula
+
+
+class HouseholdDeposit(SerializableAsDict):
+    """One server-computed total, per-person amounts, and provenance lines."""
+
+    total: MoneyValue
+    persons: dict[str, MoneyValue]
+    provenance: DepositProvenance
+
+
+class FinancialBlock(SerializableAsDict):
+    """The financial block: status plus the aggregate value."""
+
+    status: str
+    value: Any
+
+
+class SettingsPayload(SerializableAsDict):
+    """The settings document (GET /api/settings and the websocket push)."""
+
+    persons: dict[str, Any]
+    financial: FinancialBlock
+    commute_thresholds: dict[str, Any]
+    household_deposit: HouseholdDeposit
+    what_if_active: bool
+
 
 
 def _registry_property(rid: str):
@@ -141,7 +93,7 @@ class DepositBreakdown:
 
     persons: dict
     total: Money
-    lines: list[dict]
+    lines: list[ProvenanceLine]
 
 
 def _home_property_address(person) -> str:
@@ -164,13 +116,13 @@ class SessionPersons:
     settings endpoints share for session-aware ownership decisions."""
 
     persons: list
-    session_user: Mapping[str, Any] | None
+    session_user: SessionClaims | None
 
     def session_name(self) -> str:
         """The session user's Person name (email match), or "" when unlinked."""
         if not self.session_user:
             return ""
-        folded = self.session_user.get("email", "").casefold()
+        folded = self.session_user.email.casefold()
         for p in self.persons:
             email = getattr(p, "email", "")
             if email and email.casefold() == folded:
@@ -181,7 +133,7 @@ class SessionPersons:
         """Server-side ownership check — the UI never decides this."""
         if not self.session_user:
             return False
-        if self.session_user.get("is_superuser"):
+        if self.session_user.is_superuser:
             return True
         if not session_name:
             return False
@@ -207,6 +159,7 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
         item["editable_by"] = list(editable_by)
         item["editable_by_me"] = view.can_edit(session_name, person)
         item["selling_home"] = effective_selling_home(person)
+        # lucidlint: ignore loop-pipeline the loop ENRICHES each serialized POI in place — no collection is built
         for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=False):
             if isinstance(poi_item, dict):
                 poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
@@ -215,12 +168,12 @@ def _enrich_persons(dumped: object, view: SessionPersons, session_name: str) -> 
             item["home_property_address"] = addr
 
 
-async def settings_payload(session_user: Mapping[str, Any] | None = None) -> SettingsPayloadJson:
+async def settings_payload(session_user: SessionClaims | None = None) -> SettingsPayload:
     """The settings document: persons, financial aggregates, commute
     thresholds, the household deposit, and the what-if flag. Shared by
     the GET endpoint and the settings_updated websocket push, so both
-    surfaces always speak the same shape. Returns the record; callers
-    ``to_dict()`` at their own serialization edge."""
+    surfaces always speak the same shape. Returns the model; each caller
+    dumps it at its own serialization edge (FastAPI, json.dumps)."""
     svc = get_services()
     persons_json = await svc.persons_source.to_json()
     attempt = svc.persons_source.latest_attempt()
@@ -237,16 +190,18 @@ async def settings_payload(session_user: Mapping[str, Any] | None = None) -> Set
     started = (svc.whatif_started_at.latest_attempt().value_or_none() or "").strip()
 
     commute_thresholds = await svc.commute_thresholds_source.to_json()
-    return SettingsPayloadJson(
+    return SettingsPayload(
         persons=persons_json,
-        financial=_FinancialJson(status="succeeded", value=aggregate_dict(svc.setting_nodes)),
+        financial=FinancialBlock(status="succeeded", value=aggregate_dict(svc.setting_nodes)),
         commute_thresholds=commute_thresholds,
-        household_deposit=_HouseholdDepositJson(
-            total=MoneyJson(amount=f"{deposit_total.amount:.2f}", currency="GBP"),
+        household_deposit=HouseholdDeposit(
+            total=deposit_total,
             persons=deposit_persons,
-            provenance=_ProvenanceJson(
+            provenance=DepositProvenance(
+                label="Household Deposit",
                 value=f"£{deposit_total.amount:,.2f}",
-                formula=_FormulaJson(lines=deposit_lines, result=f"£{deposit_total.amount:,.2f}"),
+                source_type="calc",
+                formula=DepositFormula(lines=deposit_lines, result=f"£{deposit_total.amount:,.2f}"),
             ),
         ),
         what_if_active=bool(started),
@@ -259,19 +214,19 @@ def _deposit_breakdown(persons: list) -> DepositBreakdown:
     never contribute. Pure — unit-testable without the request (P4)."""
     contributions = home_equity_contributions(persons)
     by_name = {p.name: p for p in persons if not p.is_child}
-    deposit_persons: dict[str, dict] = {}
+    deposit_persons: dict[str, Money] = {}
     deposit_total = Money(amount="0", currency="GBP")
-    deposit_lines: list[dict] = []
+    deposit_lines: list[ProvenanceLine] = []
     for name, person in by_name.items():
         cash = person.cash_contribution.amount
         home_share = contributions.get(person_id_of(person), _Decimal("0"))
         value = home_share + cash
-        deposit_persons[name] = MoneyJson(amount=f"{value:.2f}", currency="GBP").to_dict()
+        deposit_persons[name] = Money(str(value), "GBP")
         deposit_total = deposit_total + Money(str(value), "GBP")
         deposit_lines.append(
-            _ProvenanceLineJson(
+            ProvenanceLine(
                 label=name,
                 value=equity_line(EquityInputs(name, person, contributions, persons, cash=cash, show_cash=True)),
-            ).to_dict()
+            )
         )
     return DepositBreakdown(deposit_persons, deposit_total, deposit_lines)

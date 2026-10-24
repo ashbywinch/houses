@@ -86,30 +86,31 @@ def _parse_coords(postcode: str) -> GeoPoint | None:
         return None
 
 
+async def _geocode_once(geocode_fn, query: str, failure_label: str):
+    """Run one geocoder: ``(coords, None)`` on a value, else ``(None, failure)``
+    where ``failure`` is the impossible Attempt the caller returns.
+
+    ``failure_label`` is the reason used when the geocoder names none.
+    """
+    attempt = await geocode_fn(query)
+    if attempt.impossible:
+        return None, Attempt.impossible(attempt.error or failure_label, error_info=attempt.error_info)
+    return attempt.value_or_none(), None
+
+
 async def _locate_property(postcode: str, address: str, geocode_fn, geocode_address_fn):
     """Property coordinates from a "lat,lon" postcode, geocoding, then the
     address; the returned Attempt carries the geocoding failure reason."""
-    property_coords = None
     if "," in postcode:
-        property_coords = _parse_coords(postcode)
-    if property_coords is None:
-        geocode_attempt = await geocode_fn(postcode)
-        if geocode_attempt.impossible:
-            return Attempt.impossible(
-                geocode_attempt.error or "geocoding failed",
-                error_info=geocode_attempt.error_info,
-            )
-        property_coords = geocode_attempt.value_or_none()
-    if property_coords is None and address:
-        # lucidlint: ignore duplicate-block two-stage fallback (geocode by postcode, then by address) — symmetric
-        addr_attempt = await geocode_address_fn(address)
-        if addr_attempt.impossible:
-            return Attempt.impossible(
-                addr_attempt.error or "address geocoding failed",
-                error_info=addr_attempt.error_info,
-            )
-        property_coords = addr_attempt.value_or_none()
-    return Attempt.succeeded(property_coords)
+        coords = _parse_coords(postcode)
+        if coords is not None:
+            return Attempt.succeeded(coords)
+    coords, failure = await _geocode_once(geocode_fn, postcode, "geocoding failed")
+    if failure is None and coords is None and address:
+        coords, failure = await _geocode_once(geocode_address_fn, address, "address geocoding failed")
+    if failure is not None:
+        return failure
+    return Attempt.succeeded(coords)
 
 
 def _school_eligible(school, acceptable, child_age: int) -> bool:

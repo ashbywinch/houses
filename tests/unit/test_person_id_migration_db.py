@@ -21,12 +21,7 @@ import zlib
 import pytest
 
 from dag import persistence
-from scripts.backfill_person_ids import (
-    _read_persons,
-    apply_migration,
-    collect_mapping,
-    rows_to_remap,
-)
+from scripts.backfill_person_ids import PersonIdMigration, _read_persons, collect_mapping
 
 LEGACY_SCHEMA = """
 CREATE TABLE node_results (
@@ -130,7 +125,8 @@ def _records(conn) -> dict[str, dict]:
     )
     out: dict[str, dict] = {}
     for row in conn.execute(f"SELECT {selected} FROM node_results"):
-        record = persistence.read_node_record(row)
+        decoded = persistence.read_node_record(row)
+        record = dict(decoded)
         record["_created_at"] = row["created_at"]
         record["_code_version"] = row["code_version"]
         record["_dep_timestamps"] = json.loads(row["dep_timestamps"] or "{}")
@@ -196,16 +192,14 @@ def _persons(conn):
 
 
 def _apply(conn):
-    """Drive the REAL migration harness (apply_migration), not a replica."""
+    """Drive the REAL migration harness (PersonIdMigration.apply), not a replica."""
     persons_id, data = _persons(conn)
-    mapping = collect_mapping(data["value"])
+    migration = PersonIdMigration(conn, collect_mapping(data["value"]))
     # the stream is lazy — count it BEFORE the apply mutates the table
-    remap_count = sum(1 for _ in rows_to_remap(conn, mapping))
-    result = apply_migration(
-        conn, persons_id, data, mapping, rows_to_remap(conn, mapping), backup_path=None, verify=False
-    )
+    remap_count = sum(1 for _ in migration.rows_to_remap())
+    result = migration.apply(persons_id, data, migration.rows_to_remap(), backup_path=None, verify=False)
     assert result.ok
-    return mapping, remap_count
+    return migration.mapping, remap_count
 
 
 @pytest.mark.parametrize("shape", SHAPES)
@@ -259,11 +253,11 @@ def test_apply_is_idempotent_and_preserves_existing_ids(shape):
     assert mapping["Zed"] == "7"
     assert {mapping[n] for n in ("Simon", "Lorena", "Ashby", "George")} == {"8", "9", "10", "11"}
 
-    data = _persons(conn)[1]
+    persons_id, data = _persons(conn)
     assert {p["name"]: p["person_id"] for p in data["value"]} == mapping
 
-    second = rows_to_remap(conn, collect_mapping(data["value"]))
-    assert list(second) == [], "a second pass must find zero remappable rows"
+    second = PersonIdMigration(conn, collect_mapping(data["value"]))
+    assert list(second.rows_to_remap()) == [], "a second pass must find zero remappable rows"
 
 
 @pytest.mark.parametrize("shape", SHAPES)
@@ -344,12 +338,11 @@ def test_apply_reports_the_real_applied_count(shape):
     value = data.get("value") or []
     mapping = collect_mapping(value)
     assert mapping, "seed must have persons"
-    result = apply_migration(
-        conn,
+    migration = PersonIdMigration(conn, mapping)
+    result = migration.apply(
         persons_id,
         data,
-        mapping,
-        rows_to_remap(conn, mapping),
+        migration.rows_to_remap(),
         backup_path=None,
         verify=True,
     )
@@ -367,7 +360,7 @@ def test_corrupt_works_estimates_blob_aborts_the_scan():
         (b"\x78\x9cnot-a-zlib-stream",),
     )
     with pytest.raises(RuntimeError, match="not parseable"):
-        list(rows_to_remap(conn, {"Ashby": "3"}))
+        list(PersonIdMigration(conn, {"Ashby": "3"}).rows_to_remap())
 
 
 def test_mid_shape_keeps_the_legacy_blob_in_sync():

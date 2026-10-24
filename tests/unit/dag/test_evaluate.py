@@ -17,13 +17,13 @@ import pytest
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.expression import Ref
-from dag.scheduler import AsyncQueueScheduler, flush_processor, reset_scheduler, set_scheduler
+from dag.scheduler import AsyncRefreshQueue, flush_processor, reset_scheduler, set_scheduler
 from dag.user_input_node import UserInputNode
 
 
 @pytest.fixture(autouse=True)
 def _isolated_scheduler():
-    set_scheduler(AsyncQueueScheduler(respect_time=False))
+    set_scheduler(AsyncRefreshQueue(respect_time=False))
     yield
     reset_scheduler()
 
@@ -184,7 +184,8 @@ async def _staged_lookup(node_id: str) -> Attempt | None:
 async def test_get_active_deps_honors_overridden_condition():
     """IfThenElseNode's _get_active_deps reads the condition via
     latest_attempt — an overridden condition must flip the branch."""
-    from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+    from dag.if_then_else_node import IfThenElseNode
+    from dag.if_then_else_options import IfThenElseOptions
 
     cond = UserInputNode[bool]("eval_g1", bool)
     then_src = UserInputNode[int]("eval_g2", int)

@@ -46,7 +46,7 @@ class TestParseNeTExFares:
 
         result = parse_netex_fares(xml, self._stations())
         assert result is not None
-        assert len(result.get("stop_zones", {})) >= 1
+        assert len(result.stop_zones) >= 1
 
     # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_parses_scso_zone_prices(self):
@@ -61,7 +61,7 @@ class TestParseNeTExFares:
 
         result = parse_netex_fares(xml, self._stations())
         assert result is not None
-        fares = result.get("zone_fares", {})
+        fares = result.zone_fares
         assert len(fares) >= 1
         any_single = any("adult_single" in v for v in fares.values())
         assert any_single, "No zone fare has an adult_single price"

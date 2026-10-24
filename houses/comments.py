@@ -11,11 +11,19 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TypedDict
 
 from houses.database import get_connection
 
 logger = logging.getLogger(__name__)
+
+
+class Comment(TypedDict):
+    """One comment row of the comments wire shape."""
+
+    person: str
+    text: str
+    timestamp: str
 
 
 @dataclass(frozen=True)
@@ -26,14 +34,11 @@ class CommentEntry:
     text: str
     timestamp: str  # ISO 8601, set server-side
 
-    # lucidlint: ignore record-shape to_dict IS the serialization boundary — wire shape owned here (coding-standards.md)
-    def to_dict(self) -> dict:
-        # lucidlint: ignore record-shape to_dict construction mirrors the comment wire shape (coding-standards.md)
-        return {"person": self.person, "text": self.text, "timestamp": self.timestamp}
+    def to_dict(self) -> Comment:
+        return Comment(person=self.person, text=self.text, timestamp=self.timestamp)
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def get_comments(rid: str) -> list[dict[str, Any]]:
+def get_comments(rid: str) -> list[Comment]:
     """Return all comments for a property, oldest first."""
     conn = get_connection()
     rows = conn.execute(
@@ -43,9 +48,8 @@ def get_comments(rid: str) -> list[dict[str, Any]]:
     return [CommentEntry(person=row["person"], text=row["text"], timestamp=row["created_at"]).to_dict() for row in rows]
 
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary
-def add_comment(rid: str, person: str, text: str) -> dict[str, Any]:
-    """Add a comment and return it as a dict."""
+def add_comment(rid: str, person: str, text: str) -> Comment:
+    """Add a comment and return it as its wire record."""
     conn = get_connection()
     now = datetime.now(UTC).isoformat()
     conn.execute(

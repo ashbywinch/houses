@@ -11,8 +11,8 @@ from dag.derived_node import DerivedNode
 from houses.commute import LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
+from houses.nodes.best_location_node import BestLocationNode
 from houses.nodes.commute import CommuteSelectorNode, transit_legs
-from houses.nodes.location import BestLocationNode
 from houses.nodes.transit import TransitNode
 from houses.rail_fare_registry import get_rail_fare_registry
 from houses.stations import Station

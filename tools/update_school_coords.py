@@ -34,13 +34,23 @@ from houses.location import geocode_address
 logger = logging.getLogger(__name__)
 
 CSV_PATH = Path("data/edubaseall_enriched.csv")
-# lucidlint: ignore magic-number the longitude datum of the LONDON constant — the literal IS the datum
-# lucidlint: ignore magic-number coordinate data of the named LONDON constant — the literal IS the datum, naming it
+
+
 LONDON = GeoPoint(51.5074, -0.1278)
-MAX_KM = 200
-MAX_CORRECTION_KM = 100
-PROGRESS_SAVE_INTERVAL = 100
-NOMINATIM_DELAY_S = 0.15
+
+
+class _SchoolCoordUpdate:
+    """The school-coordinate update's runtime policy: plausibility
+    bounds and the pace of the external geocoding calls."""
+
+    # A school farther from London than this can't be one of ours.
+    MAX_KM = 200
+    # Corrected coords must stay within this distance of the GIAS originals.
+    MAX_CORRECTION_KM = 100
+    # Persist progress every N rows so a crash loses at most that many.
+    PROGRESS_SAVE_INTERVAL = 100
+    # Nominatim's public API pace between requests.
+    NOMINATIM_DELAY_S = 0.15
 
 
 type SchoolRow = dict[str, str]
@@ -91,7 +101,7 @@ def _near_london(row: SchoolRow) -> bool:
     coords = _existing_coords(row)
     if coords is None:
         return True
-    return coords.distance_km_to(LONDON) <= MAX_KM
+    return coords.distance_km_to(LONDON) <= _SchoolCoordUpdate.MAX_KM
 
 
 def _already_done(row: SchoolRow) -> bool:
@@ -110,7 +120,7 @@ def _already_done(row: SchoolRow) -> bool:
         _clear_coords(row)
         return False
     original = _existing_coords(row)
-    if original is not None and original.distance_km_to(corrected) >= MAX_CORRECTION_KM:
+    if original is not None and original.distance_km_to(corrected) >= _SchoolCoordUpdate.MAX_CORRECTION_KM:
         _clear_coords(row)
         return False
     return True
@@ -178,13 +188,13 @@ async def main() -> None:
             logger.info("Nominatim exhausted — stopping (done=%d failed=%d)", done, failed)
             break
 
-        if (i + 1) % PROGRESS_SAVE_INTERVAL == 0:
+        if (i + 1) % _SchoolCoordUpdate.PROGRESS_SAVE_INTERVAL == 0:
             _atomic_write(rows, fieldnames)
             logger.info(
                 "  Progress: %d/%d (done=%d skipped=%d far=%d failed=%d)", i + 1, total, done, skipped, far_away, failed
             )
 
-        await asyncio.sleep(NOMINATIM_DELAY_S)
+        await asyncio.sleep(_SchoolCoordUpdate.NOMINATIM_DELAY_S)
 
     # Always flush at the end — row modifications from _already_done
     # (clearing bad coords) must be persisted even if all geocodes failed.

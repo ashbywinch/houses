@@ -102,3 +102,6 @@ terraform/*.tfstate.*
 houses/data/congestion_zone.json
 
 .venv
+
+# Local dev TLS certs (self-signed, machine-local — regenerate via `make gen-certs`)
+houses/frontend/certs/

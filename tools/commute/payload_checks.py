@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,7 @@ def fail(user_message: str, dev_detail: str) -> int:
     return 1
 
 
-# lucidlint: ignore record-shape compares wire-format payload dicts — serialization boundary owns the shape
-# lucidlint: ignore record-shape compares wire-format payload dicts — serialization boundary owns the shape
-def same_payload(existing: dict[str, Any], new: dict[str, Any]) -> bool:
+def same_payload(existing: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
     """Byte-identical apart from ``generated_at`` (the determinism contract)."""
     if not isinstance(existing, dict) or not isinstance(new, dict):
         return False
@@ -38,13 +37,17 @@ def same_payload(existing: dict[str, Any], new: dict[str, Any]) -> bool:
     n_meta = {k: v for k, v in new["metadata"].items() if k != "generated_at"}
     return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
-# lucidlint: ignore record-shape returns whatever the committed JSON held — serialization boundary owns the shape
-def existing_payload(out_path: Path) -> dict[str, Any] | None:
+
+def existing_payload(out_path: Path) -> Mapping[str, Any] | None:
     """Current payload, or None when absent/unreadable (will regenerate)."""
     if not out_path.exists():
         return None
     try:
-        return json.loads(out_path.read_text())
+        payload = json.loads(out_path.read_text())
     except json.JSONDecodeError:
         logger.warning("%s unreadable (corrupt?) — will regenerate", out_path)
         return None
+    if not isinstance(payload, Mapping):
+        logger.warning("%s is not a JSON object (corrupt?) — will regenerate", out_path)
+        return None
+    return payload
