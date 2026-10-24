@@ -177,7 +177,7 @@ coverage: deps
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"
 
 check-architecture:  # Thread rules (docs/dag-library.md): structural drift fails here; behavioral violations fail at runtime (assert_mutation_allowed)
-	@if grep -rn "threading.Thread" dag/ houses/ tools/ --include="*.py" | grep -v "dag/scheduler.py"; then \
+	@if grep -rn "Thread(" dag/ houses/ tools/ --include="*.py" | grep -v "dag/scheduler.py"; then \
 		echo "Thread rules: threads are created only in dag/scheduler.py" ; exit 1 ; fi
 	@if grep -rn "run_coroutine_threadsafe\|call_soon_threadsafe" dag/ houses/ --include="*.py" | grep -vE "dag/scheduler.py|houses/server.py|houses/web/broadcaster.py"; then \
 		echo "Thread rules: cross-loop handoff only via scheduler/broadcaster/server" ; exit 1 ; fi
