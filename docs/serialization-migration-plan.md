@@ -122,14 +122,25 @@ mechanical edit, and the marker must stay until it is made.
 
 ## Order (for what is left)
 
-The plan's fails are all cleared. What is left is tool-side, and the tool has
-moved: **0.6.9** (`bcfe0d42`) lands the three findings this residue waited on —
-#46 (a read-only map parameter whose value class the module declares), #47 (the
-god-class size signal is dropped as a finding with no action) and #52 (a
-Protocol the module's namesake class inherits). The pin in `pyproject.toml` is
-bumped to it; **re-run the gate, then delete the markers whose findings it
-clears** — a bump clears sites and stale markers at once, which is how the 9
-above went. Nothing here is blocked on a design call any more.
+**Done — the plan is closed.** The pin moved to **0.6.9** (`bcfe0d42`), which
+lands the three findings this residue waited on: #46 (a read-only map parameter
+whose value class the module declares), #47 (the god-class size signal dropped
+as a finding with no action) and #52 (a Protocol the module's namesake class
+inherits).
+
+0.6.9 also adds a **`stale-suppression`** check, which turns marker cleanup from
+hoping into proof: it named exactly 10 markers whose finding no longer fires —
+five `latent-class` (`attempt`, `derived_node`, `bus_journey`, `commute_router`,
+`property_nodes`) and five `middle-man` (four in `measurement.py`, one in
+`services.py`). All ten were removed by hand rather than with `lucidlint fix`
+(the repo's rule about that tool's seam).
+
+Gate: **PASS — clean, no actions**. 0 fails and 0 warnings; comment-suppressed
+149 → 139, which is exactly the ten deleted. The deliberate `middle-man` marker
+on `serialization/__init__.py:149` no longer reports.
+
+One operational note: 0.6.9 builds a Rust component, so `uv sync` needs `cargo`
+on `PATH` (`make uv-sync` inherits the shell's).
 
 
 ## Acceptance for every item
