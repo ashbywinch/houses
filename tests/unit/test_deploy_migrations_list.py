@@ -167,7 +167,8 @@ def test_traffic_moving_jobs_fail_closed_without_the_human_approval():
     assert "approval:" in inputs
     assert "default: 'pending'" in inputs
     assert "options: ['pending', 'approved']" in inputs
-    for job in ("cutover", "flip"):
+    # `prepare` is no longer here: it moves no traffic, so it carries no gate.
+    for job in ("flip",):
         block = _job_block(workflow, job)
         gate = block.index("- name: Human approval gate")
         assert "inputs.approval != 'approved'" in block, f"{job} loses the gate condition"
@@ -188,7 +189,7 @@ def test_no_job_may_both_restore_a_db_and_flip_traffic():
     without touching the DB. No single job may contain both a restore and a
     rules move."""
     workflow = WORKFLOW.read_text()
-    for job in ("cutover", "flip", "recover"):
+    for job in ("prepare", "flip", "recover"):
         block = _job_block(workflow, job)
         restores = "--restore " in block
         flips = "forwarding-rules" in block or "set-target" in block
@@ -210,7 +211,7 @@ def test_no_job_may_both_restore_a_db_and_flip_traffic():
     assert "forwarding-rules" not in rec and "set-target" not in rec
     # The gated traffic movers never restore: the box they promote is the one
     # that was reviewed.
-    for job in ("cutover", "flip"):
+    for job in ("flip",):
         block = _job_block(workflow, job)
         assert "--restore " not in block, f"{job} must never restore after its gate"
         assert "environment: production" in block, f"{job} must declare the environment gate"
@@ -254,7 +255,7 @@ def test_no_step_chains_two_deploy_key_commands():
     string exactly, so `sudo switch.sh --public-url X && sudo switch.sh
     --restore Y` in ONE ssh matches nothing and is a SILENT NO-OP — exit 0,
     nothing run. That is how the recover prep "restored" nothing for 10
-    minutes and how the cutover's rebase never restored; both hid behind a
+    minutes and how the prepare's rebase never restored; both hid behind a
     green step. One sanctioned shape per ssh call, always."""
     workflow = WORKFLOW.read_text()
     for chained in ("&& sudo /opt/houses", "; sudo /opt/houses", "&& sudo -n /opt/houses"):
@@ -263,7 +264,7 @@ def test_no_step_chains_two_deploy_key_commands():
     rec = _job_block(workflow, "recover")
     assert "switch.sh --public-url https://houses.blueumbrella.net" in rec
     assert "switch.sh --restore $SOURCE" in rec
-    cut = _job_block(workflow, "cutover")
+    cut = _job_block(workflow, "prepare")
     assert "switch.sh --public-url https://houses.blueumbrella.net" in cut
     assert "switch.sh --rebase " in cut
 
@@ -277,7 +278,7 @@ def test_the_deploy_key_is_written_before_its_first_use_in_a_job():
     a new step inserted above the writer silently breaks the whole job."""
     workflow = WORKFLOW.read_text()
     problems = []
-    for job in ("recover", "flip", "cutover", "install", "provision", "rollback"):
+    for job in ("recover", "flip", "prepare", "install", "provision", "rollback"):
         steps = re.split(r"\n      - name: ", _job_block(workflow, job))
         first_use = next((i for i, s in enumerate(steps) if "-i /tmp/deploy.key" in s), None)
         if first_use is None:

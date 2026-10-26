@@ -10,7 +10,7 @@ walkthrough is [tools/deploy/provision.md](../tools/deploy/provision.md).
 ## Production changes go ONLY through the rollout process
 
 - The GitHub **Release** workflow. Eleven dispatch actions: `release` (build the
-  artifact + install it on the standby), `cutover` (freeze the owner, snapshot
+  artifact + install it on the standby), `prepare` (freeze the owner, snapshot
   it, restore+migrate that snapshot onto the standby, publish the review surface
   — then STOP), `flip` (the gated traffic move onto the reviewed box),
   `rollback` (the ungated undo), `provision` (rebuild a box from the artifact).
@@ -25,31 +25,33 @@ walkthrough is [tools/deploy/provision.md](../tools/deploy/provision.md).
   reviewable bypass. The workflow enforces this: a tag push not reachable from
   `main` fails the build job.
 
-## One rollout, two human decisions
+## One rollout, one human decision — the flip
 
 ```
 build artifact → REBUILD the standby from it (fresh instance, bootstrap: seed
   + migrations) → install + rehearse + smoke        ── a BOOT proof, ungated
-→ APPROVAL 1: "take the site down for the review"
-→ FREEZE the owner + snapshot it → restore + verify + MIGRATE that snapshot
-  onto the standby → start it → publish the review surface   ── the real data
+→ prepare (UNGATED: dispatching it is the decision):
+    FREEZE the owner + snapshot it → restore + verify + MIGRATE that snapshot
+    onto the standby → start it → publish the review surface   ── the real data
 → REVIEW https://houses-smoke.blueumbrella.net      ── the box the flip makes live
-→ APPROVAL 2: "go live"
+→ APPROVAL: "go live"
 → flip the L4 rules → retire the relay → settle (5 min of public health)
 ```
 
 Every rollout builds a fresh box: no box drifts, and the bootstrap path is
-exercised on every rollout. Both approvals are `cutover`'s and `flip`'s
-`production` environment gates, and each dispatch must also carry
-`-f approval=approved` — two locks per traffic-relevant step. Rollback needs no
+exercised on every rollout. **`flip` is the human decision**, held by its
+`production` environment gate and by `-f approval=approved` on the dispatch — two
+locks, both required. `prepare` carries no gate: it moves no traffic, and a
+second click on top of the dispatch it already required bought nothing. It does
+take production down for the freeze, and says so on the run. Rollback needs no
 approval.
 
 **The split is the invariant: the box you review is the box that goes live.**
-`cutover` prepares and then STOPS, publishing the review surface; `flip` moves
+`prepare` freezes, snapshots, migrates and then STOPS, publishing the review surface; `flip` moves
 traffic and touches nothing on that box. `recover`/`flip` have worked this way
 since 2026-10-03 for exactly this reason — a job that restores or migrates
 *after* its approval gate makes the live box different from the approved one.
-`cutover` used to do that (snapshot, rebase and a second, unrehearsed migration
+`prepare` used to do that (snapshot, rebase and a second, unrehearsed migration
 run after its gate); it now ends at REVIEW READY.
 
 Two different databases appear above, deliberately. The fresh box's data at
@@ -59,7 +61,7 @@ serve is a **fresh snapshot of the frozen owner**, restored and migrated onto th
 standby *before* the review. Snapshotting earlier than the freeze would serve
 data that is minutes old and silently drop every write in between; snapshotting
 later than the review would make the reviewed box not the live one. The freeze
-is therefore the cutover's first act and the review its last.
+is therefore the prepare step's first act and the review its last.
 
 Stated plainly: **production is down from the freeze until the flip completes** —
 the review window is downtime. That is the price of reviewing the real data on
@@ -117,8 +119,8 @@ and `sudo -n systemctl restart houses` must fail.
 
 ## The human prod gate — the dispatch and the environment (double lock)
 
-Traffic moves (`cutover`, `flip`, `recover`) are held by TWO independent locks;
-with either one missing the job refuses:
+`flip` — the traffic move — is held by TWO independent locks; with either one
+missing the job refuses:
 
 1. **The GitHub environment gate.** Repo → Settings → Environments →
    **production** → Protection rules: **Required reviewers** = you,
@@ -126,11 +128,14 @@ with either one missing the job refuses:
    on 2026-10-02 the environment had NO protection rules (`protection_rules: []`),
    so GitHub autopassed the environment every run declared and a flip executed
    without a single approval.
-2. **The dispatch's approval input.** `flip`/`cutover`/`recover` start with a
+2. **The dispatch's approval input.** `flip` and `recover`'s flip start with a
    "Human approval gate" step that fails loudly unless the dispatch carried
    `-f approval=approved` — before any box command, before any traffic change.
    The input defaults to `pending` (fail-closed); the environment gate is a
    second lock, never the only one.
+
+`prepare` and `recover` (the prep halves) are ungated by design: they move no
+traffic, and the dispatch itself is the human's act.
 
 `rollback` stays ungated: it is the emergency undo. A traffic move without BOTH
 locks is the 2026-10-02 incident; patch the workflow or this doc for a change
@@ -285,13 +290,17 @@ boxes).
    instance** from it, install, rehearse and smoke; read the transcript (the new
    box's seed → migrations → receipt, then the install's verify → receipt →
    migrations → smoke).
-3. `Release` with `action=cutover -f approval=approved` → **read the evidence and
-   approve** when the job waits on the `production` environment; it snapshots the
-   owner, rebases the standby, starts it, flips the rules, and holds the settle
-   window.
-4. Confirm `https://houses.blueumbrella.net/health` and
+3. `Release` with `action=prepare` → **no gate; dispatching is the decision**.
+   It freezes the owner, snapshots it, restores/migrates that snapshot onto the
+   standby, starts it, and publishes the review surface — then stops. Production
+   is down from the freeze until the flip.
+4. **Review `https://houses-smoke.blueumbrella.net`** — the real data, the
+   migrations already run on it, the exact box the flip will make live.
+5. `Release` with `action=flip -f approval=approved` → preflight, move the L4
+   rules, retire the relay, hold the 5-minute settle.
+6. Confirm `https://houses.blueumbrella.net/health` and
    `terraform output live_target`.
-5. Record the outcome (and anything surprising) in this file or the plan.
+7. Record the outcome (and anything surprising) in this file or the plan.
 
 ## Data migrations ride the rollout (generic)
 

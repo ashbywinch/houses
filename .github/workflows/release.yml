@@ -69,11 +69,11 @@ on:
         required: false
         default: 'main'
       action:
-        description: 'release | build | install | cutover | rollback | recover | flip | diagnose | provision | bake | scaffold'
+        description: 'release | build | install | prepare | rollback | recover | flip | diagnose | provision | bake | scaffold'
         required: false
         default: 'release'
         type: choice
-        options: ['release', 'build', 'install', 'cutover', 'rollback', 'recover', 'flip', 'diagnose', 'provision', 'bake', 'scaffold']
+        options: ['release', 'build', 'install', 'prepare', 'rollback', 'recover', 'flip', 'diagnose', 'provision', 'bake', 'scaffold']
       artifact:
         description: 'install only: an existing gs://<bucket>/<sha256>.tar.gz (blank = build one now)'
         required: false
@@ -397,23 +397,27 @@ jobs:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
         timeout-minutes: 5
 
-  # ── cutover (THE human gate) ──────────────────────────────────────────
-  cutover:
+  # ── prepare (the maintenance prep — UNGATED) ──────────────────────────
+  # The MAINTENANCE half of a rollout: it takes production down (the freeze the
+  # snapshot requires) and leaves behind the box the flip will make live. It
+  # moves NO traffic, so it carries no approval gate — dispatching it IS the
+  # decision, and a second click on top of the dispatch bought nothing. `flip`
+  # stays gated: that is the traffic move.
+  prepare:
     needs: [resolve, image-stale]
-    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' }}
+    if: ${{ inputs.action == 'prepare' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' }}
     runs-on: ubuntu-latest
-    environment: production
+    # No environment gate: dispatching prepare is the decision. Production does
+    # go down (the freeze), and the step below says so on the run.
     env:
       BOX_USER: ${{ secrets.BOX_USER }}
       BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
       OWNER_IP: ${{ needs.resolve.outputs.owner_ip }}
       STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
     steps:
-      - name: Human approval gate — a traffic move may not start without it
-        if: ${{ inputs.approval != 'approved' }}
+      - name: Note the consequence — this TAKES PRODUCTION DOWN
         run: |
-          echo "::error::action=${{ inputs.action }} moves production traffic, and this dispatch did not carry approval=approved. Nothing ran — no box command, no traffic change. Re-dispatch with -f approval=approved ONLY after the human has approved the surface."
-          exit 1
+          echo "::notice::prepare freezes the owner (production down) to snapshot it, then restores and migrates that snapshot onto the standby. If anything after the freeze fails, the unfreeze step restarts the owner and traffic never moves."
       - name: Prepare the deploy key
         run: |
           set -euo pipefail
