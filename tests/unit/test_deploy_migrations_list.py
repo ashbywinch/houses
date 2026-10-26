@@ -286,3 +286,19 @@ def test_the_deploy_key_is_written_before_its_first_use_in_a_job():
         if not any("> /tmp/deploy.key" in s for s in steps[: first_use + 1]):
             problems.append(f"{job}: {steps[first_use].splitlines()[0]!r} uses the key before it is written")
     assert not problems, problems
+
+
+def test_every_dispatch_action_is_accepted_by_some_job():
+    """2026-10-26: renaming the action `cutover` -> `prepare` left `image-stale`'s
+    condition still spelling `cutover`, so prepare's dependency skipped and the
+    whole release did nothing — green, no error, no freeze. Every action the
+    dispatch offers must be named by at least one job's `if`."""
+    workflow = WORKFLOW.read_text()
+    match = re.search(r"options: \[([^\]]+)\]", workflow)
+    assert match is not None, "no action options found in the dispatch"
+    actions = re.findall(r"'([a-z]+)'", match.group(1))
+
+    jobs = re.findall(r"\n  ([a-z-]+):\n(.*?)(?=\n  [a-z-]+:\n|\Z)", workflow, re.DOTALL)
+    assert jobs, "no jobs parsed out of the workflow"
+    missing = [a for a in actions if not any(f"inputs.action == '{a}'" in body for _, body in jobs)]
+    assert not missing, f"dispatch actions no job accepts (they silently skip): {missing}"
