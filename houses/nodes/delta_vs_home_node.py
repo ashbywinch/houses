@@ -143,11 +143,19 @@ class DeltaVsHomeNode(DerivedNode):
         value = self._attempt.value_or_none()
         if not isinstance(value, DeltaVsHomeValue) or value.couple is None:
             return prov
-        if dep_attempts is not None and len(dep_attempts) == 2:
-            group_att, home_att = dep_attempts
-        else:
-            group_node, home_node = self._get_active_deps()
-            group_att, home_att = group_node.latest_attempt(), home_node.latest_attempt()
+        # Bind by node identity, never by position: the deps are named
+        # ("group", "current_home") and a reordered or dropped attempt must not
+        # silently swap the two figures (the lesson this class already carries).
+        nodes = self._get_active_deps()
+        by_id = (
+            {dep._id: att for dep, att in zip(nodes, dep_attempts, strict=False)}
+            if dep_attempts is not None
+            else None
+        )
+        group_att = by_id.get(nodes[0]._id) if by_id is not None else nodes[0].latest_attempt()
+        home_att = by_id.get(nodes[1]._id) if by_id is not None else nodes[1].latest_attempt()
+        if group_att is None or home_att is None:
+            return prov
         own = (group_att.value_or_none() or {}).get("couple") or {}
         baseline = home_att.value_or_none()
         base = (getattr(baseline, "group_value", None) or {}).get("couple") or {}
