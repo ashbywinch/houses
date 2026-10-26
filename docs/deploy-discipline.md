@@ -25,23 +25,25 @@ walkthrough is [tools/deploy/provision.md](../tools/deploy/provision.md).
   reviewable bypass. The workflow enforces this: a tag push not reachable from
   `main` fails the build job.
 
-## One rollout, two human decisions
+## One rollout, one human decision — the flip
 
 ```
 build artifact → REBUILD the standby from it (fresh instance, bootstrap: seed
   + migrations) → install + rehearse + smoke        ── a BOOT proof, ungated
-→ APPROVAL 1: "take the site down for the review"
-→ FREEZE the owner + snapshot it → restore + verify + MIGRATE that snapshot
-  onto the standby → start it → publish the review surface   ── the real data
+→ prepare (UNGATED: dispatching it is the decision):
+    FREEZE the owner + snapshot it → restore + verify + MIGRATE that snapshot
+    onto the standby → start it → publish the review surface   ── the real data
 → REVIEW https://houses-smoke.blueumbrella.net      ── the box the flip makes live
-→ APPROVAL 2: "go live"
+→ APPROVAL: "go live"
 → flip the L4 rules → retire the relay → settle (5 min of public health)
 ```
 
 Every rollout builds a fresh box: no box drifts, and the bootstrap path is
-exercised on every rollout. Both approvals are `prepare`'s and `flip`'s
-`production` environment gates, and each dispatch must also carry
-`-f approval=approved` — two locks per traffic-relevant step. Rollback needs no
+exercised on every rollout. **`flip` is the human decision**, held by its
+`production` environment gate and by `-f approval=approved` on the dispatch — two
+locks, both required. `prepare` carries no gate: it moves no traffic, and a
+second click on top of the dispatch it already required bought nothing. It does
+take production down for the freeze, and says so on the run. Rollback needs no
 approval.
 
 **The split is the invariant: the box you review is the box that goes live.**
@@ -117,8 +119,8 @@ and `sudo -n systemctl restart houses` must fail.
 
 ## The human prod gate — the dispatch and the environment (double lock)
 
-Traffic moves (`flip`) and the maintenance freeze (`prepare`) are held by TWO independent locks;
-with either one missing the job refuses:
+`flip` — the traffic move — is held by TWO independent locks; with either one
+missing the job refuses:
 
 1. **The GitHub environment gate.** Repo → Settings → Environments →
    **production** → Protection rules: **Required reviewers** = you,
@@ -126,11 +128,14 @@ with either one missing the job refuses:
    on 2026-10-02 the environment had NO protection rules (`protection_rules: []`),
    so GitHub autopassed the environment every run declared and a flip executed
    without a single approval.
-2. **The dispatch's approval input.** `prepare`/`flip`/`recover` start with a
+2. **The dispatch's approval input.** `flip` and `recover`'s flip start with a
    "Human approval gate" step that fails loudly unless the dispatch carried
    `-f approval=approved` — before any box command, before any traffic change.
    The input defaults to `pending` (fail-closed); the environment gate is a
    second lock, never the only one.
+
+`prepare` and `recover` (the prep halves) are ungated by design: they move no
+traffic, and the dispatch itself is the human's act.
 
 `rollback` stays ungated: it is the emergency undo. A traffic move without BOTH
 locks is the 2026-10-02 incident; patch the workflow or this doc for a change
@@ -285,9 +290,8 @@ boxes).
    instance** from it, install, rehearse and smoke; read the transcript (the new
    box's seed → migrations → receipt, then the install's verify → receipt →
    migrations → smoke).
-3. `Release` with `action=prepare -f approval=approved` → **approve at the
-   `production` environment only when you intend to take the site down**: it
-   freezes the owner, snapshots it, restores/migrates that snapshot onto the
+3. `Release` with `action=prepare` → **no gate; dispatching is the decision**.
+   It freezes the owner, snapshots it, restores/migrates that snapshot onto the
    standby, starts it, and publishes the review surface — then stops. Production
    is down from the freeze until the flip.
 4. **Review `https://houses-smoke.blueumbrella.net`** — the real data, the
