@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Any, TypedDict, cast, override
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Formula, FormulaLine, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.nodes.current_home_node import MonthlyBaseline, MonthlySide, as_figure
@@ -129,6 +129,46 @@ class DeltaVsHomeNode(DerivedNode):
             DeltaVsHomeValue(couple=sides["couple"], others=sides["others"])
         )
 
+    @override
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        """The subtraction, stated: this figure, the current home's, the result.
+
+        The class docstring promises the provenance IS "the two group figures
+        and the subtraction". The figures arrive as sources; without this the
+        subtraction existed only inside compute().
+        """
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
+        value = self._attempt.value_or_none()
+        if not isinstance(value, DeltaVsHomeValue) or value.couple is None:
+            return prov
+        # Bind by node identity, never by position: the deps are named
+        # ("group", "current_home") and a reordered or dropped attempt must not
+        # silently swap the two figures (the lesson this class already carries).
+        nodes = self._get_active_deps()
+        by_id = (
+            {dep._id: att for dep, att in zip(nodes, dep_attempts, strict=False)}
+            if dep_attempts is not None
+            else None
+        )
+        group_att = by_id.get(nodes[0]._id) if by_id is not None else nodes[0].latest_attempt()
+        home_att = by_id.get(nodes[1]._id) if by_id is not None else nodes[1].latest_attempt()
+        if group_att is None or home_att is None:
+            return prov
+        own = (group_att.value_or_none() or {}).get("couple") or {}
+        baseline = home_att.value_or_none()
+        base = (getattr(baseline, "group_value", None) or {}).get("couple") or {}
+        if own.get("value") is None or base.get("value") is None:
+            return prov
+        prov.formula = Formula(
+            lines=[
+                FormulaLine(label="This property", value=f"£{Decimal(own['value']):,.2f}/mo"),
+                FormulaLine(label="Your home", value=f"£{Decimal(base['value']):,.2f}/mo"),
+            ],
+            result=f"{value.couple.value}/mo",
+        )
+        return prov
     @staticmethod
     @override
     def provenance_display_value(att: Any) -> Any:

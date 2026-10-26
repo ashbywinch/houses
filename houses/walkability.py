@@ -95,8 +95,12 @@ WALKING_SPEED = Quantity(5, "km/hour")
 
 def extract_town(address: str) -> str:
     parts = [p.strip() for p in address.split(",")]
-    # Use search() so postcodes embedded in a segment (e.g. "Surrey. KT9 2HN") are detected.
-    filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.search(p) and not _POSTCODE_OUTCODE_RE.search(p)]
+    # The town often shares its segment with the postcode ("Newbury RG14 2RG"):
+    # strip the postcode rather than dropping the segment — and the town with it.
+    # A segment that IS a postcode strips to nothing and drops out; an outcode
+    # ("HP13") that stands alone drops out too.
+    stripped = [_POSTCODE_FULL_RE.sub("", part).strip(" .,") for part in parts]
+    filtered = [p for p in stripped if p and not _POSTCODE_OUTCODE_RE.fullmatch(p)]
     non_county = [p for p in filtered if p.lower().strip() not in KNOWN_COUNTIES]
     candidate = non_county[-1] if non_county else (filtered[-1] if filtered else "")
     # Strip trailing descriptions like " - Backing the River Wye"
