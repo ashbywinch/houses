@@ -69,11 +69,11 @@ on:
         required: false
         default: 'main'
       action:
-        description: 'release | build | install | cutover | rollback | recover | flip | diagnose | provision | bake | scaffold'
+        description: 'release | build | install | prepare | rollback | recover | flip | diagnose | provision | bake | scaffold'
         required: false
         default: 'release'
         type: choice
-        options: ['release', 'build', 'install', 'cutover', 'rollback', 'recover', 'flip', 'diagnose', 'provision', 'bake', 'scaffold']
+        options: ['release', 'build', 'install', 'prepare', 'rollback', 'recover', 'flip', 'diagnose', 'provision', 'bake', 'scaffold']
       artifact:
         description: 'install only: an existing gs://<bucket>/<sha256>.tar.gz (blank = build one now)'
         required: false
@@ -397,10 +397,15 @@ jobs:
           GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
         timeout-minutes: 5
 
-  # ── cutover (THE human gate) ──────────────────────────────────────────
-  cutover:
+  # ── prepare (the MAINTENANCE gate) ────────────────────────────────────
+  # The MAINTENANCE half of a rollout: it takes production down (the freeze the
+  # snapshot requires) and leaves behind the box the flip will make live. It
+  # moves NO traffic. Its gate is "take the site down", not "go live" — the
+  # 2026-10-26 confusion came from calling this `cutover`, which reads as the
+  # traffic move. The traffic move is `flip`.
+  prepare:
     needs: [resolve, image-stale]
-    if: ${{ inputs.action == 'cutover' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' }}
+    if: ${{ inputs.action == 'prepare' && needs.resolve.outputs.consistent == 'true' && needs.image-stale.result == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -409,10 +414,10 @@ jobs:
       OWNER_IP: ${{ needs.resolve.outputs.owner_ip }}
       STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
     steps:
-      - name: Human approval gate — a traffic move may not start without it
+      - name: Human approval gate — this TAKES PRODUCTION DOWN for the review window
         if: ${{ inputs.approval != 'approved' }}
         run: |
-          echo "::error::action=${{ inputs.action }} moves production traffic, and this dispatch did not carry approval=approved. Nothing ran — no box command, no traffic change. Re-dispatch with -f approval=approved ONLY after the human has approved the surface."
+          echo "::error::action=prepare FREEZES the owner — production goes down — to snapshot it and migrate that snapshot onto the standby. This dispatch did not carry approval=approved, so nothing ran: no freeze, no box command, no traffic change. Re-dispatch with -f approval=approved only when taking the site down for the review window is intended."
           exit 1
       - name: Prepare the deploy key
         run: |
