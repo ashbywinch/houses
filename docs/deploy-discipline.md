@@ -9,11 +9,13 @@ walkthrough is [tools/deploy/provision.md](../tools/deploy/provision.md).
 
 ## Production changes go ONLY through the rollout process
 
-- The GitHub **Release** workflow. Nine dispatch actions: `release` (build the artifact +
-  install it on the standby), `cutover` (the gated traffic move), `rollback` (the
-  ungated undo), `provision` (rebuild a box from the artifact). Never SSH in and
-  pull/restart the app directly; never run ad-hoc commands against prod to "just
-  fix it".
+- The GitHub **Release** workflow. Eleven dispatch actions: `release` (build the
+  artifact + install it on the standby), `cutover` (freeze the owner, snapshot
+  it, restore+migrate that snapshot onto the standby, publish the review surface
+  — then STOP), `flip` (the gated traffic move onto the reviewed box),
+  `rollback` (the ungated undo), `provision` (rebuild a box from the artifact).
+  Never SSH in and pull/restart the app directly; never run ad-hoc commands
+  against prod to "just fix it".
 - If the process is too slow or awkward, **improve it** — never bypass it. A
   skipped smoke gate or an unreviewed direct deploy is exactly the failure mode
   the process exists to prevent.
@@ -23,33 +25,49 @@ walkthrough is [tools/deploy/provision.md](../tools/deploy/provision.md).
   reviewable bypass. The workflow enforces this: a tag push not reachable from
   `main` fails the build job.
 
-## One rollout, one human decision
+## One rollout, two human decisions
 
 ```
-build artifact → REBUILD the standby box from it (fresh instance, bootstrap:
-seed + migrations) → install + rehearse + smoke on it → HUMAN APPROVAL →
-FREEZE the owner + snapshot it → rebase the standby onto that snapshot → start →
-flip the L4 rules → settle (5 min of public health)
+build artifact → REBUILD the standby from it (fresh instance, bootstrap: seed
+  + migrations) → install + rehearse + smoke        ── a BOOT proof, ungated
+→ APPROVAL 1: "take the site down for the review"
+→ FREEZE the owner + snapshot it → restore + verify + MIGRATE that snapshot
+  onto the standby → start it → publish the review surface   ── the real data
+→ REVIEW https://houses-smoke.blueumbrella.net      ── the box the flip makes live
+→ APPROVAL 2: "go live"
+→ flip the L4 rules → retire the relay → settle (5 min of public health)
 ```
 
 Every rollout builds a fresh box: no box drifts, and the bootstrap path is
-exercised on every rollout. The approval is the `cutover` job's `production`
-environment gate; the smoke transcript is the evidence, and nothing before it
-touches production traffic or data. Rollback needs no approval.
+exercised on every rollout. Both approvals are `cutover`'s and `flip`'s
+`production` environment gates, and each dispatch must also carry
+`-f approval=approved` — two locks per traffic-relevant step. Rollback needs no
+approval.
+
+**The split is the invariant: the box you review is the box that goes live.**
+`cutover` prepares and then STOPS, publishing the review surface; `flip` moves
+traffic and touches nothing on that box. `recover`/`flip` have worked this way
+since 2026-10-03 for exactly this reason — a job that restores or migrates
+*after* its approval gate makes the live box different from the approved one.
+`cutover` used to do that (snapshot, rebase and a second, unrehearsed migration
+run after its gate); it now ends at REVIEW READY.
 
 Two different databases appear above, deliberately. The fresh box's data at
 install time is the **seed + migrations** — a human-validated bootstrap copy that
-proves the box builds and boots. The data that will actually serve arrives at the
-rebase, immediately before the flip: a **fresh snapshot of the frozen owner**.
-Taking it any earlier would mean serving data that is minutes old and silently
-dropping every write in between, which is why the freeze is part of `--snapshot`
-itself and why the snapshot is the LAST thing before the transfer.
+proves the box builds and boots, and nothing more. The data that will actually
+serve is a **fresh snapshot of the frozen owner**, restored and migrated onto the
+standby *before* the review. Snapshotting earlier than the freeze would serve
+data that is minutes old and silently drop every write in between; snapshotting
+later than the review would make the reviewed box not the live one. The freeze
+is therefore the cutover's first act and the review its last.
 
-The abort path is explicit: if anything after the freeze fails, CI restarts the
-owner's app (`switch.sh --unfreeze`) and traffic never moved. A box never
-unfreezes production on its own.
+Stated plainly: **production is down from the freeze until the flip completes** —
+the review window is downtime. That is the price of reviewing the real data on
+the real box. The abort path is explicit: if anything after the freeze fails, CI
+restarts the owner's app (`switch.sh --unfreeze`) and traffic never moved. A box
+never unfreezes production on its own.
 
-**The settle gate** is the cutover's last step: 5 minutes of continuous public
+**The settle gate** is `flip`'s last step: 5 minutes of continuous public
 `/health` polling on the new owner. It hard-fails on a missing site or on
 `status`/`db` != ok; `last_write` staleness is reported, not gated, because a
 converged DAG legitimately writes nothing for minutes. `/health` proves the box
@@ -238,8 +256,9 @@ crash-loop stops instead of rebuilding forever.
 
 **R4 — Pre-flight gates + envelopes.** `install-artifact.sh` refuses to start the
 app below 450 MiB free; the workflow's step timeouts and the scripts' own
-deadlines (300 s snapshot, 90-minute install, 30-minute rebuild-and-bootstrap)
-bound every run; the deploy key's `command=` restriction means no wrapper may
+deadlines (300 s snapshot, 90-minute install, 90-minute rebuild-and-bootstrap —
+540 polls, because a fresh box restores the seed and then migrates it: 243k
+rows measured ~42 min) bound every run; the deploy key's `command=` restriction
 ride inside the remote command itself.
 
 **R5 — Self-heal the guest.** `houses-network-watchdog.timer` runs every 2 min;
