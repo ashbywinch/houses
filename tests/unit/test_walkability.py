@@ -26,6 +26,9 @@ class TestExtractTown:
             ("14 Burnside, Fleet, GU51 3RE", "Fleet"),
             ("Molesey Road, Hersham, Walton-On-Thames, KT12 4QW", "Walton-On-Thames"),
             ("Norden Road, Maidenhead, SL6 4AY", "Maidenhead"),
+            # The town shares a segment with its postcode — strip the postcode,
+            # don't drop the town with it (90970053's address shape).
+            ("2 Huntingdon Gardens, Newbury RG14 2RG", "Newbury"),
             ("", ""),
         ],
     )

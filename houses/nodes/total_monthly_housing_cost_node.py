@@ -8,7 +8,7 @@ from typing import Any, override
 from money import Money
 from pydantic import SerializerFunctionWrapHandler, model_serializer
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Formula, FormulaLine, Provenance
 from dag.derived_node import DerivedNode
 from dag.expression import Attr, Conditional, Div, Field, Literal, Ref
 from dag.measurement import Measurement
@@ -289,6 +289,15 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                 parts.append(f"{label} £{Decimal(others['value']):,.2f}/mo".strip())
             if parts:
                 prov.value = ", ".join(parts)
+            # THE ARITHMETIC, stated: the breakdown IS what compute() summed,
+            # so the formula carries every row and the total.
+            breakdown = val.get("couple_breakdown") or {}
+            if couple.get("value") is not None and breakdown:
+                prov.formula = _breakdown_formula(
+                    breakdown,
+                    val.get("couple_names") or val.get("couple_label") or "Couple",
+                    couple["value"],
+                )
             allocated = (val.get("couple_breakdown") or {}).get("annexe_council_tax") or (
                 val.get("others_breakdown") or {}
             ).get("annexe_council_tax")
@@ -347,6 +356,34 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
 
 
 
+
+
+# The breakdown rows as the reader knows them (the wire keys are the
+# computation's own field names).
+_BREAKDOWN_LABELS = {
+    "commutes": "Commute",
+    "insurance": "Life insurance",
+    "council_tax": "Council tax (main)",
+    "sinking_fund": "Sinking fund",
+    "annexe_council_tax": "Council tax (annexe)",
+    "rent_paid": "Rent paid",
+    "mortgage": "Mortgage",
+    "rental_income": "Rental income",
+}
+
+
+def _breakdown_formula(breakdown: Mapping[str, Any], label: str, result: str) -> Formula:
+    """One group's monthly figure as a formula: every row that made it, then the total."""
+    lines = [
+        FormulaLine(
+            label=_BREAKDOWN_LABELS.get(key, key.replace("_", " ")),
+            # + 0 normalises -0.00 (a zero rental income) to 0.00.
+            value=f"£{Decimal(str(value)) + Decimal(0):,.2f}",
+        )
+        for key, value in breakdown.items()
+        if isinstance(value, (int, float))
+    ]
+    return Formula(lines=lines, result=f"{label} £{Decimal(result):,.2f}/mo")
 
 
 def _band_line(label: str, band: str | None, amount: object, who: str, ignored: bool) -> str:

@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Any, TypedDict, cast, override
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Formula, FormulaLine, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.nodes.current_home_node import MonthlyBaseline, MonthlySide, as_figure
@@ -129,6 +129,38 @@ class DeltaVsHomeNode(DerivedNode):
             DeltaVsHomeValue(couple=sides["couple"], others=sides["others"])
         )
 
+    @override
+    async def build_provenance(
+        self, dep_attempts: list[Attempt] | None = None, active_deps: tuple[Node, ...] | None = None
+    ) -> Provenance:
+        """The subtraction, stated: this figure, the current home's, the result.
+
+        The class docstring promises the provenance IS "the two group figures
+        and the subtraction". The figures arrive as sources; without this the
+        subtraction existed only inside compute().
+        """
+        prov = await super().build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)
+        value = self._attempt.value_or_none()
+        if not isinstance(value, DeltaVsHomeValue) or value.couple is None:
+            return prov
+        if dep_attempts is not None and len(dep_attempts) == 2:
+            group_att, home_att = dep_attempts
+        else:
+            group_node, home_node = self._get_active_deps()
+            group_att, home_att = group_node.latest_attempt(), home_node.latest_attempt()
+        own = (group_att.value_or_none() or {}).get("couple") or {}
+        baseline = home_att.value_or_none()
+        base = (getattr(baseline, "group_value", None) or {}).get("couple") or {}
+        if own.get("value") is None or base.get("value") is None:
+            return prov
+        prov.formula = Formula(
+            lines=[
+                FormulaLine(label="This property", value=f"£{Decimal(own['value']):,.2f}/mo"),
+                FormulaLine(label="Your home", value=f"£{Decimal(base['value']):,.2f}/mo"),
+            ],
+            result=f"{value.couple.value}/mo",
+        )
+        return prov
     @staticmethod
     @override
     def provenance_display_value(att: Any) -> Any:
