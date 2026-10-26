@@ -486,19 +486,6 @@ jobs:
         # row's provenance is decompressed and recompressed individually), so
         # this window must hold it until every box has been through it once.
         timeout-minutes: 120
-      - name: Flip the L4 rules to the new owner
-        run: |
-          set -euo pipefail
-          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
-          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
-          REGION="${ZONE%-*}"
-          TARGET="${{ needs.resolve.outputs.standby }}-target"
-          for rule in houses-l4-http houses-l4-https; do
-            gcloud compute forwarding-rules set-target "$rule" --region "$REGION" --project "$PROJECT" \
-              --target-instance "$TARGET" \
-              --target-instance-zone "$ZONE"
-          done
-          echo "flipped houses-l4-http + houses-l4-https -> $TARGET"
       - name: Unfreeze — put production back on the owner if anything above failed
         # failure() is FALSE for a cancelled run, and a lost runner runs no
         # further steps: either way the owner's app has been stopped since the
@@ -514,49 +501,21 @@ jobs:
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --unfreeze"
         timeout-minutes: 10
-      - name: Verify public health through the settle window (5 minutes)
+      - name: Record the outcome — REVIEW READY, awaiting approval
         if: success()
         run: |
-          set -euo pipefail
-          # The settle window: five minutes of continuous public verification on
-          # the NEW owner. /health is the evidence that the box is SERVING
-          # (`status` and `db` are hard gates). It is NOT evidence that the data
-          # is migrated — that verdict comes from the runner inside --rebase
-          # (`migrations: N applied+checked, 0 failed`), which the box refuses to
-          # finish without, long before any traffic moves.
-          #
-          # last_write staleness is reported, not gated: it is MAX(created_at) in
-          # node_results, so an idle-but-converged DAG legitimately writes nothing
-          # for minutes at a time. A genuinely stalled database shows `db:"error"`.
-          deadline=$(( $(date +%s) + 300 ))
-          polls=0
-          first=""
-          last=""
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
-            read -r S DB LW < <(printf '%s' "$H" | python3 -c 'import sys,json; d=json.loads(sys.stdin.read()); print(d.get("status",""), d.get("db",""), d.get("last_write",""))' 2>/dev/null || echo "  ")
-            if [ "$S" != "ok" ] || [ "$DB" != "ok" ] || [ -z "$LW" ]; then
-              echo "::error::public health is not ok (status='$S' db='$DB' last_write='$LW') — the flip is NOT complete"
-              exit 1
-            fi
-            AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
-            [ -n "$first" ] || first="$LW"
-            last="$LW"
-            polls=$((polls + 1))
-            echo "settle poll $polls: last_write=$LW age=${AGE}s"
-            sleep 15
-          done
-          if [ "$first" = "$last" ]; then
-            echo "NOTE: last_write did not advance during the window ($last) — the app had nothing to recompute"
-          fi
-          echo "SETTLE VERIFIED: $polls healthy reads over 5 minutes (last_write $first -> $last)"
-      - name: Record the outcome
-        if: always()
-        run: |
-          echo "owner before:  ${{ needs.resolve.outputs.owner }}"
-          echo "owner after:   ${{ needs.resolve.outputs.standby }}"
-          echo "Rollback (if needed): gh workflow run Release -f action=rollback -f ref=main"
+          echo "prepared box: ${{ needs.resolve.outputs.standby }} (owner's snapshot restored, migrated, started)"
+          echo "frozen owner: ${{ needs.resolve.outputs.owner }} (app stopped since the snapshot; traffic never moved)"
+          echo "review surface: https://houses-smoke.blueumbrella.net — this is the box the flip will make live"
+          echo "next: review that surface, then: gh workflow run Release -f action=flip -f approval=approved"
           echo "Clean pre-migration backups retained: ${{ steps.snapshot.outputs.snapshot_object }} (GCS) + each box's <db>.pre-<migration> files"
+      - name: Record the failure — there is nothing to approve
+        # A failed prep must never read as REVIEW READY: the unfreeze step above
+        # restarts the owner, and no review box exists.
+        if: failure() || cancelled()
+        run: |
+          echo "::error::cutover did not complete — the owner was frozen and NO review box was published. Do not run flip."
+          echo "Verify https://houses.blueumbrella.net/health before anything else; the unfreeze step restarted the owner on failure."
 
   # ── flip: make the APPROVED review box live, nothing else ─────────────
   # Recover-rollout flip. The approved box is FINAL: prep already restored
@@ -650,6 +609,40 @@ jobs:
           # converged during its review; a fresh-cutover boot's background
           # sweep is expected and reads never block on it.
           echo "CONTINUITY OK: public site serving on the approved box"
+      - name: Settle — five minutes of continuous public health on the new owner
+        if: success()
+        run: |
+          set -euo pipefail
+          # /health proves the box is SERVING (status + db are hard gates). It is
+          # NOT evidence the data is migrated — that verdict is the runner inside
+          # --rebase (`migrations: N applied+checked, 0 failed`), which the box
+          # refuses to finish without, before any traffic moves.
+          #
+          # last_write staleness is reported, not gated: it is MAX(created_at) in
+          # node_results, so an idle-but-converged DAG legitimately writes nothing
+          # for minutes. A genuinely stalled database shows `db:"error"`.
+          deadline=$(( $(date +%s) + 300 ))
+          polls=0
+          first=""
+          last=""
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
+            read -r S DB LW < <(printf '%s' "$H" | python3 -c 'import sys,json; d=json.loads(sys.stdin.read()); print(d.get("status",""), d.get("db",""), d.get("last_write",""))' 2>/dev/null || echo "  ")
+            if [ "$S" != "ok" ] || [ "$DB" != "ok" ] || [ -z "$LW" ]; then
+              echo "::error::public health is not ok (status='$S' db='$DB' last_write='$LW') — the flip is NOT complete"
+              exit 1
+            fi
+            AGE=$(( $(date -u +%s) - $(date -u -d "${LW}" +%s 2>/dev/null || echo 0) ))
+            [ -n "$first" ] || first="$LW"
+            last="$LW"
+            polls=$((polls + 1))
+            echo "settle poll $polls: last_write=$LW age=${AGE}s"
+            sleep 15
+          done
+          if [ "$first" = "$last" ]; then
+            echo "NOTE: last_write did not advance during the window ($last) — the app had nothing to recompute"
+          fi
+          echo "SETTLE VERIFIED: $polls healthy reads over 5 minutes (last_write $first -> $last)"
       - name: Record the outcome
         if: always()
         run: |
