@@ -4,7 +4,7 @@ permissions:
   contents: read
 
 # The rollout chain (docs/anti-fragile-rollout-plan.md). ONE human decision per
-# rollout: the cutover job's production-environment approval.
+# rollout: the prepare and flip production-environment approvals.
 #
 #   resolve   — read the L4 forwarding rule's target. That is the ONLY "who is
 #               live" fact; a box's role (owner/standby) is exactly that target.
@@ -16,7 +16,7 @@ permissions:
 #   install   — on the fresh standby: verify the artifact + its venv, rehearse the
 #               migrations (apply + check each), smoke on 127.0.0.1, then leave the
 #               app STOPPED for the human gate.
-#   cutover   — GATED (environment: production). FREEZE the owner (stop its app)
+#   prepare   — UNGATED. FREEZE the owner (stop its app)
 #               and snapshot it → rebase the standby from that snapshot (restore +
 #               verify rows/integrity + migrate + check + start) → flip the rules
 #               → settle. Any failure restarts the owner's app; traffic never moved.
@@ -39,7 +39,7 @@ permissions:
 #               the L4 rules, when no rules exist yet. Requires houses-base
 #               (run action=bake first); a missing image or an existing plane
 #               fails the job loudly — there is no fallback bootstrap.
-#   DOUBLE GATE on every traffic move (cutover / flip):
+#   DOUBLE GATE on every traffic move (flip):
 #   (1) the job declares environment: production — GitHub pauses it until the
 #       required human reviewer approves, and (2) the job's first step refuses
 #       to run unless the dispatch carried approval=approved. Both must hold;
@@ -83,7 +83,7 @@ on:
         required: false
         default: 'gs://houses-seed/latest.db'
       approval:
-        description: 'flip/cutover only: explicit human approval to move traffic. REQUIRED: approved — anything else fails the job before any box or traffic operation'
+        description: 'flip only: explicit human approval to move traffic. REQUIRED: approved — anything else fails the job before any traffic operation'
         required: false
         default: 'pending'
         type: choice
@@ -144,7 +144,7 @@ jobs:
             CONSISTENT=true
           else
             CONSISTENT=false
-            echo "::warning::the L4 rules DISAGREE (https -> $TARGET, http -> $TARGET_HTTP) — a half-finished flip. action=rollback repairs this; cutover/install/recover refuse it."
+            echo "::warning::the L4 rules DISAGREE (https -> $TARGET, http -> $TARGET_HTTP) — a half-finished flip. action=rollback repairs this; prepare/install/recover refuse it."
           fi
           OWNER=$(basename "$(gcloud compute target-instances describe "$TARGET" --zone "$ZONE" --project "$PROJECT" --format='value(instance)')")
           case "$OWNER" in
@@ -172,7 +172,7 @@ jobs:
     # RE-BAKES in the same run (no human), because a stale image is a stale box.
     # The flip consumes NO image and NO artifact — the approved box is the
     # contract; a stale image must never gate it.
-    if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'cutover' }}
+    if: ${{ inputs.action == 'release' || inputs.action == 'provision' || inputs.action == 'install' || inputs.action == 'prepare' || inputs.action == 'recover' }}
     runs-on: ubuntu-latest
     outputs:
       wanted: ${{ steps.check.outputs.wanted }}
@@ -458,7 +458,7 @@ jobs:
           # that had no surviving clean copy was the 2026-09-24 lesson).
           SNAPSHOT_OBJECT="gs://houses-artifacts/snapshots/$(date -u +%Y%m%dT%H%M%SZ).db"
           gsutil -q cp /tmp/snapshot.db "$SNAPSHOT_OBJECT" || {
-            echo "::error::could not archive the clean snapshot to $SNAPSHOT_OBJECT — the cutover rule is: no archive, no migration. Production is FROZEN; the unfreeze step restarts the owner."
+            echo "::error::could not archive the clean snapshot to $SNAPSHOT_OBJECT — the prepare rule is: no archive, no migration. Production is FROZEN; the unfreeze step restarts the owner."
             exit 1
           }
           echo "archived clean snapshot: $SNAPSHOT_OBJECT ($(du -h /tmp/snapshot.db | cut -f1), $ROWS rows, pre-migration)"
@@ -500,7 +500,7 @@ jobs:
           # The owner's app has been stopped since the snapshot. Traffic never
           # moved (the flip is the last step), so restarting it restores service
           # exactly as it was — with the writes it had already accepted.
-          echo "cutover failed after the freeze — restarting the owner's app"
+          echo "prepare failed after the freeze — restarting the owner's app"
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --unfreeze"
@@ -518,7 +518,7 @@ jobs:
         # restarts the owner, and no review box exists.
         if: failure() || cancelled()
         run: |
-          echo "::error::cutover did not complete — the owner was frozen and NO review box was published. Do not run flip."
+          echo "::error::prepare did not complete — the owner was frozen and NO review box was published. Do not run flip."
           echo "Verify https://houses.blueumbrella.net/health before anything else; the unfreeze step restarted the owner on failure."
 
   # ── flip: make the APPROVED review box live, nothing else ─────────────
@@ -610,7 +610,7 @@ jobs:
           done
           [ -n "$ok" ] || { echo "::error::public health did not come up after the flip — investigate or rollback"; exit 1; }
           # DAG convergence is reported, never gated: the approved box
-          # converged during its review; a fresh-cutover boot's background
+          # converged during its review; a fresh-prepare boot's background
           # sweep is expected and reads never block on it.
           echo "CONTINUITY OK: public site serving on the approved box"
       - name: Settle — five minutes of continuous public health on the new owner
@@ -727,7 +727,7 @@ jobs:
             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --restore $SOURCE"
         # Restore + the migration pair — the same one-off split migration as
-        # the cutover's rebase (see the window above).
+        # the prepare's rebase (see the window above).
         timeout-minutes: 120
       - name: Record the surface the reviewer will look at
         run: |
@@ -1119,7 +1119,7 @@ jobs:
       - name: Notes
         run: |
           echo "boxes bootstrapping from houses-base: watch with action=diagnose"
-          echo "next: gh workflow run Release -f action=release; then cutover/recover"
+          echo "next: gh workflow run Release -f action=release; then prepare/recover"
 
   # ── read-only state dump ──────────────────────────────────────────────
   diagnose:
