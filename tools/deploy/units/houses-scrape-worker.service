@@ -7,6 +7,12 @@
 Description=Houses Rightmove scrape worker
 After=network-online.target houses-chrome.service
 Wants=network-online.target houses-chrome.service
+# A crash loop must STOP, not run forever: with Restart=always and RestartSec=5
+# the default limit (5 starts in 10s) never trips — five restarts take 25s — so
+# an ImportError looped 119,617 times over days. Five starts per five minutes
+# trips the limit and parks the unit in `failed` for a human to look at.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 User=__USER__
@@ -15,7 +21,9 @@ Environment=HOUSES_SCRAPE_APP_URL=__APP_URL__
 # The session secret comes from __REPO__/.env (pydantic reads it at import),
 # so the worker's minted cookie matches the cloud box's /etc/houses.env.
 ExecStart=__REPO__/.venv/bin/python tools/scrape_worker.py --loop --interval 60
-Restart=always
+# on-failure, not always: a clean exit (--once with an empty queue) is done, not
+# a reason to restart forever.
+Restart=on-failure
 RestartSec=5
 
 [Install]
