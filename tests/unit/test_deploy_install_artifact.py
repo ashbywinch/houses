@@ -141,7 +141,7 @@ def _stubs(tmp_path: Path) -> Path:
     return bin_dir
 
 
-def test_the_fast_path_reaches_review_ready_and_leaves_the_app_serving(tmp_path):
+def test_the_fast_path_reaches_the_install_receipt_and_does_no_data_work(tmp_path):
     root = _box(tmp_path)
     bin_dir = _stubs(tmp_path)
     env_file = tmp_path / "houses.env"
@@ -161,16 +161,15 @@ def test_the_fast_path_reaches_review_ready_and_leaves_the_app_serving(tmp_path)
 
     assert result.returncode == 0, output
     assert "the box already runs" in output, "this test must exercise the fast path"
-    assert f"REVIEW READY: artifact {SHA}" in output
-    # The rehearsal and the smoke really ran before that verdict.
-    assert "migrations: 1 applied+checked, 0 failed" in output
-    assert "house records served: 1" in output
-    # The standby IS the review surface: the app stays SERVING (never stopped),
-    # and the standby's role URL (houses-smoke) was written into the env the
-    # app reads at its next start.
-    calls = systemctl_log.read_text().splitlines()
-    assert "systemctl stop houses.service" not in calls, calls
-    assert "HOUSES_PUBLIC_URL=https://houses-smoke.blueumbrella.net" in env_file.read_text()
+    assert f"artifact installed: {SHA}" in output
+    # The box holds no database of its own: prepare restores the owner's live
+    # snapshot, and the migrations and the smoke run against THAT (see
+    # switch.sh --rebase → _finish_restore). A rehearsal or a smoke here would
+    # be running against seed data nobody serves.
+    assert "no data yet; prepare restores the owner's snapshot" in output
+    assert "migrations:" not in output
+    assert "house records served" not in output
+    assert "systemctl restart houses.service" not in systemctl_log.read_text()
 
 
 def _tarball(tmp_path: Path) -> tuple[Path, str]:
