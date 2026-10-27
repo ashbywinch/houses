@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Rightmove scrape worker — runs WHERE CHROME EXISTS (the LAN machine).
 
 The cloud box has no Chrome; property adds there enqueue scrape jobs with
