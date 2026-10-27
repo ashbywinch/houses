@@ -234,9 +234,15 @@ resource "google_compute_instance" "base_builder" {
     startup-script = file("${path.module}/../tools/deploy/base-image.sh")
   }
 
-  # The bake script powers the instance off when it has FINISHED; terraform must
-  # not stop it on creation or the bake would be truncated mid-apt. The bake
-  # workflow waits for the stopped state before creating the image from the disk.
+  # The bake script powers the instance off when it has FINISHED; the bake
+  # workflow waits for the stopped state before imaging the disk.
+  #
+  # allow_stopping_for_update is about UPDATES, not creation: an in-place change
+  # to a running instance (machine_type, service_account, network_interface)
+  # refuses without it. A bake that failed leaves the builder running, and the
+  # next rollout's `terraform apply` then dies here — exactly what failed the
+  # v1.5.5 release at provision (2026-10-27). The box resource already has it.
+  allow_stopping_for_update = true
 }
 
 # The IMAGE itself is created by the bake workflow, not here: an image must be
