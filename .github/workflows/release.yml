@@ -79,9 +79,8 @@ on:
         required: false
         default: ''
       snapshot:
-        description: 'recover only: the database object to restore (gs://bucket/object.db)'
+        description: 'recover only (REQUIRED): the database object to restore (gs://bucket/object.db). Recover abandons the owner data, so the operator names the object explicitly — there is no seed to fall back to.'
         required: false
-        default: 'gs://houses-seed/latest.db'
       approval:
         description: 'flip only: explicit human approval to move traffic. REQUIRED: approved — anything else fails the job before any traffic operation'
         required: false
@@ -677,7 +676,7 @@ jobs:
       BOX_USER: ${{ secrets.BOX_USER }}
       BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
       STANDBY_IP: ${{ needs.resolve.outputs.standby_ip }}
-      SOURCE: ${{ inputs.snapshot || 'gs://houses-seed/latest.db' }}
+      SOURCE: ${{ inputs.snapshot }}
     steps:
       - name: Guard — never recover onto the box that owns the traffic
         run: |

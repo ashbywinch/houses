@@ -72,7 +72,6 @@ locals {
     operator_pubkey    = file(var.operator_ssh_public_key_path)
     deploy_pubkey      = var.deploy_pubkey
     project            = var.project
-    seed_object        = var.seed_object
     env_object         = var.env_object
     main_host          = var.main_host
     bootstrap          = file("${path.module}/../tools/deploy/box-bootstrap.sh")
@@ -198,14 +197,15 @@ resource "google_compute_forwarding_rule" "https" {
 # IAM roles below are the permissions.
 resource "google_service_account" "box_deploy" {
   account_id   = "houses-box-deploy"
-  display_name = "Houses box deploy (artifacts + seed reads)"
+  display_name = "Houses box deploy (artifacts + env read)"
 }
 
 # ── the base machine image ──────────────────────────────────────────────
 # A rollout builds a FRESH box, so the OS layer is baked once here instead of
 # being apt-installed on every rollout: faster, and independent of the apt mirrors
 # and the Caddy repo at rollout time. The bake script has no secrets and no app —
-# the artifact supplies code, the seed supplies data.
+# the artifact supplies code; the box starts with NO data (prepare restores the
+# owner's live snapshot).
 #
 # Re-bake: the workflow's `action=bake` (terraform apply -target/-replace
 # google_compute_instance.base_builder, then the image is recreated from its
@@ -309,10 +309,9 @@ resource "google_storage_bucket" "artifacts" {
   uniform_bucket_level_access = true
   force_destroy               = false
 
-  # The cutover archives each clean PRE-MIGRATION snapshot here
+  # The rollout archives each clean PRE-MIGRATION snapshot here
   # (snapshots/<timestamp>.db, written by CI). Retention is bounded: 90 days is
-  # far past any recovery horizon — the seed is the durable recovery artifact,
-  # snapshots are the recent clean copies the process must always have made.
+  # far past any recovery horizon.
   lifecycle_rule {
     action { type = "Delete" }
     condition {
@@ -328,14 +327,14 @@ resource "google_storage_bucket_iam_member" "box_reads_artifacts" {
   member = "serviceAccount:${local.box_service_account}"
 }
 
-# The seed bucket is operator-owned (a human validates the seed via
-# tools/deploy/seed-box.sh); Terraform only grants the box read.
-data "google_storage_bucket" "seed" {
-  name = var.seed_bucket
+# The env object lives in an operator-owned bucket; Terraform only grants the
+# box read. It carries /etc/houses.env and nothing else.
+data "google_storage_bucket" "env_bucket" {
+  name = "houses-seed" # historical name: it holds /etc/houses.env only
 }
 
-resource "google_storage_bucket_iam_member" "box_reads_seed" {
-  bucket = data.google_storage_bucket.seed.name
+resource "google_storage_bucket_iam_member" "box_reads_env" {
+  bucket = data.google_storage_bucket.env_bucket.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${local.box_service_account}"
 }

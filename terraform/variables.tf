@@ -90,17 +90,9 @@ variable "main_host" {
   default     = "houses.blueumbrella.net"
 }
 
-variable "seed_bucket" {
-  description = "The human-validated seed bucket (created by an operator; terraform only grants the box read)."
-  type        = string
-  default     = "houses-seed"
-}
-
-variable "seed_object" {
-  description = "The seed object a fresh box restores. Deliberately not auto-refreshed — tools/deploy/seed-box.sh is the human-validated refresh."
-  type        = string
-  default     = "gs://houses-seed/latest.db"
-}
+# (No seed_bucket / seed_object: a fresh box starts with NO data — prepare
+# restores the owner's live snapshot. The bucket named below still holds the
+# box's private env object; the name is historical.)
 
 variable "env_object" {
   description = "The private object holding the app's root-only /etc/houses.env (session secret, API keys). Read by the box with its own identity."
