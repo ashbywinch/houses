@@ -7,13 +7,17 @@
 Description=Houses Rightmove scrape worker (LAN dev app)
 After=network-online.target houses-chrome.service
 Wants=network-online.target houses-chrome.service
+# Same bound as the production worker: an ImportError looped this unit too, and
+# Restart=always with RestartSec=5 never trips the default 5-in-10s limit.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 User=__USER__
 WorkingDirectory=__REPO__
 Environment=HOUSES_SCRAPE_APP_URL=http://127.0.0.1:8765
 ExecStart=__REPO__/.venv/bin/python tools/scrape_worker.py --loop --interval 60
-Restart=always
+Restart=on-failure
 RestartSec=5
 
 [Install]

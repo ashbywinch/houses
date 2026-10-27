@@ -28,8 +28,16 @@ import asyncio
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
+
+# Run as `python tools/scrape_worker.py`, sys.path[0] is tools/, not the repo
+# root — and the venv's editable finder only maps the top-level packages that
+# existed when it was built. That is how `serialization` (added later) went
+# missing and both units crash-looped: each 5-second restart hit ImportError
+# immediately. Put the root first, before any repo import.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dag.guard import capture_async, guarded_async
 from houses.rightmove_scraper import scrape
