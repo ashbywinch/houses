@@ -201,21 +201,23 @@ _smoke_data() {
   # Runs against the app this restore just started. The cookie is minted with
   # this box's own secret and never echoed; the curls use it in a header only.
   local secret cookie all rids rid http index
-  secret=$(grep '^HOUSES_SESSION_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)
-  [ -n "$secret" ] || { mark "FAILED: HOUSES_SESSION_SECRET missing from $ENV_FILE"; exit 1; }
-  cookie=$(HOUSES_SESSION_SECRET="$secret" "$VENV_PY" -c '
+  local env_file="${HOUSES_ENV_FILE:-/etc/houses.env}"
+  local venv_py="$APP/.venv/bin/python"
+  secret=$(grep '^HOUSES_SESSION_SECRET=' "$env_file" | head -1 | cut -d= -f2- || true)
+  [ -n "$secret" ] || { mark "FAILED: HOUSES_SESSION_SECRET missing from $env_file"; exit 1; }
+  cookie=$(HOUSES_SESSION_SECRET="$secret" "$venv_py" -c '
 from houses.web.auth import _make_session_cookie
 print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True))
 ' 2>/dev/null </dev/null) || { mark "FAILED: the smoke cookie could not be minted"; exit 1; }
 
- curl -fsS --max-time 180 -H "Cookie: session=$cookie" "localhost:8765/api/properties/all" >/dev/null \
-   || { mark "FAILED: smoke /api/properties/all did not answer"; exit 1; }
+  curl -fsS --max-time 180 -H "Cookie: session=$cookie" "localhost:8765/api/properties/all" >/dev/null \
+    || { mark "FAILED: smoke /api/properties/all did not answer"; exit 1; }
   all=$(curl -fsS --max-time 1800 -H "Cookie: session=$cookie" "localhost:8765/api/properties/all")
-  rids=$(printf '%s' "$all" | "$VENV_PY" -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("properties", d)))' 2>/dev/null || echo 0)
+  rids=$(printf '%s' "$all" | "$venv_py" -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("properties", d)))' 2>/dev/null || echo 0)
   echo "   house records served: $rids"
   [ "$rids" -gt 0 ] || { mark "FAILED: smoke /api/properties/all returned no house records"; exit 1; }
 
-  rid=$(printf '%s' "$all" | "$VENV_PY" -c 'import json,sys; d=json.load(sys.stdin); ps=d.get("properties", d); print(sorted(ps)[-1] if isinstance(ps, dict) else ps[0]["rid"])' 2>/dev/null || echo "")
+  rid=$(printf '%s' "$all" | "$venv_py" -c 'import json,sys; d=json.load(sys.stdin); ps=d.get("properties", d); print(sorted(ps)[-1] if isinstance(ps, dict) else ps[0]["rid"])' 2>/dev/null || echo "")
   [ -z "$rid" ] || curl -fsS --max-time 900 -H "Cookie: session=$cookie" "localhost:8765/api/properties/$rid/detail" >/dev/null \
     || { mark "FAILED: smoke property detail (rid $rid) did not render"; exit 1; }
 
