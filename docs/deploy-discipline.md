@@ -302,6 +302,36 @@ boxes).
    `terraform output live_target`.
 7. Record the outcome (and anything surprising) in this file or the plan.
 
+### Outcome — 2026-10-27, the first run of the split
+
+`v1.5.4` (artifact `7a8d071f…`). `prepare` succeeded in ~12 minutes: snapshot
+`gs://houses-artifacts/snapshots/20261026T194939Z.db`, restore verified at
+**261,526 rows** (the owner's data — the seed is 243,004), `migrations: 2
+applied+checked, 0 failed` (`split_node_results.py` a no-write no-op because
+production was already split; `backfill_person_ids.py` applied with a backup),
+app started, review surface published. `flip` passed the preflight, moved the
+rules, retired the relay, and held **20 healthy reads over 5 minutes** of settle.
+
+`houses` is now production; `houses-standby` is the abandoned frozen owner with
+its database kept as-is.
+
+**Production was down from the 19:49 freeze to the 11:01 flip — about 15 hours**,
+because the review window is downtime by design. The migration took 12 minutes,
+so almost all of it was the wait for review. That is the honest cost of
+reviewing the real data on the real box, and a reason to keep that window
+deliberately short.
+
+Two things the run taught, both already fixed:
+
+- **A renamed action can silently skip its job.** `prepare` reported success
+  having done nothing: `image-stale`'s condition still tested `cutover`, so it
+  skipped, `prepare`'s `needs.image-stale.result` was `skipped` rather than
+  `success`, and `prepare` skipped too. Production never froze; the only signal
+  was one word in the job list. There is now a guard that every action the
+  dispatch offers is named by at least one job's `if`.
+- **`last_write` stays stale through a flip**, correctly: the box was frozen and
+  a converged DAG writes nothing. The settle reports it and does not gate on it.
+
 ## Data migrations ride the rollout (generic)
 
 A data migration is a ref-shipped script executed by the ONE runner
