@@ -1042,6 +1042,19 @@ jobs:
           # The boxes reference the image BY NAME, so recreating it is how a
           # re-bake reaches them (at their NEXT rebuild — never in place).
           echo "NOTE: do not bake while a rollout is creating a box — for a few seconds the name has no image behind it."
+          # The bake script powers the builder OFF when it finishes. A stopped
+          # instance still reports STOPPING for a while, and images.create then
+          # fails with "the resource ... is not ready" (2026-10-27: took the
+          # release down after the bake itself had succeeded). Wait for the
+          # terminal state, then image.
+          for _ in $(seq 1 60); do
+            STATE=$(gcloud compute instances describe houses-base-builder --zone "$ZONE" --project "$PROJECT" \
+              --format='value(status)' 2>/dev/null || echo UNKNOWN)
+            [ "$STATE" = "TERMINATED" ] && break
+            echo "   builder is $STATE — waiting for TERMINATED"
+            sleep 5
+          done
+          [ "$STATE" = "TERMINATED" ] || { echo "::error::the builder never settled (state $STATE) — cannot image it"; exit 1; }
           gcloud compute images delete "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" --project "$PROJECT" --quiet 2>/dev/null || true
           gcloud compute images create "${{ vars.GCP_BASE_IMAGE || 'houses-base' }}" \
             --project "$PROJECT" \
