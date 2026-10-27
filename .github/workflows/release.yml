@@ -485,9 +485,10 @@ jobs:
           # rebase had been doing).
           ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --public-url https://houses.blueumbrella.net"
-          cat /tmp/snapshot.db | ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
             -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
-            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}"
+            "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --rebase ${{ steps.snapshot.outputs.rows }}" \
+            < /tmp/snapshot.db
           # The GCS copy is now the archive; the runner's own <db>.pre-<basename>
           # backups live on the standby/owner box. Nothing further is deleted.
         # Restore + the migration pair. The node_results split migration is a
@@ -807,7 +808,7 @@ jobs:
       - name: Verify public health recovered
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             H=$(curl -s -m 10 https://houses.blueumbrella.net/health 2>/dev/null || true)
             S=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("status",""))' 2>/dev/null || true)
             LW=$(printf '%s' "$H" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("last_write",""))' 2>/dev/null || true)
@@ -936,6 +937,7 @@ jobs:
     # inside a release chain: a builder creation must not sit on the rollout's
     # critical path (2026-09-30: zone capacity blocked two rollouts).
     if: ${{ inputs.action == 'bake' }}
+    runs-on: ubuntu-latest
     concurrency:
       group: houses-terraform
       cancel-in-progress: false

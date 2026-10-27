@@ -57,8 +57,9 @@ The layout this all targets:
    ```bash
    gsutil mb -l us-west1 -b on gs://houses-tfstate
    ```
-6. **The artifact + seed buckets** (Terraform manages `houses-artifacts`; the
-   seed bucket is yours):
+6. **Two buckets** (Terraform manages `houses-artifacts`; the config bucket is
+   yours — it holds `/etc/houses.env` and the Cloudflare origin pair, nothing
+   else. There is no seed database: a box starts with no data):
    ```bash
    gsutil mb -l us-west1 -b on gs://houses-seed
    ```
@@ -97,10 +98,16 @@ The scaffold applies the whole config: the two instances boot from
 `houses-base` (default `base_image` — a missing image fails the job loudly:
 run `action=bake` first; there is no stock fallback for a box), each renders
 `tools/deploy/box-bootstrap.sh` into `startup-script` metadata and builds
-itself: packages → operator key → artifact (instance SA, sha256 verified) →
-layout/units/sudoers → deploy-key allowlist → seed restore → migrations → app
-env → Caddy → markers. The action refuses if the L4 rules already exist —
+itself: **preflight (the image must carry the OS layer — the bootstrap installs
+nothing)** → operator key → artifact (instance SA, sha256 verified) →
+layout/units/sudoers → deploy-key allowlist → app env → Caddy → markers. It
+creates **no database**: the data arrives with `action=prepare`, which restores
+the owner's live snapshot. The action refuses if the L4 rules already exist —
 from then on it is `action=release`, every time.
+
+If the preflight fails, the base image is stale or incomplete: re-bake it
+(`gh workflow run release.yml -f action=bake`). Do not install the package in the
+bootstrap — that hides the broken image and charges every rollout the apt cost.
 
 Watch a bootstrap with
 `ssh -i ~/.ssh/houses_operator ubuntu@<ephemeral-ip> "sudo tail -f /var/log/syslog"`
@@ -113,7 +120,7 @@ existing box's database is trustworthy. **Read the warning first.**
 
 > **Ordering.** The rollout's tooling ships inside the artifact, and the new
 > scripts have no per-box flip. So the adoption comes BEFORE the next `release`:
-> terraform first, then the box work, then the gated `cutover`. A box still on the
+> terraform first, then the box work, then the gated `flip`. A box still on the
 > old layout cannot be flipped by this tree at all.
 >
 > **The old box is NOT adopted in place.** Its disk keeps the old OS, its sudoers
@@ -132,35 +139,46 @@ existing box's database is trustworthy. **Read the warning first.**
    cannot own one address), so traffic keeps flowing to the old box.
 2. `gh workflow run Release -f action=release` — builds the artifact, rebuilds
    `houses-standby`, installs and smokes it.
-3. Publish the live database to the new plane — this is the step that needs the
-   old box, so run it from the LAN machine:
-   `tools/deploy/seed-box.sh <old-box-ip>` (pulls the live DB, migrates the copy
-   with the rollout's runner, uploads the seed).
-4. **`action=recover`** with that seed: `houses-standby` is restored from it,
-   migrated, started and flipped to. From here the L4 rules own the address...
-   which the old box still holds. So before the flip, detach it:
+3. Take the old box's database as a named snapshot object. There is no seed
+   tool any more: the copy is taken from the box itself, once, and named
+   explicitly. Freeze and copy from the LAN machine:
+   ```bash
+   ssh -i ~/.ssh/houses_operator ubuntu@<old-box-ip> \
+     'sudo systemctl stop houses.service && \
+      sudo sqlite3 /opt/houses/data/houses.db ".backup /tmp/adopt.db" && \
+      sudo chown ubuntu:ubuntu /tmp/adopt.db && sudo systemctl start houses.service'
+   scp -i ~/.ssh/houses_operator ubuntu@<old-box-ip>:/tmp/adopt.db ./adopt.db
+   gsutil cp ./adopt.db gs://houses-artifacts/snapshots/adopt-$(date -u +%Y%m%d).db
+   ```
+   The stop is what makes the copy exact; the old box is serving again by the
+   time you copy the file off it.
+4. **`action=recover -f snapshot=gs://houses-artifacts/snapshots/adopt-<date>.db`**
+   — `houses-standby` is restored from that object, migrated, started and
+   exposed at `houses-smoke` for review. From here the L4 rules own the
+   address... which the old box still holds. So before the flip, detach it:
    ```bash
    gcloud compute instances delete-access-config <old-box> \
      --access-config-name=external-nat --zone us-west1-a
    ```
    and run `terraform apply` once more so the rules claim `houses-static`
-   (accepted downtime: the seconds the address is unattached).
+   (accepted downtime: the seconds the address is unattached). Then `action=flip`.
 5. Verify: `https://houses.blueumbrella.net/health`, `terraform output live_target`.
 6. Retire the old box when you are satisfied: `gcloud compute instances delete <old-box>`
    — never before, because it is the copy of record until the flip is verified.
 
-**Variant B — the live database is NOT trustworthy (today's case).** Skip the
-snapshot of the old box entirely; its data is abandoned:
+**Variant B — the live database is NOT trustworthy.** Do not snapshot it at all;
+its data is abandoned:
 
 1. Run `action=scaffold`, then detach the address from the old box and re-run
    `action=scaffold`'s apply equivalent (or apply once the address is free) so
    the rules hold it — the old box may keep serving on an ephemeral address,
    or not serve at all; that is the point.
-2. `action=release` → build + rebuild the standby + install + smoke.
-3. `action=recover -f snapshot=gs://houses-seed/latest.db` → the standby is
-   restored from the human-validated seed (or from any object you name), migrated,
-   started, and flipped to. **Every write since that seed is gone** — the
-   approval gate is where you accept that.
+2. `action=release` → build + rebuild the standby + install.
+3. `action=recover -f snapshot=gs://<your-object>.db`, naming a database you DO
+   trust (there is no default: a recover always names its source). The standby is
+   restored from it, migrated, started, and reviewed — then `action=flip`.
+   **Every write since that object was taken is gone** — the approval gate is
+   where you accept that.
 4. Verify and retire the old box as above. Its data is never read, and the next
    rollout replaces it anyway.
 
@@ -242,7 +260,7 @@ for the web client in `/etc/houses.env` (same project, no new credentials):
 The box's sudoers grants ONLY `/opt/houses/install-artifact.sh`,
 `/opt/houses/switch.sh`, and read-only `journalctl` — no interactive login can
 restart app units or mutate the deployment. Production changes go only through
-the Release workflow (build → install → cutover). If that feels slow, improve
+the Release workflow (build → install → prepare → review → flip). If that feels slow, improve
 the process; never ssh in and "just fix it" directly.
 
 ## 5. GitHub secrets
@@ -280,7 +298,7 @@ is a silent no-op, so a shape that is not listed here does nothing at all.
 
 ## 5b. Human prod gate — the DOUBLE gate on every traffic move
 
-Traffic moves (`cutover`, `flip`, `recover`) are held by TWO independent locks;
+Traffic moves (`flip`, `recover`) are held by TWO independent locks;
 either one missing means the job refuses:
 
 1. **The GitHub environment gate.** Repo → Settings → Environments →
@@ -302,48 +320,59 @@ replaced from the artifact, so no box drifts, and the bootstrap path is exercise
 on every rollout — the standby is the DR drill.
 
 ```bash
-# 1. build the artifact, rebuild the STANDBY instance from it, install + smoke
+# 1. build the artifact, rebuild the STANDBY instance from it, install.
+#    The box ends with NO data: the bootstrap verifies the image and stops.
 gh workflow run Release -f action=release -f ref=main
 
 # 2. read the run log — every verdict line:
-#    the new box: seed restored → migrations applied+checked → artifact receipt
-#    the install:  sha256 verified (or "already runs this artifact"), venv receipt
-#                  ok, `migrations: N applied+checked, 0 failed`, app healthy,
-#                  smoke ok, then INSTALL READY with the app STOPPED.
+#    the new box: base image ok → artifact verified + unpacked → venv receipt ok
+#    the install:  sha256 verified, then "artifact installed: <sha> — no data yet;
+#                  prepare restores the owner's snapshot"
 
-# 3. the flip — the dispatch carries the approval input, and the job waits at
+# 3. PREPARE — freeze the owner, snapshot it live, restore that snapshot onto
+#    the standby, migrate it, start it, SMOKE IT ON THOSE ROWS, publish the
+#    review surface. It touches no traffic and is ungated: dispatching it is
+#    the decision. Production is DOWN until step 4 approves the flip.
+gh workflow run Release -f action=prepare
+#    read: snapshot: FREEZING production → rows=N → integrity ok →
+#          migrations: N applied+checked, 0 failed → data smoke ok: N properties,
+#          detail rendered, frontend served → REVIEW READY
+#    review: https://houses-smoke.blueumbrella.net  (the box that will go live)
+
+# 4. the flip — the dispatch carries the approval input, and the job waits at
 #    the `production` environment gate for your reviewer approval
-gh workflow run Release -f action=cutover -f ref=main -f approval=approved
+gh workflow run Release -f action=flip -f approval=approved
 
-# 4. something wrong? undo in one command (no DB restore: the rollout never
+# 5. something wrong? undo in one command (no DB restore: the rollout never
 #    writes the owner's database)
-gh workflow run Release -f action=rollback -f ref=main
+gh workflow run Release -f action=rollback
 
-# 5. re-install onto the existing standby (no rebuild — a retry after a failed
+# 6. re-install onto the existing standby (no rebuild — a retry after a failed
 #    install, or a probe)
 gh workflow run Release -f action=install -f artifact=gs://houses-artifacts/<sha256>.tar.gz
-
-# 6. the owner's data is not trustworthy? RECOVER-PREP onto a named object
-#    instead of carrying it forward — UNGATED (restore + review surface only):
-gh workflow run Release -f action=recover -f snapshot=gs://houses-seed/latest.db
+# 7. the owner's data is not trustworthy? RECOVER onto a named object instead
+#    of carrying it forward — UNGATED (restore + review surface only). There is
+#    no default snapshot: a recover always names its source.
+gh workflow run Release -f action=recover -f snapshot=gs://<bucket>/<object>.db
 #    then, after reviewing the served box, promote with the GATED flip (§7b):
-gh workflow run Release -f action=build -f ref=main
-gh workflow run Release -f action=flip -f approval=approved -f artifact=gs://houses-artifacts/<sha256>.tar.gz
+gh workflow run Release -f action=flip -f approval=approved
 ```
 
 What each phase owns:
 
 | Phase | Data | Proves |
 |---|---|---|
-| `provision` (bootstrap) | **seed + migrations** | the box builds from an artifact and a human-validated seed |
-| `install` (rehearsal + smoke) | the same seed-derived DB | the artifact boots, serves and migrates |
-| `cutover` → freeze + `--snapshot` | **the owner's live DB**, app stopped | the exact last state production served (no write can land after the freeze) |
-| `cutover` → `--rebase` | that snapshot, restored | integrity + row count match, migrations + checks pass |
-| `cutover` → `set-target` + settle | — | the public site on the new owner |
+| `provision` (bootstrap) | **none — the box starts empty** | the image carries the OS layer, the artifact unpacks, the box is ssh-able |
+| `install` | **none** | the artifact's venv imports the app; it stops at its receipt |
+| `prepare` → freeze + `--snapshot` | **the owner's live DB**, app stopped | the exact last state production served (no write can land after the freeze) |
+| `prepare` → `--rebase` | that snapshot, restored | integrity + row count match, migrations + checks pass, **and the data smoke on those rows** |
+| `flip` → `set-target` + settle | (unchanged box) | the public site on the new owner |
 
-**Every cutover first ARCHIVES the clean pre-migration snapshot** (`gs://houses-artifacts/snapshots/<timestamp>.db`, written by CI, pruned after 90 days) and only then lets the runner migrate the restored copy — with the runner's own pre-backup (`<db>.pre-<migration>`) kept beside the database on the box. The process never runs a migration without a clean copy that still exists afterwards; the 2026-09-24 lesson was precisely that there was none.
+**The data arrives exactly once, at `prepare`.** Nothing before it touches a
+database, so no phase can rehearse against data nobody serves — the smoke that
+gates your review runs on the snapshot that will go live.
 
-**The cutover is the only downtime, and it is the freeze window.** `--snapshot`
+**`prepare` is the only downtime, and it is the freeze window.** `--snapshot`
 stops the owner's app *before* copying, so nothing is lost between the copy and
 the flip — the price is that production is down from the freeze until the flip
 (snapshot → transfer → restore → verify → migrate → start → flip; minutes on a
@@ -351,7 +380,7 @@ the flip — the price is that production is down from the freeze until the flip
 installed and smoked before the gate is even opened. If any step after the
 freeze fails, CI restarts the owner's app (`--unfreeze`) and traffic never moved.
 
-**The "settle gate"** is the last step of the cutover: five minutes of continuous
+**The "settle gate"** is the last step of `flip`: five minutes of continuous
 public polling of `https://houses.blueumbrella.net/health` on the new owner. It
 hard-fails if the site does not answer, or if `status`/`db` are not `ok`, or if
 `last_write` is missing — i.e. if the box is not serving. It reports `last_write`
@@ -359,38 +388,42 @@ staleness but does not gate on it: `last_write` is `MAX(created_at)` in
 `node_results`, so a converged DAG that has nothing to recompute legitimately
 writes nothing for minutes at a time.
 
-The seed is *not* the correct database and is not meant to be: it only gives a
-fresh box something to boot and smoke with. The correct database can only land at
-the flip, because the owner keeps writing up to it — see §7.
+**The data arrives once, at `prepare`.** There is no seed, no pre-baked database
+and no second copy: the only database a box ever holds is the one `prepare`
+restores from the owner, and that is the one the smoke and the review see.
 
-## 7. The seed, and when the box gets the real data
+## 7. Where the box gets its data (and why nothing earlier has any)
 
-**What a seed is.** `gs://houses-seed/latest.db` — one full copy of the production
-SQLite database (the DAG's computed state, ~2.3 GB), produced by a human running
-`tools/deploy/seed-box.sh`: it pulls the owner's DB, applies the migrations to the
-copy, verifies, and uploads. `box-bootstrap.sh` restores it to
-`/opt/houses/data/houses.db` on a fresh box and writes `/opt/houses/SEED`
-(object, etag, when, row count) so the box's origin is a file, not a memory.
+**A box starts with no database.** `box-bootstrap.sh` asserts that — if a
+database is present at first boot, it fails, because a fresh box has none and the
+only legitimate way data lands is `prepare`.
 
-**Why it is not "the correct database".** The live database is being written
-continuously, so any copy is stale the moment it is taken. Baking a copy in at box
-build time would mean serving data that is 10–15 minutes old at the flip and
-silently dropping every write in between. That is why the plan puts the data step
-immediately before the traffic step: the cutover takes a **fresh snapshot of the
-owner**, streams it to CI, restores it onto the standby with the app stopped,
-verifies it (`integrity_check` + row count against the snapshot's own count),
-runs the migrations + checks on that quiescent copy, and only then starts the app
-and moves the rule. The seed's data is superseded before a single request reaches
-the box.
+`prepare` is the only step that moves data, and it is the *rollout's* own copy:
 
-**Refresh the seed deliberately**, when you judge the settled state trustworthy —
-it is never auto-refreshed (the old `--publish` step that did that made the newest
-live output the next restore source automatically, which is how a stale capture
-became production's data on 2026-09-24):
+1. **freeze** the owner (`switch.sh --snapshot` stops the app, so nothing is lost
+   between the copy and the flip),
+2. stream that snapshot to CI (it is archived as
+   `gs://houses-artifacts/snapshots/<timestamp>.db`, pruned after 90 days, before
+   any migration runs),
+3. restore it onto the standby (`switch.sh --rebase`), verify `integrity_check`
+   and the row count against the snapshot's own count,
+4. run the migrations + checks on that quiescent copy, start the app,
+5. **smoke those exact rows** — properties served, a detail rendered, the frontend
+   serving — and publish the review surface.
 
-```bash
-tools/deploy/seed-box.sh <owner-ip>       # copy → migrate the copy → verify → upload
-```
+So the data your review reads is the data `flip` will serve. Nothing in the chain
+rehearses against a copy nobody is going to run.
+
+**Why not bake a copy in earlier?** Any copy is stale the moment it is taken, and
+a copy taken at build time would be 10–15 minutes old at the flip while silently
+dropping every write in between. The 2026-09-24 incident was exactly that: a
+stale capture became production's data. There used to be a seed
+(`gs://houses-seed/latest.db`, refreshed by hand with `tools/deploy/seed-box.sh`)
+that existed only to give a fresh box something to boot against; it cost ~15
+minutes of every provision on an e2-micro and `prepare` overwrote it immediately,
+so its smoke proved nothing about the data that shipped. **It is deleted. Do not
+reintroduce it** — if a box needs data before `prepare`, the answer is that the
+box does not need to serve before `prepare`.
 
 ## 7b. Recovery: when the owner's data must NOT be carried forward
 
@@ -460,22 +493,25 @@ the settle window.
 
 | What | Where | When it exists |
 |---|---|---|
-| the **seed** (the recovery artifact) | `gs://houses-seed/latest.db` (+ `.meta`); the bucket is VERSIONED, so publishing a new seed never destroys the previous generation (last 10 kept) | made by `seed-box.sh`, replaced deliberately |
+| **no seed exists** | — (deleted 2026-10-27: it was a stale second copy that `prepare` overwrote, and its smoke proved nothing) | — |
 | a box's **live database** | that box's `/opt/houses/data/houses.db`, with each migration's clean pre-backup kept beside it as `<db>.pre-<migration>` | while the box exists (see `/opt/houses/RESTORED` for what it was last restored from) |
 | the LAN dev copy | `data/houses.db` on this machine | the development data — never a recovery source |
-| **the cutover's clean snapshots** | `gs://houses-artifacts/snapshots/<timestamp>.db` — every cutover's PRE-MIGRATION live DB, archived before the runner migrates the restored copy | one per cutover, pruned after 90 days |
-| a deliberately chosen recovery source | `gs://houses-seed/recovery-<timestamp>.db` — copies the operator has verified and NAMED for a specific recovery | made by hand, like this session's |
+| **the rollout's clean snapshots** | `gs://houses-artifacts/snapshots/<timestamp>.db` — every `prepare`'s PRE-MIGRATION live DB, archived before the runner migrates the restored copy | one per rollout, pruned after 90 days |
+| a deliberately chosen recovery source | any object the operator names and has verified — `recover` has no default | made by hand, for a specific recovery |
 
-Versioning and pruning are CONFIGURED on the buckets (GCS lifecycle), not a script: the normal process therefore always keeps the clean copy it took, and the archive cannot grow without bound.
+Versioning and pruning are CONFIGURED on the buckets (GCS lifecycle), not a
+script: the normal process therefore always keeps the clean copy it took, and the
+archive cannot grow without bound.
 
-There is deliberately no pile of floating copies beyond those intentional archives: the plan's rule is that a fresh
-box's data is **seed + migrations**, and that the seed is the human-validated
-artifact. Nothing else is kept, so "which backup?" has exactly one normal answer.
+There is deliberately no pile of floating copies beyond those intentional
+archives: a box's data comes from exactly one place — `prepare`'s live snapshot
+of the owner — so "which backup?" has exactly one normal answer, and the copy a
+review is based on is the copy that ships.
 
 **How to know a backup is good — without trusting anyone's memory:**
 
 ```bash
-tools/deploy/verify-backup.sh gs://houses-seed/latest.db
+tools/deploy/verify-backup.sh gs://houses-artifacts/snapshots/<timestamp>.db
 ```
 
 It copies the object, then applies the SAME gates the rollout insists on:
@@ -485,19 +521,17 @@ runner's verdict `migrations: <N> applied+checked, 0 failed`.
 **`MIGRATION-COMPATIBLE` is the only claim the script ever makes: the tooling
 can carry this object forward.** It is NOT a statement that the data is what you
 want — the migration machinery repairing a copy proves nothing about the copy's
-source (see 2026-09-24). **Trust is a human judgement**, made from the meta's
-`captured_from`/`captured_at`/`made_by` plus your knowledge of that moment, and
-it is taken at the `recover` approval gate — never stamped by a script.
+source (see 2026-09-24). **Trust is a human judgement**, made from that object's
+`.meta` (`captured_from`/`captured_at`/`made_by`) plus your knowledge of that
+moment, and it is taken at the `recover` approval gate — never stamped by a
+script.
 
-`latest.db.meta` (next to the seed) records the inputs to that human judgement
-without needing the 621 MB copy: `object`, `captured_from` (which box),
-`captured_at`, `rows`, `manifest_sha256`, `migrations_applied`,
-`gates=passed-on-copy`, `made_by`, and `trust=unset` until a human takes the
-decision. It is written by `seed-box.sh` at upload time.
+`prepare`'s snapshots carry a `.meta` beside them recording the box it came from,
+when, the row count and the manifest hash, so "where did this come from" is a file
+and not a memory.
 
 On a box, `/opt/houses/RESTORED` answers "this box's data came from X at time T
-with N rows" and `/opt/houses/SEED` answers what the box bootstrapped from.
-`action=diagnose` prints both.
+with N rows". `action=diagnose` prints it.
 
 ## Gotchas (learned the hard way)
 

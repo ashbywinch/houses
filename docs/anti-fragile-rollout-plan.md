@@ -92,8 +92,16 @@ The runner prints exactly one `migration …` line per manifest entry and one su
 - **The artifact is a content-addressed object in GCS** — `gs://houses-artifacts/<sha256>.tar.gz` — built by a `build-artifact` CI job: `uv sync --no-editable` into a `uv venv --relocatable`, plus frontend `npm ci && npm run build`, into one tarball (code, `frontend/dist`, `.venv`, units, tools, `migrations.list`, checks); the sha256 is the object key. This matters: a venv is not portable by default — this repo's own `.venv/bin/uvicorn` shebang and its `__editable__` `.pth` embed absolute build paths, so an editable venv built in CI cannot import `houses`/`dag` after unpacking elsewhere. The install receipt verifies `<venv>/bin/python -c "import houses, dag"` before the smoke, so a broken venv fails the install, not the flip; and the box's prod boot path runs **no** `uv sync` — the artifact's venv is the source of truth, `uv` stays build-time only. GCS over the GitHub artifact store is a consequence of who consumes it: the **box**, at first boot and install, by its instance SA via the metadata server — no token, no secret, no size-capped ssh re-pipe.
 - **Install:** one new sanctioned shape, `sudo /opt/houses/install-artifact.sh <object>` (charset-validated). It fetches with the instance SA, verifies the sha256 equals the key, unpacks over the standby's checkout, runs the runner (rehearsal) and the smoke locally (127.0.0.1), stops the standby app, and streams verdicts. The stdin-dist pipe and per-side git checkouts disappear; tooling ships inside the artifact.
 - **Fresh box:** `PROVISION_ARTIFACT` in metadata (public) names the object; bootstrap step 2 fetches and unpacks it with the instance SA. The artifact hash answers "what is this box": `/opt/houses/ARTIFACT` records `<sha256>` + `<git ref>`; `--diagnose` prints both.
-- **Seed provenance:** the bootstrap writes `/opt/houses/SEED` — `object=<seed object> etag=<etag> restored_at=<iso> rows=<n>` (values it already has during restore) — so "what did this box start from" is a file, printed by `--diagnose`.
-- **The seed is deliberately not auto-refreshed.** It is a human-validated artifact written only by `seed-box.sh`, and migrations carry it forward deterministically — a seed older than the last rollout is *by design*, and a fresh box's data = seed + migrations. `--publish` is removed because it made the newest live output the next restore source automatically, which is the mechanism behind the 2026-09-24 untrusted/stale-seed incident. `seed-box.sh` is the deliberate refresh: a human judges the settled state trustworthy, takes backups, and updates the object.
+- **SUPERSEDED 2026-10-27 — there is no seed.** The two bullets this replaces
+  (seed provenance in `/opt/houses/SEED`; a human-refreshed `seed-box.sh`) are
+  history. The seed was a second copy of production that went stale between
+  refreshes, cost ~15 minutes of every provision restoring 1.4 GB onto an
+  e2-micro, and whose smoke proved nothing about the data that shipped —
+  `prepare` overwrote it minutes later. It is **deleted**; a box starts with no
+  database and the only data it ever holds is `prepare`'s live snapshot of the
+  owner. Do not reintroduce it: if a box seems to need data earlier, the answer
+  is that the box does not need to serve earlier. See
+  [provision.md](../tools/deploy/provision.md) §7.
 
 ## Cutover and rollback
 
