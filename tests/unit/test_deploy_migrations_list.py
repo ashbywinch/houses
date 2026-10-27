@@ -34,7 +34,11 @@ REPO = Path(__file__).resolve().parents[2]
 DEPLOY = REPO / "tools" / "deploy"
 WORKFLOW = REPO / ".github" / "workflows" / "release.yml"
 MANIFEST = DEPLOY / "migrations.list"
-RUNNER_CALLERS = ("install-artifact.sh", "switch.sh")
+# The migration runner's callers: the review box restores the owner's live
+# snapshot and migrates it (switch.sh), and the seed script migrates its copy
+# before uploading. install-artifact.sh no longer calls it — the box it leaves
+# behind has no database.
+RUNNER_CALLERS = ("switch.sh", "seed-box.sh")
 # The retired INVOCATION shapes (not bare words): the box scripts explain in
 # prose which mechanisms are gone and why, and that explanation is worth keeping.
 RETIRED_INVOCATIONS = (

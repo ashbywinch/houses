@@ -196,6 +196,37 @@ if [ "$ACTION" = "--unfreeze" ]; then
   exit 0
 fi
 
+
+_smoke_data() {
+  # Runs against the app this restore just started. The cookie is minted with
+  # this box's own secret and never echoed; the curls use it in a header only.
+  local secret cookie all rids rid http index
+  secret=$(grep '^HOUSES_SESSION_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)
+  [ -n "$secret" ] || { mark "FAILED: HOUSES_SESSION_SECRET missing from $ENV_FILE"; exit 1; }
+  cookie=$(HOUSES_SESSION_SECRET="$secret" "$VENV_PY" -c '
+from houses.web.auth import _make_session_cookie
+print(_make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True))
+' 2>/dev/null </dev/null) || { mark "FAILED: the smoke cookie could not be minted"; exit 1; }
+
+ curl -fsS --max-time 180 -H "Cookie: session=$cookie" "localhost:8765/api/properties/all" >/dev/null \
+   || { mark "FAILED: smoke /api/properties/all did not answer"; exit 1; }
+  all=$(curl -fsS --max-time 1800 -H "Cookie: session=$cookie" "localhost:8765/api/properties/all")
+  rids=$(printf '%s' "$all" | "$VENV_PY" -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("properties", d)))' 2>/dev/null || echo 0)
+  echo "   house records served: $rids"
+  [ "$rids" -gt 0 ] || { mark "FAILED: smoke /api/properties/all returned no house records"; exit 1; }
+
+  rid=$(printf '%s' "$all" | "$VENV_PY" -c 'import json,sys; d=json.load(sys.stdin); ps=d.get("properties", d); print(sorted(ps)[-1] if isinstance(ps, dict) else ps[0]["rid"])' 2>/dev/null || echo "")
+  [ -z "$rid" ] || curl -fsS --max-time 900 -H "Cookie: session=$cookie" "localhost:8765/api/properties/$rid/detail" >/dev/null \
+    || { mark "FAILED: smoke property detail (rid $rid) did not render"; exit 1; }
+
+  index=$(mktemp /tmp/houses-smoke-index-XXXXXX.html)
+  http=$(curl -sS --max-time 10 -o "$index" -w "%{http_code}" "localhost:8765/")
+  if [ "$http" != "200" ] || ! grep -qi "<!doctype html\|<html" "$index"; then
+    mark "FAILED: the shipped frontend did not serve (HTTP $http)"; rm -f "$index"; exit 1
+  fi
+  rm -f "$index"
+  mark "data smoke ok: $rids properties, detail rendered, frontend served"
+}
 # ── the restore body, shared by --rebase (stdin) and --restore (object) ─
 # $1 = the staged database, $2 = the expected row count ("" for an object restore,
 # where nobody recorded one), $3 = what to record in RESTORED.
@@ -262,7 +293,13 @@ _finish_restore() {
     systemctl stop houses.service || true
     exit 1
   }
+  # THE DATA SMOKE, on the database this box will actually serve. The review
+  # box holds the owner's snapshot (rebase) or a named object (restore) —
+  # migrated, not a seed — so these are the numbers the human is about to
+  # approve, and a broken migration fails HERE, before any approval.
+  _smoke_data
   mark "RESTORE READY: rows=$ROWS integrity=$INTEGRITY migrations applied+checked; app healthy on 127.0.0.1:8765"
+
   exit 0
 }
 
