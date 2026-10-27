@@ -437,21 +437,27 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 
     Verifies state, exchanges code for token, verifies id_token, and
     creates a signed session cookie.  Redirects to frontend root on success.
+
+    Every redirect here is RELATIVE on purpose. The callback runs on the origin
+    the user is browsing — production serves the SPA itself, dev serves it
+    through Vite's proxy — so "/" lands on the right app in both. Building them
+    from ``settings.frontend_url`` sent production to http://localhost:5173
+    whenever HOUSES_FRONTEND_URL was unset (its default), i.e. right after login.
     """
     if error:
-        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(error))
+        return RedirectResponse(url="/?auth_error=" + quote(error))
 
     if not code or not state:
-        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=missing_params")
+        return RedirectResponse(url="/?auth_error=missing_params")
 
     # Verify and consume state token (prevents CSRF + replay)
     state_data = _OAuthStateStore.states.pop(state, None)
     if state_data is None:
-        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=invalid_state")
+        return RedirectResponse(url="/?auth_error=invalid_state")
 
     code_verifier = state_data.code_verifier
     if not code_verifier:
-        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=missing_code_verifier")
+        return RedirectResponse(url="/?auth_error=missing_code_verifier")
 
     svc = get_services()
     user, failure = capture(
@@ -459,13 +465,13 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
     )
     if user is None:
         logger.error("OAuth callback failed", exc_info=failure)
-        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(str(failure)))
+        return RedirectResponse(url="/?auth_error=" + quote(str(failure)))
     if not user.email_verified:
-        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
+        return RedirectResponse(url="/?auth_error=email_not_verified")
 
     cookie_value = _build_session(user).cookie_value
 
-    response = RedirectResponse(url=f"{settings.frontend_url}/")
+    response = RedirectResponse(url="/")
     _set_session_cookie(response, cookie_value, _is_secure(request))
     return response
 

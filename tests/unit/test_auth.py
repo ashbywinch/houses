@@ -773,3 +773,27 @@ class TestSessionIsolation:
         assert resp_a.json()["is_superuser"] is False
         assert resp_b.json()["email"] == "lorena@example.com"
         assert resp_b.json()["is_superuser"] is True
+
+
+class TestCallbackRedirects:
+    """Where the browser lands after an auth attempt.
+
+    2026-10-27: production's login landed on http://localhost:5173. The callback
+    built every redirect from settings.frontend_url, whose default is localhost
+    and which production never set. The callback runs on whatever origin the
+    user is browsing — production serves the SPA itself, dev serves it through
+    Vite's proxy — so the redirect must be relative."""
+
+    def test_callback_redirect_is_relative(self, monkeypatch):
+        monkeypatch.setattr(settings, "frontend_url", "http://localhost:5173")
+        resp = client.get(
+            "/api/auth/callback", params={"code": "x", "state": "nope"}, follow_redirects=False
+        )
+        assert resp.status_code in (302, 307)
+        assert resp.headers["location"] == "/?auth_error=invalid_state"
+
+    def test_callback_error_redirect_is_relative(self, monkeypatch):
+        monkeypatch.setattr(settings, "frontend_url", "http://localhost:5173")
+        resp = client.get("/api/auth/callback", params={"error": "access_denied"}, follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert resp.headers["location"] == "/?auth_error=access_denied"
