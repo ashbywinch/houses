@@ -54,6 +54,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -399,7 +400,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def _open_report() -> Report:
     log_dir = _log_dir()
-    log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        # The box owns /opt/houses; a LAN machine running this same runner
+        # (tools/deploy/seed-box.sh) does not, and the default log dir is
+        # unreachable there. The transcript still has to exist.
+        log_dir = Path(tempfile.gettempdir()) / "houses-migrations"
+        log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
     report = Report(log_dir / f"{RunnerConfig.LOG_PREFIX}{stamp}.log")
     _prune_logs(log_dir)
