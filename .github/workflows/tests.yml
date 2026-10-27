@@ -28,6 +28,17 @@ jobs:
       - name: Lint
         run: make lint-github   # ruff --output-format=github: findings as PR annotations
 
+      - name: Workflow syntax (actionlint)
+        # An invalid workflow fails EVERY push with no jobs and only a banner
+        # ("This run likely failed because of a workflow file issue") — nothing
+        # points at the line. On 2026-10-27 a missing `runs-on:` broke
+        # release.yml for four runs while the release chain silently stopped
+        # running. This turns that into a normal red PR check.
+        run: |
+          curl -sSfL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o /tmp/actionlint.tgz
+          tar -xzf /tmp/actionlint.tgz -C /tmp actionlint
+          /tmp/actionlint -color .github/workflows/*.yml
+
       - name: Unit tests
         run: make test
 

@@ -936,6 +936,7 @@ jobs:
     # inside a release chain: a builder creation must not sit on the rollout's
     # critical path (2026-09-30: zone capacity blocked two rollouts).
     if: ${{ inputs.action == 'bake' }}
+    runs-on: ubuntu-latest
     concurrency:
       group: houses-terraform
       cancel-in-progress: false
