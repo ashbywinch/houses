@@ -4,8 +4,8 @@
 # first boot of a fresh instance. The WHOLE box build:
 #
 #   packages → operator SSH key → artifact (code + venv + frontend + tooling)
-#   → box layout/units/sudoers → deploy-key allowlist → data seed (instance SA)
-#   → migrations on the seed → app env → Caddy HTTPS → markers.
+#   → box layout/units/sudoers → deploy-key allowlist → app env → Caddy HTTPS
+#   → markers. NO DATA: prepare restores the owner's live snapshot.
 #
 # Inputs arrive as PUBLIC environment variables (a git ref, an artifact object,
 # two SSH public keys, bucket names) — no secret, no key file: every gsutil call
@@ -16,7 +16,7 @@
 # BEFORE anything heavy, so even a half-provisioned box is reachable and
 # troubleshootable; the deploy key's allowlist needs the artifact's own copy of
 # install-deploy-allowlist.sh, so it lands immediately after the unpack — still
-# before the seed, the migrations and Caddy (the steps that can fail).
+# before the app env and Caddy (the steps that can fail).
 #
 # Idempotent-safe: re-running it re-fetches the artifact and re-runs the
 # migrations (which are idempotent). Replace-not-repair: never hand-fix a box.
@@ -43,7 +43,6 @@ fetch_object() {
 log "0. inputs"
 : "${PROVISION_REF:?} ${PROVISION_ARTIFACT:?} ${OPERATOR_PUBKEY:?}"
 DEPLOY_PUBKEY="${DEPLOY_PUBKEY:-}"
-GCS_SEED="${GCS_SEED:-gs://houses-seed/latest.db}"
 GCS_ENV="${GCS_ENV:-gs://houses-seed/houses.env}"
 HOUSES_MAIN_HOST="${HOUSES_MAIN_HOST:-houses.blueumbrella.net}"
 export HOUSES_ROOT=/opt/houses
@@ -55,12 +54,12 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq sqlite3 curl ca-certificates gnupg debian-archive-keyring openssh-client >/dev/null
 
-# gsutil is the box's ONLY route to the bucket (artifact, seed, env, cert cache)
+# gsutil is the box's ONLY route to the bucket (artifact, env, cert cache)
 # and the GCP Ubuntu image is expected to carry the CLI — the previous bootstrap
 # authenticated a service-account key with it. Install it if an image ever ships
 # without one, and fail loudly rather than half-building a box.
 command -v gsutil >/dev/null 2>&1 || apt-get install -y -qq google-cloud-cli >/dev/null
-command -v gsutil >/dev/null 2>&1 || { log "FAILED: no gsutil — cannot fetch the artifact/seed"; exit 1; }
+command -v gsutil >/dev/null 2>&1 || { log "FAILED: no gsutil — cannot fetch the artifact/env"; exit 1; }
 
 log "2. operator admin key FIRST — the box is ssh-able even if the rest fails"
 OPERATOR_HOME=$(getent passwd ubuntu | cut -d: -f6)
@@ -113,45 +112,18 @@ if [ -n "$DEPLOY_PUBKEY" ]; then
   "$ROOT/install-deploy-allowlist.sh" "$DEPLOY_PUBKEY"
 fi
 
-log "6. data seed from GCS (the human-validated seed; instance identity)"
-if [ ! -s "$ROOT/data/houses.db" ]; then
-  # FATAL, not a warning: a box with no data cannot serve, and the PROVISIONED
-  # marker below is what the provision job waits for — declaring an empty box
-  # provisioned is how a silent failure becomes a rollout.
-  fetch_object "$GCS_SEED" "$ROOT/data/houses.db" \
-    || { log "FAILED: no seed at $GCS_SEED — refusing to declare this box provisioned"; exit 1; }
-fi
+# ── 6. NO DATA ─────────────────────────────────────────────────────────
+# This box starts with no database, deliberately. The data it will serve is
+# the OWNER's, snapshotted live by `prepare` and restored onto this box after
+# the human has provisioned it. A seed restore here was a second, stale copy:
+# it cost ~15 minutes on an e2-micro (1.4 GB write) and then `prepare`
+# overwrote it — so the smoke it fed proved nothing about the data that ships.
+#
+# A box with no data cannot start the app, and it must not: `prepare` restores
+# the snapshot, migrates it, starts the app, and smokes it.
 if [ -s "$ROOT/data/houses.db" ]; then
-  chown ubuntu:ubuntu "$ROOT/data/houses.db" && chmod 600 "$ROOT/data/houses.db"
-  sqlite3 "$ROOT/data/houses.db" "PRAGMA integrity_check;" | grep -q '^ok$' || { log "FAILED: seed integrity check"; exit 1; }
-  # Provenance: "what did this box start from" must be a file, not a memory.
-  # rows = the seed's row count at restore; etag = the object's identity in the
-  # bucket at that moment. Printed by switch.sh --diagnose. The seed is NEVER
-  # auto-refreshed (that mechanism — --publish — is deleted): a fresh box's data
-  # is seed + migrations, by design, and seed-box.sh is the deliberate,
-  # human-validated refresh.
-  SEED_ETAG=$(gsutil ls -L "$GCS_SEED" 2>/dev/null | awk -F': +' '/^[[:space:]]*ETag:/ {print $2; exit}' || true)
-  SEED_ROWS=$(sqlite3 "$ROOT/data/houses.db" "SELECT count(*) FROM node_results;" 2>/dev/null || echo unknown)
-  printf 'object=%s etag=%s restored_at=%s rows=%s\n' \
-    "$GCS_SEED" "${SEED_ETAG:-unknown}" "$(date -u +%FT%TZ)" "$SEED_ROWS" > "$ROOT/SEED"
-  chmod 644 "$ROOT/SEED"
-  log "seeded from $GCS_SEED ($(cat "$ROOT/SEED"))"
-
-  log "6b. migrations on the restored seed (seed + migrations = this box's data)"
-  MIG_RC=0
-  MIG_OUT=$("$VENV_PY" "$APP/tools/deploy/run_migrations.py" \
-    --manifest "$APP/tools/deploy/migrations.list" \
-    --db "$ROOT/data/houses.db" \
-    --scripts-dir "$APP" \
-    --python "$VENV_PY" \
-    --apply 2>&1) || MIG_RC=$?
-  printf '%s\n' "$MIG_OUT"
-  if [ "$MIG_RC" != 0 ] || ! printf '%s\n' "$MIG_OUT" | grep -Eq '^migrations: [0-9]+ applied\+checked, 0 failed$'; then
-    log "FAILED: the seed could not be carried forward by the migrations"
-    exit 1
-  fi
-else
-  log "no seed at $GCS_SEED — box starts empty (the rollout's install still verifies the artifact)"
+  log "FAILED: a database is already present at $ROOT/data/houses.db — a fresh box has none, and the owner's snapshot is restored by prepare"
+  exit 1
 fi
 
 log "7. app env restore (private GCS object — instance identity)"
@@ -162,8 +134,8 @@ if [ ! -f /etc/houses.env ]; then
     rm -f /tmp/houses.env
     log "env restored to /etc/houses.env"
   else
-    # Same reasoning as the seed: without it the app cannot start, so the box is
-    # not provisioned and must not say it is.
+    # Without it the app cannot start, so the box is not provisioned and must
+    # not say it is.
     log "FAILED: no env object at $GCS_ENV — refusing to declare this box provisioned"
     exit 1
   fi
@@ -185,4 +157,4 @@ log "9. provision marker"
 echo "provisioned $(date -u +%FT%TZ) ref=$PROVISION_REF artifact=$ACTUAL_SHA" > "$ROOT/PROVISIONED"
 chmod 644 "$ROOT/PROVISIONED"
 
-log "PROVISION COMPLETE — ssh paths live, artifact installed, seed+migrations applied, box ready for the rollout"
+log "PROVISION COMPLETE — ssh paths live, artifact installed, NO data (prepare restores the owner's snapshot), box ready"
