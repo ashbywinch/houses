@@ -180,7 +180,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref || 'main' }}
+          # MAIN, never the released ref. There is exactly ONE base image and it
+          # serves every box, so the invariant is "image == main's bake source".
+          # Checking out the released ref compared the image against that tag's
+          # older bake sources and reported them as "main" (2026-10-27: releasing
+          # v1.5.7 failed after an image fix landed in main, claiming drift that
+          # did not exist — the image matched main exactly).
+          ref: main
       - name: Compare the image's bake_ref to main's bake source
         id: check
         run: |
@@ -198,7 +204,7 @@ jobs:
             exit 1
           fi
           if [ "$BAKED" != "$WANTED" ]; then
-            echo "::error::image source drifted (image=$BAKED main=$WANTED) — the bake pipeline must re-bake before this release; re-run after it lands"
+            echo "::error::image source drifted (image=$BAKED main=$WANTED) — main's bake source changed; run action=bake and re-run this release once the image is rebuilt"
             exit 1
           fi
           echo "image source matches main ($BAKED)"
@@ -822,6 +828,14 @@ jobs:
   # ── rebuild a box from the artifact (replace-not-repair) ──────────────
   provision:
     needs: [resolve, build, image-stale]
+    # ONE terraform state, ONE apply at a time. A merge-triggered bake and a
+    # manual action=bake both apply to houses-tfstate; overlapping them races on
+    # the state lock ("Error acquiring the state lock ... 412", 2026-10-27) and
+    # fails a run that had nothing wrong with it. Queued, never cancelled: an
+    # interrupted apply is worse than a late one.
+    concurrency:
+      group: houses-terraform
+      cancel-in-progress: false
     # the chain re-bakes on drift: a bake that ran must have succeeded
     # Part of every rollout (a fresh box per rollout — replace-not-repair), and
     # standalone for a box that needs rebuilding between rollouts.
@@ -922,7 +936,9 @@ jobs:
     # inside a release chain: a builder creation must not sit on the rollout's
     # critical path (2026-09-30: zone capacity blocked two rollouts).
     if: ${{ inputs.action == 'bake' }}
-    runs-on: ubuntu-latest
+    concurrency:
+      group: houses-terraform
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
