@@ -49,17 +49,34 @@ export HOUSES_ROOT=/opt/houses
 ROOT=/opt/houses
 APP="$ROOT/app"
 
-log "1. packages"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq sqlite3 curl ca-certificates gnupg debian-archive-keyring openssh-client >/dev/null
-
-# gsutil is the box's ONLY route to the bucket (artifact, env, cert cache)
-# and the GCP Ubuntu image is expected to carry the CLI — the previous bootstrap
-# authenticated a service-account key with it. Install it if an image ever ships
-# without one, and fail loudly rather than half-building a box.
-command -v gsutil >/dev/null 2>&1 || apt-get install -y -qq google-cloud-cli >/dev/null
-command -v gsutil >/dev/null 2>&1 || { log "FAILED: no gsutil — cannot fetch the artifact/env"; exit 1; }
+log "1. preflight — the base image must carry the OS layer"
+# This box runs from `houses-base`, baked by tools/deploy/base-image.sh. The
+# bake installs MUST be verified here, NOT repeated: a bootstrap that apts is a
+# bootstrap that hides a stale image, and every rollout then pays ~2 minutes of
+# apt for a layer the image was built to provide (measured 2026-10-27: 120.7s
+# of a 376.9s bootstrap).
+#
+# If this fails, the fix is to RE-BAKE THE IMAGE — never to install the package
+# here. Patching the bootstrap turns one broken image into a permanent rollout
+# cost and removes the signal that the image went stale.
+missing=""
+for tool in sqlite3 curl gpg gsutil caddy; do
+  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+for dir in /opt/houses/data /etc/caddy/certs; do
+  [ -d "$dir" ] || missing="$missing $dir"
+done
+if [ -n "$missing" ]; then
+  log "FAILED: the base image is missing:$missing"
+  log "   The image is built by tools/deploy/base-image.sh (workflow action=bake),"
+  log "   and this box came from a stale or partial one. Re-bake it:"
+  log "     gh workflow run release.yml -f action=bake"
+  log "   Do NOT install the package here. A bootstrap that apts hides a broken"
+  log "   image and makes every rollout pay for it — that is the defect this"
+  log "   check exists to surface."
+  exit 1
+fi
+log "base image ok (sqlite3 curl gpg gsutil caddy; /opt/houses/data /etc/caddy/certs)"
 
 log "2. operator admin key FIRST — the box is ssh-able even if the rest fails"
 OPERATOR_HOME=$(getent passwd ubuntu | cut -d: -f6)

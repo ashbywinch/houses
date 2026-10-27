@@ -7,15 +7,15 @@
 # (or on the Caddy apt repo) at rollout time — those are the slowest and least
 # reliable minutes of a bootstrap, and they change under us daily.
 #
-# WHAT BELONGS HERE: the OS layer only — packages, the Caddy package, directory
-# ownership. NO app, NO code, NO secret, NO database: the artifact supplies the
-# app and its venv, and the seed/env objects supply data and configuration.
+# WHAT BELONGS HERE: the whole OS layer — every package the box needs, the Caddy
+# binary, the directory layout, and nothing belonging to the app. NO app, NO
+# code, NO secret, NO database: the artifact supplies the app and its venv.
 #
-# The bake is an OPTIMISATION, never a requirement: box-bootstrap.sh installs the
-# same packages itself, so a box built from the stock Ubuntu image still works —
-# it is just slower. Keep this list in step with box-bootstrap.sh step 1 and
-# install-caddy.sh; a package that is only here gets installed at rollouts
-# anyway, and one that is only there gets installed once per box.
+# The bootstrap VERIFIES this layer and refuses to run without it; it never
+# installs. If a package is needed on the box, add it HERE and re-bake —
+# installing it in box-bootstrap.sh would make the image non-load-bearing and
+# charge every rollout the apt cost (2026-10-27: a bake that skipped
+# verification cost 120.7s per provision while looking like it worked).
 set -euo pipefail
 
 echo "== base image bake: $(date -u +%FT%TZ)"
@@ -45,6 +45,26 @@ fi
 install -d -o ubuntu -g ubuntu /opt/houses /opt/houses/data /opt/houses/logs/releases
 install -d -m 0755 /etc/caddy/certs
 chown -R caddy:caddy /var/lib/caddy 2>/dev/null || true
+
+# VERIFY before powering off. The bootstrap refuses to run on an image missing
+# any of this, so a bake that silently skipped an install would produce an image
+# that fails every rollout — and the failure would look like a bootstrap bug.
+# A bake must fail HERE instead, while its own log is the thing being read.
+missing=""
+for tool in sqlite3 curl gpg gsutil caddy; do
+  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+for dir in /opt/houses/data /etc/caddy/certs; do
+  [ -d "$dir" ] || missing="$missing $dir"
+done
+if [ -n "$missing" ]; then
+  echo "== BAKE FAILED: the OS layer is incomplete:$missing" >&2
+  echo "== fix tools/deploy/base-image.sh and re-bake; do NOT leave this image" >&2
+  # Leave the instance RUNNING so its log is readable — the bake workflow
+  # treats a non-TERMINATED builder as a failed bake and refuses to image it.
+  exit 1
+fi
+echo "== OS layer verified: sqlite3 curl gpg gsutil caddy; /opt/houses/data /etc/caddy/certs"
 
 # Clean up after ourselves: the image must not carry apt's transient state.
 apt-get clean
