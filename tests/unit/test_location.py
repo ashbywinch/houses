@@ -23,8 +23,8 @@ class TestUpgradeAddress:
 
     def test_no_trailing_postcode(self):
         """Address has no trailing postcode pattern — unchanged."""
-        result = self.upgrade("31 Isambard Road, Southall", "UB2 4GN")
-        assert result == "31 Isambard Road, Southall"
+        result = self.upgrade("31 Example Road, Anytown", "AB1 2CD")
+        assert result == "31 Example Road, Anytown"
 
     def test_postcode_is_itself_an_outcode(self):
         """Postcode param is an outcode (not full) — no upgrade possible."""

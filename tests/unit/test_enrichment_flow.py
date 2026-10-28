@@ -279,14 +279,14 @@ class TestEnrichmentApi:
         prop = PropertyNodes(RID)
         register_property(RID, prop)
 
-        prop.rightmove_address.push("10 High St, Southall, UB2 5AD", "Rightmove")
+        prop.rightmove_address.push("10 High St, Anytown, CD4 5EF", "Rightmove")
         prop.rightmove_bedrooms.push("3", "Rightmove")
         prop.rightmove_price.push(Money("250000", "GBP"), "Rightmove")
         await flush_processor()
 
         detail = await get_property_detail(RID)
         assert detail["best_address"]["status"] == "succeeded"
-        assert detail["best_address"]["value"] == "10 High St, Southall, UB2 5AD"
+        assert detail["best_address"]["value"] == "10 High St, Anytown, CD4 5EF"
         assert detail["location"]["best_location"]["status"] == "succeeded"
         assert detail["location"]["best_location"]["value"] == {"lat": 51.5, "lon": -0.1}
 

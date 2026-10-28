@@ -81,12 +81,12 @@ def prop():
 
     p = PropertyNodes("test_shape")
     p.rightmove_price.push(Money("550000", "GBP"), "test")
-    p.rightmove_address.push("31 Isambard Rd", "test")
+    p.rightmove_address.push("31 Example Rd", "test")
     p.rightmove_bedrooms.push("3", "test")
     p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
-    p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
+    p.corrected_address.push("31 Example Rd, SW1P 1AA", "test")
     p.precise_location.push(GeoPoint(51.5, -0.37), "test")
-    p.user_entered_address.push("31 Isambard Rd, SW1P 1AA", "test")
+    p.user_entered_address.push("31 Example Rd, SW1P 1AA", "test")
     p.works_estimates.push({"3": Money("0", "GBP")}, "test")
     p.comment_status.push("", "test")
     return p

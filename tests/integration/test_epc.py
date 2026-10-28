@@ -36,7 +36,7 @@ def _ensure_token():
         ("Carver Hill Road, High Wycombe, HP11", False, ""),
         # Named building → proceed
         ("Blue Dawes, Pangbourne on Thames, RG8 7AS", True, "Blue Dawes"),
-        ("Ruskins, Goaters Road, Ascot, SL5 8HZ", True, "Ruskins"),
+        ("Rose Cottage, Sample Lane, Sampleton, EF6 7GH", True, "Rose Cottage"),
         ("Gorseway, Fleet, GU52", True, "Gorseway"),
         # Named building (2 parts, but clear name) → proceed
         ("Blue Dawes, Pangbourne on Thames", True, "Blue Dawes"),
@@ -64,8 +64,8 @@ def test_should_lookup_epc(address, expected_proceed, expected_building_id):
 
 def test_match_cert_by_number():
     certs: list[_EpcCertificateRow] = [
-        {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
-        {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
+        {"addressLine1": "9 Sample Lane", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
+        {"addressLine1": "7 Sample Lane", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
     result = _match_cert(certs, "7")
     assert result.succeeded
@@ -89,8 +89,8 @@ def test_match_cert_by_name():
 def test_match_cert_multiple_certs_same_building_returns_most_recent():
     """Multiple certs for the same building → most recent."""
     certs: list[_EpcCertificateRow] = [
-        {"addressLine1": "7 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
-        {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
+        {"addressLine1": "7 Sample Lane", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
+        {"addressLine1": "7 Sample Lane", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
     result = _match_cert(certs, "7")
     assert result.succeeded
@@ -100,7 +100,7 @@ def test_match_cert_multiple_certs_same_building_returns_most_recent():
 def test_match_cert_no_match_returns_impossible():
     """No certificate matches the given building_id."""
     certs: list[_EpcCertificateRow] = [
-        {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
+        {"addressLine1": "9 Sample Lane", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
     ]
     result = _match_cert(certs, "7")
     assert result.impossible
@@ -117,8 +117,8 @@ def test_match_cert_empty_certs_returns_impossible():
 def test_match_cert_empty_building_id_returns_most_recent():
     """With no building ID, returns the most recent certificate."""
     certs: list[_EpcCertificateRow] = [
-        {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
-        {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
+        {"addressLine1": "9 Sample Lane", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
+        {"addressLine1": "7 Sample Lane", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
     result = _match_cert(certs, "")
     assert result.succeeded

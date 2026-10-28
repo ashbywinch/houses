@@ -43,9 +43,9 @@ class TestPropertyApi:
         prop = PropertyNodes("prop123")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "user")
         prop.rightmove_location.push(GeoPoint(51.4, -0.2), "rightmove")
-        prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.user_entered_address.push("31 Example Road, Anytown, AB1 2CD", "test")
+        prop.corrected_address.push("31 Example Road, Anytown, AB1 2CD", "test")
+        prop.rightmove_address.push("31 Example Road, Anytown, AB1 2CD", "test")
         reg.register("prop123", prop)
         flush_all()
 
@@ -312,7 +312,7 @@ class TestPropertyApi:
                         band="D",
                         yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
                         annexe=AnnexeDwelling(
-                            address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                            address="FLAT 2, 2 SAMPLE GARDENS",
                             band="A",
                             yearly_cost=Measurement(Money("900", "GBP"), 0.0),
                         ),
@@ -448,12 +448,12 @@ class TestPropertyApi:
         client, _ = self._setup()
         prop = PropertyNodes("88275093")
         prop.rightmove_price.push(Money("500000", "GBP"), "test")
-        prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.rightmove_address.push("31 Example Road, Anytown, AB1 2CD", "test")
         prop.rightmove_bedrooms.push("3", "test")
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.corrected_address.push("31 Example Road, Anytown, AB1 2CD", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.user_entered_address.push("31 Example Road, Anytown, AB1 2CD", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("current", "test")
@@ -467,7 +467,7 @@ class TestPropertyApi:
         # The literal route resolves to the homes list (not a {rid} lookup)
         resp = client.get("/api/properties/current-homes")
         assert resp.status_code == 200, resp.text
-        assert resp.json()["homes"] == [{"rid": "88275093", "address": "31 Isambard Road, Southall, UB2 4GN"}]
+        assert resp.json()["homes"] == [{"rid": "88275093", "address": "31 Example Road, Anytown, AB1 2CD"}]
 
         # AND the parameterised route still resolves to its own property
         # (a reorder that shadows {rid} would fail here)

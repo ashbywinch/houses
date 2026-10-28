@@ -7,7 +7,7 @@ class TestSinglePropertyAddress:
     """Tests for is_single_property_address helper used by BestLocationNode."""
 
     def test_detects_single_property(self):
-        assert is_single_property_address("31 Isambard Road, Southall UB2 4GN") is True
+        assert is_single_property_address("31 Example Road, Anytown AB1 2CD") is True
         assert is_single_property_address("London") is False
         assert is_single_property_address("10 High Street, London SW1P 1AA") is True
         assert is_single_property_address("Maidenhead") is False

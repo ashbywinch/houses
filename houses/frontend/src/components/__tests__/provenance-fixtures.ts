@@ -218,7 +218,7 @@ export const totalMonthlyCost: Provenance = {
           sourceType: 'calc',
           value: 'GBP 92.40',
           sources: {
-            walk: { label: 'Walk to Southall station', value: '19 min', sourceType: 'api' },
+            walk: { label: 'Walk to Anytown station', value: '19 min', sourceType: 'api' },
             transit: { label: 'TfL route (selected)', sourceType: 'api', url: 'https://api.tfl.gov.uk/' },
             rail_fare: { label: 'National Rail fare', sourceType: 'api', url: 'https://www.nationalrail.co.uk/' },
           },
@@ -232,7 +232,7 @@ export const totalMonthlyCost: Provenance = {
       url: 'https://www.gov.uk/council-tax-bands',
       value: 'GBP 159.00/mo (Band E)',
       sources: {
-        postcode: { label: 'Postcode', value: 'UB2 4GN', sourceType: 'user', freshness: '2026-07-30T09:15:00+00:00' },
+        postcode: { label: 'Postcode', value: 'AB1 2CD', sourceType: 'user', freshness: '2026-07-30T09:15:00+00:00' },
         best_address: { label: 'Property address', sourceType: 'calc' },
       },
     },
@@ -241,17 +241,17 @@ export const totalMonthlyCost: Provenance = {
 
 export const councilTaxError: Provenance = {
   label: 'Council Tax',
-  description: "Lookup failed: the property address '31 Isambard Road' matches multiple council tax records. We found Band D (£1,905/yr) and Band E (£2,329/yr) for this postcode.",
+  description: "Lookup failed: the property address '31 Example Road' matches multiple council tax records. We found Band D (£1,905/yr) and Band E (£2,329/yr) for this postcode.",
   sourceType: 'api',
   freshness: '2026-07-30T07:21:56.960072+00:00',
   url: 'https://www.gov.uk/council-tax-bands',
   status: 'impossible',
   error: 'Ambiguous address: 2 council tax bands found for this postcode (D and E)',
   sources: {
-    postcode: { label: 'Postcode', value: 'UB2 4GN', sourceType: 'user', freshness: '2026-07-30T09:15:00+00:00' },
+    postcode: { label: 'Postcode', value: 'AB1 2CD', sourceType: 'user', freshness: '2026-07-30T09:15:00+00:00' },
     best_address: {
       label: 'Property address',
-      value: '31 Isambard Road, Southall, UB2 4GN',
+      value: '31 Example Road, Anytown, AB1 2CD',
       sourceType: 'calc',
       freshness: '2026-07-30T09:10:00+00:00',
       sources: {
@@ -280,9 +280,9 @@ export const commuteError: Provenance = {
       freshness: '2026-07-30T10:30:00+00:00',
       description: 'Walking + train to Pimlico (TfL data unavailable)',
       sources: {
-        walk: { label: 'Walk to Southall station', value: '19 min', sourceType: 'api', freshness: '2026-07-30T10:30:00+00:00' },
+        walk: { label: 'Walk to Anytown station', value: '19 min', sourceType: 'api', freshness: '2026-07-30T10:30:00+00:00' },
         transit: {
-          label: 'Southall → Ealing Broadway → Oxford Circus → Pimlico',
+          label: 'Anytown → Ealing Broadway → Oxford Circus → Pimlico',
           sourceType: 'api',
           freshness: '2026-07-30T10:30:00+00:00',
           status: 'impossible',

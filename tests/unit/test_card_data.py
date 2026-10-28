@@ -97,7 +97,7 @@ def prop():
     """A PropertyNode seeded with basic data, registered."""
     rid = "test_card"
     p = PropertyNodes(rid)
-    p.rightmove_address.push("48 Acacia Avenue, Southall, UB2 5AD", "Rightmove")
+    p.rightmove_address.push("48 Sample Avenue, Anytown, CD4 5EF", "Rightmove")
     p.rightmove_url.push("https://www.rightmove.co.uk/properties/12345", "Browser")
     p.rightmove_bedrooms.push("3", "Rightmove")
     p.rightmove_price.push(Money("450000", "GBP"), "Rightmove")

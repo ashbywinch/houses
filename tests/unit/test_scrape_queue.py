@@ -76,7 +76,7 @@ class TestEnqueueOnFailedScrape:
         scrape, no enqueue (the scrape is for URL-only adds)."""
         resp = client.post(
             "/api/properties",
-            json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000},
+            json={"url": URL, "address": "Penwood Lane, Sampleton, SL7 2AP", "price": 650000},
         )
         assert resp.status_code == 200, resp.text
         assert resp.json().get("scrape_pending") is None
@@ -246,7 +246,7 @@ class TestReportSuccess:
                 "job_id": job["id"],
                 "ok": True,
                 "data": {
-                    "address": "Penwood Lane, Marlow, SL7 2AP",
+                    "address": "Penwood Lane, Sampleton, SL7 2AP",
                     "postcode": "SL7 2AP",
                     "bedrooms": 4,
                     "price": 800000,
@@ -259,7 +259,7 @@ class TestReportSuccess:
         assert _scrape_rows() == []
         # The DAG now carries the scraped values
         detail = client.get(f"/api/properties/{RID}").json()
-        assert detail["best_address"]["value"] == "Penwood Lane, Marlow, SL7 2AP"
+        assert detail["best_address"]["value"] == "Penwood Lane, Sampleton, SL7 2AP"
         assert detail["postcode"]["value"] == "SL7 2AP"
         assert detail["rightmove_bedrooms"]["value"] == "4"
         assert detail["rightmove_price"]["value"]["amount"] == "800000.00"

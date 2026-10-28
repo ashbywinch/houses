@@ -116,11 +116,11 @@ class TestBestAddressNode:
             corrected_address=corrected,
             rightmove_address=rightmove,
         )
-        corrected.push("Penwood Lane, Marlow, SL7 2AP", "user")
+        corrected.push("Penwood Lane, Sampleton, SL7 2AP", "user")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded, f"corrected address must resolve while rightmove is pending: {a.error}"
-        assert a.value_or_none() == "Penwood Lane, Marlow, SL7 2AP"
+        assert a.value_or_none() == "Penwood Lane, Sampleton, SL7 2AP"
 
     @pytest.mark.asyncio
     async def test_stays_pending_until_any_source_arrives(self):
@@ -533,7 +533,7 @@ class TestPostcodeNode:
     @pytest.mark.asyncio
     async def test_derives_the_full_postcode_from_the_address(self, node):
         n, addr = node
-        addr.push("Penwood Lane, Marlow, SL7 2AP", "user")
+        addr.push("Penwood Lane, Sampleton, SL7 2AP", "user")
         await flush_processor()
         a = await n.attempt()
         assert a.succeeded and a.value_or_none() == "SL7 2AP"

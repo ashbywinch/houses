@@ -36,7 +36,7 @@ class TestFindNearestTownName:
                 pass
 
             def json(self):
-                return {"features": [{"properties": {"locality": "Southall"}}]}
+                return {"features": [{"properties": {"locality": "Anytown"}}]}
 
         result = await find_nearest_town_name(
             51.5,
@@ -50,7 +50,7 @@ class TestFindNearestTownName:
         )
 
         assert result.succeeded
-        assert result.value_or_none() == "Southall"
+        assert result.value_or_none() == "Anytown"
 
     @pytest.mark.asyncio
     async def test_no_features_returns_impossible(self):
@@ -142,7 +142,7 @@ class TestFindNearestTownName:
                 pass
 
             def json(self):
-                return {"features": [{"properties": {"locality": "Southall"}}]}
+                return {"features": [{"properties": {"locality": "Anytown"}}]}
 
         await find_nearest_town_name(
             51.5,
@@ -186,8 +186,8 @@ class TestGenerateTownDescription:
             return _FakeResp().json()
 
         result = await generate_town_description(
-            "Southall",
-            "UB2 4GN",
+            "Anytown",
+            "AB1 2CD",
             client_factory=lambda **k: _FakeCM(),
             with_cache_fn=_fake_cache,
         )
@@ -232,8 +232,8 @@ class TestGenerateTownDescription:
             return await fetch()
 
         await generate_town_description(
-            "Southall",
-            "UB2 4GN",
+            "Anytown",
+            "AB1 2CD",
             client_factory=lambda **k: _FakeCM(),
             with_cache_fn=_fake_cache,
         )
@@ -274,8 +274,8 @@ class TestGenerateTownDescription:
             return await fetch()
 
         result = await generate_town_description(
-            "Southall",
-            "UB2 4GN",
+            "Anytown",
+            "AB1 2CD",
             client_factory=lambda **k: _FakeCM(),
             with_cache_fn=_fake_cache,
         )
@@ -312,8 +312,8 @@ class TestGenerateTownDescription:
             return await fetch()
 
         result = await generate_town_description(
-            "Southall",
-            "UB2 4GN",
+            "Anytown",
+            "AB1 2CD",
             client_factory=lambda **k: _FakeCM(),
             with_cache_fn=_fake_cache,
         )

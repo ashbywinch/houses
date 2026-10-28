@@ -207,7 +207,7 @@ class TestChooseNoReprs:
     def test_plain_string_values_pass_through(self):
         """Refs over string-valued nodes (addresses, labels) must not be
         treated as objects needing a projection."""
-        a = _ref("31 Isambard Road", "address")
+        a = _ref("31 Example Road", "address")
 
         expr = Choose(
             alternatives={"address": a},
@@ -215,7 +215,7 @@ class TestChooseNoReprs:
         )
         expr.evaluate()
         lines = expr.to_formula_lines()
-        assert any(line.value == "31 Isambard Road" for line in lines)
+        assert any(line.value == "31 Example Road" for line in lines)
     def test_unprojectable_value_raises_instead_of_repr(self):
         """An object with no to_provenance_value must raise, not str()."""
         a = _ref(_Unprojectable(), "drive")

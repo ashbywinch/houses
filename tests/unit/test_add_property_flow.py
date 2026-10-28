@@ -57,7 +57,7 @@ class TestSummaryCarriesScrapeState:
     def test_no_scrape_key_when_no_job():
         """A payload WITH the user's own facts never enqueues — no scrape
         state on the summary."""
-        client.post("/api/properties", json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP"})
+        client.post("/api/properties", json={"url": URL, "address": "Penwood Lane, Sampleton, SL7 2AP"})
         all_props = client.get("/api/properties/all").json()
         assert "scrape" not in all_props[RID]
 
@@ -89,7 +89,7 @@ class TestManualDetails:
         _add_url_only()
         resp = client.patch(
             f"/api/properties/{RID}/details",
-            json={"address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000, "bedrooms": 4},
+            json={"address": "Penwood Lane, Sampleton, SL7 2AP", "price": 650000, "bedrooms": 4},
         )
         assert resp.status_code == 200, resp.text
         assert _scrape_rows() == [], "manual details must cancel the scrape job"
@@ -97,7 +97,7 @@ class TestManualDetails:
         # environment has no processor thread, so the drain is explicit here.
         flush_all()
         detail = client.get(f"/api/properties/{RID}/detail").json()
-        assert detail["best_address"]["value"] == "Penwood Lane, Marlow, SL7 2AP"
+        assert detail["best_address"]["value"] == "Penwood Lane, Sampleton, SL7 2AP"
         assert detail["rightmove_price"]["value"]["amount"] == "650000.00"
 
     @staticmethod
@@ -108,7 +108,7 @@ class TestManualDetails:
         _add_url_only()
         resp = client.patch(
             f"/api/properties/{RID}/details",
-            json={"address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000, "bedrooms": 4},
+            json={"address": "Penwood Lane, Sampleton, SL7 2AP", "price": 650000, "bedrooms": 4},
         )
         assert resp.status_code == 200, resp.text
         flush_all()  # the PATCH queues and returns; the test drains explicitly
@@ -126,7 +126,7 @@ class TestManualDetails:
         _add_url_only()
         resp = client.patch(
             f"/api/properties/{RID}/details",
-            json={"address": "Penwood Lane, Marlow, SL7 2AP"},
+            json={"address": "Penwood Lane, Sampleton, SL7 2AP"},
         )
         assert resp.status_code == 200, resp.text
         prop = get_services().property_registry.get(RID)
@@ -153,7 +153,7 @@ class TestCommuteComputesAfterDetails:
         _add_url_only()
         resp = client.patch(
             f"/api/properties/{RID}/details",
-            json={"address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000, "bedrooms": 4},
+            json={"address": "Penwood Lane, Sampleton, SL7 2AP", "price": 650000, "bedrooms": 4},
         )
         assert resp.status_code == 200, resp.text
         flush_all()  # the PATCH queues the seeding; the test drains explicitly
@@ -173,7 +173,7 @@ class TestCommuteComputesAfterDetails:
         _add_url_only()
         client.patch(
             f"/api/properties/{RID}/details",
-            json={"address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000, "bedrooms": 4},
+            json={"address": "Penwood Lane, Sampleton, SL7 2AP", "price": 650000, "bedrooms": 4},
         )
         detail = client.get(f"/api/properties/{RID}/detail").json()
         commutes = detail.get("commutes", {})
@@ -238,7 +238,7 @@ class TestRemove:
             json={
                 "job_id": job["id"],
                 "ok": True,
-                "data": {"address": "Penwood Lane, Marlow, SL7 2AP"},
+                "data": {"address": "Penwood Lane, Sampleton, SL7 2AP"},
             },
         )
         prop = get_services().property_registry.get(RID)
@@ -257,7 +257,7 @@ class TestAddressPatchDerivesPostcode:
         _add_url_only()
         resp = client.patch(
             f"/api/properties/{RID}/address",
-            json={"address": "Penwood Lane, Marlow, SL7 2AP"},
+            json={"address": "Penwood Lane, Sampleton, SL7 2AP"},
         )
         assert resp.status_code == 200, resp.text
         # The PATCH queues the push and returns (Thread rule 7); the test
@@ -286,7 +286,7 @@ class TestAddressPatchDerivesPostcode:
         )
         resp = client.patch(
             f"/api/properties/{RID}/address",
-            json={"address": "Penwood Lane, Marlow, SL7 2AP"},
+            json={"address": "Penwood Lane, Sampleton, SL7 2AP"},
         )
         assert resp.status_code == 200, resp.text
         flush_all()  # the PATCH queues the push; the test drains explicitly

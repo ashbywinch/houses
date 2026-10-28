@@ -26,7 +26,7 @@ from houses.nodes.geocode_node import GeocodeNode
 async def test_a_stamp_stale_geocode_node_converges_after_the_sweep_reschedules_it():
     addr = UserInputNode("rg_addr", str)
     geo = GeocodeNode("rg_geocode", best_address=addr)
-    addr.push("1 Isambard Road, Southall", "test")
+    addr.push("1 Example Road, Anytown", "test")
     await flush_processor()
     assert (await geo.attempt()).succeeded
 
@@ -34,7 +34,7 @@ async def test_a_stamp_stale_geocode_node_converges_after_the_sweep_reschedules_
     # migration/scrape end-run that writes rows directly.
     save_node_result(
         "rg_addr",
-        {"status": "succeeded", "value": "2 Isambard Road, Southall"},
+        {"status": "succeeded", "value": "2 Example Road, Anytown"},
         created_at=datetime.now(UTC).isoformat(),
     )
 
