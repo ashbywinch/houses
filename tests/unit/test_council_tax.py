@@ -66,16 +66,16 @@ class TestLookupExactMatchPriority:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS", "D"),
-                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "A"),
+                Row("2 SAMPLE GARDENS", "D"),
+                Row("FLAT 2, 2 SAMPLE GARDENS", "A"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.succeeded, f"exact address must win, got: {a.status}: {a.error}"
@@ -95,31 +95,31 @@ class TestLookupExactMatchPriority:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS", "D"),
-                Row("2 WILLOWMEAD COURT", "D"),
+                Row("2 SAMPLE GARDENS", "D"),
+                Row("2 SAMPLE COURT", "D"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
-        # "2 Willowmead" alone names the number but no building — neither
+        # "2 Sample" alone names the number but no building — neither
         # row is an exact prefix of the query, so it stays ambiguous.
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.impossible
         assert "address matched multiple properties" in (a.error or "")
-        assert "'2 WILLOWMEAD GARDENS'" in (a.error or "")
-        assert "'2 WILLOWMEAD COURT'" in (a.error or "")
+        assert "'2 SAMPLE GARDENS'" in (a.error or "")
+        assert "'2 SAMPLE COURT'" in (a.error or "")
         assert "(2 matches)" in (a.error or "")
 
 
 class TestAnnexeDetection:
     """An annexe is a single extra VOA property whose address is the main
-    address with a unit prefix — 'FLAT 2, 2 WILLOWMEAD GARDENS' contains
-    '2 WILLOWMEAD GARDENS'.  Locality-suffixed duplicates are the same
+    address with a unit prefix — 'FLAT 2, 2 SAMPLE GARDENS' contains
+    '2 SAMPLE GARDENS'.  Locality-suffixed duplicates are the same
     property, not an annexe."""
 
     @pytest.mark.asyncio
@@ -134,22 +134,22 @@ class TestAnnexeDetection:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS", "D"),
-                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "A"),
+                Row("2 SAMPLE GARDENS", "D"),
+                Row("FLAT 2, 2 SAMPLE GARDENS", "A"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.succeeded
         info = a.value_or_none()
         assert info is not None and info.annexe is not None
-        assert info.annexe.address == "FLAT 2, 2 WILLOWMEAD GARDENS"
+        assert info.annexe.address == "FLAT 2, 2 SAMPLE GARDENS"
         assert info.annexe.band == "A"
         assert info.annexe.yearly_cost is not None
 
@@ -165,16 +165,16 @@ class TestAnnexeDetection:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS", "D"),
-                Row("2 WILLOWMEAD GARDENS MARLOW", "D"),
+                Row("2 SAMPLE GARDENS", "D"),
+                Row("2 SAMPLE GARDENS SAMPLETON", "D"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.succeeded
@@ -194,17 +194,17 @@ class TestAnnexeDetection:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS", "D"),
-                Row("FLAT 1, 2 WILLOWMEAD GARDENS", "A"),
-                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "B"),
+                Row("2 SAMPLE GARDENS", "D"),
+                Row("FLAT 1, 2 SAMPLE GARDENS", "A"),
+                Row("FLAT 2, 2 SAMPLE GARDENS", "B"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.succeeded
@@ -247,9 +247,9 @@ class TestLoadRates:
 
 
 class TestRealAddressForm:
-    """Real property addresses carry the county ('2 Willowmead Gardens,
-    Marlow, Buckinghamshire, SL7 1HW') while VOA rows carry only the
-    locality ('2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW').  The exact-match
+    """Real property addresses carry the county ('2 Sample Gardens,
+    Sampleton, Buckinghamshire, XY3 4ZW') while VOA rows carry only the
+    locality ('2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW').  The exact-match
     rule must survive the county token."""
 
     @pytest.mark.asyncio
@@ -264,17 +264,17 @@ class TestRealAddressForm:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F"),
-                Row("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "A"),
-                Row("12 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
+                Row("2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "F"),
+                Row("FLAT 2, 2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "A"),
+                Row("12 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "D"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, Buckinghamshire, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, Exampleshire, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.succeeded, f"exact match must win despite the county, got: {a.status}: {a.error}"
@@ -282,13 +282,13 @@ class TestRealAddressForm:
         assert info is not None
         assert info.band == "F"
         assert info.annexe is not None
-        assert info.annexe.address == "FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW"
+        assert info.annexe.address == "FLAT 2, 2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW"
         assert info.annexe.band == "A"
 
 
 class TestUnitPrefixedAnnexe:
-    """The classic UK annexe form '2A WILLOWMEAD GARDENS' (main house
-    number + a letter) is a superset of '2 WILLOWMEAD GARDENS' and must
+    """The classic UK annexe form '2A SAMPLE GARDENS' (main house
+    number + a letter) is a superset of '2 SAMPLE GARDENS' and must
     be detected — while '12'/'20' (digit-prefixed) must not be."""
 
     @pytest.mark.asyncio
@@ -303,19 +303,19 @@ class TestUnitPrefixedAnnexe:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F"),
-                Row("2A WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "A"),
-                Row("2AB WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "B"),
-                Row("12 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
-                Row("20 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
+                Row("2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "F"),
+                Row("2A SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "A"),
+                Row("2AB SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "B"),
+                Row("12 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "D"),
+                Row("20 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "D"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.succeeded, f"lookup must succeed, got: {a.status}: {a.error}"
@@ -323,7 +323,7 @@ class TestUnitPrefixedAnnexe:
         assert info is not None
         assert info.band == "F"
         assert info.annexe is not None, "2A is the annexe — a letter-suffixed number"
-        assert "2A WILLOWMEAD" in info.annexe.address
+        assert "2A SAMPLE" in info.annexe.address
         assert info.annexe.band == "A"
         # A multi-char suffix ("2AB") is NOT the single-letter form — the
         # len(row)+1 guard excludes it (the review's concern was moot).
@@ -347,14 +347,14 @@ class TestMissingRate:
                 self.local_authority = "Narnia"
 
         class Page:
-            rows = [Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F")]
+            rows = [Row("2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "F")]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
             rate_lookup=lambda band, la: None,
         )
@@ -383,16 +383,16 @@ class TestMissingRate:
 
         class Page:
             rows = [
-                Row("2 WILLOWMEAD GARDENS", "F", la=""),
-                Row("2 WILLOWMEAD GARDENS, MARLOW", "F", la="Woking"),
+                Row("2 SAMPLE GARDENS", "F", la=""),
+                Row("2 SAMPLE GARDENS, SAMPLETON", "F", la="Woking"),
             ]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
         )
         assert a.succeeded, f"lookup must succeed, got: {a.status}: {a.error}"
@@ -422,14 +422,14 @@ class TestMissingRate:
                 self.local_authority = "Woking"
 
         class Page:
-            rows = [Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F")]
+            rows = [Row("2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW", "F")]
 
         def fetcher(postcode: str, page: int):
             return Page()
 
         a = await lookup_council_tax(
-            "SL7 1HW",
-            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            "XY3 4ZW",
+            "2 Sample Gardens, Sampleton, XY3 4ZW",
             page_fetcher=fetcher,
             rate_lookup=lambda band, la: None,
         )

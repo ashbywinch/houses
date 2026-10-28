@@ -597,7 +597,7 @@ describe('PropertyList map pins are interactive', () => {
 
 const homeBaseline: MonthlyBaseline = {
   rid: 'prop-b',
-  address: '31 Isambard Road, Southall, UB2 4GN',
+  address: '31 Example Road, Anytown, AB1 2CD',
   couple: { value: '1783.61', approx: false },
   others: { value: '652.92', approx: false },
   others_rent_paid: 600,
@@ -653,7 +653,7 @@ describe('PropertyList — extra vs your home (baseline)', () => {
     const wrapper = await mountWithBaseline(deltaData())
     const legends = wrapper.findAll('.baseline-legend')
     expect(legends).toHaveLength(1)
-    expect(legends[0].text()).toContain('Monthly figures are the change vs your home — 31 Isambard Road, Southall, UB2 4GN')
+    expect(legends[0].text()).toContain('Monthly figures are the change vs your home — 31 Example Road, Anytown, AB1 2CD')
     expect(legends[0].text()).toContain('S&L £1,784/mo')
     expect(legends[0].text()).toContain('Ashby £653/mo')
     expect(legends[0].text()).toContain("Full totals and breakdowns live on each property's page.")

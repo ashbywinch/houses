@@ -14,7 +14,7 @@ function mountSection(overrides: Record<string, unknown> = {}) {
     props: {
       rid: '123',
       mainBill: { band: 'D', yearly_cost: { value: { amount: '1800', currency: 'GBP' } } },
-      annexe: { address: 'FLAT 2, 2 WILLOWMEAD GARDENS', band: 'A', yearly_cost: { value: { amount: '900', currency: 'GBP' } } },
+      annexe: { address: 'FLAT 2, 2 SAMPLE GARDENS', band: 'A', yearly_cost: { value: { amount: '900', currency: 'GBP' } } },
       mainPayers: [],
       annexePayers: [],
       ignored: false,
@@ -31,7 +31,7 @@ describe('AnnexeSection council-tax apportionment', () => {
     expect(text).toContain('Main house — Band D')
     expect(text).toContain('Simon, Lorena, Ashby')
     expect(text).toContain('all adults — default')
-    expect(text).toContain('FLAT 2, 2 WILLOWMEAD GARDENS')
+    expect(text).toContain('FLAT 2, 2 SAMPLE GARDENS')
     expect(text).toContain('separate council tax')
     expect(text).toContain('Not yet included in the monthly costs')
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(6)

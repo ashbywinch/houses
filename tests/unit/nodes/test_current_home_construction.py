@@ -83,14 +83,14 @@ async def test_a_late_reprice_of_the_current_home_rederives_the_baseline(_sqlite
         {"couple": {"value": "1873.81", "stddev": 0}, "others": {"value": "652.92", "stddev": 0}},
         "test",
     )
-    address.push("31 Isambard Road, Southall", "test")
+    address.push("31 Example Road, Anytown", "test")
     await flush_processor()
 
     att = await node.attempt()
     baseline = att.value_or_none()
     assert baseline is not None, "a re-price of the current home must re-derive the baseline"
     assert baseline.rid == "p100"
-    assert baseline.address == "31 Isambard Road, Southall"
+    assert baseline.address == "31 Example Road, Anytown"
 
 def test_the_baseline_provenance_value_is_an_object_that_projects_to_a_tree():
     """The DAG's projector must handle ANY node value without knowing its type,

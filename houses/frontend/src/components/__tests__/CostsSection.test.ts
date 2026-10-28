@@ -417,7 +417,7 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
 describe('CostsSection — vs your home rows', () => {
   const homeBaseline: MonthlyBaseline = {
     rid: 'home',
-    address: '31 Isambard Road, Southall, UB2 4GN',
+    address: '31 Example Road, Anytown, AB1 2CD',
     couple: { value: '1783.61', approx: false },
     others: { value: '652.92', approx: false },
     others_rent_paid: 600,
@@ -445,7 +445,7 @@ describe('CostsSection — vs your home rows', () => {
     const wrapper = mountWith({ monthlyBaseline: homeBaseline })
     const rows = wrapper.findAll('.costs-row--vs')
     expect(rows).toHaveLength(2)
-    expect(rows[0].text()).toContain('vs your home (31 Isambard Road)')
+    expect(rows[0].text()).toContain('vs your home (31 Example Road)')
     expect(rows[0].text()).toContain('≈+£1,308/mo')
     expect(rows[0].attributes('title')).toBe('£3091.67 − £1783.61 = +1308.06. ≈ = council tax estimated.')
     expect(rows[1].text()).toContain('−£411/mo')
@@ -473,7 +473,7 @@ describe('CostsSection — vs your home rows', () => {
 describe('CostsSection — vs-row provenance widget (defect 1)', () => {
   const homeBaseline: MonthlyBaseline = {
     rid: 'home',
-    address: '31 Isambard Road, Southall, UB2 4GN',
+    address: '31 Example Road, Anytown, AB1 2CD',
     couple: { value: '1783.61', approx: false },
     others: { value: '652.92', approx: false },
     others_rent_paid: 600,
@@ -481,12 +481,12 @@ describe('CostsSection — vs-row provenance widget (defect 1)', () => {
 
   const deltaProvenance = {
     label: 'Monthly difference vs your home',
-    description: 'Candidate monthly total minus your home (31 Isambard Road).',
+    description: 'Candidate monthly total minus your home (31 Example Road).',
     sourceType: 'calc',
     formula: {
       lines: [
         { label: 'This property (S+L)', value: '£3091.67/mo' },
-        { label: 'Your home (31 Isambard Road)', value: '£1783.61/mo' },
+        { label: 'Your home (31 Example Road)', value: '£1783.61/mo' },
       ],
       result: '+1308.06/mo',
     },
@@ -542,7 +542,7 @@ describe('CostsSection — vs-row provenance widget (defect 1)', () => {
     const text = wrapper.text()
     expect(text).toContain('This property (S+L)')
     expect(text).toContain('£3091.67/mo')
-    expect(text).toContain('Your home (31 Isambard Road)')
+    expect(text).toContain('Your home (31 Example Road)')
     expect(text).toContain('£1783.61/mo')
   })
 

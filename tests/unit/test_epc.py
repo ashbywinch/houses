@@ -1,5 +1,5 @@
 """EPC certificate matching — a building NUMBER must match as a whole
-token, never a substring: "2" must not claim "12"/"20"/"A2" Willowmead
+token, never a substring: "2" must not claim "12"/"20"/"A2" Sample
 Gardens (the same hardening as the council-tax lookup). Regression:
 "address matched multiple properties" for a plain numbered house."""
 from __future__ import annotations
@@ -17,12 +17,12 @@ def _cert(address: str, band: str = "C", registration: str = "2025-01-01") -> _E
 
 def test_numbered_building_matches_only_that_number():
     certs = [
-        _cert("2 WILLOWMEAD GARDENS", band="B"),
-        _cert("12 WILLOWMEAD GARDENS"),
-        _cert("20 WILLOWMEAD GARDENS"),
-        _cert("21 WILLOWMEAD GARDENS"),
+        _cert("2 SAMPLE GARDENS", band="B"),
+        _cert("12 SAMPLE GARDENS"),
+        _cert("20 SAMPLE GARDENS"),
+        _cert("21 SAMPLE GARDENS"),
     ]
-    a = _match_cert(certs, "2", "2 Willowmead Gardens, Marlow, SL7 1HW")
+    a = _match_cert(certs, "2", "2 Sample Gardens, Sampleton, XY3 4ZW")
     assert a.succeeded, f"2 must match only its own certificate, got: {a.status}: {a.error}"
     assert a.value_or_none() == "B"
 
@@ -30,40 +30,40 @@ def test_numbered_building_matches_only_that_number():
 def test_number_does_not_match_letter_or_digit_prefixed_substrings():
     """A2/12A must not be claimed by the bare number."""
     certs = [
-        _cert("2 WILLOWMEAD GARDENS"),
-        _cert("12A WILLOWMEAD GARDENS"),
-        _cert("A2 WILLOWMEAD GARDENS"),
+        _cert("2 SAMPLE GARDENS"),
+        _cert("12A SAMPLE GARDENS"),
+        _cert("A2 SAMPLE GARDENS"),
     ]
-    a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
+    a = _match_cert(certs, "2", address="2 Sample Gardens, Sampleton, XY3 4ZW")
     assert a.succeeded, f"got: {a.status}: {a.error}"
     assert a.value_or_none() == "C"
 
 
 def test_exact_building_wins_over_flat_variant():
-    """'2 Willowmead Gardens' is an exact match — the separate dwelling
-    'FLAT 2, 2 WILLOWMEAD GARDENS' (annexe/flat) must not make it
+    """'2 Sample Gardens' is an exact match — the separate dwelling
+    'FLAT 2, 2 SAMPLE GARDENS' (annexe/flat) must not make it
     ambiguous; the house's certificate wins."""
     certs = [
-        _cert("2 WILLOWMEAD GARDENS", band="B"),
-        _cert("FLAT 2, 2 WILLOWMEAD GARDENS", band="E"),
-        _cert("20 WILLOWMEAD GARDENS"),
+        _cert("2 SAMPLE GARDENS", band="B"),
+        _cert("FLAT 2, 2 SAMPLE GARDENS", band="E"),
+        _cert("20 SAMPLE GARDENS"),
     ]
-    a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
+    a = _match_cert(certs, "2", address="2 Sample Gardens, Sampleton, XY3 4ZW")
     assert a.succeeded, f"exact address must win, got: {a.status}: {a.error}"
     assert a.value_or_none() == "B"
 
 
 def test_exact_match_survives_county_in_query_address():
-    """The real address form carries the county ('2 Willowmead Gardens,
-    Marlow, Buckinghamshire, SL7 1HW'); certificate addressLine1 values
+    """The real address form carries the county ('2 Sample Gardens,
+    Sampleton, Buckinghamshire, XY3 4ZW'); certificate addressLine1 values
     usually do not.  The county token must not break the prefix rule —
     the house's certificate still wins over the flat's."""
     certs = [
-        _cert("2 WILLOWMEAD GARDENS, MARLOW", band="B"),
-        _cert("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW", band="E"),
+        _cert("2 SAMPLE GARDENS, SAMPLETON", band="B"),
+        _cert("FLAT 2, 2 SAMPLE GARDENS, SAMPLETON", band="E"),
     ]
     a = _match_cert(
-        certs, "2", address="2 Willowmead Gardens, Marlow, Buckinghamshire, SL7 1HW"
+        certs, "2", address="2 Sample Gardens, Sampleton, Exampleshire, XY3 4ZW"
     )
     assert a.succeeded, f"exact address must win despite the county, got: {a.status}: {a.error}"
     assert a.value_or_none() == "B"
@@ -73,19 +73,19 @@ def test_no_exact_match_stays_ambiguous_with_names():
     """No exact prefix → genuinely ambiguous; the error names the first
     two matches + count so the provenance is troubleshooting-useful."""
     certs = [
-        _cert("2 WILLOWMEAD GARDENS", band="B"),
-        _cert("2 WILLOWMEAD COURT", band="E"),
+        _cert("2 SAMPLE GARDENS", band="B"),
+        _cert("2 SAMPLE COURT", band="E"),
     ]
-    a = _match_cert(certs, "2", address="2 Willowmead, Marlow, SL7 1HW")
+    a = _match_cert(certs, "2", address="2 Sample, Sampleton, XY3 4ZW")
     assert a.impossible
     assert "multiple properties" in (a.error or "")
-    assert "'2 WILLOWMEAD GARDENS'" in (a.error or "")
-    assert "'2 WILLOWMEAD COURT'" in (a.error or "")
+    assert "'2 SAMPLE GARDENS'" in (a.error or "")
+    assert "'2 SAMPLE COURT'" in (a.error or "")
     assert "(2 matches)" in (a.error or "")
 
 def test_no_match_reports_no_certificate():
-    certs = [_cert("12 WILLOWMEAD GARDENS")]
-    a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
+    certs = [_cert("12 SAMPLE GARDENS")]
+    a = _match_cert(certs, "2", address="2 Sample Gardens, Sampleton, XY3 4ZW")
     assert a.impossible
     assert "no matching certificate" in (a.error or "")
 
@@ -96,10 +96,10 @@ def test_exact_prefix_locality_variants_collapse_newest_wins():
     ambiguous.  The newest registration wins (mirrors the council-tax
     band-collapse)."""
     certs = [
-        _cert("2 WILLOWMEAD GARDENS", band="B", registration="2023-06-01"),
-        _cert("2 WILLOWMEAD GARDENS, MARLOW", band="C", registration="2025-01-01"),
+        _cert("2 SAMPLE GARDENS", band="B", registration="2023-06-01"),
+        _cert("2 SAMPLE GARDENS, SAMPLETON", band="C", registration="2025-01-01"),
     ]
-    a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
+    a = _match_cert(certs, "2", address="2 Sample Gardens, Sampleton, XY3 4ZW")
     assert a.succeeded, f"locality variants are the same building, got: {a.status}: {a.error}"
     assert a.value_or_none() == "C"
 

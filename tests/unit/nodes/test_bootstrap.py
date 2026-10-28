@@ -50,14 +50,14 @@ class TestUpgradeAddress:
     def test_replaces_outcode_with_full_postcode(self):
         from houses.location import upgrade_address as _upgrade_address
 
-        result = _upgrade_address("31 Isambard Road, Southall, UB2", "UB2 4GN")
-        assert result == "31 Isambard Road, Southall, UB2 4GN"
+        result = _upgrade_address("31 Example Road, Anytown, AB1", "AB1 2CD")
+        assert result == "31 Example Road, Anytown, AB1 2CD"
 
     def test_no_change_when_address_has_full_postcode(self):
         from houses.location import upgrade_address as _upgrade_address
 
-        result = _upgrade_address("31 Isambard Road, Southall, UB2 4GN", "UB2 4GN")
-        assert result == "31 Isambard Road, Southall, UB2 4GN"
+        result = _upgrade_address("31 Example Road, Anytown, AB1 2CD", "AB1 2CD")
+        assert result == "31 Example Road, Anytown, AB1 2CD"
 
     def test_appends_when_no_outcode(self):
         from houses.location import upgrade_address as _upgrade_address
@@ -83,17 +83,17 @@ class TestUpgradeAddress:
         otherwise append a duplicate (addresses arrive in mixed case)."""
         from houses.location import upgrade_address as _upgrade_address
 
-        result = _upgrade_address("Penwood Lane, Marlow, sl7 2ap", "SL7 2AP")
-        assert result == "Penwood Lane, Marlow, sl7 2ap"
+        result = _upgrade_address("Penwood Lane, Sampleton, sl7 2ap", "SL7 2AP")
+        assert result == "Penwood Lane, Sampleton, sl7 2ap"
 
     def test_repeated_upgrade_is_idempotent(self):
         """Upgrading an already-upgraded address must not double the
         postcode (re-enrich / re-report paths re-run the upgrade)."""
         from houses.location import upgrade_address as _upgrade_address
 
-        once = _upgrade_address("31 Isambard Road, Southall, UB2", "UB2 4GN")
-        twice = _upgrade_address(once, "UB2 4GN")
-        assert once == "31 Isambard Road, Southall, UB2 4GN"
+        once = _upgrade_address("31 Example Road, Anytown, AB1", "AB1 2CD")
+        twice = _upgrade_address(once, "AB1 2CD")
+        assert once == "31 Example Road, Anytown, AB1 2CD"
         assert twice == once
 
     def test_different_postcode_variant_is_not_doubled_onto_the_same_outcode(self):

@@ -178,10 +178,10 @@ class TestCarParkRegistry:
     # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_lookup_free_station(self, tmp_path):
         csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,0.0\n")
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nSampleton,MLW,0.0\n")
 
         registry = CarParkRegistry(rates_path=csv_path)
-        station = Station(name="Marlow", crs="MLW", location=GeoPoint(51.5, -0.8))
+        station = Station(name="Sampleton", crs="MLW", location=GeoPoint(51.5, -0.8))
         car_park = registry.find_car_park(station)
 
         assert car_park is not None
@@ -190,7 +190,7 @@ class TestCarParkRegistry:
     # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_lookup_unknown_station(self, tmp_path):
         csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,0.0\n")
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nSampleton,MLW,0.0\n")
 
         registry = CarParkRegistry(rates_path=csv_path)
         station = Station(name="Unknown", crs="ZZZ", location=GeoPoint(0, 0))
@@ -201,10 +201,10 @@ class TestCarParkRegistry:
     # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_lookup_blank_cost_returns_car_park_with_none_cost(self, tmp_path):
         csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,\n")
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nSampleton,MLW,\n")
 
         registry = CarParkRegistry(rates_path=csv_path)
-        station = Station(name="Marlow", crs="MLW", location=GeoPoint(51.5, -0.8))
+        station = Station(name="Sampleton", crs="MLW", location=GeoPoint(51.5, -0.8))
         car_park = registry.find_car_park(station)
 
         assert car_park is not None

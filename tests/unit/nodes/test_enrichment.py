@@ -102,8 +102,8 @@ class TestCouncilTaxNode:
         class _FailingCT:
             async def lookup(self, postcode, address=""):
                 return Attempt.impossible(
-                    "address matched multiple properties: '2 WILLOWMEAD GARDENS', "
-                    "'FLAT 2, 2 WILLOWMEAD GARDENS' (2 matches)"
+                    "address matched multiple properties: '2 SAMPLE GARDENS', "
+                    "'FLAT 2, 2 SAMPLE GARDENS' (2 matches)"
                 )
 
         svc = make_services(council_tax_service=_FailingCT())
@@ -112,8 +112,8 @@ class TestCouncilTaxNode:
             addr = UserInputNode[str]("addr_ct_fb", str)
             pc = UserInputNode[str]("pc_ct_fb", str)
             node = CouncilTaxNode("ct_fb", best_address=addr, postcode_node=pc)
-            addr.push("2 Willowmead Gardens, Marlow, SL7 1HW", "test")
-            pc.push("SL7 1HW", "test")
+            addr.push("2 Sample Gardens, Sampleton, XY3 4ZW", "test")
+            pc.push("XY3 4ZW", "test")
 
             from dag.scheduler import flush_processor
 
@@ -124,7 +124,7 @@ class TestCouncilTaxNode:
             val = a.value_or_none()
             assert val is not None
             assert "multiple properties" in val.lookup_error
-            assert "2 WILLOWMEAD GARDENS" in val.lookup_error
+            assert "2 SAMPLE GARDENS" in val.lookup_error
 
             prov = await node.build_provenance()
             assert "Council tax estimated" in (prov.description or "")
@@ -160,8 +160,8 @@ class TestCouncilTaxNode:
             addr = UserInputNode[str]("addr_ct_rate", str)
             pc = UserInputNode[str]("pc_ct_rate", str)
             node = CouncilTaxNode("ct_rate", best_address=addr, postcode_node=pc)
-            addr.push("2 Willowmead Gardens, Marlow, SL7 1HW", "test")
-            pc.push("SL7 1HW", "test")
+            addr.push("2 Sample Gardens, Sampleton, XY3 4ZW", "test")
+            pc.push("XY3 4ZW", "test")
 
             from dag.scheduler import flush_processor
 
@@ -208,8 +208,8 @@ class TestCouncilTaxNode:
             addr = UserInputNode[str]("addr_ct_ev", str)
             pc = UserInputNode[str]("pc_ct_ev", str)
             node = CouncilTaxNode("ct_ev", best_address=addr, postcode_node=pc)
-            addr.push("2 Willowmead Gardens, Marlow, SL7 1HW", "test")
-            pc.push("SL7 1HW", "test")
+            addr.push("2 Sample Gardens, Sampleton, XY3 4ZW", "test")
+            pc.push("XY3 4ZW", "test")
 
             from dag.scheduler import flush_processor
 
@@ -297,14 +297,14 @@ class TestTownDescNode:
             loc = UserInputNode[GeoPoint]("loc_td3", GeoPoint)
             loc.push(GeoPoint(lat=51.5, lon=-0.1), "test")
             nearest.push("London", "test")
-            addr_town.push("Southall", "test")
-            pc.push("UB2 4GN", "test")
+            addr_town.push("Anytown", "test")
+            pc.push("AB1 2CD", "test")
             await flush_processor()
             a = await node.attempt()
             assert a.succeeded, f"town_desc failed: {a.error}"
-            # Must prefer address-extracted "Southall" over reverse-geocoded "London"
-            assert seen_town == "Southall", f"Expected address town, got {seen_town}"
-            assert seen_pc == "UB2 4GN"
+            # Must prefer address-extracted "Anytown" over reverse-geocoded "London"
+            assert seen_town == "Anytown", f"Expected address town, got {seen_town}"
+            assert seen_pc == "AB1 2CD"
         finally:
             _sp.reset(token)
 

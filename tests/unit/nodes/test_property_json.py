@@ -76,12 +76,12 @@ def prop():
 
     p = PropertyNodes("test_shape")
     p.rightmove_price.push(Money("550000", "GBP"), "test")
-    p.rightmove_address.push("31 Isambard Rd", "test")
+    p.rightmove_address.push("31 Example Rd", "test")
     p.rightmove_bedrooms.push("3", "test")
     p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
-    p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
+    p.corrected_address.push("31 Example Rd, SW1P 1AA", "test")
     p.precise_location.push(GeoPoint(51.5, -0.37), "test")
-    p.user_entered_address.push("31 Isambard Rd, SW1P 1AA", "test")
+    p.user_entered_address.push("31 Example Rd, SW1P 1AA", "test")
     p.works_estimates.push({"3": Money("0", "GBP")}, "test")
     p.comment_status.push("", "test")
     return p
@@ -355,12 +355,12 @@ class TestSchoolAcceptableFromPersons:
 
         p = PropertyNodes("test_acc")
         p.rightmove_price.push(Money("550000", "GBP"), "test")
-        p.rightmove_address.push("31 Isambard Rd", "test")
+        p.rightmove_address.push("31 Example Rd", "test")
         p.rightmove_bedrooms.push("3", "test")
         p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
-        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.corrected_address.push("31 Example Rd, SW1P 1AA", "test")
         p.precise_location.push(GeoPoint(51.5, -0.37), "test")
-        p.user_entered_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.user_entered_address.push("31 Example Rd, SW1P 1AA", "test")
 
         await flush_processor()
 
@@ -390,11 +390,11 @@ class TestSchoolAcceptableFromPersons:
 
         p = PropertyNodes("test_acc2")
         p.rightmove_price.push(Money("550000", "GBP"), "test")
-        p.rightmove_address.push("31 Isambard Rd", "test")
+        p.rightmove_address.push("31 Example Rd", "test")
         p.rightmove_bedrooms.push("3", "test")
-        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.corrected_address.push("31 Example Rd, SW1P 1AA", "test")
         p.precise_location.push(GeoPoint(51.5, -0.37), "test")
-        p.user_entered_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.user_entered_address.push("31 Example Rd, SW1P 1AA", "test")
 
         await flush_processor()
 
@@ -417,8 +417,8 @@ class TestReadsAreNonBlocking:
         from houses.nodes.property_nodes import PropertyNodes
 
         p = PropertyNodes("test_nonblocking")
-        p.rightmove_address.push("31 Isambard Rd, SW1P 1AA", "test")
-        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.rightmove_address.push("31 Example Rd, SW1P 1AA", "test")
+        p.corrected_address.push("31 Example Rd, SW1P 1AA", "test")
         await flush_processor()
 
         ba = p.best_address
@@ -445,8 +445,8 @@ class TestReadsAreNonBlocking:
         from houses.nodes.property_nodes import PropertyNodes
 
         p = PropertyNodes("test_nonblocking2")
-        p.rightmove_address.push("31 Isambard Rd, SW1P 1AA", "test")
-        p.corrected_address.push("31 Isambard Rd, SW1P 1AA", "test")
+        p.rightmove_address.push("31 Example Rd, SW1P 1AA", "test")
+        p.corrected_address.push("31 Example Rd, SW1P 1AA", "test")
         await flush_processor()
 
         ba = p.best_address

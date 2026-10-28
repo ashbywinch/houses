@@ -762,7 +762,7 @@ describe('PropertyDetail council-tax apportionment (AnnexeSection wiring)', () =
         council_tax: {
           succeeded: true,
           value: councilTaxValue({
-            address: 'FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW',
+            address: 'FLAT 2, 2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW',
             band: 'A',
             yearly_cost: { value: { amount: '900', currency: 'GBP' }, stddev: 0 },
           }),
@@ -775,7 +775,7 @@ describe('PropertyDetail council-tax apportionment (AnnexeSection wiring)', () =
     const text = wrapper.text()
     expect(text).toContain('Council tax — who pays')
     expect(text).toContain('Main house — Band F · £3,650.11/yr')
-    expect(text).toContain('FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW')
+    expect(text).toContain('FLAT 2, 2 SAMPLE GARDENS, SAMPLETON, XY3 4ZW')
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(6)
   })
 

@@ -649,7 +649,7 @@ class TestGroupMonthlyCostNode:
                 band="D",
                 yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
                 annexe=AnnexeDwelling(
-                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    address="FLAT 2, 2 SAMPLE GARDENS",
                     band="A",
                     yearly_cost=Measurement(Money("900", "GBP"), 0.0),
                 ),
@@ -706,7 +706,7 @@ class TestGroupMonthlyCostNode:
                 band="D",
                 yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
                 annexe=AnnexeDwelling(
-                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    address="FLAT 2, 2 SAMPLE GARDENS",
                     band="A",
                     yearly_cost=Measurement(Money("900", "GBP"), 0.0),
                 ),
@@ -748,7 +748,7 @@ class TestGroupMonthlyCostNode:
                 band="D",
                 yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
                 annexe=AnnexeDwelling(
-                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    address="FLAT 2, 2 SAMPLE GARDENS",
                     band="A",
                     yearly_cost=Measurement(Money("900", "GBP"), 0.0),
                 ),
@@ -787,7 +787,7 @@ class TestGroupMonthlyCostNode:
                 band="D",
                 yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
                 annexe=AnnexeDwelling(
-                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    address="FLAT 2, 2 SAMPLE GARDENS",
                     band="A",
                     yearly_cost=Measurement(Money("900", "GBP"), 0.0),
                 ),

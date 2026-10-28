@@ -26,7 +26,7 @@ const detailFixture = {
   settings: { persons: { value: [] } },
   monthly_baseline: {
     rid: '88275093',
-    address: '31 Isambard Road, Southall',
+    address: '31 Example Road, Anytown',
     couple: { value: '2383.36', approx: false },
     others: { value: '652.92', approx: false },
     others_rent_paid: 600,

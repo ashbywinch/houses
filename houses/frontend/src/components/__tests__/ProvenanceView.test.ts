@@ -192,7 +192,7 @@ describe('ProvenanceView — Dataset B: Council Tax Error (root error)', () => {
   it('shows the postcode input source', () => {
     const w = mountView(councilTaxError, { detailLevel: 'detail' })
     expect(w.text()).toContain('Postcode')
-    expect(w.text()).toContain('UB2 4GN')
+    expect(w.text()).toContain('AB1 2CD')
   })
 
   it('shows the best_address chain with its own sources', () => {
@@ -231,7 +231,7 @@ describe('ProvenanceView — Dataset C: Commute Error (deep error)', () => {
 
   it('shows the failing node label (transit route)', () => {
     const w = mountView(commuteError, { detailLevel: 'detail' })
-    expect(w.text()).toContain('Southall → Ealing Broadway → Oxford Circus → Pimlico')
+    expect(w.text()).toContain('Anytown → Ealing Broadway → Oxford Circus → Pimlico')
   })
 
   it('renders walk value (19 min)', () => {

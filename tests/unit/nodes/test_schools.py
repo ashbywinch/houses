@@ -248,7 +248,7 @@ class TestSchoolNodeAcceptable:
             acc_src.push(("boys", "girls"), "test")
             NearestSchoolNode("ps_acc", child_age=4, stage="primary", best_location=loc, acceptable=acc_src)
             loc.push(GeoPoint(51.5, -0.37), "test")
-            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            addr.push("31 Example Road, Anytown, AB1 2CD", "test")
             await flush_processor()
             assert seen_acceptable is not None
             assert set(seen_acceptable) == {SchoolGender.BOYS, SchoolGender.GIRLS}
@@ -281,7 +281,7 @@ class TestSchoolNodeAcceptable:
             acc_src.push(("girls",), "test")
             NearestSchoolNode("ss_acc", child_age=12, stage="secondary", best_location=loc, acceptable=acc_src)
             loc.push(GeoPoint(51.5, -0.37), "test")
-            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            addr.push("31 Example Road, Anytown, AB1 2CD", "test")
             await flush_processor()
             assert seen_acceptable is not None
             assert list(seen_acceptable) == [SchoolGender.GIRLS]
@@ -312,7 +312,7 @@ class TestSchoolNodeAcceptable:
             addr = UserInputNode[str]("addr_ps_def", str)
             NearestSchoolNode("ps_def", child_age=4, stage="primary", best_location=loc)
             loc.push(GeoPoint(51.5, -0.37), "test")
-            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            addr.push("31 Example Road, Anytown, AB1 2CD", "test")
             await flush_processor()
             assert seen == (SchoolGender.MIXED,)
         finally:
@@ -342,7 +342,7 @@ class TestSchoolNodeAcceptable:
             addr = UserInputNode[str]("addr_ss_def", str)
             NearestSchoolNode("ss_def", child_age=12, stage="secondary", best_location=loc)
             loc.push(GeoPoint(51.5, -0.37), "test")
-            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            addr.push("31 Example Road, Anytown, AB1 2CD", "test")
             await flush_processor()
             assert seen == (SchoolGender.MIXED,)
         finally:
@@ -1079,7 +1079,7 @@ class TestSchoolAcceptanceDep:
             addr = UserInputNode[str]("addr_acc_dep", str)
             NearestSchoolNode("ps_acc_dep", child_age=4, stage="primary", best_location=loc, acceptable=acc)
             loc.push(GeoPoint(51.5, -0.37), "test")
-            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            addr.push("31 Example Road, Anytown, AB1 2CD", "test")
             await flush_processor()
             assert seen and seen[-1] == (SchoolGender.MIXED,), seen
 

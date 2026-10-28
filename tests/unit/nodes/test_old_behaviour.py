@@ -33,7 +33,7 @@ class TestSchoolNodes:
         addr = UserInputNode[str]("addr", str)
         node = NearestSchoolNode("ss", child_age=12, stage="secondary", best_location=loc)
         loc.push(GeoPoint(51.5, -0.37), "test")
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        addr.push("31 Example Road, Anytown, AB1 2CD", "test")
 
         class AssertingService:
             async def find_nearest(self, postcode, child_age, address="", acceptable=None):
@@ -64,7 +64,7 @@ class TestSchoolNodes:
         addr = UserInputNode[str]("addr", str)
         node = NearestSchoolNode("ps", child_age=4, stage="primary", best_location=loc)
         loc.push(GeoPoint(51.5, -0.37), "test")
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        addr.push("31 Example Road, Anytown, AB1 2CD", "test")
 
         class AssertingService:
             async def find_nearest(self, postcode, child_age, address="", acceptable=None):
@@ -97,8 +97,8 @@ class TestCouncilTaxNode:
         addr = UserInputNode[str]("addr", str)
         pc = UserInputNode[str]("pc", str)
         node = CouncilTaxNode("ct", best_address=addr, postcode_node=pc)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        pc.push("UB2 4GN", "test")
+        addr.push("31 Example Road, Anytown, AB1 2CD", "test")
+        pc.push("AB1 2CD", "test")
 
         captured = {}
 
@@ -125,7 +125,7 @@ class TestCouncilTaxNode:
 
             await flush_processor()
             await node.attempt()
-            assert captured.get("postcode") == "UB2 4GN", f"Expected 'UB2 4GN', got {captured.get('postcode')!r}"
+            assert captured.get("postcode") == "AB1 2CD", f"Expected 'AB1 2CD', got {captured.get('postcode')!r}"
         finally:
             _sp.reset(token)
 
@@ -137,7 +137,7 @@ class TestCouncilTaxNode:
         addr = UserInputNode[str]("addr", str)
         pc = UserInputNode[str]("pc", str)
         node = CouncilTaxNode("ct2", best_address=addr, postcode_node=pc)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        addr.push("31 Example Road, Anytown, AB1 2CD", "test")
         from dag.scheduler import flush_processor
 
         await flush_processor()
@@ -155,13 +155,13 @@ class TestTownNode:
 
         addr = UserInputNode[str]("addr", str)
         node = TownNode("tn", best_address=addr)
-        addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
+        addr.push("48 Sample Avenue, Anytown, CD4 5EF", "test")
         from dag.scheduler import flush_processor
 
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none() == "Southall"
+        assert a.value_or_none() == "Anytown"
 
     @pytest.mark.asyncio
     async def test_fails_without_address(self):
@@ -180,7 +180,7 @@ class TestTownName:
     def test_extract_town_from_address(self):
         from houses.walkability import extract_town
 
-        assert extract_town("48 Acacia Avenue, Southall, UB2 5AD") == "Southall"
+        assert extract_town("48 Sample Avenue, Anytown, CD4 5EF") == "Anytown"
 
     def test_extract_town_maidenhead(self):
         from houses.walkability import extract_town

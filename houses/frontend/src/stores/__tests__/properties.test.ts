@@ -274,7 +274,7 @@ describe('add-property flow', () => {
 
 const homeBaseline: MonthlyBaseline = {
   rid: 'home',
-  address: '31 Isambard Road, Southall, UB2 4GN',
+  address: '31 Example Road, Anytown, AB1 2CD',
   couple: { value: '1783.61', approx: false },
   others: { value: '652.92', approx: false },
   others_rent_paid: 600,

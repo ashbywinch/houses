@@ -33,7 +33,7 @@ from tests.helpers import make_services
 LISTING_LOCATION = GeoPoint(51.48, -0.35)
 PRECISE_LOCATION = GeoPoint(51.5, -0.37)
 ASKING_PRICE = Money(amount="550000", currency="GBP")
-TEST_ADDRESS = "31 Isambard Rd, SW1V 2QQ"
+TEST_ADDRESS = "31 Example Rd, SW1V 2QQ"
 
 
 class _ExplodingPlanner:
@@ -55,7 +55,7 @@ def failing_prop():
     try:
         p = PropertyNodes("test_failure_surfaces")
         p.rightmove_price.push(ASKING_PRICE, "test")
-        p.rightmove_address.push("31 Isambard Rd", "test")
+        p.rightmove_address.push("31 Example Rd", "test")
         p.rightmove_bedrooms.push("3", "test")
         p.rightmove_location.push(LISTING_LOCATION, "rightmove")
         p.corrected_address.push(TEST_ADDRESS, "test")

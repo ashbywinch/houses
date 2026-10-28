@@ -2,7 +2,7 @@
 on the transit CostGroups.
 
 Regression: 88275093 Simon/Pimlico showed "Could not calculate — no
-fare STL→EAL". The route (Southall → Ealing Broadway → tube → Pimlico)
+fare STL→EAL". The route (Anytown → Ealing Broadway → tube → Pimlico)
 is entirely TfL-priced, but the fare was DROPPED in _build_cost_groups
 (a dangling `round(fare['totalCost']…)` expression), so daily_cost was
 £0 and the National Rail fare node ran, found no NR fare for the
@@ -32,15 +32,15 @@ _TFL_JOURNEY = {
                 {
                     "mode": {"name": "walking"},
                     "duration": "8",
-                    "departurePoint": {"commonName": "Isambard Road"},
-                    "arrivalPoint": {"commonName": "Southall Rail Station"},
+                    "departurePoint": {"commonName": "Example Road"},
+                    "arrivalPoint": {"commonName": "Anytown Rail Station"},
                     "route": {"name": ""},
                     "instruction": {"summary": "Walk"},
                 },
                 {
                     "mode": {"name": "national-rail"},
                     "duration": "9",
-                    "departurePoint": {"commonName": "Southall Rail Station"},
+                    "departurePoint": {"commonName": "Anytown Rail Station"},
                     "arrivalPoint": {"commonName": "Ealing Broadway Rail Station"},
                     "route": {"name": "Elizabeth line"},
                     "instruction": {"summary": "Elizabeth line"},

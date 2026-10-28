@@ -13,7 +13,7 @@ class TestExtractTown:
     @pytest.mark.parametrize(
         ("address", "expected"),
         [
-            ("31 Isambard Road, Southall, UB2 4GN", "Southall"),
+            ("31 Example Road, Anytown, AB1 2CD", "Anytown"),
             ("Boyn Valley Rd, Maidenhead, SL6 4DT", "Maidenhead"),
             ("Thurlby Way, Maidenhead, SL6 3YZ", "Maidenhead"),
             ("Blue Dawes, Pangbourne on Thames, RG8 7AS", "Pangbourne on Thames"),
@@ -113,7 +113,7 @@ class TestExtractTown:
         result = await enrich_walkability(
             51.5,
             -0.1,
-            "Some Street, Southall, UB2 4GN",
+            "Some Street, Anytown, AB1 2CD",
             fns=WalkabilityFns(
                 extract_town_centre=mock_extract,
                 walk_duration=mock_dur,

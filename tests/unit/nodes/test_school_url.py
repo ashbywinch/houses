@@ -35,7 +35,7 @@ async def test_school_location_node_returns_geopoint():
 
     # Push values — this triggers changed.emit() which queues the derived nodes
     loc.push(GeoPoint(51.5, -0.37), "test")
-    addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+    addr.push("31 Example Road, Anytown, AB1 2CD", "test")
 
     from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
@@ -88,7 +88,7 @@ async def test_school_node_output_has_url():
 
     # Push values — this triggers changed.emit() which queues the derived node
     loc.push(GeoPoint(51.5, -0.37), "test")
-    addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+    addr.push("31 Example Road, Anytown, AB1 2CD", "test")
 
     from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
