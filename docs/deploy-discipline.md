@@ -332,6 +332,42 @@ Two things the run taught, both already fixed:
 - **`last_write` stays stale through a flip**, correctly: the box was frozen and
   a converged DAG writes nothing. The settle reports it and does not gate on it.
 
+### Outcome — 2026-10-28, the seed deleted and the image made load-bearing
+
+`v1.5.9` (artifact `a8b2e41b…`). `prepare` snapshot **272,277 rows**
+(`gs://houses-artifacts/snapshots/20261027T203834Z.db`), restore verified
+`integrity=ok`, `migrations: 2 applied+checked, 0 failed`, then for the first
+time the **data smoke ran against the rows that would ship**: `46 properties,
+detail rendered, frontend served`. `flip` moved both L4 rules to
+`houses-standby-target` and held **20 healthy reads over 5 minutes**.
+
+Serving box: `/opt/houses/ARTIFACT ref=v1.5.9`,
+`RESTORED source=live-snapshot rows=272277`. `houses` is now the abandoned
+frozen owner.
+
+**The rollout surface was smaller than the pipeline behind it.** Six defects
+surfaced, each one visible only after the previous was fixed; the first four are
+process defects, and two of them were mine:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `provision` took 537s, then 897s of it "waiting for bootstrap" | a 1.4 GB **seed** restored onto an e2-micro, then overwritten by `prepare` minutes later | seed deleted; a box starts with **no data** |
+| stage `1. packages` cost **120.7s** on a baked image | the bootstrap apt-installed what the image was supposed to carry, so a stale image was invisible | bake **verifies** its layer before powering off; bootstrap only verifies, and its failure names `action=bake` and forbids installing |
+| release failed "image source drifted" while the image matched main | `image-stale` checked out the **released ref** and called it main | gate always checks out `main` (one image serves every box) |
+| `Error acquiring the state lock … 412` | a merge-triggered `dispatch-bake` and a manual `action=bake` overlapped | `provision`/`bake` share `concurrency: houses-terraform` |
+| every push to main failed with **0 jobs** | an edit dropped `bake`'s `runs-on`; GitHub only says "workflow file issue" | actionlint is a CI step (it names the line) |
+| `prepare` died after a good restore: `ENV_FILE: unbound variable` | the new smoke helper used `install-artifact.sh`'s variables, which `switch.sh` sets only in later branches | the helper declares its own locals |
+
+**The lesson worth keeping:** when a rollout is slow or fails on a *box* step,
+ask what the box was built with before patching the step. Three of the six were
+an artifact or an image being wrong, and the tempting "fix" — install the
+package here, keep the seed, copy the variables across — is what made the next
+rollout worse. The bootstrap now refuses rather than repairs, and says which.
+
+**Production was down from the 20:38 freeze to the 10:09 flip** on the date
+boundary, again mostly review. `prepare` itself was ~20 minutes end to end
+(1.4 GB snapshot stream, restore, two migrations).
+
 ## Data migrations ride the rollout (generic)
 
 A data migration is a ref-shipped script executed by the ONE runner
