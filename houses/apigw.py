@@ -175,7 +175,18 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
 # carrying "Quota exceeded" and one carrying "Invalid key" are different bugs.
 # Discarding the body is why the 2026-10-03 standing ORS direction refusal was
 # unattributable.
-_SECRET_PARAM_RE = re.compile(r"((?:api_?key|key|token|apikey)=)[^&\"'\s]+", re.IGNORECASE)
+# Every parameter name that carries a credential, not just this repo's current
+# `api_key`: a URL built by any caller lands in this log, and a `client_secret=`
+# that slipped through would be the whole point of the log leaking it. The
+# lookbehind keeps `author=smith` from matching as `auth`, and `=` (never `": "`)
+# keeps a JSON body's key from being mistaken for a query parameter.
+_SECRET_PARAM_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])"
+    r"((?:api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret"
+    r"|auth|authorization|password|passwd|secret|signature|sig|token|credential|key)=)"
+    r"[^&\"'\s,}]+",
+    re.IGNORECASE,
+)
 
 
 def _redact(text: object) -> str:
@@ -186,24 +197,33 @@ def _redact(text: object) -> str:
 def _caller_chain(limit: int = 8) -> str:
     """App frames that led to this call, outermost first (the call site last).
 
-    Keyed on the APP DIRECTORY, not on a "/houses/" substring: the repo itself
-    lives under .../code/houses, so a substring test also matched the venv's
-    own `_pytest` frames and reported the test runner as the caller (caught by
-    the audit-log test). Frames under tests/ and the venv are outside this
-    directory, so they drop out for free. The directory is resolved per call:
-    it is one stat against a network request, and module-level state would be
-    a second source of truth about where the app lives."""
-    app_dir = Path(__file__).resolve().parent
+    Scope is the REPO, not just the `houses/` package: `dag/` and `serialization/`
+    are app code too, and a call made from one of them must be attributed to it
+    rather than to whichever `houses/` frame happens to be nearest. Excluded:
+    the gateway itself, the venv (its `_pytest` frames put the test runner in
+    the chain — the repo path contains `/houses/`, which is why a substring
+    filter was wrong), `tests/`, and `build/`. Paths are rendered repo-relative.
+    Resolved per call: one stat against a network request, and no module state
+    that could disagree with where the app actually is."""
+    repo_root = Path(__file__).resolve().parents[1]
     gateway = Path(__file__).resolve()
+    excluded_roots = {"tests", "build"}
     frames: list[str] = []
     for frame in traceback.extract_stack()[:-1]:
+        # A frame with no file (an exec'd string, a REPL) has no attribution
+        # value and would otherwise render as a repo-relative path.
+        if frame.filename.startswith("<"):
+            continue
         try:
             path = Path(frame.filename).resolve()
         except OSError:  # a frame from a file that no longer exists
             continue
-        if path == gateway or not path.is_relative_to(app_dir):
+        if path == gateway or not path.is_relative_to(repo_root):
             continue
-        frames.append(f"{path.name}:{frame.lineno} {frame.name}")
+        rel = path.relative_to(repo_root)
+        if rel.parts[0] in excluded_roots or ".venv" in rel.parts:
+            continue
+        frames.append(f"{rel.as_posix()}:{frame.lineno} {frame.name}")
     return " <- ".join(frames[-limit:]) or "-"
 
 

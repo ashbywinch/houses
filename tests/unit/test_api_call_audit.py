@@ -113,8 +113,31 @@ async def test_a_body_that_echoes_a_key_is_redacted_in_the_log(caplog):
     assert "api_key=***" in logged
 
 
+@pytest.mark.parametrize(
+    "param",
+    ["api_key", "apikey", "api-key", "access_token", "refresh_token", "client_secret",
+     "auth", "authorization", "password", "passwd", "secret", "signature", "sig",
+     "token", "credential", "key"],
+)
+def test_every_credential_parameter_name_is_redacted(param):
+    """A URL built by any caller lands in this log — the mask cannot be a
+    list of the names this repo happens to use today."""
+    assert apigw._redact(f"https://x/y?{param}=SECRET123&b=2") == f"https://x/y?{param}=***&b=2"
+
+
+def test_a_benign_parameter_that_starts_with_a_secret_name_is_left_alone():
+    """`author=smith` must not match `auth` — over-redaction destroys the log."""
+    assert apigw._redact("https://x/y?author=smith") == "https://x/y?author=smith"
+
+
+def test_a_json_body_key_is_not_mistaken_for_a_query_parameter():
+    """Bodies are JSON: `"key": "value"` is not a credential."""
+    assert apigw._redact('{"key": "value"}') == '{"key": "value"}'
+
+
 def test_the_caller_chain_ignores_frames_outside_the_app():
-    """The chain must name app code, never the venv's own pytest frames."""
+    """The chain must name app code, never the venv's pytest frames or tests."""
     chain = apigw._caller_chain()
     assert "_pytest" not in chain
     assert ".venv" not in chain
+    assert "tests/" not in chain
