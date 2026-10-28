@@ -33,10 +33,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
+import traceback
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -165,6 +168,60 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     return None
 
 
+# ── outbound-call audit log ───────────────────────────────────────────
+# Every external call funnels through api_fetch — the one place a per-call
+# record can be written: the app frames that asked for it, what went on the
+# wire, and what came back. The response BODY is part of that record: a 403
+# carrying "Quota exceeded" and one carrying "Invalid key" are different bugs.
+# Discarding the body is why the 2026-10-03 standing ORS direction refusal was
+# unattributable.
+_SECRET_PARAM_RE = re.compile(r"((?:api_?key|key|token|apikey)=)[^&\"'\s]+", re.IGNORECASE)
+
+
+def _redact(text: object) -> str:
+    """Text that is safe to log: query-string secrets masked."""
+    return _SECRET_PARAM_RE.sub(r"\1***", str(text))
+
+
+def _caller_chain(limit: int = 8) -> str:
+    """App frames that led to this call, outermost first (the call site last).
+
+    Keyed on the APP DIRECTORY, not on a "/houses/" substring: the repo itself
+    lives under .../code/houses, so a substring test also matched the venv's
+    own `_pytest` frames and reported the test runner as the caller (caught by
+    the audit-log test). Frames under tests/ and the venv are outside this
+    directory, so they drop out for free. The directory is resolved per call:
+    it is one stat against a network request, and module-level state would be
+    a second source of truth about where the app lives."""
+    app_dir = Path(__file__).resolve().parent
+    gateway = Path(__file__).resolve()
+    frames: list[str] = []
+    for frame in traceback.extract_stack()[:-1]:
+        try:
+            path = Path(frame.filename).resolve()
+        except OSError:  # a frame from a file that no longer exists
+            continue
+        if path == gateway or not path.is_relative_to(app_dir):
+            continue
+        frames.append(f"{path.name}:{frame.lineno} {frame.name}")
+    return " <- ".join(frames[-limit:]) or "-"
+
+
+def _body_snippet(resp: httpx.Response | None, limit: int = 300) -> str:
+    """The response body, whitespace-collapsed, secrets masked and truncated.
+
+    Redacted for the same reason as the URL: this text is echoed into the log,
+    and a key reflected back in a body would be logged with it. An unreadable
+    or non-UTF-8 body yields "" — logging must never break the call it
+    describes."""
+    if resp is None:
+        return ""
+    try:
+        return _SECRET_PARAM_RE.sub(r"\1***", " ".join(resp.text.split()))[:limit]
+    except (httpx.ResponseNotRead, UnicodeDecodeError, AttributeError):
+        return ""
+
+
 # ── per-process state (the quota belongs to the KEY, so it is
 # ── process-wide, not per-request) ────────────────────────────────────
 class ApiGate:
@@ -233,6 +290,11 @@ async def api_fetch(req: FetchArgs, *, api: ApiProfile) -> Any:
     await GATE.pace(api)
 
     async def _fetch() -> Any:
+        # This closure runs only on a cache MISS, so one "api call" line is
+        # exactly one real outbound call — attributable per caller and per
+        # sweep. That count is what the 2026-10-03 quota overuse needed and
+        # did not have.
+        logger.info("api call %s %s | %s", req.method, _redact(req.url), _caller_chain())
         factory = req._client_factory or cached_async_client
         async with factory(timeout=api.timeout_s) as client:
             try:
@@ -244,25 +306,50 @@ async def api_fetch(req: FetchArgs, *, api: ApiProfile) -> Any:
                     headers=req.headers,
                 )
             except httpx.HTTPStatusError as e:
+                body = _body_snippet(e.response)
+                logger.warning(
+                    "api response %s HTTP %s | %s",
+                    _redact(req.url), e.response.status_code, body or "(no body)",
+                )
                 # the raised path: a quota status inside the error flips the
                 # flag too (raise_for_status-style clients and test fakes)
                 if api.is_quota(e.response.status_code):
                     GATE.mark_quota_exhausted(api)
                     raise DailyQuotaError(
-                        f"{api}: HTTP {e.response.status_code} (daily quota) for {req.url}"
+                        _redact(
+                            f"{api}: HTTP {e.response.status_code} (daily quota) for {req.url}"
+                            + (f" — {body}" if body else "")
+                        )
                     ) from e
                 raise GatewayHttpError(
-                    str(e), request=e.request, response=e.response,
+                    _redact(f"{e} — {body}" if body else str(e)),
+                    request=e.request, response=e.response,
                     retry_after=_retry_after_seconds(e.response),
                 ) from e
             if api.is_quota(resp.status_code):
                 GATE.mark_quota_exhausted(api)
-                raise DailyQuotaError(f"{api}: HTTP {resp.status_code} (daily quota) for {req.url}")
+                body = _body_snippet(resp)
+                logger.warning(
+                    "api response %s HTTP %s | %s",
+                    _redact(req.url), resp.status_code, body or "(no body)",
+                )
+                raise DailyQuotaError(
+                    _redact(
+                        f"{api}: HTTP {resp.status_code} (daily quota) for {req.url}"
+                        + (f" — {body}" if body else "")
+                    )
+                )
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
+                body = _body_snippet(e.response)
+                logger.warning(
+                    "api response %s HTTP %s | %s",
+                    _redact(req.url), e.response.status_code, body or "(no body)",
+                )
                 raise GatewayHttpError(
-                    str(e), request=e.request, response=e.response,
+                    _redact(f"{e} — {body}" if body else str(e)),
+                    request=e.request, response=e.response,
                     retry_after=_retry_after_seconds(e.response),
                 ) from e
             return resp.json()

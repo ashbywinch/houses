@@ -785,6 +785,7 @@ class TestCallbackRedirects:
     Vite's proxy — so the redirect must be relative."""
 
     def test_callback_redirect_is_relative(self, monkeypatch):
+        # lucidlint: ignore monkeypatch — proves frontend_url is never read: a relative redirect is the assertion.
         monkeypatch.setattr(settings, "frontend_url", "http://localhost:5173")
         resp = client.get(
             "/api/auth/callback", params={"code": "x", "state": "nope"}, follow_redirects=False
@@ -793,6 +794,7 @@ class TestCallbackRedirects:
         assert resp.headers["location"] == "/?auth_error=invalid_state"
 
     def test_callback_error_redirect_is_relative(self, monkeypatch):
+        # lucidlint: ignore monkeypatch — same: proves frontend_url is never read on this path.
         monkeypatch.setattr(settings, "frontend_url", "http://localhost:5173")
         resp = client.get("/api/auth/callback", params={"error": "access_denied"}, follow_redirects=False)
         assert resp.status_code in (302, 307)
