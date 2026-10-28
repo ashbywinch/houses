@@ -289,12 +289,24 @@ jobs:
           export UV_PROJECT_ENVIRONMENT="$STAGE/.venv"
           uv venv --relocatable "$STAGE/.venv"
           uv sync --no-editable --frozen
-          # Prove it moved: unpack elsewhere and import the app + the DAG library.
+          # The shipped venv carries RUNTIME deps only. `dev` is an optional
+          # extra, so a plain `uv sync` omits it — but nothing enforced that: a
+          # future `uv sync --extra dev`, or `dev` moving to a
+          # [dependency-groups] entry (which uv sync DOES install by default),
+          # would silently put pytest/lucidlint/pyrefly on every box. Check the
+          # invariant instead of trusting the current spelling of pyproject.
+          "$STAGE/.venv/bin/python" -c 'import importlib.util as u, sys; leaked = [m for m in ("pytest","ruff","lucidlint","pyrefly","basedpyright","archunitpython","libcst","coverage") if u.find_spec(m)]; sys.exit(f"BUILD FAILED: dev-only packages in the production venv: {leaked}") if leaked else print("production venv carries runtime deps only")'
+          echo "venv contains no dev packages (runtime deps only)"
+          # Prove it moved AND that it runs the way the box runs it: the service
+          # uses WorkingDirectory=/opt/houses/app, so `serialization` (a repo-root
+          # package, not a venv install) must resolve from the CWD. Proving from
+          # `/` allows `houses`+`dag` but not `houses.server`, and hides exactly
+          # the 2026-10-27 scrape-worker failure (#206).
           PROOF=/tmp/houses-artifact-proof
           rm -rf "$PROOF"; mkdir -p "$PROOF"
           tar -cf - -C "$STAGE" . | tar -xf - -C "$PROOF"
-          ( cd / && "$PROOF/.venv/bin/python" -c 'import houses, dag' )
-          echo "venv receipt ok: the packed .venv imports houses + dag from $PROOF"
+          ( cd "$PROOF" && ./.venv/bin/python -c 'import houses, dag, serialization, houses.server' )
+          echo "venv receipt ok: from its own root the packed tree imports houses + dag + serialization + houses.server"
           rm -rf "$PROOF"
           # Pack, then hash the FILE: the object key must be the sha256 of the
           # exact bytes served, or the box's verification would be meaningless.
