@@ -285,9 +285,14 @@ _finish_restore() {
   # up on a restored, verified, migrated database.
   mark "restore: starting the app on the restored DB"
   systemctl restart houses.service
-  for i in $(seq 1 300); do
-    curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && break
-    sleep 2
+  # A first boot on a CODE-STALE database recomputes every stale node — a deploy
+  # invalidates the persisted fingerprints — so /health can lag a warm start by
+  # many minutes. 20 minutes, not 10: a short window turns a healthy-but-busy
+  # box into a false abort, which unfreezes production and makes someone retry.
+  # Measured cold start on a restored snapshot: ~5.5 min; the cascade is longer.
+  for i in $(seq 1 400); do
+    curl -fsS --max-time 5 localhost:8765/health >/dev/null 2>&1 && break
+    sleep 3
   done
   curl -fsS --max-time 30 localhost:8765/health >/dev/null 2>&1 || {
     mark "FAILED: the app did not become healthy after the restore — leaving it stopped, the owner is untouched"
@@ -399,9 +404,11 @@ fi
 
 if [ "$ACTION" = "--serve" ]; then
   systemctl start houses.service 2>/dev/null || { mark "FAILED: could not start houses.service"; exit 1; }
-  for i in $(seq 1 300); do
-    curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && break
-    sleep 2
+  # Same 20-minute window as the restore: a freshly installed artifact carries
+  # new code, which can invalidate fingerprints and start a recompute cascade.
+  for i in $(seq 1 400); do
+    curl -fsS --max-time 5 localhost:8765/health >/dev/null 2>&1 && break
+    sleep 3
   done
   curl -fsS --max-time 30 localhost:8765/health >/dev/null 2>&1 || {
     mark "FAILED: the app did not become healthy after --serve"
@@ -432,9 +439,11 @@ if [ "$ACTION" = "--role" ]; then
   fi
   mark "role url set: $URL — restarting the app to apply it"
   systemctl restart houses.service 2>/dev/null || { mark "FAILED: could not restart houses.service"; exit 1; }
-  for i in $(seq 1 300); do
-    curl -fsS --max-time 3 localhost:8765/health >/dev/null 2>&1 && break
-    sleep 2
+  # Restarting onto new code can also start a cascade; the flip must not fail on
+  # a box that is merely busy.
+  for i in $(seq 1 400); do
+    curl -fsS --max-time 5 localhost:8765/health >/dev/null 2>&1 && break
+    sleep 3
   done
   curl -fsS --max-time 30 localhost:8765/health >/dev/null 2>&1 || {
     mark "FAILED: the app did not become healthy after --role"
