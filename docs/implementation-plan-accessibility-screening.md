@@ -102,7 +102,7 @@ rejection.
 |---|---|---|
 | `evals/` gated by `RUN_EVALS=1`; never in CI; deliberate spend | books_to_anki (`evals/conftest.py`) | `tests/evals/conftest.py` skips everything unless `RUN_EVALS=1` |
 | Eval = named regression case from a real failure, asserting a contract | books_to_anki | Each eval names the trap it encodes (e.g. "front-door-facing loo", "carpet bedroom") |
-| "If it doesn't call a real API/model, it's a test, not an eval" | chat-workflow `docs/testing.md` | Parser/photo evals run the **real pipeline** on real fixtures; pure-logic checks stay in `tests/unit` |
+| "If it doesn't call a real API/model, it's a test, not an eval" | chat-workflow (its own testing doc — not this repo) | Parser/photo evals run the **real pipeline** on real fixtures; pure-logic checks stay in `tests/unit` |
 | Live evals **fail (not skip)** when keys/artifacts missing | chat-workflow | Photo-inference evals fail if no API key; model evals fail if `make floorplan-model` wasn't run |
 | `make evals` + affected-evals selection | chat-workflow Makefile | `make evals`; `make evals-incremental` via the code-review-graph dependency map |
 | Golden labelled sets committed under `tests/fixtures/` | feed-generator | `tests/fixtures/floorplans/` + `labels.json` (+ photo + aerial labels), committed `-diff`/`linguist-generated` |
