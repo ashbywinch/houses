@@ -24,6 +24,7 @@ REQUIRED_TOOLS = ("sqlite3", "curl", "gpg", "gsutil", "caddy")
 REQUIRED_DIRS = ("/opt/houses/data", "/etc/caddy/certs")
 
 
+# lucidlint: ignore fakefs — reads the repo's real deploy scripts; they are the subject.
 def test_the_bootstrap_never_installs_the_os_layer():
     src = BOOTSTRAP.read_text()
     assert "apt-get install" not in src, (
@@ -37,6 +38,7 @@ def test_the_bootstrap_never_installs_the_os_layer():
     )
 
 
+# lucidlint: ignore fakefs — reads the real deploy scripts, which are the subject.
 def test_the_failure_points_at_the_image_not_the_bootstrap():
     src = BOOTSTRAP.read_text()
     assert "action=bake" in src, (
@@ -49,6 +51,7 @@ def test_the_failure_points_at_the_image_not_the_bootstrap():
     )
 
 
+# lucidlint: ignore fakefs — reads the real deploy scripts, which are the subject.
 def test_both_sides_verify_the_same_layer():
     for path in (BASE_IMAGE, BOOTSTRAP):
         src = path.read_text()
@@ -58,6 +61,7 @@ def test_both_sides_verify_the_same_layer():
             assert directory in src, f"{path.name} does not check for {directory}"
 
 
+# lucidlint: ignore fakefs — reads the real bake script, which is the subject.
 def test_the_bake_verifies_before_it_powers_off():
     src = BASE_IMAGE.read_text()
     verify_at = src.find("OS layer verified")

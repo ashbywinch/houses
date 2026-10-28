@@ -19,6 +19,7 @@ SCRIPT_DIRS = ("tools", "scripts")
 BANNED = re.compile(rb"^#!\s*/usr/bin/env\s+python\s*$", re.MULTILINE)
 
 
+# lucidlint: ignore fakefs — the subject IS the repo's real script files.
 def test_no_script_uses_a_bare_python_shebang():
     offenders = [
         str(path.relative_to(REPO))

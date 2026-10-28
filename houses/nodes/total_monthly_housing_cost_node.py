@@ -358,25 +358,25 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
 
 
 
-# The breakdown rows as the reader knows them (the wire keys are the
-# computation's own field names).
-_BREAKDOWN_LABELS = {
-    "commutes": "Commute",
-    "insurance": "Life insurance",
-    "council_tax": "Council tax (main)",
-    "sinking_fund": "Sinking fund",
-    "annexe_council_tax": "Council tax (annexe)",
-    "rent_paid": "Rent paid",
-    "mortgage": "Mortgage",
-    "rental_income": "Rental income",
-}
-
-
 def _breakdown_formula(breakdown: Mapping[str, Any], label: str, result: str) -> Formula:
     """One group's monthly figure as a formula: every row that made it, then the total."""
+    # The breakdown rows as the reader knows them (the wire keys are the
+    # computation's own field names). Local to its only reader: a module-level
+    # table is state nothing can vary, and a presentation label is not worth a
+    # shared mutable.
+    labels = {
+        "commutes": "Commute",
+        "insurance": "Life insurance",
+        "council_tax": "Council tax (main)",
+        "sinking_fund": "Sinking fund",
+        "annexe_council_tax": "Council tax (annexe)",
+        "rent_paid": "Rent paid",
+        "mortgage": "Mortgage",
+        "rental_income": "Rental income",
+    }
     lines = [
         FormulaLine(
-            label=_BREAKDOWN_LABELS.get(key, key.replace("_", " ")),
+            label=labels.get(key, key.replace("_", " ")),
             # + 0 normalises -0.00 (a zero rental income) to 0.00.
             value=f"£{Decimal(str(value)) + Decimal(0):,.2f}",
         )

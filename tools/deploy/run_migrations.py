@@ -48,6 +48,7 @@ import argparse
 import collections
 import dataclasses
 import datetime as dt
+import errno
 import os
 import pwd
 import re
@@ -402,11 +403,22 @@ def _open_report() -> Report:
     log_dir = _log_dir()
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
+    except OSError as exc:
         # The box owns /opt/houses; a LAN machine running this same runner
         # (tools/deploy/seed-box.sh) does not, and the default log dir is
-        # unreachable there. The transcript still has to exist.
-        log_dir = Path(tempfile.gettempdir()) / "houses-migrations"
+        # unreachable there. Only "this directory cannot be written here" falls
+        # back — EACCES/EPERM (not ours) and EROFS (read-only root) — and it
+        # says so, because an operator must know the transcript moved. Anything
+        # else (a missing parent, a bad path) is a real error and propagates.
+        if exc.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):
+            raise
+        fallback = Path(tempfile.gettempdir()) / "houses-migrations"
+        print(
+            f"run_migrations: cannot write {log_dir} ({exc.strerror}) — "
+            f"writing the transcript to {fallback} instead",
+            file=sys.stderr,
+        )
+        log_dir = fallback
         log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
     report = Report(log_dir / f"{RunnerConfig.LOG_PREFIX}{stamp}.log")
