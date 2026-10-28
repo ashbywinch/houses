@@ -5,7 +5,7 @@
 # bash, everywhere.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
-.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check check-architecture lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve lucidlint
+.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check check-architecture lint format docs-check clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve lucidlint
 
 # Variables
 PYTHON := .venv/bin/python
@@ -34,6 +34,7 @@ help:
 	@echo "  ${GREEN}make test-e2e${NC}           Run only end-to-end tests (hits real APIs)"
 	@echo "  ${GREEN}make e2e${NC}                Alias for test-e2e"
 	@echo "  ${GREEN}make lint${NC}               Check code quality with ruff"
+	@echo "  ${GREEN}make docs-check${NC}         Every relative markdown link resolves (house standard)"
 	@echo "  ${GREEN}make format${NC}             Auto-fix formatting issues"
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
@@ -190,6 +191,10 @@ lint: deps lint-check
 lint-check:  # Shared with the pre-commit hook — single source of truth for the lint scope
 	@$(RUFF) check houses/ tests/ tools/ dag/
 	cd houses/frontend && npm run lint:css
+
+docs-check: deps   # every relative markdown link resolves (house standard)
+	@$(PYTHON) tools/check_docs_links.py
+
 
 lint-github: deps   # CI only: findings surface as PR annotations
 	@$(RUFF) check houses/ tests/ tools/ dag/ --output-format=github

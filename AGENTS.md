@@ -58,6 +58,19 @@ make stop                       # Stop dev server + frontend
 - **Never** ``hub restart`` anything — pointless with --reload.
 - **Health check** that hangs? Stop running it. Read logs.
 
+## Testing rules
+
+- ALWAYS use `make` targets — `make test`, `make lint`, `make docs-check`; NEVER
+  construct ad-hoc test commands. CI runs exactly the make targets.
+- `make test` gates on `lint` + `typecheck`; `make docs-check` verifies every relative
+  markdown link resolves (a doc that links nowhere is a finding).
+
+## Secrets
+
+- Real secrets live in the shell environment — never in code, docs, logs, or `.env`
+  files committed to the repo.
+- Check a variable with `test -n "$VAR"` — NEVER `echo $VAR` (leaks it).
+
 ## Database
 
 - **NEVER delete or recreate the database.** Here's why and what to do instead:
@@ -98,6 +111,7 @@ make stop                       # Stop dev server + frontend
 
 ## Decision Tree
 
+- **Accessibility screening feature (PRD + implementation plan)**: [docs/prd-accessibility-screening.md](docs/prd-accessibility-screening.md) + [docs/implementation-plan-accessibility-screening.md](docs/implementation-plan-accessibility-screening.md)
 - **Develop / test / run**: [docs/development.md](docs/development.md)
 - **Coding standards / conventions**: [docs/coding-standards.md](docs/coding-standards.md)
 - **Writing tests**: [docs/testing-standards.md](docs/testing-standards.md)
