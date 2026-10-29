@@ -271,7 +271,6 @@ class TestSummaryShape:
             "rightmove_price",
             "rightmove_bedrooms",
             "group_monthly_cost",
-            "town_name",
             "commutes",
             "schools",
             "walkability",
@@ -290,7 +289,6 @@ class TestSummaryShape:
             "rightmove_price",
             "rightmove_bedrooms",
             "group_monthly_cost",
-            "town_name",
             "walkability",
         )
         for key in wrapped:
@@ -361,6 +359,44 @@ class TestCommuteData:
             c = cd["commute"]
             if "Primary School" in key or "Secondary School" in key:
                 assert c.get("is_child") is True, f"{key} should be child commute"
+
+    @pytest.mark.asyncio
+    async def test_summary_commutes_carry_only_the_card_wire(self, prop):
+        """An index load must not carry detail-page commute data.
+
+        The card renders the person's name, the destination address, the
+        duration/cost pill and the child flag. The route legs, the whole
+        Person record and the destination's frequency/modes belong to the
+        detail page (docs/api.md → GET /api/properties/all).
+        """
+        await flush_processor()
+        s = (await prop.summary()).to_dict()
+        seen = 0
+
+        for key, cd in s["commutes"].items():
+            val = cd["commute"].get("value")
+            if not isinstance(val, dict):
+                continue
+            seen += 1
+            assert set(val) == {"label", "person", "destination", "duration", "daily_cost", "mode", "is_child"}
+            assert set(val["person"]) == {"name"}, f"{key} ships the whole person record"
+            assert set(val["destination"]) == {"address"}, f"{key} ships the whole destination"
+
+        assert seen > 0, "fixture produced no computed commute"
+
+    @pytest.mark.asyncio
+    async def test_detail_commutes_keep_the_full_wire(self, prop):
+        """The detail page still gets the route legs and embedded records."""
+        await flush_processor()
+        d = (await prop.detail()).to_dict()
+        values = [c["value"] for c in d["commutes"].values() if isinstance(c.get("value"), dict)]
+
+        assert values, "fixture produced no computed commute"
+        for val in values:
+            assert "_details" in val, "detail commute lost its route legs"
+            assert "origin" in val
+            assert "has_car" in val["person"], "detail commute lost the person record"
+            assert "trips_per_week" in val["destination"]
 
 
 class TestSchoolData:

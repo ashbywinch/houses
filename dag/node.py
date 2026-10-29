@@ -4,6 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, ClassVar, Generic, TypeVar
 
 from pydantic import Field, TypeAdapter
@@ -37,6 +38,21 @@ class NodeValue(SerializableAsDict):
     retry_at: str | None = Field(default=None, exclude_if=omit_when_none)
     retry_count: int | None = Field(default=None, exclude_if=omit_when_none)
     stale: bool | None = Field(default=None, exclude_if=omit_when_none)
+
+
+class WireProjection(StrEnum):
+    """How much of a node's value its wire carries.
+
+    ``FULL`` is the persisted row and the detail page: the whole value.
+    ``CARD`` is the bulk-list projection — only the fields the list surface
+    renders, so an index load never pays for detail-page data (route legs,
+    embedded person records) it cannot show. A node opts in by handling the
+    projection in ``_wire_value``; a node whose whole value is rendered
+    ignores it.
+    """
+
+    FULL = "full"
+    CARD = "card"
 
 
 T = TypeVar("T")
@@ -280,6 +296,7 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         active_deps: tuple[Node, ...] | None = None,
         *,
         provenance: bool = True,
+        projection: WireProjection = WireProjection.FULL,
     ) -> NodeValue:
         """This node's wire record — the shape ``to_json``/``to_json_value`` dump.
 
@@ -287,12 +304,13 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         declares ``wire_type`` and extends the record (DerivedNode's lifecycle
         keys, PetrolCostAugmentNode's ``is_child``), so no caller has to patch
         keys onto a dict it does not own. ``provenance=False`` skips the
-        expensive tree build (the bulk-list path).
+        expensive tree build (the bulk-list path); ``projection`` chooses how
+        much of the value the bulk path carries (see ``WireProjection``).
         """
         attempt = await self.attempt()
         rec = self.wire_type(
             status=attempt.status,
-            value=self._wire_value(attempt),
+            value=self._wire_value(attempt, projection),
             succeeded=attempt.succeeded,
             pending=attempt.pending,
             impossible=attempt.impossible,
@@ -308,13 +326,15 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
             rec.provenance = (await self.build_provenance(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
         return rec
 
-    def _wire_value(self, attempt: Attempt[Any]) -> Any:
+    def _wire_value(self, attempt: Attempt[Any], projection: WireProjection = WireProjection.FULL) -> Any:
         """The value as the wire states it.
 
-        The base dumps the typed value. A node whose value is a machine dict
-        (CommuteSelectorNode's breakdown, with its private ``_details`` field
-        renamed for the frontend) projects it here, so the projection holds on
-        the serve path AND the persist path — one place, not one per caller.
+        The base dumps the typed value. A node whose value carries more than
+        a surface renders (CommuteSelectorNode's breakdown, with its private
+        ``_details`` field renamed for the frontend) projects it here, so the
+        projection holds on the serve path AND the persist path — one place,
+        not one per caller. ``projection`` is ignored by nodes whose whole
+        value is rendered.
         """
         return self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None
 
@@ -324,13 +344,14 @@ class Node(ABC, PersistedNodeMixin[T], Generic[T]):
         """The node's wire: ``to_node_value``, dumped."""
         return (await self.to_node_value(dep_attempts=dep_attempts, active_deps=active_deps)).to_dict()
 
-    async def to_json_value(self) -> dict:
+    async def to_json_value(self, *, projection: WireProjection = WireProjection.FULL) -> dict:
         """Like to_json() but skips the expensive provenance tree build.
 
         Returns status, value, and metadata only — no ``provenance`` field.
-        Use this for bulk-list endpoints where provenance is not needed.
+        Use this for bulk-list endpoints where provenance is not needed; a
+        list surface passes the projection it renders (``WireProjection.CARD``).
         """
-        return (await self.to_node_value(provenance=False)).to_dict()
+        return (await self.to_node_value(provenance=False, projection=projection)).to_dict()
 
     def _impossible(self, dep_attempts: _DepAttemptMap, extra: str = "") -> Attempt[T]:
         parts = [self._id]

@@ -10,10 +10,11 @@ from pydantic import Field
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.expression import Choose, Expression, Ref
-from dag.node import Node, NodeValue
+from dag.node import Node, NodeValue, WireProjection
 from houses.commute import CostGroup, LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, PlaceOfInterest
+from houses.nodes.commute_card import card_wire
 from serialization import omit_when_none
 
 logger = logging.getLogger(__name__)
@@ -342,20 +343,30 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return result
 
     @override
-    def _wire_value(self, attempt: Attempt[Any]) -> Any:
-        """The selector's value: the commute dump with its private ``_details``
-        field renamed to ``details`` for the frontend. An unserializable value
-        degrades to ``None`` (the row then states no value, as before)."""
+    def _wire_value(self, attempt: Attempt[Any], projection: WireProjection = WireProjection.FULL) -> Any:
+        """The selector's value, projected to what the surface renders.
+
+        ``FULL`` (the persisted row and the detail page) is the commute dump
+        with its private ``_details`` field renamed to ``details`` for the
+        frontend. ``CARD`` is the list card's projection: the person's name,
+        the destination's address, the duration/cost pill, and the child flag
+        — never the route legs or the embedded records the card cannot show.
+        An unserializable value degrades to ``None`` (the row then states no
+        value, as before).
+        """
         if not (attempt.succeeded and attempt.value_or_none() is not None):
             return None
+        value = attempt.value_or_none()
+        if projection is WireProjection.CARD:
+            return card_wire(value)
         try:
-            value = self._adapter.dump_python(attempt.value_or_none(), mode="json")
+            dumped = self._adapter.dump_python(value, mode="json")
         except (AttributeError, TypeError, ValueError):
             logger.exception("Failed to serialize commute value to JSON")
             return None
-        if isinstance(value, dict) and "_details" in value:
-            value["details"] = value.pop("_details")
-        return value
+        if isinstance(dumped, dict) and "_details" in dumped:
+            dumped["details"] = dumped.pop("_details")
+        return dumped
 
     @override
     def _enrich_json(self, result: NodeValue) -> None:

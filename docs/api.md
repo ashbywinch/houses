@@ -6,6 +6,8 @@ All endpoints live on port 8765 (`make run`). **The source of truth is the runni
 |----------|--------------------|
 | `GET /properties` | Lists every property from the DB-backed DAG registry. Legacy `?tab=view\|data` param is accepted and ignored — both serve the same rows |
 | `POST /api/properties` | Single-property upsert (scrape a Rightmove URL); re-adds of an existing RID are rejected unless `fields=` is passed |
+| `GET /api/properties/all` | One card per property for the index, ordered by the server's card score. The commute value is the **card projection** (`WireProjection.CARD`): person name, destination address, duration/cost/mode/child flag only. Route legs (`details`), the full person/destination records and the planned origin are detail-page data and are not served here |
+| `GET /api/properties/{rid}/detail` | The full detail wire — its commutes keep the whole commute value (route legs, embedded records) |
 | `POST /api/admin/regenerate` | Superuser-only force-recompute of derived nodes matching id patterns |
 
 ## POST /api/properties

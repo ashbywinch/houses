@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import Field
 
+from dag.node import WireProjection
 from dag.persistence import property_created_at
 from houses.nodes.school_entry import SchoolEntry
 from houses.nodes.schools_block import SchoolsBlock
@@ -32,7 +33,6 @@ class PropertySummary(SerializableAsDict):
     rightmove_price: Any = None
     rightmove_bedrooms: Any = None
     group_monthly_cost: Any = None
-    town_name: Any = None
     commutes: dict[str, Mapping[str, Any]] = Field(default_factory=dict)
     schools: SchoolsBlock = Field(default_factory=SchoolsBlock)
     walkability: Any = None
@@ -44,9 +44,12 @@ class PropertySummary(SerializableAsDict):
 async def property_summary(nodes: PropertyNodes) -> PropertySummary:
     """Build the summary payload from a property's node container.
 
-    The commute entries are the wire projection of the live selectors: only
+    The commute entries are the CARD projection of the live selectors: only
     a destination that actually happens gets an entry (trips and weeks both
-    above zero), and its key carries the person's NAME, never their id.
+    above zero), its key carries the person's NAME, never their id, and its
+    value carries only what the list card renders (``WireProjection.CARD``)
+    — route legs and the embedded person/destination records stay on the
+    detail page.
     """
     return PropertySummary(
         rid=nodes.rid,
@@ -55,9 +58,10 @@ async def property_summary(nodes: PropertyNodes) -> PropertySummary:
         rightmove_price=await nodes.rightmove_price.to_json_value(),
         rightmove_bedrooms=await nodes.rightmove_bedrooms.to_json_value(),
         group_monthly_cost=await nodes.group_monthly_cost.to_json_value(),
-        town_name=await nodes.town_name.to_json_value(),
         commutes={
-            nodes.commute_wire_key(key, nodes.commute_wire_map()): {"commute": await selector.to_json_value()}
+            nodes.commute_wire_key(key, nodes.commute_wire_map()): {
+                "commute": await selector.to_json_value(projection=WireProjection.CARD)
+            }
             for key, selector in nodes.commute_selectors.items()
             if key in nodes.commuted_destinations()
         },
