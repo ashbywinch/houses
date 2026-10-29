@@ -44,6 +44,15 @@ class CommuteCard(SerializableAsDict):
 
 
 def card_wire(value: object) -> dict | None:
-    """The card projection of a commute value — ``None`` when the value is
-    not a computed commute (a pending/impossible row states no value)."""
-    return CommuteCard.from_commute(value).to_dict() if isinstance(value, Commute) else None
+    """The card projection of a commute value.
+
+    ``None`` is reserved for a row that states no value (pending or
+    impossible). Any other non-Commute value is a broken invariant, not an
+    empty card — raise so it surfaces instead of shipping a silently blank
+    row.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, Commute):
+        raise TypeError(f"card projection expects a Commute, got {type(value).__name__}")
+    return CommuteCard.from_commute(value).to_dict()

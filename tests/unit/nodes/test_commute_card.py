@@ -14,7 +14,7 @@ from pint import Quantity
 
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.model.domain import Commute, HomeCoOwner, Person, PlaceOfInterest
-from houses.nodes.commute_card import CommuteCard
+from houses.nodes.commute_card import CommuteCard, card_wire
 
 
 def _full_commute(*, is_child: bool = False) -> Commute:
@@ -70,3 +70,15 @@ def test_card_states_the_child_flag(is_child: bool, expected: bool) -> None:
     wire = CommuteCard.from_commute(_full_commute(is_child=is_child)).to_dict()
 
     assert wire["is_child"] is expected
+
+
+def test_card_wire_states_no_value_for_an_empty_row() -> None:
+    """A pending/impossible row has no commute value to project."""
+    assert card_wire(None) is None
+
+
+def test_card_wire_refuses_a_non_commute_value() -> None:
+    """A succeeded row whose value is not a Commute is a broken invariant —
+    it must surface, never ship a silently blank card."""
+    with pytest.raises(TypeError):
+        card_wire({"label": "Bracknell"})
