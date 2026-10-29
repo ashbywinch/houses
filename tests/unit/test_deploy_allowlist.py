@@ -51,6 +51,13 @@ def test_sanctioned_shapes_forward_exactly(tmp_path):
             f"sudo /opt/houses/install-artifact.sh {ARTIFACT}",
             f"SUDO:/opt/houses/install-artifact.sh {ARTIFACT}",
         ),
+        (
+            # the owner's tooling refresh MUST keep its flag: without it the
+            # dispatcher runs a full install on the owner, stopping production
+            # (2026-10-29)
+            f"sudo /opt/houses/install-artifact.sh --tooling-only {ARTIFACT}",
+            f"SUDO:/opt/houses/install-artifact.sh --tooling-only {ARTIFACT}",
+        ),
         ("sudo /opt/houses/switch.sh --snapshot", "SUDO:/opt/houses/switch.sh --snapshot"),
         ("sudo /opt/houses/switch.sh --rebase 862143", "SUDO:/opt/houses/switch.sh --rebase 862143"),
         ("sudo /opt/houses/switch.sh --diagnose", "SUDO:/opt/houses/switch.sh --diagnose"),
