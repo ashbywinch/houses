@@ -4,7 +4,7 @@
 
 Wait for the server to stabilise after code changes — watch logs for `Application startup complete.` before curling. A `WatchFiles detected changes in...` right after means it's still catching up; wait.
 
-**Don't edit files or commit while a long request runs.** Every file change triggers `--reload`, killing in-progress HTTP requests → truncated responses and half-applied work.
+**Don't edit app code or commit while a long request runs.** A change under `houses/`, `dag/` or `serialization/` triggers `--reload`, killing in-progress HTTP requests → truncated responses and half-applied work. (Test and doc edits are outside the watch scope and do not restart the server.)
 
 ## Checking API failures (server logs)
 

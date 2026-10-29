@@ -52,7 +52,9 @@ make stop                       # Stop dev server + frontend
 - **Logs**: ``cat .logs/backend.log | tail -n 30``
 - **Stop**: ``make stop``
 - **Server errors?** Read the logs. ``uvicorn --reload`` picks up code changes in ~1s. See ``never-touch-server`` rule.
-  ``uvicorn --reload`` watches all .py files. Code changes are live in ~1s.
+  It watches the app packages only (``houses/``, ``dag/``, ``serialization/``): a test or doc edit does
+  **not** restart it. An app-package restart re-seeds the DAG (tens of seconds) and runs a code-stale
+  recompute sweep — requests during that window hang.
 - **Never** restart or kill the server. ``reload`` handles it.  Read logs instead.
 - **Never** ``fuser -k 8080/tcp`` — kills the CRG watcher.
 - **Never** ``hub restart`` anything — pointless with --reload.
