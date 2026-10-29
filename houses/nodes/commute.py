@@ -354,9 +354,9 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         An unserializable value degrades to ``None`` (the row then states no
         value, as before).
         """
-        if not (attempt.succeeded and attempt.value_or_none() is not None):
-            return None
         value = attempt.value_or_none()
+        if not attempt.succeeded or value is None:
+            return None
         if projection is WireProjection.CARD:
             return card_wire(value)
         try:
