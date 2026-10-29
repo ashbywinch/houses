@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8765
     reload: bool = True
+    # The dev server's reload watch scope: the packages the app imports.
+    # uvicorn otherwise watches the whole working tree, so saving a test
+    # restarted the backend (a full DAG re-seed plus a recompute sweep).
+    # tests/unit/test_dev_reload_scope.py keeps this list complete.
+    reload_packages: tuple[str, ...] = ("houses", "dag", "serialization")
 
     simon_destination: str = "1 Drummond Gate, Pimlico, London SW1V 2QQ"
     lorena_destination: str = "Eastgate House, 40 Dukes Place, Aldgate, London EC3A 7LP"
