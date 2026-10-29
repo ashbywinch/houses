@@ -851,3 +851,36 @@ describe('a commute that could not be computed', () => {
     expect(wrapper.text()).not.toContain('often Council Tax')
   })
 })
+
+describe('the lean list wire', () => {
+  // The server's card projection (docs/api.md → GET /api/properties/all):
+  // person carries only the name, destination only the address, and the
+  // route legs / planned origin never reach an index load.
+  const leanEntry = {
+    commute: {
+      status: 'succeeded',
+      succeeded: true,
+      pending: false,
+      impossible: false,
+      stale: false,
+      is_child: false,
+      value: {
+        label: 'Pimlico',
+        person: { name: 'Simon' },
+        destination: { address: 'SW1P 1AA' },
+        duration: { value: 32, unit: 'minute' },
+        daily_cost: { amount: '4.50', currency: 'GBP' },
+        mode: 'transit',
+        is_child: false,
+      },
+    },
+  } as unknown as PropertySummary['commutes']
+
+  it('renders the card from fields the list wire carries', () => {
+    const wrapper = mountCard({ rid: '123', data: makeSummary({ commutes: { 'Simon/Pimlico': leanEntry } as unknown as PropertySummary['commutes'] }) })
+
+    expect(wrapper.find('.card__commute-person').text()).toBe('Simon → Pimlico')
+    expect(wrapper.find('.pill-link').attributes('href')).toContain(encodeURIComponent('SW1P 1AA'))
+    expect(wrapper.text()).toContain('32m')
+  })
+})

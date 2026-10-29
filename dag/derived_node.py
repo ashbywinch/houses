@@ -28,7 +28,7 @@ from dag.connection import Connection
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
 from dag.guard import capture_async, guarded
-from dag.node import Node, NodeValue
+from dag.node import Node, NodeValue, WireProjection
 from dag.persistence import latest_node_provenance
 from dag.processor import assert_mutation_allowed
 from dag.scheduler import get_scheduler
@@ -1047,9 +1047,13 @@ class DerivedNode(Node[T], Generic[T]):
         active_deps: tuple[Node, ...] | None = None,
         *,
         provenance: bool = True,
+        projection: WireProjection = WireProjection.FULL,
     ) -> NodeValue:
         rec = await super().to_node_value(
-            dep_attempts=dep_attempts, active_deps=active_deps, provenance=provenance
+            dep_attempts=dep_attempts,
+            active_deps=active_deps,
+            provenance=provenance,
+            projection=projection,
         )
         self._enrich_json(rec)
         return rec

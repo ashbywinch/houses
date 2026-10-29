@@ -10,7 +10,7 @@ household finances.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import cast, override
+from typing import Any, cast, override
 
 from money import Money
 from pint import Quantity
@@ -18,9 +18,10 @@ from pydantic import Field
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
-from dag.node import Node, NodeValue
+from dag.node import Node, NodeValue, WireProjection
 from houses.commute import JourneyLeg, LegMode
 from houses.model.domain import Commute, person_id_of
+from houses.nodes.commute_card import card_wire
 from serialization import omit_when_none
 
 
@@ -209,6 +210,21 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             _details=tuple(new_details),
         )
         return Attempt.succeeded(new_commute)
+
+    @override
+    def _wire_value(self, attempt: Attempt[Any], projection: WireProjection = WireProjection.FULL) -> Any:
+        """The pipeline entry's value, projected to what the surface renders.
+
+        The commute entry is this node (the selectors feed it), so the
+        CARD projection lives here: the list card's person name, destination
+        address and duration/cost pill — never the route legs, the embedded
+        person/destination records, or the planned origin, which belong to
+        the detail page. ``FULL`` keeps the whole commute (the persisted row
+        and the detail wire).
+        """
+        if projection is WireProjection.CARD:
+            return card_wire(attempt.value_or_none()) if attempt.succeeded else None
+        return super()._wire_value(attempt, projection)
 
     @override
     def _enrich_json(self, result: NodeValue) -> None:
