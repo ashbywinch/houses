@@ -357,6 +357,7 @@ process defects, and two of them were mine:
 | `Error acquiring the state lock … 412` | a merge-triggered `dispatch-bake` and a manual `action=bake` overlapped | `provision`/`bake` share `concurrency: houses-terraform` |
 | every push to main failed with **0 jobs** | an edit dropped `bake`'s `runs-on`; GitHub only says "workflow file issue" | actionlint is a CI step (it names the line) |
 | `prepare` died after a good restore: `ENV_FILE: unbound variable` | the new smoke helper used `install-artifact.sh`'s variables, which `switch.sh` sets only in later branches | the helper declares its own locals |
+| tagging a release started a **bake** nobody asked for, and the rollout's `provision` queued behind it | `bake.yml`'s `push` trigger was narrowed by `paths` only — GitHub does not evaluate path filters for tag pushes, so every release tag ran it and dispatched `action=bake` | the push trigger names `branches: [main]`; a test asserts every path-filtered push also names its branch |
 
 **The lesson worth keeping:** when a rollout is slow or fails on a *box* step,
 ask what the box was built with before patching the step. Three of the six were
