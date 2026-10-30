@@ -376,43 +376,6 @@ jobs:
             "$BOX_USER@$STANDBY_IP" "sudo /opt/houses/switch.sh --diagnose" \
             || echo "standby unreachable — check the console"
         timeout-minutes: 3
-      - name: Bring the OWNER's tooling current (tooling-only refresh)
-        # The owner's only install is its bootstrap; its /opt/houses scripts
-        # would otherwise lag every artifact generation and lack verbs the
-        # release uses on it (2026-09-30: the smoke relay died on the owner's
-        # stale switch.sh). The deploy key is allowlisted for install-artifact.sh.
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-            "$BOX_USER@${{ needs.resolve.outputs.owner_ip }}" \
-            "sudo /opt/houses/install-artifact.sh --tooling-only $ARTIFACT"
-        timeout-minutes: 15
-      - name: Build the smoke review surface (owner Caddy relays the standby)
-        # The human review surface of the rollout: houses-smoke must show the
-        # fresh STANDBY, wired by the process — never by hand. The deploy key
-        # is allowlisted for switch.sh on every box; gcloud (for the standby's
-        # internal IP) runs as the CI SA.
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$GOOGLE_SA_KEY" | base64 -d > /tmp/sa.json
-          chmod 600 /tmp/sa.json
-          gcloud auth activate-service-account --key-file=/tmp/sa.json >/dev/null 2>&1
-          rm -f /tmp/sa.json
-          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
-          chmod 600 /tmp/deploy.key
-          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
-          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
-          SB_INT=$(gcloud compute instances describe "${{ needs.resolve.outputs.standby }}" \
-            --zone "$ZONE" --project "$PROJECT" --format='value(networkInterfaces[0].networkIP)')
-          OWNER_IP="${{ needs.resolve.outputs.owner_ip }}"
-          echo "smoke relay: $OWNER_IP -> $SB_INT"
-          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-            "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay $SB_INT"
-        env:
-          GOOGLE_SA_KEY: ${{ secrets.GOOGLE_SA_KEY }}
-        timeout-minutes: 5
 
   # ── prepare (the maintenance prep — UNGATED) ──────────────────────────
   # The MAINTENANCE half of a rollout: it takes production down (the freeze the
@@ -508,6 +471,25 @@ jobs:
         # row's provenance is decompressed and recompressed individually), so
         # this window must hold it until every box has been through it once.
         timeout-minutes: 120
+      - name: Publish the review surface (owner Caddy relays the standby)
+        # The live box hosts houses-smoke — both hostnames land on its Caddy —
+        # so this is the ONE write the rollout makes there beyond the freeze:
+        # a validated Caddyfile block and a graceful Caddy reload. No app
+        # change, no script change, no service restart. It runs here, not in
+        # `release`, because `release` must leave the box serving untouched.
+        if: ${{ success() }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          PROJECT="${{ vars.GCP_PROJECT || 'houses-498215' }}"
+          ZONE="${{ vars.GCP_ZONE || 'us-west1-a' }}"
+          SB_INT=$(gcloud compute instances describe "${{ needs.resolve.outputs.standby }}" \
+            --zone "$ZONE" --project "$PROJECT" --format='value(networkInterfaces[0].networkIP)')
+          echo "smoke relay: $OWNER_IP -> $SB_INT"
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$BOX_USER@$OWNER_IP" "sudo /opt/houses/switch.sh --smoke-relay $SB_INT"
+        timeout-minutes: 5
       - name: Unfreeze — put production back on the owner if anything above failed
         # failure() is FALSE for a cancelled run, and a lost runner runs no
         # further steps: either way the owner's app has been stopped since the
