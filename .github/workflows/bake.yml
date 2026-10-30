@@ -5,15 +5,22 @@ name: Bake image pipeline
 # path; 2026-09-30: zone capacity blocked two rollouts while boxes sat live).
 #
 # Triggers:
-#   - any push touching the files the image is baked FROM
+#   - a push to main touching the files the image is baked FROM
 #   - nightly (belt: a drifted image is caught before a release needs it)
 #   - manual dispatch (the same action=bake the release docs describe)
+#
+# The push trigger names `branches: [main]` deliberately: GitHub does NOT
+# evaluate `paths` filters for tag pushes, so without the branch filter every
+# release tag ran this pipeline and dispatched a bake that then queued ahead
+# of the rollout's `provision` on the houses-terraform concurrency group
+# (2026-10-29: tagging v1.6.0 started a bake nobody asked for).
 #
 # It dispatches the Release workflow's bake job — ONE implementation of the
 # bake lives there (release.yml), reused here, so the steps never fork.
 
 on:
   push:
+    branches: [main]
     paths:
       - 'tools/deploy/base-image.sh'
       - 'tools/deploy/box-setup.sh'

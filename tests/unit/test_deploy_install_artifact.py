@@ -172,17 +172,39 @@ def test_the_fast_path_reaches_the_install_receipt_and_does_no_data_work(tmp_pat
     assert "systemctl restart houses.service" not in systemctl_log.read_text()
 
 
+# The tooling a refresh installs — the refresher validates and owns exactly
+# these (tools/deploy/refresh-tooling.sh).
+TOOLING_SCRIPTS = (
+    "run-instance.sh",
+    "switch.sh",
+    "install-artifact.sh",
+    "deploy-allowlist.sh",
+    "install-deploy-allowlist.sh",
+    "network-watchdog.sh",
+    "refresh-tooling.sh",
+)
+TOOLING_UNITS = ("houses.service", "houses-network-watchdog.service", "houses-network-watchdog.timer")
+
+
 def _tarball(tmp_path: Path) -> tuple[Path, str]:
     """A REAL artifact tarball (tools/deploy + units + ARTIFACT_REF) whose
     sha256 IS its object key — the installer verifies what it fetched."""
     stage = tmp_path / "tarball-src"
-    (stage / "tools" / "deploy").mkdir(parents=True)
+    (stage / "tools" / "deploy" / "units").mkdir(parents=True)
     (stage / "units").mkdir()
     (stage / "tools" / "deploy" / "box-setup.sh").write_text("#!/bin/sh\nexit 0\n")
-    (stage / "tools" / "deploy" / "switch.sh").write_text("#!/bin/sh\nexit 0\n")
-    (stage / "tools" / "deploy" / "run_migrations.py").write_text("")
+    for name in TOOLING_SCRIPTS:
+        if name == "refresh-tooling.sh":
+            # the REAL refresher: the installer runs it from the staged tree, so
+            # a stub here would test nothing
+            (stage / "tools" / "deploy" / name).write_bytes(REPO.joinpath("tools/deploy", name).read_bytes())
+        else:
+            (stage / "tools" / "deploy" / name).write_text("#!/bin/sh\nexit 0\n")
+    (stage / "tools" / "deploy" / "run_migrations.py").write_text("print('ok')\n")
     (stage / "tools" / "deploy" / "migrations.list").write_text("m a\n")
-    (stage / "units" / "houses.service").write_text("")
+    for name in TOOLING_UNITS:
+        (stage / "tools" / "deploy" / "units" / name).write_text("[Unit]\nDescription=x\n")
+        (stage / "units" / name).write_text("[Unit]\nDescription=x\n")
     (stage / "ARTIFACT_REF").write_text("main\n")
     tarball = tmp_path / "artifact.tar.gz"
     with tarfile.open(tarball, "w:gz") as tf:
@@ -195,14 +217,22 @@ def _tarball(tmp_path: Path) -> tuple[Path, str]:
 def test_tooling_only_sync_never_stops_or_swaps_the_app(tmp_path):
     """2026-10-02: install-artifact.sh --tooling-only stopped the standby's app
     (and swapped its whole checkout) before the flip's preflight — killing the
-    review surface the preflight checks. A tooling sync must refresh ONLY the
-    tooling: no systemctl, no app swap, no ARTIFACT rewrite."""
+    review surface the preflight checks. 2026-10-29: the same path ran the
+    machine bootstrap on the LIVE box and left production stopped, so the
+    contract is now narrower still — refresh-tooling.sh writes only the tooling
+    files, never stops/starts/enables a service, and a second sync of the same
+    artifact writes nothing at all."""
     root = _box(tmp_path)  # ARTIFACT marker names SHA (the OLD artifact)
     bin_dir = _stubs(tmp_path)
     env_file = tmp_path / "houses.env"
     env_file.write_text("HOUSES_SESSION_SECRET=secret\n")
     systemctl_log = tmp_path / "systemctl.log"
     systemctl_log.write_text("")
+    units_dir = tmp_path / "systemd"
+    units_dir.mkdir()
+    for name in TOOLING_UNITS:
+        # identical to the artifact's: no unit changed, so no daemon-reload
+        (units_dir / name).write_text("[Unit]\nDescription=x\n")
     tarball, sha = _tarball(tmp_path)
     obj = f"gs://houses-artifacts/{sha}.tar.gz"
 
@@ -210,6 +240,7 @@ def test_tooling_only_sync_never_stops_or_swaps_the_app(tmp_path):
         **os.environ,
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOUSES_ROOT": str(root),
+        "HOUSES_UNIT_DIR": str(units_dir),
         "GSUTIL_SRC": str(tarball),
         "HOUSES_ENV_FILE": str(env_file),
         "SYSTEMCTL_LOG": str(systemctl_log),
@@ -220,8 +251,7 @@ def test_tooling_only_sync_never_stops_or_swaps_the_app(tmp_path):
     output = result.stdout + result.stderr
 
     assert result.returncode == 0, output
-    assert "TOOLING now at" in output
-    # The app was NEVER touched: no systemctl call at all.
+    # The app was NEVER touched: no systemctl call at all (no unit changed).
     assert systemctl_log.read_text() == "", "a tooling-only sync must not stop or restart the app"
     # The APP's marker still names the old artifact; the TOOLING marker names the new.
     assert f"sha256={SHA} ref=main" in (root / "ARTIFACT").read_text()
@@ -230,10 +260,18 @@ def test_tooling_only_sync_never_stops_or_swaps_the_app(tmp_path):
     # The app tree was not swapped: no staging dir left behind, old app intact.
     assert not (root / ".app-incoming").exists()
     assert (root / "app" / ".venv" / "bin" / "python").exists()
-    # A second sync of the same object is a no-op (the TOOLING marker matches).
+    # A second sync of the same object is a true no-op: nothing rewritten,
+    # the marker untouched, still no systemctl call.
+    before = (root / "switch.sh").stat().st_mtime_ns
+    marker_before = (root / "TOOLING").stat().st_mtime_ns
     again = subprocess.run(
         [str(INSTALLER), "--tooling-only", obj], capture_output=True, text=True, env=env
     )
     assert again.returncode == 0, again.stdout + again.stderr
+    # the installer's own fast path sees the matching TOOLING marker and skips
+    # the refresh entirely — a release that ships no tooling change writes
+    # nothing at all to this box
     assert "tooling already at" in again.stdout + again.stderr
+    assert (root / "switch.sh").stat().st_mtime_ns == before
+    assert (root / "TOOLING").stat().st_mtime_ns == marker_before
     assert systemctl_log.read_text() == ""

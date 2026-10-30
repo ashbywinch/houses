@@ -24,12 +24,13 @@ set -euo pipefail
 ROOT="${HOUSES_ROOT:-/opt/houses}"
 APP="$ROOT/app"
 
-# A box that only needs to be CURRENT (never installed — e.g. the OWNER, whose
-# only install is at bootstrap) can refresh its tooling without any app work.
-# The deploy key is allowlisted for install-artifact.sh on every box, so the
-# release keeps every box's /opt/houses scripts current before using a verb
-# that a stale copy would not know (2026-09-30: the smoke relay died on the
-# owner's pre-verb switch.sh).
+# --tooling-only refreshes the box's rollout tooling WITHOUT any app work: no
+# app stop, no checkout swap, no service start/enable. It is a deliberate,
+# operator-driven operation (a rollout-protocol change needing a new verb on a
+# box that keeps serving), NOT part of `release` — the release workflow never
+# writes to the live box (2026-10-29: an automatic owner refresh ran the
+# bootstrap there and stopped production). The refresh itself is narrow by
+# contract: tools/deploy/refresh-tooling.sh.
 TOOLING_ONLY=0
 [ "${1:-}" = "--tooling-only" ] && { TOOLING_ONLY=1; shift; }
 # This script runs from wherever the caller happened to be (the workflow SSH
@@ -175,28 +176,19 @@ fi
 
 # ── 5. layout + tooling from THIS artifact ─────────────────────────────
 if [ "$TOOLING_ONLY" = 1 ]; then
-  # The application tree is untouched and stays in place; box-setup installs
-  # the tooling FROM THE STAGED TREE (HOUSES_ARTIFACT_TREE), so the box's
-  # scripts become THIS artifact's, not the older app's.
+  # The application tree, its venv, the database and the RUNNING app are
+  # untouched. The refresh is NARROW by contract
+  # (tools/deploy/refresh-tooling.sh): it writes nothing when the files already
+  # match, never stops/starts/enables a service, validates before replacing,
+  # swaps atomically and keeps the previous copies. This used to run the
+  # machine bootstrap (box-setup.sh), which also rewrote sudoers, re-enabled
+  # units and re-chowned the app tree — and it ran on the LIVE box
+  # (2026-10-29: that stopped production for 4m22s).
   mark "refreshing box tooling from $ACTUAL_SHA (app + DB + live app untouched)"
-  HOUSES_ARTIFACT_TREE="$STAGE" bash "$STAGE/tools/deploy/box-setup.sh"
   RECEIPT_REF=$(head -1 "$STAGE/ARTIFACT_REF" 2>/dev/null || true)
-  printf 'sha256=%s ref=%s installed_at=%s\n' \
-    "$ACTUAL_SHA" "${RECEIPT_REF:-unknown}" "$(date -u +%FT%TZ)" > "$ROOT/TOOLING"
-  chmod 644 "$ROOT/TOOLING"
-  # Re-exec from the REFRESHED copy when it differs: this script is running
-  # from the PREVIOUS artifact's snapshot, and the sync has just overwritten
-  # it with the NEW tooling. Without the re-exec every tooling fix lags exactly
-  # one run behind. The second pass sees the TOOLING marker and stops. The
-  # staging tree is removed before the re-exec either way — a sync leaves no
-  # app work behind.
-  if [ -f /opt/houses/install-artifact.sh ] && ! cmp -s "$0" /opt/houses/install-artifact.sh; then
-    rm -rf "$STAGE"
-    mark "re-executing the refreshed install-artifact.sh (content changed)"
-    exec /opt/houses/install-artifact.sh --tooling-only "$OBJECT"
-  fi
+  sh "$STAGE/tools/deploy/refresh-tooling.sh" "$STAGE" "$ACTUAL_SHA" "${RECEIPT_REF:-unknown}"
   rm -rf "$STAGE"
-  mark "TOOLING now at $ACTUAL_SHA — the app was not stopped, not swapped, not started"
+  mark "tooling refresh complete for $ACTUAL_SHA — the app was not stopped, not swapped, not started"
   exit 0
 fi
 mark "refreshing box layout and tooling from the artifact"

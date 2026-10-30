@@ -16,6 +16,18 @@ walkthrough is [tools/deploy/provision.md](../tools/deploy/provision.md).
   `rollback` (the ungated undo), `provision` (rebuild a box from the artifact).
   Never SSH in and pull/restart the app directly; never run ad-hoc commands
   against prod to "just fix it".
+- **`release` writes only to the standby.** It must never make the live box do
+  anything: the live box has to stay a working rollback target, and an
+  automatic write is how a "no traffic" step can still take production down
+  (2026-10-29: the release's owner tooling refresh ran the machine bootstrap
+  there, stopped the app and left it stopped for 4m22s). The one live-box write
+  a rollout makes is `prepare` publishing the review surface — a Caddyfile block
+  and a graceful reload, no app, no scripts, no service restart. A box whose
+  tooling must be newer for a protocol change gets it by a deliberate
+  `install-artifact.sh --tooling-only`, whose contract is
+  [refresh-tooling.sh](../tools/deploy/refresh-tooling.sh): no-op when the files
+  match, validate before writing, atomic swaps, backups, and never a
+  start/stop/enable/restart.
 - If the process is too slow or awkward, **improve it** — never bypass it. A
   skipped smoke gate or an unreviewed direct deploy is exactly the failure mode
   the process exists to prevent.
@@ -357,6 +369,8 @@ process defects, and two of them were mine:
 | `Error acquiring the state lock … 412` | a merge-triggered `dispatch-bake` and a manual `action=bake` overlapped | `provision`/`bake` share `concurrency: houses-terraform` |
 | every push to main failed with **0 jobs** | an edit dropped `bake`'s `runs-on`; GitHub only says "workflow file issue" | actionlint is a CI step (it names the line) |
 | `prepare` died after a good restore: `ENV_FILE: unbound variable` | the new smoke helper used `install-artifact.sh`'s variables, which `switch.sh` sets only in later branches | the helper declares its own locals |
+| tagging a release started a **bake** nobody asked for, and the rollout's `provision` queued behind it | `bake.yml`'s `push` trigger was narrowed by `paths` only — GitHub does not evaluate path filters for tag pushes, so every release tag ran it and dispatched `action=bake` | the push trigger names `branches: [main]`; a test asserts every path-filtered push also names its branch |
+| production down for 4m22s during a `release` | the install job's owner **tooling refresh** was a full install: `deploy-allowlist.sh` accepted `install-artifact.sh --tooling-only <object>` and rebuilt the command without the flag; the "refresh" then ran the machine bootstrap on the live box (stopped the app, swapped the checkout) and left it stopped | the allowlist forwards the validated mode (test pins the exact shape); the refresh no longer runs the bootstrap — `refresh-tooling.sh` is a no-op when unchanged, validates first, swaps atomically, backs up, and never stops/starts/enables a service; and `release` no longer writes to the live box at all |
 
 **The lesson worth keeping:** when a rollout is slow or fails on a *box* step,
 ask what the box was built with before patching the step. Three of the six were

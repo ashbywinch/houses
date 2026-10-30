@@ -24,11 +24,18 @@ SHA256_HEX_CHARS=64   # the artifact's key IS its sha256, in hex
 # --- the rollout install: install-artifact.sh [--tooling-only] <gs://...tar.gz>
 # The OBJECT is the content-addressed artifact name — the script re-verifies
 # the sha256 against the key it fetches. --tooling-only (owner-side refresh,
-# no app work) is the one allowed prefix.
+# no app work) is the one allowed prefix, and it MUST be forwarded: dropping
+# it turns the owner's tooling sync into a FULL install — which stops the
+# owner's app and swaps its checkout (2026-10-29: a release's owner tooling
+# refresh took production down for 4m22s exactly this way).
 case "$CMD" in
-  "sudo /opt/houses/install-artifact.sh "*|"sudo /opt/houses/install-artifact.sh --tooling-only "*)
+  "sudo /opt/houses/install-artifact.sh "*)
+    MODE=""
     case "$CMD" in
-      "sudo /opt/houses/install-artifact.sh --tooling-only "*) OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh --tooling-only "} ;;
+      "sudo /opt/houses/install-artifact.sh --tooling-only "*)
+        MODE="--tooling-only"
+        OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh --tooling-only "}
+        ;;
       *) OBJECT=${CMD#"sudo /opt/houses/install-artifact.sh "} ;;
     esac
     case "$OBJECT" in
@@ -47,6 +54,9 @@ case "$CMD" in
           *[!0-9a-f]*|"") echo "deploy-allowlist: the artifact key must be a 64-character lowercase sha256 hex string" >&2; exit 1 ;;
         esac
         [ "${#HASH}" = "${SHA256_HEX_CHARS}" ] || { echo "deploy-allowlist: the artifact key must be a 64-character lowercase sha256 hex string" >&2; exit 1; }
+        if [ -n "$MODE" ]; then
+          exec sudo /opt/houses/install-artifact.sh "$MODE" "$OBJECT"
+        fi
         exec sudo /opt/houses/install-artifact.sh "$OBJECT"
         ;;
       *) echo "deploy-allowlist: bad artifact object" >&2; exit 1 ;;
