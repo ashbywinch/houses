@@ -383,7 +383,7 @@ class _IntersectionBuild:
     def _polygons_by_label(self) -> PolygonsByLabel:
         """Shed polygons per drive destination (a shed may be several loops)."""
         by_label: PolygonsByLabel = {}
-        # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
+        # group-by accumulation — no comprehension form; groupby would re-sort
         for s in self._drive_searches.get("searches", []):
             by_label.setdefault(s["destination"]["label"], []).append(
                 [GeoPoint(lat, lon) for lat, lon in s["polygon"]]
