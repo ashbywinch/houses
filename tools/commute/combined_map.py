@@ -140,7 +140,7 @@ def build_html(
     transit = [c["outline"] for c in union.get("components", [])]
 
     drive_by_label: dict[str, list[dict]] = {}
-    # lucidlint: ignore loop-pipeline group-by/control-flow — comprehension cannot express
+    # group-by/control-flow — comprehension cannot express
     for s in drive.get("searches", []):
         drive_by_label.setdefault(s["destination"]["label"], []).append(s)
 

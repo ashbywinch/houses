@@ -875,7 +875,7 @@ def _containment_issues(searches: list[SearchRecord]) -> list[str]:
     """Every destination's centre must sit inside one of its own shed's loops."""
     issues: list[str] = []
     by_label: dict[str | None, list[SearchRecord]] = {}
-    # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
+    # group-by accumulation — no comprehension form; groupby would re-sort
     for s in searches:
         by_label.setdefault(_destination_label(s), []).append(s)
     for group in by_label.values():
